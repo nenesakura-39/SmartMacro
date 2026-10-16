@@ -5,6 +5,8 @@ using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using SmartMacro.Core.Models;
 using SmartMacro.Core.Ocr;
+using SmartMacro.Core.Playback;
+using SmartMacro.Core.Storage;
 using SmartMacro.Core.Vision;
 using SmartMacro.Services.Input;
 using SmartMacro.Services.Ocr;
@@ -43,6 +45,19 @@ public interface IVisionTools
     /// </summary>
     Task<string> TrackColorAsync(FindColorStep step, TimeSpan duration);
 
+    /// <summary>
+    /// Feedback loop: captures the bar area and finds the marker / zone as fast as possible for a few seconds, sending
+    /// no input, and reports the frame rate reached, capture and detection time, and a suggested captures-per-second.
+    /// </summary>
+    Task<string> MeasureFeedbackAsync(FeedbackLoopStep step, TimeSpan duration);
+
+    /// <summary>
+    /// Feedback loop dry run: runs the real loop (same sensor, same rules and limits) at the step's frame rate but
+    /// sends NO input. A small always-on-top window shows the bar with the marker / zone marked and what the loop
+    /// would do. Stop conditions aren't checked here.
+    /// </summary>
+    Task<string> PreviewFeedbackAsync(FeedbackLoopStep step, TimeSpan duration);
+
     /// <summary>Turns a picture into something WPF can show (frozen, so any thread may use it).</summary>
     ImageSource ToImageSource(BgraImage image);
 }
@@ -57,6 +72,10 @@ public sealed class VisionTools : IVisionTools
 
     private static readonly RgbColor MatchColor = new(0x22, 0xC5, 0x5E);
     private static readonly RgbColor OtherColor = new(0xF5, 0x9E, 0x0B);
+    private static readonly RgbColor ZoneOverlayColor = new(0x38, 0xBD, 0xF8);
+
+    // Feedback preview: how often the live window's picture and text are refreshed.
+    private static readonly TimeSpan LivePreviewRefresh = TimeSpan.FromMilliseconds(100);
 
     private readonly Window _mainWindow;
     private readonly GdiScreenCapture _capture;
@@ -236,6 +255,322 @@ public sealed class VisionTools : IVisionTools
 
         if (summary.LastFrame is not null) ShowPreview("Find color – tracking (last frame)", summary.LastFrame, text);
         return text;
+    }
+
+    // ---------------- Feedback loop (Stage 4): Measure loop speed + Preview ----------------
+
+    public async Task<string> MeasureFeedbackAsync(FeedbackLoopStep step, TimeSpan duration)
+    {
+        var copy = (FeedbackLoopStep)MacroJson.CloneStep(step); // the editor may change the step while this runs
+        ClosePreview();
+
+        MeasureSummary summary;
+        try
+        {
+            summary = await WhileHiddenAsync(() => Task.Run(() => MeasureLoopAsync(copy, duration)));
+        }
+        catch (Exception ex)
+        {
+            return $"Measuring failed: {ex.Message}";
+        }
+
+        var stats = summary.Stats;
+        var hz = stats.FramesPerSecond(summary.Elapsed);
+        var suggested = SuggestCapturesPerSecond(hz);
+        var text = $"Measured for {summary.Elapsed.TotalSeconds:0.0} s, sending no input: {stats.Frames:N0} frames, about {hz:0} frames per second at full speed for this {copy.RegionWidth}×{copy.RegionHeight} area. " +
+                   $"Per frame: capture {stats.AverageCaptureMs:0.0} ms + detection {stats.AverageDetectMs:0.0} ms on average; 95% of frames took at most {summary.P95Ms:0.0} ms, the slowest {stats.SlowestFrame.TotalMilliseconds:0} ms. " +
+                   $"Marker found in {Share(stats.MarkerFound, stats.Frames)} of frames, unclear (two similar patches) in {Share(stats.MarkerUnclear, stats.Frames)}, missing in {Share(stats.MarkerMissing, stats.Frames)}";
+        if (copy.ZoneMode == FeedbackZoneMode.DetectedByColor) text += $"; zone missing in {Share(stats.ZoneMissing, stats.Frames)}";
+        text += $". Suggested \"captures per second\": {suggested} (leaves time for the game itself). This step is set to {copy.MaxCapturesPerSecond}.";
+        if (copy.MaxCapturesPerSecond > hz) text += " That's more than this PC reached, so the loop will simply run as fast as it can.";
+        text += " Real reactions are slower than this: the game also needs time to draw the screen and to react to input.";
+
+        if (summary.LastFrame is not null) ShowPreview("Feedback loop – measured (last frame)", DrawFeedbackOverlay(summary.LastFrame, copy), text);
+        return text;
+    }
+
+    public async Task<string> PreviewFeedbackAsync(FeedbackLoopStep step, TimeSpan duration)
+    {
+        var copy = (FeedbackLoopStep)MacroJson.CloneStep(step);
+        ClosePreview();
+
+        PreviewSummary summary;
+        try
+        {
+            summary = await WhileHiddenAsync(async () =>
+            {
+                using var stop = new CancellationTokenSource();
+                var live = new LiveFeedbackWindow(stop.Cancel);
+                live.Show();
+                try
+                {
+                    return await Task.Run(() => PreviewLoopAsync(copy, duration, live, stop.Token));
+                }
+                finally
+                {
+                    live.Close();
+                }
+            });
+        }
+        catch (Exception ex)
+        {
+            return $"Preview failed: {ex.Message}";
+        }
+
+        var stats = summary.Stats;
+        var input = copy.InputKind == FeedbackInputKind.MouseButton ? $"the {copy.MouseButton.ToString().ToLowerInvariant()} mouse button" : Core.Input.VirtualKeys.GetName(copy.VirtualKey);
+        var text = $"Preview ({(summary.Stopped ? "stopped" : "finished")}) – NO input was sent. {stats.Describe(summary.Elapsed, summary.FrameInterval)} " +
+                   $"With input on, it would have pressed {input} {stats.Presses} time(s), released it {stats.Releases} time(s) and tapped it {stats.Taps} time(s); it would have been held for {Share(summary.HeldFrames, stats.Frames)} of the frames.";
+        if (summary.LoopEnds.Count > 0)
+            text += $" The real loop would have ENDED at {summary.LoopEnds[0]} (target lost; {DescribeLostAction(copy.WhenTargetLost)}).";
+        if (summary.Elapsed.TotalMilliseconds >= copy.MaxRuntimeMs)
+            text += $" Its max runtime ({copy.MaxRuntimeMs / 1000.0:0.#} s) would have ended it at that point.";
+        text += " \"Done when\" / \"failed when\" conditions aren't checked in the preview.";
+
+        if (summary.LastFrame is not null) ShowPreview("Feedback loop – preview (last frame)", DrawFeedbackOverlay(summary.LastFrame, copy), text);
+        return text;
+    }
+
+    private sealed record MeasureSummary(TimeSpan Elapsed, FeedbackStats Stats, double P95Ms, FeedbackFrame? LastFrame);
+
+    private sealed record PreviewSummary(TimeSpan Elapsed, TimeSpan FrameInterval, FeedbackStats Stats, int HeldFrames,
+        IReadOnlyList<string> LoopEnds, bool Stopped, FeedbackFrame? LastFrame);
+
+    /// <summary>Capture + detect back to back (no rate limit, no input) to see what this PC can do for this area.</summary>
+    private async Task<MeasureSummary> MeasureLoopAsync(FeedbackLoopStep step, TimeSpan duration)
+    {
+        var sensor = new FeedbackSensor(step, _capture);
+        var stats = new FeedbackStats();
+        var times = new List<double>();
+        FeedbackFrame? last = null;
+        var watch = Stopwatch.StartNew();
+        while (watch.Elapsed < duration)
+        {
+            var frame = await sensor.ReadAsync(CancellationToken.None).ConfigureAwait(false);
+            stats.Add(frame);
+            times.Add((frame.CaptureTime + frame.DetectTime).TotalMilliseconds);
+            last = frame;
+        }
+
+        times.Sort();
+        var p95 = times.Count == 0 ? 0 : times[Math.Min(times.Count - 1, (int)Math.Ceiling(times.Count * 0.95) - 1)];
+        return new MeasureSummary(watch.Elapsed, stats, p95, last);
+    }
+
+    /// <summary>
+    /// The real loop logic (sensor, controller, rate limit) without input: counts what it would do and keeps the live
+    /// window updated a few times per second.
+    /// </summary>
+    private async Task<PreviewSummary> PreviewLoopAsync(FeedbackLoopStep step, TimeSpan duration, LiveFeedbackWindow live, CancellationToken token)
+    {
+        using var timerResolution = new HighResolutionTimerScope(); // 1 ms timer, like during playback
+        var sensor = new FeedbackSensor(step, _capture);
+        var rules = FeedbackRules.From(step);
+        var controller = new FeedbackController(rules);
+        var stats = new FeedbackStats();
+        var interval = TimeSpan.FromTicks(TimeSpan.TicksPerSecond / Math.Clamp(step.MaxCapturesPerSecond, 1, Core.Validation.MacroValidator.MaxCapturesPerSecond));
+        var loopEnds = new List<string>();
+        var heldFrames = 0;
+        var waiting = false;
+        var nextRefresh = TimeSpan.Zero;
+        FeedbackFrame? last = null;
+        var watch = Stopwatch.StartNew();
+
+        while (watch.Elapsed < duration && !token.IsCancellationRequested)
+        {
+            var start = watch.Elapsed;
+            var frame = await sensor.ReadAsync(CancellationToken.None).ConfigureAwait(false);
+            stats.Add(frame);
+            last = frame;
+
+            var decision = controller.Update(frame.Observation, start);
+            if (decision.Deferred) stats.Deferred++;
+            switch (decision.Command)
+            {
+                case FeedbackCommand.Press: stats.Presses++; break;
+                case FeedbackCommand.Release: stats.Releases++; break;
+                case FeedbackCommand.Tap: stats.Taps++; break;
+            }
+
+            if (controller.IsWaiting && !waiting) stats.LostEpisodes++;
+            waiting = controller.IsWaiting;
+            if (controller.IsHeld) heldFrames++;
+
+            if (decision.TargetLost)
+            {
+                // The real loop would end here. Note it, and start over so the rest of the preview still shows something.
+                loopEnds.Add($"{start.TotalSeconds:0.0} s");
+                controller = new FeedbackController(rules, start);
+            }
+
+            if (start >= nextRefresh)
+            {
+                live.Post(ToImageSource(DrawFeedbackOverlay(frame, step)), DescribeLiveFrame(frame, decision, controller, stats, watch.Elapsed));
+                nextRefresh = start + LivePreviewRefresh;
+            }
+
+            var rest = interval - (watch.Elapsed - start);
+            if (rest > TimeSpan.Zero)
+            {
+                try { await Task.Delay(rest, token).ConfigureAwait(false); }
+                catch (OperationCanceledException) { break; }
+            }
+        }
+
+        return new PreviewSummary(watch.Elapsed, interval, stats, heldFrames, loopEnds, token.IsCancellationRequested, last);
+    }
+
+    /// <summary>One or two lines for the live window: where the marker and zone are and what the loop would do.</summary>
+    private static string DescribeLiveFrame(FeedbackFrame frame, FeedbackDecision decision, FeedbackController controller, FeedbackStats stats, TimeSpan elapsed)
+    {
+        var marker = frame.Marker.Status switch
+        {
+            MarkerStatus.Found => $"marker {frame.Marker.PositionPercent:0} %",
+            MarkerStatus.Ambiguous => "marker UNCLEAR (two similar patches)",
+            MarkerStatus.IgnoredJump => "marker jump ignored",
+            _ => "marker MISSING",
+        };
+        var zone = frame.Zone.Found ? $"zone {frame.Zone.StartPercent:0}–{frame.Zone.EndPercent:0} %" : "zone MISSING";
+        var where = decision.Region switch
+        {
+            FeedbackRegion.Before => "before the zone",
+            FeedbackRegion.Inside => "inside the zone",
+            FeedbackRegion.After => "after the zone",
+            _ => controller.IsWaiting ? "target lost, waiting" : "no change (frame not trusted)",
+        };
+        var action = decision.Command switch
+        {
+            FeedbackCommand.Press => "→ would PRESS",
+            FeedbackCommand.Release => "→ would RELEASE",
+            FeedbackCommand.Tap => "→ would TAP",
+            _ => decision.Deferred ? "→ change held back (min time between changes)" : "",
+        };
+        var state = controller.IsHeld ? "HELD" : "released";
+        return $"{marker} · {zone} · {where} {action}\nInput: {state} · {stats.FramesPerSecond(elapsed):0} fps · capture {stats.AverageCaptureMs:0.0} ms · detect {stats.AverageDetectMs:0.0} ms · NO input is sent";
+    }
+
+    private static string DescribeLostAction(FeedbackLostAction action) => action switch
+    {
+        FeedbackLostAction.ExitLoop => "set to continue with the next step",
+        FeedbackLostAction.StopMacro => "set to stop the macro",
+        _ => "set to release and wait",
+    };
+
+    /// <summary>About 60 % of what the PC reached at full speed, between 5 and 60 per second.</summary>
+    private static int SuggestCapturesPerSecond(double fullSpeedHz) => Math.Clamp((int)Math.Floor(fullSpeedHz * 0.6), 5, 60);
+
+    private static string Share(int count, int total) => total <= 0 ? "0%" : $"{count / (double)total:P0}";
+
+    /// <summary>The captured bar with the zone (blue box) and the marker (green = found, orange = unclear) marked.</summary>
+    private static BgraImage DrawFeedbackOverlay(FeedbackFrame frame, FeedbackLoopStep step)
+    {
+        var picture = frame.Frame.Image.Clone();
+        var horizontal = step.Orientation == BarOrientation.Horizontal;
+        var length = horizontal ? picture.Width : picture.Height;
+
+        if (frame.Zone.Found && length > 1)
+        {
+            var a = (int)Math.Round(frame.Zone.StartPercent / 100.0 * (length - 1));
+            var b = (int)Math.Round(frame.Zone.EndPercent / 100.0 * (length - 1));
+            var zone = horizontal ? new ScreenRect(a, 0, b - a + 1, picture.Height) : new ScreenRect(0, a, picture.Width, b - a + 1);
+            picture.DrawRectangle(zone, ZoneOverlayColor, 1);
+        }
+
+        if (frame.Marker.Bounds is { } marker)
+            picture.DrawRectangle(Grow(marker, 2), frame.Marker.Status == MarkerStatus.Found ? MatchColor : OtherColor, 2);
+        return picture;
+    }
+
+    /// <summary>
+    /// A small always-on-top window for the feedback preview: the bar picture, what the loop sees / would do, and a
+    /// Stop button. Not owned by the main window (that one is minimized while the preview runs), never takes the focus
+    /// from the game, and is left out of screen captures so it can't confuse the detection.
+    /// </summary>
+    private sealed class LiveFeedbackWindow
+    {
+        private readonly Window _window;
+        private readonly Image _image;
+        private readonly TextBlock _text;
+        private bool _closed;
+
+        public LiveFeedbackWindow(Action stop)
+        {
+            _image = new Image { Stretch = Stretch.Uniform, StretchDirection = StretchDirection.Both, Height = 90 };
+            RenderOptions.SetBitmapScalingMode(_image, BitmapScalingMode.NearestNeighbor);
+            _text = new TextBlock
+            {
+                Text = "Starting…",
+                TextWrapping = TextWrapping.Wrap,
+                Foreground = new SolidColorBrush(Color.FromRgb(0xE6, 0xEB, 0xF5)),
+                FontSize = 12,
+                Margin = new Thickness(0, 8, 0, 8),
+            };
+            var stopButton = new Button { Content = "Stop preview", Padding = new Thickness(14, 4, 14, 4), HorizontalAlignment = HorizontalAlignment.Right };
+            stopButton.Click += (_, _) => stop();
+
+            var panel = new StackPanel { Margin = new Thickness(12) };
+            panel.Children.Add(new TextBlock
+            {
+                Text = "Feedback loop preview – no input is sent",
+                FontWeight = FontWeights.SemiBold,
+                Foreground = new SolidColorBrush(Color.FromRgb(0xE6, 0xEB, 0xF5)),
+                Margin = new Thickness(0, 0, 0, 8),
+            });
+            panel.Children.Add(new Border
+            {
+                Background = new SolidColorBrush(Color.FromRgb(0x05, 0x0A, 0x14)),
+                BorderBrush = new SolidColorBrush(Color.FromRgb(0x26, 0x32, 0x4A)),
+                BorderThickness = new Thickness(1),
+                Child = _image,
+            });
+            panel.Children.Add(_text);
+            panel.Children.Add(stopButton);
+
+            var area = SystemParameters.WorkArea;
+            _window = new Window
+            {
+                Title = "SmartMacro – feedback preview",
+                Width = 460,
+                SizeToContent = SizeToContent.Height,
+                WindowStyle = WindowStyle.ToolWindow,
+                ResizeMode = ResizeMode.NoResize,
+                Topmost = true,
+                ShowActivated = false,
+                ShowInTaskbar = false,
+                Background = new SolidColorBrush(Color.FromRgb(0x0E, 0x16, 0x26)),
+                Content = panel,
+                Left = area.Right - 480,
+                Top = area.Bottom - 260,
+            };
+            _window.Closed += (_, _) =>
+            {
+                _closed = true;
+                stop(); // closing the window also stops the preview
+            };
+        }
+
+        public void Show()
+        {
+            _window.Show();
+            NativeMethods.SetExcludedFromCapture(_window, true);
+        }
+
+        public void Close()
+        {
+            if (!_closed) _window.Close();
+        }
+
+        /// <summary>Called from the preview thread; the window is updated on its own (UI) thread.</summary>
+        public void Post(ImageSource picture, string text)
+        {
+            if (_closed) return;
+            _window.Dispatcher.InvokeAsync(() =>
+            {
+                if (_closed) return;
+                _image.Source = picture;
+                _text.Text = text;
+            });
+        }
     }
 
     public ImageSource ToImageSource(BgraImage image)

@@ -9,7 +9,7 @@ namespace SmartMacro.ViewModels.Steps;
 
 /// <summary>
 /// The screen tools (Pick area, Capture image, Pick color, Test now) the editor hands to steps that look at the
-/// screen, including the search inside an If / Repeat condition.
+/// screen, including the search inside an If / Repeat condition and a Feedback loop (with its conditions).
 /// </summary>
 public sealed record ScreenTools(IFindTextTools? Text, IVisionTools? Vision)
 {
@@ -34,6 +34,9 @@ public sealed record ScreenTools(IFindTextTools? Text, IVisionTools? Vision)
                 break;
             case RepeatStepViewModel repeat:
                 repeat.Tools = this;
+                break;
+            case FeedbackLoopStepViewModel feedback:
+                feedback.Tools = this;
                 break;
         }
     }

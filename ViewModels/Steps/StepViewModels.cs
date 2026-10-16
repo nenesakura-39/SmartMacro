@@ -26,6 +26,7 @@ public static class StepTypeCatalog
         new StepTypeInfo(StepKind.FindText, StepDescriber.DisplayName(StepKind.FindText), "\uE721", "Wait for text to appear on screen (OCR), and optionally click it."),
         new StepTypeInfo(StepKind.FindImage, StepDescriber.DisplayName(StepKind.FindImage), "\uE8B9", "Wait for a picture (button, icon…) to appear on screen or disappear, and optionally click it."),
         new StepTypeInfo(StepKind.FindColor, StepDescriber.DisplayName(StepKind.FindColor), "\uE790", "Wait for a color to appear in an area (or disappear), and optionally click it. Simple color matching, not object recognition."),
+        new StepTypeInfo(StepKind.FeedbackLoop, StepDescriber.DisplayName(StepKind.FeedbackLoop), "\uE895", "Keeps a moving marker in a target zone: watches a bar on screen many times per second and holds, releases or taps one key or mouse button depending on where the marker is. Always has a max runtime; Stop and Esc work at any time."),
         new StepTypeInfo(StepKind.InputSequence, StepDescriber.DisplayName(StepKind.InputSequence), "\uE7FC", "Mouse and keyboard input recorded on one timeline and played back with its original timing: exact key and button down/up, plus cursor positions or relative (camera) mouse movement."),
         new StepTypeInfo(StepKind.If, StepDescriber.DisplayName(StepKind.If), "\uE8AB", "Runs the steps inside only when a condition is true: some text, an image or a color is (or is not) on screen. Adding it from the toolbox adds the If and its End If."),
         new StepTypeInfo(StepKind.Else, StepDescriber.DisplayName(StepKind.Else), "\uE76C", "Optional, inside an If block: the steps after Else run when the If's condition is false."),
@@ -182,6 +183,7 @@ public abstract class StepViewModel : ObservableObject
         IfStep i => new IfStepViewModel(i),
         RepeatStep r => new RepeatStepViewModel(r),
         ElseStep or EndIfStep or EndRepeatStep => new BlockMarkerStepViewModel(step),
+        FeedbackLoopStep f => new FeedbackLoopStepViewModel(f),
         _ => throw new NotSupportedException($"No editor for step type {step.GetType().Name}."),
     };
 }

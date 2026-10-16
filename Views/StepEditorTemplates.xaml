@@ -671,6 +671,291 @@
         </StackPanel>
     </DataTemplate>
 
+    <!--
+        Stage 4: Feedback loop. Sections: bar + marker, zone, rules, input, limits, stop conditions, tools.
+        The stop conditions reuse the If / Repeat condition editor.
+    -->
+    <DataTemplate DataType="{x:Type steps:FeedbackLoopStepViewModel}">
+        <StackPanel>
+            <ContentControl Content="{Binding}" ContentTemplate="{StaticResource StepHeaderTemplate}" Focusable="False" />
+
+            <!-- 1. The bar and the marker -->
+            <TextBlock Text="1. The bar and the moving marker" Style="{StaticResource SectionTitle}" FontSize="13" Margin="0,18,0,0" />
+            <Grid Margin="0,4,0,0">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="6" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="6" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="6" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <StackPanel Grid.Column="0">
+                    <TextBlock Text="X" Style="{StaticResource FieldLabel}" Margin="0,4,0,2" />
+                    <TextBox Text="{Binding RegionX, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}" Padding="6,5" AutomationProperties.Name="Bar area left" />
+                </StackPanel>
+                <StackPanel Grid.Column="2">
+                    <TextBlock Text="Y" Style="{StaticResource FieldLabel}" Margin="0,4,0,2" />
+                    <TextBox Text="{Binding RegionY, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}" Padding="6,5" AutomationProperties.Name="Bar area top" />
+                </StackPanel>
+                <StackPanel Grid.Column="4">
+                    <TextBlock Text="Width" Style="{StaticResource FieldLabel}" Margin="0,4,0,2" />
+                    <TextBox Text="{Binding RegionWidth, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}" Padding="6,5" AutomationProperties.Name="Bar area width" />
+                </StackPanel>
+                <StackPanel Grid.Column="6">
+                    <TextBlock Text="Height" Style="{StaticResource FieldLabel}" Margin="0,4,0,2" />
+                    <TextBox Text="{Binding RegionHeight, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}" Padding="6,5" AutomationProperties.Name="Bar area height" />
+                </StackPanel>
+            </Grid>
+            <Button Command="{Binding PickAreaCommand}" HorizontalAlignment="Left" Margin="0,10,0,0"
+                    ToolTip="SmartMacro hides, then you drag a box tightly around the bar the marker moves along.">
+                <StackPanel Orientation="Horizontal">
+                    <TextBlock Text="&#xE8B0;" Style="{StaticResource IconText}" />
+                    <TextBlock Text="Pick bar area" Margin="8,0,0,0" />
+                </StackPanel>
+            </Button>
+
+            <TextBlock Text="Direction the marker moves" Style="{StaticResource FieldLabel}" />
+            <ComboBox ItemsSource="{x:Static steps:FeedbackLoopStepViewModel.Orientations}" DisplayMemberPath="Label" SelectedValuePath="Value"
+                      SelectedValue="{Binding Orientation}" AutomationProperties.Name="Direction the marker moves" />
+
+            <TextBlock Text="Marker color (#RRGGBB)" Style="{StaticResource FieldLabel}" />
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="10" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="10" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <Border Grid.Column="0" Width="30" Height="30" CornerRadius="6" Background="{Binding MarkerBrush}"
+                        BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" />
+                <TextBox Grid.Column="2" Text="{Binding MarkerColor, UpdateSourceTrigger=PropertyChanged}" MaxLength="7" Tag="#FF0000"
+                         AutomationProperties.Name="Marker color" />
+                <Button Grid.Column="4" Command="{Binding PickMarkerColorCommand}" ToolTip="SmartMacro hides, then you click the marker.">
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="&#xEF3C;" Style="{StaticResource IconText}" />
+                        <TextBlock Text="Pick from screen" Margin="8,0,0,0" />
+                    </StackPanel>
+                </Button>
+            </Grid>
+            <Grid Margin="0,4,0,0">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="10" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="10" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <StackPanel Grid.Column="0">
+                    <TextBlock Text="Tolerance (0-255)" Style="{StaticResource FieldLabel}" />
+                    <TextBox Text="{Binding MarkerTolerance, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}" AutomationProperties.Name="Marker color tolerance" />
+                </StackPanel>
+                <StackPanel Grid.Column="2">
+                    <TextBlock Text="Min size (pixels)" Style="{StaticResource FieldLabel}" />
+                    <TextBox Text="{Binding MarkerMinPixels, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}" AutomationProperties.Name="Marker minimum size" />
+                </StackPanel>
+                <StackPanel Grid.Column="4">
+                    <TextBlock Text="Ignore jumps over (%)" Style="{StaticResource FieldLabel}" />
+                    <TextBox Text="{Binding MaxJumpPercent, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}"
+                             ToolTip="A jump bigger than this in one frame is ignored once, in case it was a glitch. If the marker is still there next frame, the jump is accepted."
+                             AutomationProperties.Name="Glitch filter percent" />
+                </StackPanel>
+            </Grid>
+
+            <!-- 2. The target zone -->
+            <TextBlock Text="2. The target zone" Style="{StaticResource SectionTitle}" FontSize="13" Margin="0,18,0,0" />
+            <ComboBox ItemsSource="{x:Static steps:FeedbackLoopStepViewModel.ZoneModes}" DisplayMemberPath="Label" SelectedValuePath="Value"
+                      SelectedValue="{Binding ZoneMode}" Margin="0,6,0,0" AutomationProperties.Name="Zone type" />
+            <Grid Margin="0,4,0,0" Visibility="{Binding IsFixedZone, Converter={StaticResource BoolToVisibility}}">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="10" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <StackPanel Grid.Column="0">
+                    <TextBlock Text="Zone starts at (%)" Style="{StaticResource FieldLabel}" />
+                    <TextBox Text="{Binding ZoneStartPercent, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}" AutomationProperties.Name="Zone start percent" />
+                </StackPanel>
+                <StackPanel Grid.Column="2">
+                    <TextBlock Text="Zone ends at (%)" Style="{StaticResource FieldLabel}" />
+                    <TextBox Text="{Binding ZoneEndPercent, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}" AutomationProperties.Name="Zone end percent" />
+                </StackPanel>
+            </Grid>
+            <StackPanel Visibility="{Binding IsDetectedZone, Converter={StaticResource BoolToVisibility}}">
+                <TextBlock Text="Zone color (#RRGGBB)" Style="{StaticResource FieldLabel}" />
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="10" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="10" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <Border Grid.Column="0" Width="30" Height="30" CornerRadius="6" Background="{Binding ZoneBrush}"
+                            BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" />
+                    <TextBox Grid.Column="2" Text="{Binding ZoneColor, UpdateSourceTrigger=PropertyChanged}" MaxLength="7" Tag="#FFFFFF"
+                             AutomationProperties.Name="Zone color" />
+                    <Button Grid.Column="4" Command="{Binding PickZoneColorCommand}" ToolTip="SmartMacro hides, then you click the zone.">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="&#xEF3C;" Style="{StaticResource IconText}" />
+                            <TextBlock Text="Pick from screen" Margin="8,0,0,0" />
+                        </StackPanel>
+                    </Button>
+                </Grid>
+                <Grid Margin="0,4,0,0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="10" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <StackPanel Grid.Column="0">
+                        <TextBlock Text="Tolerance (0-255)" Style="{StaticResource FieldLabel}" />
+                        <TextBox Text="{Binding ZoneTolerance, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}" AutomationProperties.Name="Zone color tolerance" />
+                    </StackPanel>
+                    <StackPanel Grid.Column="2">
+                        <TextBlock Text="Min size (pixels)" Style="{StaticResource FieldLabel}" />
+                        <TextBox Text="{Binding ZoneMinPixels, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}" AutomationProperties.Name="Zone minimum size" />
+                    </StackPanel>
+                </Grid>
+            </StackPanel>
+
+            <!-- 3. The rules -->
+            <TextBlock Text="3. What to do" Style="{StaticResource SectionTitle}" FontSize="13" Margin="0,18,0,0" />
+            <TextBlock Text="{Binding BeforeLabel}" Style="{StaticResource FieldLabel}" />
+            <ComboBox ItemsSource="{x:Static steps:FeedbackLoopStepViewModel.Actions}" DisplayMemberPath="Label" SelectedValuePath="Value"
+                      SelectedValue="{Binding WhenBeforeZone}" AutomationProperties.Name="Rule before the zone" />
+            <TextBlock Text="When the marker is INSIDE the zone" Style="{StaticResource FieldLabel}" />
+            <ComboBox ItemsSource="{x:Static steps:FeedbackLoopStepViewModel.Actions}" DisplayMemberPath="Label" SelectedValuePath="Value"
+                      SelectedValue="{Binding WhenInsideZone}" AutomationProperties.Name="Rule inside the zone" />
+            <TextBlock Text="{Binding AfterLabel}" Style="{StaticResource FieldLabel}" />
+            <ComboBox ItemsSource="{x:Static steps:FeedbackLoopStepViewModel.Actions}" DisplayMemberPath="Label" SelectedValuePath="Value"
+                      SelectedValue="{Binding WhenAfterZone}" AutomationProperties.Name="Rule after the zone" />
+            <TextBlock Text="Dead band (%)" Style="{StaticResource FieldLabel}" />
+            <TextBox Text="{Binding DeadBandPercent, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}" Width="100" HorizontalAlignment="Left"
+                     AutomationProperties.Name="Dead band percent" />
+            <TextBlock Style="{StaticResource MutedText}" FontSize="11" Margin="0,4,0,0" TextWrapping="Wrap"
+                       Text="The marker must be this far past a zone edge before it counts as crossed, so the input doesn't flicker on and off at an edge. 0 = off; 1-5 is typical." />
+
+            <!-- 4. The input -->
+            <TextBlock Text="4. Which input" Style="{StaticResource SectionTitle}" FontSize="13" Margin="0,18,0,0" />
+            <ComboBox ItemsSource="{x:Static steps:FeedbackLoopStepViewModel.InputKinds}" DisplayMemberPath="Label" SelectedValuePath="Value"
+                      SelectedValue="{Binding InputKind}" Margin="0,6,0,0" AutomationProperties.Name="Input kind" />
+            <StackPanel Visibility="{Binding UsesMouseButton, Converter={StaticResource BoolToVisibility}}">
+                <TextBlock Text="Mouse button (pressed wherever the cursor is)" Style="{StaticResource FieldLabel}" />
+                <ComboBox ItemsSource="{x:Static steps:FeedbackLoopStepViewModel.MouseButtons}" SelectedItem="{Binding MouseButton}" AutomationProperties.Name="Mouse button" />
+            </StackPanel>
+            <StackPanel Visibility="{Binding UsesKey, Converter={StaticResource BoolToVisibility}}">
+                <TextBlock Text="Key" Style="{StaticResource FieldLabel}" />
+                <ComboBox ItemsSource="{x:Static steps:FeedbackLoopStepViewModel.Keys}" DisplayMemberPath="Name" SelectedValuePath="Code"
+                          SelectedValue="{Binding VirtualKey}" IsTextSearchEnabled="True" TextSearch.TextPath="Name" AutomationProperties.Name="Key" />
+            </StackPanel>
+            <StackPanel Visibility="{Binding UsesTap, Converter={StaticResource BoolToVisibility}}">
+                <TextBlock Text="Tap length (ms)" Style="{StaticResource FieldLabel}" />
+                <TextBox Text="{Binding TapMs, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}" Width="100" HorizontalAlignment="Left"
+                         AutomationProperties.Name="Tap length in milliseconds" />
+            </StackPanel>
+
+            <!-- 5. Limits -->
+            <TextBlock Text="5. Speed and safety limits" Style="{StaticResource SectionTitle}" FontSize="13" Margin="0,18,0,0" />
+            <Grid Margin="0,4,0,0">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="10" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <StackPanel Grid.Column="0">
+                    <TextBlock Text="Captures per second (max)" Style="{StaticResource FieldLabel}" />
+                    <TextBox Text="{Binding MaxCapturesPerSecond, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}"
+                             ToolTip="How often the loop looks at the bar. Use &quot;Measure loop speed&quot; to see what your PC can do." AutomationProperties.Name="Captures per second" />
+                </StackPanel>
+                <StackPanel Grid.Column="2">
+                    <TextBlock Text="Min time between changes (ms)" Style="{StaticResource FieldLabel}" />
+                    <TextBox Text="{Binding MinInputChangeMs, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}"
+                             ToolTip="Presses / releases / taps are at least this far apart (games miss changes that are too quick)." AutomationProperties.Name="Minimum time between input changes" />
+                </StackPanel>
+            </Grid>
+            <Grid Margin="0,4,0,0">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="10" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <StackPanel Grid.Column="0">
+                    <TextBlock Text="Max runtime (ms)" Style="{StaticResource FieldLabel}" />
+                    <TextBox Text="{Binding MaxRuntimeMs, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}" AutomationProperties.Name="Max runtime in milliseconds" />
+                </StackPanel>
+                <StackPanel Grid.Column="2">
+                    <TextBlock Text="When the time is up" Style="{StaticResource FieldLabel}" />
+                    <ComboBox ItemsSource="{x:Static steps:FeedbackLoopStepViewModel.EndOptions}" DisplayMemberPath="Label" SelectedValuePath="Value"
+                              SelectedValue="{Binding WhenTimeUp}" AutomationProperties.Name="When the time is up" />
+                </StackPanel>
+            </Grid>
+            <TextBlock Text="{Binding MaxRuntimeText}" Style="{StaticResource MutedText}" FontSize="11" Margin="0,4,0,0" />
+            <Grid Margin="0,4,0,0">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="10" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <StackPanel Grid.Column="0">
+                    <TextBlock Text="Target missing for (ms)" Style="{StaticResource FieldLabel}" />
+                    <TextBox Text="{Binding LostTimeoutMs, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}"
+                             ToolTip="Shorter gaps (a flicker, two similar patches) just keep the input as it is." AutomationProperties.Name="Target missing time in milliseconds" />
+                </StackPanel>
+                <StackPanel Grid.Column="2">
+                    <TextBlock Text="Then" Style="{StaticResource FieldLabel}" />
+                    <ComboBox ItemsSource="{x:Static steps:FeedbackLoopStepViewModel.LostActions}" DisplayMemberPath="Label" SelectedValuePath="Value"
+                              SelectedValue="{Binding WhenTargetLost}" AutomationProperties.Name="When the target is missing" />
+                </StackPanel>
+            </Grid>
+
+            <!-- 6. Stop when -->
+            <TextBlock Text="6. Stop when (optional)" Style="{StaticResource SectionTitle}" FontSize="13" Margin="0,18,0,0" />
+            <CheckBox Content="Done when a condition is true (e.g. a &quot;caught&quot; picture appears)" IsChecked="{Binding HasCompleteCondition}" Margin="0,8,0,0" />
+            <ContentControl Content="{Binding CompleteCondition}" ContentTemplate="{StaticResource ConditionEditorTemplate}" Focusable="False" Margin="0,6,0,0"
+                            Visibility="{Binding CompleteCondition, Converter={StaticResource NullToVisibility}}" />
+            <CheckBox Content="Failed when a condition is true (e.g. a &quot;lost&quot; message appears)" IsChecked="{Binding HasFailCondition}" Margin="0,10,0,0" />
+            <StackPanel Visibility="{Binding FailCondition, Converter={StaticResource NullToVisibility}}">
+                <ContentControl Content="{Binding FailCondition}" ContentTemplate="{StaticResource ConditionEditorTemplate}" Focusable="False" Margin="0,6,0,0" />
+                <TextBlock Text="When it failed" Style="{StaticResource FieldLabel}" />
+                <ComboBox ItemsSource="{x:Static steps:FeedbackLoopStepViewModel.EndOptions}" DisplayMemberPath="Label" SelectedValuePath="Value"
+                          SelectedValue="{Binding WhenFailed}" AutomationProperties.Name="When it failed" />
+            </StackPanel>
+            <TextBlock Style="{StaticResource MutedText}" FontSize="11" Margin="0,6,0,0" TextWrapping="Wrap"
+                       Text="Conditions are checked about every &quot;Check every&quot; while the loop runs (&quot;Keep checking for&quot; isn't used here). Image and color conditions are fast; text (OCR) pauses the loop while it reads." />
+
+            <!-- Tools -->
+            <TextBlock Text="Try it (no input is sent)" Style="{StaticResource SectionTitle}" FontSize="13" Margin="0,18,0,0" />
+            <WrapPanel Margin="0,8,0,0">
+                <Button Command="{Binding MeasureCommand}" Margin="0,0,8,8"
+                        ToolTip="For 3 seconds SmartMacro captures the bar and finds the marker as fast as it can, then shows the frames per second, the time per frame and a suggested captures-per-second setting.">
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="&#xEC4A;" Style="{StaticResource IconText}" />
+                        <TextBlock Text="Measure loop speed" Margin="8,0,0,0" />
+                    </StackPanel>
+                </Button>
+                <Button Command="{Binding PreviewCommand}" Style="{StaticResource PrimaryButton}" Margin="0,0,8,8"
+                        ToolTip="Runs the loop for 10 seconds WITHOUT pressing anything. A small window shows the marker, the zone and what the loop would do.">
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="&#xE768;" Style="{StaticResource IconText}" />
+                        <TextBlock Text="Preview 10 s" Margin="8,0,0,0" />
+                    </StackPanel>
+                </Button>
+            </WrapPanel>
+            <Border Margin="0,4,0,0" Padding="10,8" CornerRadius="6" Background="{StaticResource SurfaceAltBrush}"
+                    Visibility="{Binding TestResult, Converter={StaticResource NullToVisibility}}">
+                <TextBlock Text="{Binding TestResult}" TextWrapping="Wrap" FontSize="12" />
+            </Border>
+
+            <TextBlock Style="{StaticResource MutedText}" FontSize="11" Margin="0,10,0,0" TextWrapping="Wrap"
+                       Text="While it runs: Stop, Esc and Pause work every frame; pausing releases the input and presses it again on resume. When the loop ends for any reason, the key / button is released. A short marker flicker or two similar patches never trigger an action. This reacts to what it sees, a few frames late: it suits simple &quot;keep the marker in the zone&quot; bars, not every minigame." />
+
+            <ContentControl Content="{Binding}" ContentTemplate="{StaticResource StepFooterTemplate}" Focusable="False" />
+        </StackPanel>
+    </DataTemplate>
+
     <DataTemplate DataType="{x:Type steps:BlockMarkerStepViewModel}">
         <StackPanel>
             <ContentControl Content="{Binding}" ContentTemplate="{StaticResource StepHeaderTemplate}" Focusable="False" />

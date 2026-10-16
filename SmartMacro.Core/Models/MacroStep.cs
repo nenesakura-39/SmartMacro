@@ -22,6 +22,9 @@ public enum StepKind
     EndIf,
     Repeat,
     EndRepeat,
+
+    // Stage 4: continuous visual feedback (see FeedbackLoopStep.cs).
+    FeedbackLoop,
 }
 
 public enum MacroMouseButton
@@ -78,6 +81,7 @@ public enum KeyModifiers
 [JsonDerivedType(typeof(EndIfStep), "endIf")]
 [JsonDerivedType(typeof(RepeatStep), "repeat")]
 [JsonDerivedType(typeof(EndRepeatStep), "endRepeat")]
+[JsonDerivedType(typeof(FeedbackLoopStep), "feedbackLoop")]
 public abstract class MacroStep
 {
     public Guid Id { get; set; } = Guid.NewGuid();

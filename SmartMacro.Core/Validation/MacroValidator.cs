@@ -85,6 +85,17 @@ public static class MacroValidator
     public const int MaxLoopCount = 1_000_000;       // turns of one Repeat block
     public const int MaxLoopDurationMs = 86_400_000; // 24 hours
 
+    // Stage 4: feedback loops.
+    public const int MinFeedbackRuntimeMs = 100;
+    public const int MaxFeedbackRuntimeMs = 3_600_000; // 1 hour
+    public const int MaxCapturesPerSecond = 120;
+    public const int MaxInputChangeMs = 5_000;
+    public const int MaxLostTimeoutMs = 60_000;
+    public const int MaxTapMs = 1_000;
+    public const int MaxDeadBandPercent = 25;
+    public const int MinBarLength = 10;              // pixels along the bar
+    public const long LargeFeedbackAreaPixels = 250_000; // bigger areas make each frame slow
+
     public static bool HasErrors(this IEnumerable<ValidationIssue> issues) =>
         issues.Any(i => i.Severity == IssueSeverity.Error);
 
@@ -144,7 +155,7 @@ public static class MacroValidator
                 issues.Add(new ValidationIssue(IssueSeverity.Warning,
                     "This click uses the last found spot, but there's no \"Find text\", \"Find image\" or \"Find color\" step (or If / Repeat condition) before it.", i, step.Id, nameof(MouseClickStep.UseLastFoundText)));
             if (step is ScreenSearchStep { Enabled: true, Goal: WaitGoal.Appear }) hasFindTextBefore = true;
-            if (step.Enabled && WorkflowSteps.ConditionOf(step) is not null) hasFindTextBefore = true; // conditions remember what they saw
+            if (step.Enabled && WorkflowSteps.ConditionsOf(step).Any()) hasFindTextBefore = true; // conditions remember what they saw
 
             if (step.Id == Guid.Empty || !seenIds.Add(step.Id))
                 issues.Add(new ValidationIssue(IssueSeverity.Error, "This step has a missing or duplicate ID.", i, step.Id));
@@ -317,6 +328,10 @@ public static class MacroValidator
                 ValidateRepeat(issues, r, screen);
                 break;
 
+            case FeedbackLoopStep feedback:
+                ValidateFeedbackLoop(issues, feedback, screen);
+                break;
+
             case FindColorStep c:
                 if (!RgbColor.TryParse(c.Color, out _))
                     issues.Add(Error("Enter the color as #RRGGBB (for example #FF0000 for red), or pick it from the screen.", nameof(FindColorStep.Color)));
@@ -376,18 +391,18 @@ public static class MacroValidator
     /// A condition needs search settings of a supported kind; those are checked with the same rules as the
     /// Find text / image / color step (messages start with "Condition:").
     /// </summary>
-    private static void ValidateCondition(List<ValidationIssue> issues, Condition? condition, ScreenBounds? screen)
+    private static void ValidateCondition(List<ValidationIssue> issues, Condition? condition, ScreenBounds? screen,
+        string label = "Condition", string property = "Condition")
     {
-        const string property = "Condition";
         if (condition?.Check is null)
         {
-            issues.Add(Error("Choose what the condition looks for (text, image or color).", property));
+            issues.Add(Error($"{label}: choose what the condition looks for (text, image or color).", property));
             return;
         }
 
         if (condition.Search is not { } search)
         {
-            issues.Add(Error($"A condition can't use a \"{condition.Check.GetType().Name}\" step. Use text, image or color. The macro may be damaged.", property));
+            issues.Add(Error($"{label}: a condition can't use a \"{condition.Check.GetType().Name}\" step. Use text, image or color. The macro may be damaged.", property));
             return;
         }
 
@@ -395,8 +410,149 @@ public static class MacroValidator
         {
             // The "when found" action, wait goal and "when not found" choice aren't used by conditions.
             if (issue.Property is nameof(ScreenSearchStep.Action) or nameof(ScreenSearchStep.WhenNotFound) or nameof(ScreenSearchStep.Goal)) continue;
-            issues.Add(issue with { Message = "Condition: " + issue.Message, Property = property + "." + (issue.Property ?? "") });
+            issues.Add(issue with { Message = label + ": " + issue.Message, Property = property + "." + (issue.Property ?? "") });
         }
+    }
+
+    /// <summary>
+    /// Feedback loop (Stage 4): a bar area on screen, a valid marker colour, a zone, rules that press something,
+    /// a key or button, rate limits, a required max runtime, a lost-target policy and optional stop conditions.
+    /// Every number has a range, so a damaged or hand-edited file can't make the loop run wild.
+    /// </summary>
+    private static void ValidateFeedbackLoop(List<ValidationIssue> issues, FeedbackLoopStep f, ScreenBounds? screen)
+    {
+        if (!Enum.IsDefined(f.Orientation) || !Enum.IsDefined(f.ZoneMode) || !Enum.IsDefined(f.InputKind)
+            || !Enum.IsDefined(f.WhenBeforeZone) || !Enum.IsDefined(f.WhenInsideZone) || !Enum.IsDefined(f.WhenAfterZone)
+            || !Enum.IsDefined(f.WhenTargetLost) || !Enum.IsDefined(f.WhenTimeUp) || !Enum.IsDefined(f.WhenFailed))
+        {
+            issues.Add(Error("This Feedback loop step has an unknown option value. The macro may be damaged."));
+            return;
+        }
+
+        // Observe: the bar area.
+        const string region = "Region";
+        if (f.RegionWidth < 5 || f.RegionHeight < 5)
+            issues.Add(Error("The bar area must be at least 5×5 pixels. Use \"Pick bar area\".", region));
+        else if (f.RegionWidth > MaxRegionSize || f.RegionHeight > MaxRegionSize)
+            issues.Add(Error($"The bar area can be at most {MaxRegionSize:N0} pixels wide or tall.", region));
+        else
+        {
+            var length = f.Orientation == BarOrientation.Horizontal ? f.RegionWidth : f.RegionHeight;
+            if (length < MinBarLength)
+                issues.Add(Error($"The bar area must be at least {MinBarLength} pixels long in the direction the marker moves. Check \"Direction\".", region));
+            if ((long)f.RegionWidth * f.RegionHeight > LargeFeedbackAreaPixels)
+                issues.Add(Warning("The bar area is large, so every frame takes longer. Pick only the bar itself.", region));
+            if (screen is not null && !f.Region.IntersectsWith(new Ocr.ScreenRect(screen.Left, screen.Top, screen.Width, screen.Height)))
+                issues.Add(Warning("The bar area is outside your current screen.", region));
+        }
+
+        // Observe: the marker.
+        if (!RgbColor.TryParse(f.MarkerColor, out var marker))
+            issues.Add(Error("Enter the marker color as #RRGGBB, or pick it from the screen.", nameof(FeedbackLoopStep.MarkerColor)));
+        CheckTolerance(issues, f.MarkerTolerance, nameof(FeedbackLoopStep.MarkerTolerance), "marker");
+        if (f.MarkerMinPixels < 1 || f.MarkerMinPixels > MaxColorPixels)
+            issues.Add(Error($"The marker's minimum size must be 1 to {MaxColorPixels:N0} pixels.", nameof(FeedbackLoopStep.MarkerMinPixels)));
+        if (f.MaxJumpPercent < 1 || f.MaxJumpPercent > 100)
+            issues.Add(Error("The glitch filter (largest jump in one frame) must be 1 to 100 %.", nameof(FeedbackLoopStep.MaxJumpPercent)));
+
+        // Target zone.
+        if (f.ZoneMode == FeedbackZoneMode.Fixed)
+        {
+            if (f.ZoneStartPercent < 0 || f.ZoneEndPercent > 100 || f.ZoneStartPercent >= f.ZoneEndPercent)
+                issues.Add(Error("The zone must start before it ends, between 0 % and 100 % (for example 40 to 60).", nameof(FeedbackLoopStep.ZoneStartPercent)));
+            else if (f.DeadBandPercent > 0 && f.DeadBandPercent * 2 >= f.ZoneEndPercent - f.ZoneStartPercent)
+                issues.Add(Warning("The dead band is as wide as half the zone or more, so the marker may never count as inside it. Use a smaller dead band.", nameof(FeedbackLoopStep.DeadBandPercent)));
+        }
+        else
+        {
+            if (!RgbColor.TryParse(f.ZoneColor, out var zone))
+                issues.Add(Error("Enter the zone color as #RRGGBB, or pick it from the screen.", nameof(FeedbackLoopStep.ZoneColor)));
+            else if (RgbColor.TryParse(f.MarkerColor, out _) && Overlaps(marker, f.MarkerTolerance, zone, f.ZoneTolerance))
+                issues.Add(Warning("The marker and zone colors are so close (with their tolerances) that one can be mistaken for the other. Lower a tolerance or pick more different colors.", nameof(FeedbackLoopStep.ZoneColor)));
+            CheckTolerance(issues, f.ZoneTolerance, nameof(FeedbackLoopStep.ZoneTolerance), "zone");
+            if (f.ZoneMinPixels < 1 || f.ZoneMinPixels > MaxColorPixels)
+                issues.Add(Error($"The zone's minimum size must be 1 to {MaxColorPixels:N0} pixels.", nameof(FeedbackLoopStep.ZoneMinPixels)));
+        }
+
+        // Decide.
+        if (f.DeadBandPercent < 0 || f.DeadBandPercent > MaxDeadBandPercent)
+            issues.Add(Error($"The dead band must be 0 to {MaxDeadBandPercent} %.", nameof(FeedbackLoopStep.DeadBandPercent)));
+        var actions = new[] { f.WhenBeforeZone, f.WhenInsideZone, f.WhenAfterZone };
+        if (!actions.Any(a => a is FeedbackAction.Hold or FeedbackAction.Tap))
+            issues.Add(Error("None of the rules presses anything. Set at least one place to \"Hold\" or \"Tap\".", "Rules"));
+        else if (actions.Contains(FeedbackAction.Hold) && !actions.Contains(FeedbackAction.Release) && !actions.Contains(FeedbackAction.Tap))
+            issues.Add(Warning("A rule holds the input but no rule releases it, so it stays held until the loop ends.", "Rules"));
+
+        // Act.
+        if (f.InputKind == FeedbackInputKind.MouseButton)
+        {
+            if (!Enum.IsDefined(f.MouseButton))
+                issues.Add(Error("Unknown mouse button.", nameof(FeedbackLoopStep.MouseButton)));
+        }
+        else if (!VirtualKeys.IsValid(f.VirtualKey))
+        {
+            issues.Add(Error("Choose a valid key.", nameof(FeedbackLoopStep.VirtualKey)));
+        }
+        else if (f.VirtualKey == 0x1B)
+        {
+            issues.Add(Warning("Esc is also SmartMacro's emergency stop key (only when you press it yourself). Another key is clearer.", nameof(FeedbackLoopStep.VirtualKey)));
+        }
+
+        if (f.TapMs < 1 || f.TapMs > MaxTapMs)
+            issues.Add(Error($"The tap length must be 1 to {MaxTapMs:N0} ms.", nameof(FeedbackLoopStep.TapMs)));
+
+        // Limits.
+        if (f.MaxCapturesPerSecond < 1 || f.MaxCapturesPerSecond > MaxCapturesPerSecond)
+            issues.Add(Error($"Captures per second must be 1 to {MaxCapturesPerSecond}.", nameof(FeedbackLoopStep.MaxCapturesPerSecond)));
+        else if (f.MaxCapturesPerSecond > 60)
+            issues.Add(Warning("More than 60 captures per second is usually faster than the screen updates; it mostly uses more CPU. Check \"Measure loop speed\".", nameof(FeedbackLoopStep.MaxCapturesPerSecond)));
+
+        if (f.MinInputChangeMs < 0 || f.MinInputChangeMs > MaxInputChangeMs)
+            issues.Add(Error($"The minimum time between input changes must be 0 to {MaxInputChangeMs:N0} ms.", nameof(FeedbackLoopStep.MinInputChangeMs)));
+        else if (f.MinInputChangeMs < 16)
+            issues.Add(Warning("Changes less than 16 ms apart can be faster than a game's frame, so the game may miss some.", nameof(FeedbackLoopStep.MinInputChangeMs)));
+
+        if (f.MaxRuntimeMs < MinFeedbackRuntimeMs || f.MaxRuntimeMs > MaxFeedbackRuntimeMs)
+            issues.Add(Error($"A feedback loop needs a max runtime of {MinFeedbackRuntimeMs} to {MaxFeedbackRuntimeMs:N0} ms (1 hour), so it can't run forever.", nameof(FeedbackLoopStep.MaxRuntimeMs)));
+
+        if (f.LostTimeoutMs < 0 || f.LostTimeoutMs > MaxLostTimeoutMs)
+            issues.Add(Error($"\"Target missing for\" must be 0 to {MaxLostTimeoutMs:N0} ms.", nameof(FeedbackLoopStep.LostTimeoutMs)));
+
+        // Stop when.
+        if (f.CompleteWhen is not null)
+            ValidateFeedbackCondition(issues, f.CompleteWhen, screen, "Done when", nameof(FeedbackLoopStep.CompleteWhen));
+        if (f.FailWhen is not null)
+            ValidateFeedbackCondition(issues, f.FailWhen, screen, "Failed when", nameof(FeedbackLoopStep.FailWhen));
+
+        if (f.CompleteWhen is null && f.WhenTargetLost == FeedbackLostAction.ReleaseAndWait && f.WhenTimeUp == LoopLimitBehavior.StopMacro)
+            issues.Add(Warning("This loop can only end with an error (when its max runtime is reached). Add a \"done when\" condition, or let it continue when the time is up or the target is gone.", nameof(FeedbackLoopStep.WhenTimeUp)));
+    }
+
+    /// <summary>A stop condition of a feedback loop: the normal condition rules, plus hints about what costs time here.</summary>
+    private static void ValidateFeedbackCondition(List<ValidationIssue> issues, Condition condition, ScreenBounds? screen, string label, string property)
+    {
+        ValidateCondition(issues, condition, screen, label, property);
+        if (condition.Search is not { } search) return;
+
+        if (search is FindTextStep)
+            issues.Add(Warning($"{label}: reading text (OCR) takes about 50-300 ms, and the loop can't react while it reads. An image or color condition is much faster.", property));
+        if (search.TimeoutMs > 0)
+            issues.Add(Warning($"{label}: \"keep checking for\" isn't used here; the loop looks once every \"check every\" while it runs.", property));
+    }
+
+    private static void CheckTolerance(List<ValidationIssue> issues, int tolerance, string property, string what)
+    {
+        if (tolerance < 0 || tolerance > 255)
+            issues.Add(Error($"The {what} tolerance must be 0 to 255.", property));
+        else if (tolerance > 100)
+            issues.Add(Warning($"A {what} tolerance above 100 matches many different colors.", property));
+    }
+
+    /// <summary>True if some colour would match both colours (their tolerance boxes overlap on every channel).</summary>
+    private static bool Overlaps(RgbColor a, int toleranceA, RgbColor b, int toleranceB)
+    {
+        var reach = Math.Max(0, toleranceA) + Math.Max(0, toleranceB);
+        return Math.Abs(a.R - b.R) <= reach && Math.Abs(a.G - b.G) <= reach && Math.Abs(a.B - b.B) <= reach;
     }
 
     private static void CheckHold(List<ValidationIssue> issues, int holdMs, bool applies, string property, string actionName)

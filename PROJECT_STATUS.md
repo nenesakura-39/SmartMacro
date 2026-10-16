@@ -1,6 +1,6 @@
 # SmartMacro – Project Status / Handoff
 
-_Last updated: 2026-10-16 (v1.0.0 + game-input fidelity work + Stage 1 smart recording + Stage 2 visual detection + Stage 3 conditions and loops — written, not yet built). Owner & developer: Riku_
+_Last updated: 2026-10-16 (v1.0.0 + game-input fidelity work + Stage 1 smart recording + Stage 2 visual detection + Stage 3 conditions and loops — built and tested + Stage 4 continuous visual feedback — written, not yet built). Owner & developer: Riku_
 
 ## Done
 **Phase 1: Foundation**
@@ -203,7 +203,7 @@ _Last updated: 2026-10-16 (v1.0.0 + game-input fidelity work + Stage 1 smart rec
 - **Update:** owner re-ran verify (all green) and did the STAGE2 manual tests: all passed ("100/100"). Owner noted some
   improvements are wanted; they are deferred to a polish pass at the end of the roadmap (not listed yet — ask the owner).
 
-**Stage 3: Conditional workflows and loops** (2026-10-16; written, NOT built or tested yet — the AI's environment had no .NET SDK)
+**Stage 3: Conditional workflows and loops** (2026-10-16; written by the AI without a .NET SDK, then built and tested by the owner)
 - Models (`Core/Models/WorkflowSteps.cs`): `Condition` { `Check` = a FindTextStep / FindImageStep / FindColorStep
   (stored with the normal step discriminators, so only known types load), `Negate` } with derived `Kind`
   (TextVisible / ImageVisible / ColorVisible). Conditions use the search's what / area / TimeoutMs ("keep checking
@@ -240,14 +240,89 @@ _Last updated: 2026-10-16 (v1.0.0 + game-input fidelity work + Stage 1 smart rec
   spacing; stop inside a loop and during a condition wait with release; pause in a loop; progress text; evaluator;
   validation; format 5 round trip, old v4 file, damaged / script-like files, broken structure, import).
 - Docs: `docs/STAGE3_MANUAL_TESTS.md`, README "If / Else and Repeat", roadmap status.
-- Not verified: build, test run, any real app or game.
+- Owner build (2026-10-16): `tools\verify.cmd` → 0 warnings, 0 errors; tests **389/389 passed** (first run, no fixes needed).
+  Owner then reported the Stage 3 work "Done" (manual-test details not sent; ask if anything failed).
+
+**Stage 4: Continuous visual feedback** (2026-10-16; written, NOT built or tested yet — the AI's environment had no .NET SDK
+and no network access to install one, so nothing below has been compiled or run)
+- Audit before the change: Stage 2 `MarkerTracker` (Found / Ambiguous / Lost / IgnoredJump) was only used by the editor's
+  "Track for 3 s". Stage 3 gave the program-counter engine, `HeldInput` (released on every exit, released / re-pressed on
+  pause), `ActiveTime` (paused time excluded), `IConditionEvaluator` + `ScreenProbes`. Stage 4 builds on exactly these.
+- Model (`Core/Models/FeedbackLoopStep.cs`, JSON "feedbackLoop", `StepKind.FeedbackLoop`): bar area (RegionX/Y/Width/
+  Height, default 300×30), `Orientation` (Horizontal / Vertical), MarkerColor / MarkerTolerance 24 / MarkerMinPixels 3 /
+  MaxJumpPercent 35; ZoneMode Fixed (ZoneStartPercent 40, ZoneEndPercent 60) or DetectedByColor (ZoneColor / ZoneTolerance
+  / ZoneMinPixels 20); rules WhenBeforeZone Hold / WhenInsideZone Keep / WhenAfterZone Release (Hold / Release / Keep /
+  Tap); DeadBandPercent 2; InputKind MouseButton (Left) or Key (VirtualKey, default Space); TapMs 40;
+  MaxCapturesPerSecond 30; MinInputChangeMs 50; MaxRuntimeMs 30,000 (required) + WhenTimeUp (ExitLoop default /
+  StopMacro); LostTimeoutMs 500 + WhenTargetLost (ReleaseAndWait default / ExitLoop / StopMacro); optional CompleteWhen and
+  FailWhen (Stage 3 `Condition`) + WhenFailed (StopMacro default / ExitLoop). Plain data: no scripts, no expressions.
+- `Core/Vision/ZoneFinder`: biggest patch of the zone colour along the bar, joined with neighbours across gaps up to the
+  marker's width + 2 px (a marker on top of the zone doesn't split it); % uses the same scale as `MarkerTracker`.
+- `Core/Playback/FeedbackSensor`: capture bar area → `MarkerTracker.Update` → fixed zone or `ZoneFinder` →
+  `FeedbackObservation` + capture / detect times. Refuses a bar area that is partly off screen (percentages would shift).
+  Shared by the engine and the editor tools. `FeedbackStats` = counters + the one-line summary.
+- `Core/Playback/FeedbackController` (pure, caller passes the time): untrusted frame (lost / ambiguous / ignored jump /
+  zone missing) → no change; lost ≥ LostTimeout → release-and-wait (safety release ignores the min change time) or
+  TargetLost for the runner; else classify before / inside / after with the dead band (only switch region when the marker
+  is DeadBand % past the crossed edge; a jump right across the zone that isn't clearly past the far edge counts as
+  inside), wanted state from the rule, Tap only on a real move into the region (not at the start or when the target comes
+  back), changes held back until MinInputChange has passed (Deferred).
+- Engine (`PlaybackEngine.RunFeedbackLoopAsync`, called from `RunStepsAsync`): per frame → pause / stop check → max runtime
+  (`ActiveTime`, paused time excluded) → FailWhen then CompleteWhen (each looked at once, spaced by its "check every"; a
+  condition that sees its target sets "last found") → sense → decide → act through `HeldInput` (Press / Release / Tap =
+  release if held, press, TapMs, release) → progress text every 250 ms ("feedback 3.2 s, holding") → rate limit wait.
+  Takes over the key / button at the start (released if a previous step held it). `finally`: release, `ResetTimeline`,
+  ONE log line (why it ended, frames, achieved Hz, avg capture / detect ms, slowest frame, reaction-time range, input
+  changes, deferred changes, marker found / unclear / missing %, jumps ignored, zone missing %, lost episodes, condition
+  checks). StopMacro endings throw `FeedbackLoopException` (macro Failed). Macro Speed doesn't apply (real time).
+  `WaitAsync(TimeSpan)` overload added (exact waits); the old `WaitAsync(double ms)` forwards to it.
+- Validation (`ValidateFeedbackLoop`): unknown enum values; area 5×5 to 20,000 and ≥ 10 px along the bar; warning for
+  areas > 250,000 px or off screen; colours; tolerances 0–255 (warning > 100); min sizes; glitch filter 1–100; fixed zone
+  0 ≤ start < end ≤ 100 (warning when dead band ≥ half the zone); detected-zone colours too close to the marker (warning);
+  dead band 0–25; at least one rule Hold or Tap (error) and a warning for hold-without-release; valid mouse button / key
+  (warning for Esc); tap 1–1,000 ms; captures/s 1–120 (warning > 60); min change 0–5,000 (warning < 16); max runtime
+  100 ms–1 h (required); lost timeout 0–60 s; conditions validated like If conditions with labels "Done when:" /
+  "Failed when:" (warnings: OCR is slow inside a loop, "keep checking for" unused); warning when the loop can only end with
+  an error. `ValidateCondition` got optional label / property parameters (Stage 3 messages unchanged except "Condition:
+  choose what…" wording for a missing search). `WorkflowSteps.ConditionsOf` (If / Repeat / feedback conditions);
+  `ScreenSearches` and the "find before last-found click" check use it, so the OCR availability check covers text
+  conditions in feedback loops.
+- Files: `MacroDocument.CurrentSchemaVersion = 6`, written only when a Feedback loop exists (others keep 1–5).
+  Factory, describer ("Keep marker #FF0000 in zone 40–60 %: hold before, release after (left button; max 30 s)").
+- App: toolbox entry "Feedback loop"; `FeedbackLoopStepViewModel` (all settings, Done / Failed checkboxes creating colour
+  conditions, embedded condition editors, Pick bar area – also sets the direction from the shape –, Pick marker / zone
+  color, Measure, Preview); XAML template with 6 numbered sections. `IVisionTools` / `VisionTools`: **Measure loop
+  speed** (3 s, capture + detect back to back, no input; fps, avg / p95 / slowest ms, found %, suggested captures/s =
+  60 % of full speed clamped 5–60; picture with overlay) and **Preview 10 s** (real sensor + controller at the step's
+  rate, 1 ms timer, NO input; live always-on-top, non-activating, capture-excluded window at the bottom right with the
+  bar + overlay + "would PRESS / RELEASE / TAP", Stop button / close = stop; summary with would-be presses, held share,
+  where the real loop would have ended). Tools work on a copy of the step.
+- Tests: `SmartMacro.Tests/FeedbackLoopTests.cs` — controller (hold / keep / release, changes only on change, dead band,
+  Classify table, untrusted frames, missing zone, lost → release-and-wait / exit / stop, lost timer from start, min
+  change defers, safety release, tap rules, deferred tap, direction changes, moving zone); zone finder (edges, bridging,
+  missing, vertical); sensor (fixed / detected zone, ambiguity, partly off screen, bad colour); stats text; engine with a
+  scripted fake bar (sweep, rate limit, max runtime stop / continue, done, fail stop / continue, fail wins, lost exit /
+  stop, release-and-wait, unclear / short gaps, jump ignored / accepted, min change spacing, tap timing, key input,
+  moving detected zone, takeover of a held button, Stop (fake + real clock), Pause release / re-press with paused time not
+  counted, no capture, off-screen bar, disabled step, inside Repeat, progress text, last-found); validation (every
+  setting, unknown enums, warnings, off screen, refused before running, OCR detection, factory / describer); files
+  (format 6 round trip, older formats kept, unset conditions not written, formats 1–5 load unchanged, minimal file
+  defaults, damaged JSON refused, loadable-but-unsafe values refused by the validator, newer than 6 refused).
+- Docs: `docs/STAGE4_MANUAL_TESTS.md` (beginner checklist, measured numbers to send back), `docs/feedback-test-page.html`
+  (offline test page: mode 1 moving marker over a fixed zone, mode 2 catch game with a white zone pushed by mouse / Space,
+  simple or heavy physics, green #00C800 / blue #0000C8 status square), README "Feedback loop", roadmap "Stage 4 as built".
+- Design check (not a substitute for the C# tests): a Python simulation of the test page's catch game with the same
+  bang-bang + dead-band rules won 190–200 of 200 rounds with the "simple" zone at 15–60 captures/s and 2–6 frames
+  of latency, but only 2–47 % of rounds with the "heavy" (momentum) zone. That's the documented honest limit.
+- Not verified: build, test run, any measurement on a real PC, any app or game.
 
 ## Architecture
 - `SmartMacro.Core` (net10.0, no WPF): models, validation, storage, logging. All unit tested.
 - `SmartMacro` (net10.0-windows, WPF, MVVM): `Mvvm/`, `ViewModels/`, `Views/`, `Themes/`, `Services/`, `Converters/`.
 - Recording: `Core/Recording/RecordingConverter` (desktop), `Core/Recording/GameRecordingConverter` + `IRelativeInputRecorder` (game), and `Core/Recording/SmartRecordingConverter` + `MouseContextClassifier` + `ISmartInputRecorder` (smart, the default). Model: `Core/Models/InputSequence.cs` (InputEvent, codec v1/u1) and `Core/Models/MouseSegment.cs`.
 - `SmartMacro.Tests` (xUnit): 57 tests verified, plus about 35 new Phase 3 tests (engine, converter, validation) not yet run.
-- Visual detection: `Core/Vision` (BgraImage, TemplateCodec, TemplateMatcher, ColorFinder, MarkerTracker, IScreenCapture) and `Services/Vision` (GdiScreenCapture, VisionTools + preview window).
+- Visual detection: `Core/Vision` (BgraImage, TemplateCodec, TemplateMatcher, ColorFinder, MarkerTracker, ZoneFinder, IScreenCapture) and `Services/Vision` (GdiScreenCapture, VisionTools + preview window + feedback measure / live preview).
+- Feedback loops: `Core/Models/FeedbackLoopStep`, `Core/Playback/FeedbackSensor` (+ FeedbackStats), `Core/Playback/FeedbackController`, engine `RunFeedbackLoopAsync`.
 - OCR: `Core/Ocr` (ScreenRect, IOcrService, OcrTextMatcher) and `Services/Ocr` (WindowsOcrService + ScreenCapture, FindTextTools + RegionPickerWindow). The app's TFM is now `net10.0-windows10.0.19041.0`, which is needed for the WinRT projections; Core and Tests stay on plain `net10.0`.
 - Windows-only code is in `Services/Input` (NativeMethods, Win32InputSimulator, LowLevelInputHook / WindowsInputRecorder / EmergencyStopWatcher), `Services/HotkeyService.cs` and `Services/RunModeHost.cs` (banner + minimize).
 - The composition root is in `App.xaml.cs`, with dependencies wired by hand (no DI container needed yet).
@@ -276,8 +351,15 @@ _Last updated: 2026-10-16 (v1.0.0 + game-input fidelity work + Stage 1 smart rec
   quality changes need a new capture. Find color is colour matching only, not object recognition.
 - GDI capture can return black for exclusive full-screen games or some overlays; windowed / borderless mode usually works.
 - Full-screen image search costs tens of ms per check on a big screen (estimate; to be measured with STAGE2 test E).
+- Feedback loops react a few frames late: capture + detection (a few ms for a small bar, to be measured) + up to one
+  frame of waiting + the game's own render / input delay. They only compare colours; look-alike colours, flashing
+  effects, zones with momentum and very fast markers are handled poorly or not at all. Mouse-button loops press where
+  the cursor is. One input per loop. Stop conditions that use OCR pause the loop while they read. Default rate limits
+  are guesses until the owner's measurements (STAGE4 tests B3 / D2) are in.
 
 ## Next task
-- Owner: run `tools\verify.cmd`, send `artifacts\build.log` + `artifacts\test.log`, then do `docs/STAGE3_MANUAL_TESTS.md`.
-- Fix whatever the build / tests / manual tests show. Only then Stage 4 (continuous visual feedback).
-- Later: the polish pass (Stage 2 improvements the owner mentioned + Stage 3 editor wording), then `tools\publish.cmd`.
+- Owner: run `tools\verify.cmd`, send `artifacts\build.log` + `artifacts\test.log`, then do `docs/STAGE4_MANUAL_TESTS.md`
+  (start with the test page) and send the 📏 numbers.
+- Fix whatever the build / tests / manual tests show; set the default captures-per-second / min-change values from the
+  measured numbers.
+- Then the polish pass (Stage 2 / 3 improvements the owner mentioned + anything from Stage 4 testing), then `tools\publish.cmd`.

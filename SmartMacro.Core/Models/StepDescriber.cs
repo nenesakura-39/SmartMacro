@@ -22,6 +22,7 @@ public static class StepDescriber
         StepKind.EndIf => "End If",
         StepKind.Repeat => "Repeat",
         StepKind.EndRepeat => "End Repeat",
+        StepKind.FeedbackLoop => "Feedback loop",
         _ => kind.ToString(),
     };
 
@@ -44,6 +45,7 @@ public static class StepDescriber
         EndIfStep => "End of the If block",
         RepeatStep r => DescribeRepeat(r),
         EndRepeatStep => "End of the Repeat block (go back for the next turn)",
+        FeedbackLoopStep f => DescribeFeedback(f),
         _ => step.GetType().Name,
     };
 
@@ -63,6 +65,40 @@ public static class StepDescriber
         var verb = condition.Negate ? "is not" : "is";
         var wait = search.TimeoutMs > 0 ? $" (wait up to {search.TimeoutMs / 1000.0:0.#} s)" : "";
         return $"{what} {verb} {where}{wait}";
+    }
+
+    /// <summary>E.g. "Keep marker #FF0000 in zone 40–60 %: hold before, release after (left button; max 30 s)".</summary>
+    public static string DescribeFeedback(FeedbackLoopStep f)
+    {
+        var zone = f.ZoneMode == FeedbackZoneMode.Fixed
+            ? $"zone {f.ZoneStartPercent}–{f.ZoneEndPercent} %"
+            : $"zone {f.ZoneColor}";
+        var input = f.InputKind == FeedbackInputKind.MouseButton
+            ? $"{f.MouseButton.ToString().ToLowerInvariant()} button"
+            : VirtualKeys.GetName(f.VirtualKey);
+
+        var rules = new List<string>();
+        AddRule(rules, f.WhenBeforeZone, "before");
+        AddRule(rules, f.WhenInsideZone, "inside");
+        AddRule(rules, f.WhenAfterZone, "after");
+        var what = rules.Count == 0 ? "no rules" : string.Join(", ", rules);
+
+        var stops = new List<string> { $"max {f.MaxRuntimeMs / 1000.0:0.#} s" };
+        if (f.CompleteWhen is not null) stops.Add("until done");
+        if (f.FailWhen is not null) stops.Add("fail check");
+        return $"Keep marker {f.MarkerColor} in {zone}: {what} ({input}; {string.Join(", ", stops)})";
+    }
+
+    private static void AddRule(List<string> rules, FeedbackAction action, string where)
+    {
+        var verb = action switch
+        {
+            FeedbackAction.Hold => "hold",
+            FeedbackAction.Release => "release",
+            FeedbackAction.Tap => "tap",
+            _ => null,
+        };
+        if (verb is not null) rules.Add($"{verb} {where}");
     }
 
     private static string DescribeRepeat(RepeatStep r)

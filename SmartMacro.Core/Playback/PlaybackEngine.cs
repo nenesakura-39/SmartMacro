@@ -58,6 +58,10 @@ public sealed class LoopLimitException : Exception
 /// validator has already checked before anything runs. Every Repeat has a limit (count, max turns and/or max time),
 /// every condition check honours Pause / Stop / Esc, and loop state lives in a small per-run stack, so pausing
 /// can't lose or corrupt it.
+///
+/// Feedback loops (Stage 4): a Feedback loop step runs its own capture → detect → decide → act loop
+/// (<see cref="FeedbackSensor"/> + <see cref="FeedbackController"/>), sends input only when the decision changes,
+/// checks Pause / Stop / Esc every frame, and always lets go of its key / button when it ends for any reason.
 /// </summary>
 public sealed class PlaybackEngine
 {
@@ -68,6 +72,9 @@ public sealed class PlaybackEngine
 
     /// <summary>Short pause after clicking found text / an image so the clicked window can take focus before the next step.</summary>
     public const int ClickSettleMs = 100;
+
+    /// <summary>How often the progress text is refreshed while a feedback loop runs.</summary>
+    private static readonly TimeSpan FeedbackProgressInterval = TimeSpan.FromMilliseconds(250);
 
     private readonly IInputSimulator _input;
     private readonly IPlaybackClock _clock;
@@ -355,11 +362,13 @@ public sealed class PlaybackEngine
     /// A plain relative wait (used inside Type text and Find text, whose own duration isn't part of a recording).
     /// Uses the real elapsed time, so timer inaccuracy doesn't add up over long delays.
     /// </summary>
-    private async Task WaitAsync(double milliseconds, CancellationToken token)
-    {
-        if (milliseconds <= 0) return;
+    private Task WaitAsync(double milliseconds, CancellationToken token) =>
+        milliseconds <= 0 ? Task.CompletedTask : WaitAsync(TimeSpan.FromMilliseconds(milliseconds), token);
 
-        var remaining = TimeSpan.FromMilliseconds(milliseconds);
+    /// <summary>The same relative wait, for an exact <see cref="TimeSpan"/> (no rounding through milliseconds).</summary>
+    private async Task WaitAsync(TimeSpan duration, CancellationToken token)
+    {
+        var remaining = duration;
         while (remaining > TimeSpan.Zero)
         {
             await WaitIfPausedAsync(token).ConfigureAwait(false);
@@ -518,6 +527,13 @@ public sealed class PlaybackEngine
                     break;
                 }
 
+                case FeedbackLoopStep feedback when feedback.Enabled:
+                    Report(run, pc, loops);
+                    await RunFeedbackLoopAsync(run, pc, loops, feedback, token).ConfigureAwait(false);
+                    run.StepsExecuted++;
+                    pc++;
+                    break;
+
                 default:
                     if (step.Enabled)
                     {
@@ -532,7 +548,7 @@ public sealed class PlaybackEngine
         }
     }
 
-    private void Report(RunContext run, int index, List<LoopFrame> loops)
+    private void Report(RunContext run, int index, List<LoopFrame> loops, string? extra = null)
     {
         string? loopText = null;
         if (loops.Count > 0 && run.Steps[loops[^1].Start] is RepeatStep repeat)
@@ -540,6 +556,8 @@ public sealed class PlaybackEngine
             var turn = loops[^1].Turns + 1;
             loopText = repeat.Mode == RepeatMode.Times ? $"loop turn {turn} of {repeat.Count}" : $"loop turn {turn}";
         }
+
+        if (extra is not null) loopText = loopText is null ? extra : $"{loopText} · {extra}";
 
         ProgressChanged?.Invoke(this, new PlaybackProgress(run.Iteration, run.TotalIterations, index + 1, run.Steps.Count, run.Steps[index], loopText));
     }
@@ -649,6 +667,188 @@ public sealed class PlaybackEngine
         ResetTimeline(); // checking takes as long as it takes; start timing again from here
         var stats = timer is null ? string.Empty : " " + timer.Describe(ActiveTime - started);
         return new ConditionAnswer(check.IsTrue, $"({conditions.Describe(condition)}: {(check.IsTrue ? "true" : "false")}) {check.Details}{stats}");
+    }
+
+    // ---------------- Feedback loop (Stage 4) ----------------
+
+    /// <summary>
+    /// Runs a Feedback loop step: every frame (at most "captures per second"):
+    /// 1. Pause / Stop / Esc are checked (pause releases the key / button and presses it again on resume, like every step).
+    /// 2. Max runtime (paused time not counted).
+    /// 3. The "failed when" / "done when" conditions, each at most once per its "check every".
+    /// 4. Capture the bar area, find the marker and zone (<see cref="FeedbackSensor"/>).
+    /// 5. Decide (<see cref="FeedbackController"/>) and send input only when the decision changes.
+    /// When the loop ends for any reason (done, failed, time up, target lost, Stop / Esc, an error) the key / button is
+    /// released and ONE summary line is logged (frames, frame rate, capture / detection time, input changes, why it
+    /// ended). Nothing is logged per frame.
+    /// </summary>
+    private async Task RunFeedbackLoopAsync(RunContext run, int index, List<LoopFrame> loops, FeedbackLoopStep step, CancellationToken token)
+    {
+        var number = index + 1;
+        var capture = _capture ?? throw new ScreenCaptureUnavailableException("Screen capture isn't available, so Feedback loop steps can't run.");
+        var sensor = new FeedbackSensor(step, capture, _clock);
+        var controller = new FeedbackController(FeedbackRules.From(step));
+        var stats = new FeedbackStats();
+        var held = run.Held;
+        var key = new HeldKey(step.VirtualKey);
+        var maxRuntime = TimeSpan.FromMilliseconds(step.MaxRuntimeMs);
+        var frameInterval = TimeSpan.FromTicks(TimeSpan.TicksPerSecond / Math.Clamp(step.MaxCapturesPerSecond, 1, MacroValidator.MaxCapturesPerSecond));
+        var startedAt = ActiveTime;
+        TimeSpan? lastCompleteCheck = null;
+        TimeSpan? lastFailCheck = null;
+        var nextProgress = TimeSpan.Zero;
+        var waiting = false;
+        string? ending = null;        // why the loop ended, for the summary line
+        Exception? failure = null;    // thrown after the summary when the loop ends as an error
+
+        // Time since the loop started, without paused time (the controller, runtime and rate limit all use this).
+        TimeSpan Now() => ActiveTime - startedAt;
+
+        bool IsDown() => step.InputKind == FeedbackInputKind.MouseButton
+            ? held.Buttons.Contains(step.MouseButton)
+            : held.Keys.Contains(key);
+
+        // All input goes through here, so the engine always knows what is held (Stop / pause / errors release it).
+        void SetInput(bool down)
+        {
+            if (step.InputKind == FeedbackInputKind.MouseButton)
+            {
+                _input.MouseButton(step.MouseButton, down);
+                if (down) held.Buttons.Add(step.MouseButton);
+                else held.Buttons.Remove(step.MouseButton);
+            }
+            else
+            {
+                _input.Key(step.VirtualKey, down);
+                if (down) held.Keys.Add(key);
+                else held.Keys.Remove(key);
+            }
+        }
+
+        // "Stop the macro" or "continue": sets the ending text and, for stop, the error to throw.
+        void End(string what, LoopLimitBehavior behavior)
+        {
+            if (behavior == LoopLimitBehavior.StopMacro)
+            {
+                ending = what;
+                failure = new FeedbackLoopException($"Feedback loop (step {number}) {what}. The macro was stopped.");
+            }
+            else
+            {
+                ending = what + "; continuing with the next step";
+            }
+        }
+
+        try
+        {
+            // The loop takes over this key / button and starts from "released".
+            if (IsDown()) SetInput(false);
+
+            while (true)
+            {
+                await WaitIfPausedAsync(token).ConfigureAwait(false);
+                token.ThrowIfCancellationRequested();
+                var frameStart = Now();
+
+                if (frameStart >= maxRuntime)
+                {
+                    End($"reached its max runtime of {step.MaxRuntimeMs / 1000.0:0.###} s", step.WhenTimeUp);
+                    break;
+                }
+
+                // Stop conditions: failure first (if both are true, the failure wins).
+                if (step.FailWhen is { } fail && IsConditionDue(fail, lastFailCheck, frameStart))
+                {
+                    lastFailCheck = frameStart;
+                    var check = await CheckFeedbackConditionAsync(run, fail, stats, token).ConfigureAwait(false);
+                    if (check.IsTrue)
+                    {
+                        End($"failed: its \"failed when\" condition is true ({check.Details.TrimEnd('.')})", step.WhenFailed);
+                        break;
+                    }
+                }
+
+                if (step.CompleteWhen is { } complete && IsConditionDue(complete, lastCompleteCheck, frameStart))
+                {
+                    lastCompleteCheck = frameStart;
+                    var check = await CheckFeedbackConditionAsync(run, complete, stats, token).ConfigureAwait(false);
+                    if (check.IsTrue)
+                    {
+                        ending = $"finished: its \"done when\" condition is true ({check.Details.TrimEnd('.')})";
+                        break;
+                    }
+                }
+
+                // Look, decide, act.
+                var frame = await sensor.ReadAsync(token).ConfigureAwait(false);
+                stats.Add(frame);
+                var decision = controller.Update(frame.Observation, Now());
+                if (decision.Deferred) stats.Deferred++;
+
+                switch (decision.Command)
+                {
+                    case FeedbackCommand.Press:
+                        if (!IsDown()) SetInput(true);
+                        stats.Presses++;
+                        break;
+                    case FeedbackCommand.Release:
+                        if (IsDown()) SetInput(false);
+                        stats.Releases++;
+                        break;
+                    case FeedbackCommand.Tap:
+                        if (IsDown()) SetInput(false);
+                        SetInput(true);
+                        await WaitAsync(TimeSpan.FromMilliseconds(step.TapMs), token).ConfigureAwait(false);
+                        if (IsDown()) SetInput(false);
+                        stats.Taps++;
+                        break;
+                }
+
+                if (controller.IsWaiting && !waiting) stats.LostEpisodes++;
+                waiting = controller.IsWaiting;
+
+                if (decision.TargetLost)
+                {
+                    var what = $"lost its target: the marker{(step.ZoneMode == FeedbackZoneMode.DetectedByColor ? " or zone" : "")} wasn't seen clearly for {step.LostTimeoutMs} ms";
+                    End(what, step.WhenTargetLost == FeedbackLostAction.StopMacro ? LoopLimitBehavior.StopMacro : LoopLimitBehavior.ExitLoop);
+                    break;
+                }
+
+                if (frameStart >= nextProgress)
+                {
+                    var state = waiting ? "waiting for the target" : controller.IsHeld ? "holding" : "released";
+                    Report(run, index, loops, $"feedback {frameStart.TotalSeconds:0.0} s, {state}");
+                    nextProgress = frameStart + FeedbackProgressInterval;
+                }
+
+                // Rate limit: at most "captures per second" frames.
+                var rest = frameInterval - (Now() - frameStart);
+                if (rest > TimeSpan.Zero) await WaitAsync(rest, token).ConfigureAwait(false);
+            }
+        }
+        finally
+        {
+            // Whatever ended the loop, let go of the key / button (Stop / Esc / errors: the engine releases everything too).
+            if (IsDown()) TryRelease(() => SetInput(false));
+            ResetTimeline(); // the loop took as long as it took; start timing again from here
+
+            var why = ending ?? (token.IsCancellationRequested ? "was stopped" : "ended because of an error");
+            Message?.Invoke(this, $"Feedback loop (step {number}) {why}. {stats.Describe(Now(), frameInterval)}");
+        }
+
+        if (failure is not null) throw failure;
+    }
+
+    private static bool IsConditionDue(Condition condition, TimeSpan? lastCheck, TimeSpan now) =>
+        lastCheck is not { } last || now - last >= TimeSpan.FromMilliseconds(Math.Max(1, condition.Search?.CheckIntervalMs ?? 250));
+
+    /// <summary>Looks once for a feedback loop's stop condition. A condition that sees its target also sets the "last found" spot.</summary>
+    private async Task<ConditionCheck> CheckFeedbackConditionAsync(RunContext run, Condition condition, FeedbackStats stats, CancellationToken token)
+    {
+        var check = await run.Conditions.CheckAsync(condition, null, token).ConfigureAwait(false);
+        stats.ConditionChecks++;
+        if (check.Seen) _lastFound = (check.X, check.Y);
+        return check;
     }
 
     // ---------------- Steps ----------------

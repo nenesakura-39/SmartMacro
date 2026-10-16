@@ -1,7 +1,8 @@
 # Roadmap – Stages 2, 3 and 4
 
-> **Status (2026-10-16):** Stage 2 is built, tested and manually verified. Stage 3 is **written** (see "Stage 3 as
-> built" below and `PROJECT_STATUS.md`) but not yet built or tested on Windows. Stage 4 is still a plan only.
+> **Status (2026-10-16):** Stages 2 and 3 are built, tested and manually verified (Stage 3: 389/389 tests).
+> Stage 4 is **written** (see "Stage 4 as built" below and `PROJECT_STATUS.md`) but not yet built or tested on Windows.
+> After Stage 4 is verified: the polish pass (Stage 2 / 3 improvements the owner listed), then a release.
 
 Each stage starts only after the previous one has passed its automated **and** manual tests.
 Nothing here is game-specific: Fisch, Grow a Garden, etc. are examples a user would *configure*, never code paths.
@@ -142,3 +143,29 @@ always work; everything held is released on stop, failure, timeout and app exit.
 
 **Honest scope:** this can handle simple "keep the marker in the zone" minigames that the user configures; it will not
 handle every minigame, and it never reads game memory or bypasses anti-cheat.
+
+**Stage 4 as built (differences from the plan above)**
+- One step, `FeedbackLoopStep` (JSON "feedbackLoop", file format 6). Observe = bar area + marker colour / tolerance /
+  min size / glitch filter (`MarkerTracker`) + direction. Zone = fixed % range **or** detected by colour
+  (`Core/Vision/ZoneFinder`: biggest patch of the zone colour, joined with neighbours across gaps up to the marker's
+  width, so a marker sitting on the zone doesn't split it).
+- Decide = three rules instead of free-form ones: what to do when the marker is **before / inside / after** the zone
+  (Hold / Release / Keep / Tap), plus a dead band in % of the bar. Covers "below zone → hold, above → release",
+  "click when it enters the zone" and bang-bang control, with no expressions.
+- `Core/Playback/FeedbackSensor` (capture + track + zone, shared by playback and the editor tools) and the pure
+  `Core/Playback/FeedbackController` (reading + time → Press / Release / Tap / nothing; dead band, untrusted frames,
+  lost policy, minimum time between changes, taps only on a real move into a region).
+- Engine: `PlaybackEngine.RunFeedbackLoopAsync`. Per frame: pause / stop check, max runtime (paused time excluded), stop
+  conditions spaced by their "check every" (failure first), sense, decide, act through `HeldInput`, rate limit.
+  Releases on every exit, one summary log line, progress text "feedback 3.2 s, holding". Stop conditions look once per
+  check (their "keep checking for" isn't used) and set the "last found" spot like If conditions.
+- Lost policy: untrusted frames (lost, ambiguous, ignored jump, zone missing) never act; after "target missing for"
+  ms → release and keep looking / release and continue / release and stop. The timer starts with the loop.
+- Measuring: no numbers could be measured by the AI (no Windows). Defaults are conservative guesses (30 captures/s,
+  50 ms between changes) and the editor's **Measure loop speed** suggests a value from real numbers; the owner's
+  STAGE4 test results decide the defaults in the polish pass.
+- Editor: one property panel (6 numbered sections), **Measure loop speed** (3 s, no rate limit, no input) and
+  **Preview 10 s** (real sensor + controller at the step's rate, no input, live always-on-top window excluded from
+  capture, Stop button). No live overlay on top of the game itself (kept the UI small).
+- Not added (possible later): look-ahead / velocity prediction, more than one input, OCR-free "progress bar" reading,
+  Windows.Graphics.Capture for games that capture black with GDI.

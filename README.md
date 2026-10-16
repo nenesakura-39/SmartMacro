@@ -100,6 +100,37 @@ The toolbox has a **Logic** section. Blocks are marked by pairs of steps, and th
 - Macros with blocks are saved as file format 5 (older SmartMacro builds will say the file is from a newer version).
   Macros without blocks keep their old format. Conditions are plain settings, never scripts or code.
 
+## Feedback loop (keep a moving marker in a zone)
+
+Some minigames show a bar with a moving marker and a target zone, and you have to hold or release a key / mouse
+button to keep the marker in the zone. The **Feedback loop** step does that kind of thing in real time:
+
+1. **The bar and the marker:** **Pick bar area** (drag tightly around the bar), then **Pick from screen** for the
+   marker color. The direction (left ↔ right or up ↕ down) is set from the shape of the area.
+2. **The target zone:** either a fixed part of the bar (for example 40–60 %) or **found by its color** (a zone that
+   moves – pick its color too).
+3. **What to do** when the marker is left of / inside / right of the zone: **Hold down**, **Release**,
+   **Keep as it is**, or **Tap once when it gets there**. A **dead band** stops flicker at the zone edges.
+4. **Which input:** one mouse button (pressed where the cursor is – put a *Move mouse* step before the loop) or one key.
+5. **Limits (required):** captures per second, minimum time between input changes, a **max runtime**, and what to do
+   when the marker can't be seen for a while (release and keep looking / continue with the next step / stop).
+6. **Stop when (optional):** a **done** condition and a **failed** condition – the same text / image / color
+   conditions as If and Repeat.
+
+Before using real input, use the two buttons at the bottom: **Measure loop speed** (how many frames per second your
+PC manages for this area, and a suggested setting) and **Preview 10 s** (runs the loop for real but presses nothing;
+a small window shows what it sees and what it would do). `docs\feedback-test-page.html` is a little offline test page
+with a moving marker and a "catch game" to practise on before any game.
+
+While a loop runs, Stop, Esc and Pause work every frame; the key / button is always released when it ends for any
+reason. The log gets one summary line per loop (frames, frames per second, capture and detection time, input changes,
+why it ended). Macros with a Feedback loop are saved as file format 6.
+
+Honest limits: it reacts to what it sees, a few frames late (capture + detection + the game's own delay, usually
+somewhere around 20–100 ms in total). That's fine for simple "keep the marker in the zone" bars; it handles zones with
+momentum, very fast markers, flashing effects or look-alike colors much worse, and it can't win every minigame. It only
+compares colors, never reads game memory, and doesn't get around anti-cheat.
+
 ## Safety
 
 - **Esc** on your keyboard stops playback immediately.
@@ -119,6 +150,7 @@ The toolbox has a **Logic** section. Blocks are marked by pairs of steps, and th
 - Some games with anti-cheat ignore simulated input. SmartMacro doesn't try to bypass this.
 - Mouse positions are exact screen pixels. If you change monitors, resolution or scaling, recorded clicks may land in the wrong place. Use **Find text** steps for more robust macros.
 - OCR reads normal horizontal text best. Very small, stylized or rotated text may not be found.
+- Feedback loops react a few frames late and only compare colors; they can't handle every minigame (see above).
 - Find image only finds the picture at the size it was captured, and Find color only compares colors. Neither one
   "understands" what is on screen, and neither can guarantee that a game will react to the clicks it sends.
 
@@ -134,6 +166,9 @@ The toolbox has a **Logic** section. Blocks are marked by pairs of steps, and th
 - **The camera didn't turn (or the cursor jumped instead):** open the **Recorded input** step and check its parts. A
   camera part must say "Plays as: relative movement"; a menu part should say "cursor position". Change the part if not.
 - After recording, the log says how many cursor and camera parts were found.
+- **A Feedback loop doesn't react / reacts wrongly:** use **Preview 10 s** first. If it says "marker UNCLEAR" or
+  "MISSING" a lot, pick a tighter bar area, pick the color again or change the tolerance. If the preview is right but
+  the game doesn't react, the game may ignore simulated input or need the cursor over its window (add a Move mouse step).
 
 ---
 

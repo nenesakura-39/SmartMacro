@@ -183,12 +183,29 @@ public static class WorkflowSteps
         _ => null,
     };
 
-    /// <summary>Every screen search an enabled step does: the step itself (Find…) or its condition's search.</summary>
+    /// <summary>
+    /// Every condition a step checks: the condition of an If / Repeat while / until, or the "done when" / "failed when"
+    /// conditions of a Feedback loop (only the ones that are set).
+    /// </summary>
+    public static IEnumerable<Condition> ConditionsOf(MacroStep? step)
+    {
+        if (ConditionOf(step) is { } condition) yield return condition;
+        if (step is FeedbackLoopStep feedback)
+        {
+            if (feedback.CompleteWhen is { } complete) yield return complete;
+            if (feedback.FailWhen is { } fail) yield return fail;
+        }
+    }
+
+    /// <summary>Every screen search an enabled step does: the step itself (Find…) or its conditions' searches.</summary>
     public static IEnumerable<ScreenSearchStep> ScreenSearches(MacroStep? step)
     {
         if (step is null) yield break;
         if (step is ScreenSearchStep search) yield return search;
-        if (ConditionOf(step)?.Search is { } check) yield return check;
+        foreach (var condition in ConditionsOf(step))
+        {
+            if (condition.Search is { } check) yield return check;
+        }
     }
 
     /// <summary>True if any enabled step reads text with OCR (directly or in a condition).</summary>
