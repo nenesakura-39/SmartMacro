@@ -1,0 +1,310 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                    xmlns:steps="clr-namespace:SmartMacro.ViewModels.Steps">
+
+    <!--
+        Property editors for each step type. The Content of the properties panel is the selected
+        StepViewModel, and WPF picks the template below that matches its type.
+    -->
+
+    <!-- Header shared by every step: title, enabled switch, problems. -->
+    <DataTemplate x:Key="StepHeaderTemplate" DataType="{x:Type steps:StepViewModel}">
+        <StackPanel>
+            <StackPanel Orientation="Horizontal">
+                <Border Width="34" Height="34" CornerRadius="8" Background="{StaticResource AccentSoftBrush}">
+                    <TextBlock Text="{Binding Glyph}" Style="{StaticResource IconText}" Foreground="{StaticResource AccentBrush}" HorizontalAlignment="Center" />
+                </Border>
+                <StackPanel Margin="10,0,0,0" VerticalAlignment="Center">
+                    <TextBlock Text="{Binding Title}" Style="{StaticResource SectionTitle}" FontSize="15" />
+                    <TextBlock Foreground="{StaticResource MutedTextBrush}" FontSize="11">
+                        <Run Text="Step " /><Run Text="{Binding Number, Mode=OneWay}" />
+                    </TextBlock>
+                </StackPanel>
+            </StackPanel>
+            <TextBlock Text="{Binding TypeInfo.Description}" Style="{StaticResource MutedText}" FontSize="12" Margin="0,10,0,0" />
+
+            <Border Margin="0,10,0,0" Padding="10,8" CornerRadius="6" Background="{StaticResource ErrorSoftBrush}"
+                    Visibility="{Binding HasError, Converter={StaticResource BoolToVisibility}}">
+                <TextBlock Text="{Binding IssueText}" TextWrapping="Wrap" Foreground="{StaticResource TextBrush}" FontSize="12" />
+            </Border>
+            <Border Margin="0,10,0,0" Padding="10,8" CornerRadius="6" Background="{StaticResource WarningSoftBrush}"
+                    Visibility="{Binding HasWarning, Converter={StaticResource BoolToVisibility}}">
+                <TextBlock Text="{Binding IssueText}" TextWrapping="Wrap" Foreground="{StaticResource TextBrush}" FontSize="12" />
+            </Border>
+
+            <CheckBox Content="Enabled (disabled steps are skipped)" IsChecked="{Binding Enabled}" Margin="0,14,0,0" />
+        </StackPanel>
+    </DataTemplate>
+
+    <!-- Footer shared by every step: comment. -->
+    <DataTemplate x:Key="StepFooterTemplate" DataType="{x:Type steps:StepViewModel}">
+        <StackPanel>
+            <TextBlock Text="Comment (optional)" Style="{StaticResource FieldLabel}" Margin="0,18,0,4" />
+            <TextBox Text="{Binding Comment, UpdateSourceTrigger=PropertyChanged}" Tag="A note for yourself" MaxLength="500"
+                     AutomationProperties.Name="Step comment" />
+        </StackPanel>
+    </DataTemplate>
+
+    <!-- X / Y fields used by several mouse steps. -->
+    <DataTemplate x:Key="PositionFieldsTemplate">
+        <Grid>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="10" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+            <StackPanel Grid.Column="0">
+                <TextBlock Text="X (pixels)" Style="{StaticResource FieldLabel}" />
+                <TextBox Text="{Binding X, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}" AutomationProperties.Name="X position" />
+            </StackPanel>
+            <StackPanel Grid.Column="2">
+                <TextBlock Text="Y (pixels)" Style="{StaticResource FieldLabel}" />
+                <TextBox Text="{Binding Y, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}" AutomationProperties.Name="Y position" />
+            </StackPanel>
+        </Grid>
+    </DataTemplate>
+
+    <DataTemplate DataType="{x:Type steps:DelayStepViewModel}">
+        <StackPanel>
+            <ContentControl Content="{Binding}" ContentTemplate="{StaticResource StepHeaderTemplate}" Focusable="False" />
+
+            <TextBlock Text="Wait time (milliseconds)" Style="{StaticResource FieldLabel}" Margin="0,18,0,4" />
+            <TextBox Text="{Binding DurationMs, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}" AutomationProperties.Name="Wait time in milliseconds" />
+            <TextBlock Text="{Binding SecondsText}" Style="{StaticResource MutedText}" FontSize="12" Margin="0,4,0,0" />
+
+            <TextBlock Text="Quick set" Style="{StaticResource FieldLabel}" />
+            <UniformGrid Columns="4">
+                <Button Content="100 ms" Command="{Binding SetDurationCommand}" CommandParameter="100" Padding="4,6" Margin="0,0,4,0" />
+                <Button Content="500 ms" Command="{Binding SetDurationCommand}" CommandParameter="500" Padding="4,6" Margin="2,0,2,0" />
+                <Button Content="1 s" Command="{Binding SetDurationCommand}" CommandParameter="1000" Padding="4,6" Margin="2,0,2,0" />
+                <Button Content="5 s" Command="{Binding SetDurationCommand}" CommandParameter="5000" Padding="4,6" Margin="4,0,0,0" />
+            </UniformGrid>
+
+            <ContentControl Content="{Binding}" ContentTemplate="{StaticResource StepFooterTemplate}" Focusable="False" />
+        </StackPanel>
+    </DataTemplate>
+
+    <DataTemplate DataType="{x:Type steps:MouseMoveStepViewModel}">
+        <StackPanel>
+            <ContentControl Content="{Binding}" ContentTemplate="{StaticResource StepHeaderTemplate}" Focusable="False" />
+            <ContentControl Content="{Binding}" ContentTemplate="{StaticResource PositionFieldsTemplate}" Focusable="False" Margin="0,6,0,0" />
+            <TextBlock Text="{Binding DataContext.ScreenBoundsText, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                       Style="{StaticResource MutedText}" FontSize="11" Margin="0,6,0,0" />
+            <ContentControl Content="{Binding}" ContentTemplate="{StaticResource StepFooterTemplate}" Focusable="False" />
+        </StackPanel>
+    </DataTemplate>
+
+    <DataTemplate DataType="{x:Type steps:MouseClickStepViewModel}">
+        <StackPanel>
+            <ContentControl Content="{Binding}" ContentTemplate="{StaticResource StepHeaderTemplate}" Focusable="False" />
+
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="10" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <StackPanel Grid.Column="0">
+                    <TextBlock Text="Button" Style="{StaticResource FieldLabel}" Margin="0,18,0,4" />
+                    <ComboBox ItemsSource="{x:Static steps:MouseClickStepViewModel.Buttons}" SelectedItem="{Binding Button}" AutomationProperties.Name="Mouse button" />
+                </StackPanel>
+                <StackPanel Grid.Column="2">
+                    <TextBlock Text="Action" Style="{StaticResource FieldLabel}" Margin="0,18,0,4" />
+                    <ComboBox ItemsSource="{x:Static steps:MouseClickStepViewModel.Actions}" SelectedItem="{Binding Action}" AutomationProperties.Name="Click action" />
+                </StackPanel>
+            </Grid>
+
+            <CheckBox Content="Click where the cursor already is" IsChecked="{Binding UseCurrentPosition}" Margin="0,16,0,0" />
+            <CheckBox Content="Click on the text found by the last &quot;Find text&quot; step" IsChecked="{Binding UseLastFoundText}" Margin="0,10,0,0" />
+            <ContentControl Content="{Binding}" ContentTemplate="{StaticResource PositionFieldsTemplate}" Focusable="False" Margin="0,4,0,0"
+                            IsEnabled="{Binding UsesFixedPosition}" />
+            <TextBlock Text="{Binding DataContext.ScreenBoundsText, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                       Style="{StaticResource MutedText}" FontSize="11" Margin="0,6,0,0" />
+
+            <ContentControl Content="{Binding}" ContentTemplate="{StaticResource StepFooterTemplate}" Focusable="False" />
+        </StackPanel>
+    </DataTemplate>
+
+    <DataTemplate DataType="{x:Type steps:MouseScrollStepViewModel}">
+        <StackPanel>
+            <ContentControl Content="{Binding}" ContentTemplate="{StaticResource StepHeaderTemplate}" Focusable="False" />
+
+            <TextBlock Text="Scroll amount" Style="{StaticResource FieldLabel}" Margin="0,18,0,4" />
+            <TextBox Text="{Binding Delta, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}" AutomationProperties.Name="Scroll amount" />
+            <TextBlock Style="{StaticResource MutedText}" FontSize="11" Margin="0,4,0,0"
+                       Text="120 = one wheel notch. Positive scrolls up (or right), negative scrolls down (or left)." />
+
+            <CheckBox Content="Scroll sideways (horizontal)" IsChecked="{Binding Horizontal}" Margin="0,14,0,0" />
+            <CheckBox Content="Scroll where the cursor already is" IsChecked="{Binding UseCurrentPosition}" Margin="0,10,0,0" />
+            <ContentControl Content="{Binding}" ContentTemplate="{StaticResource PositionFieldsTemplate}" Focusable="False" Margin="0,4,0,0"
+                            IsEnabled="{Binding UseCurrentPosition, Converter={StaticResource InverseBool}}" />
+
+            <ContentControl Content="{Binding}" ContentTemplate="{StaticResource StepFooterTemplate}" Focusable="False" />
+        </StackPanel>
+    </DataTemplate>
+
+    <DataTemplate DataType="{x:Type steps:KeyPressStepViewModel}">
+        <StackPanel>
+            <ContentControl Content="{Binding}" ContentTemplate="{StaticResource StepHeaderTemplate}" Focusable="False" />
+
+            <TextBlock Text="Key" Style="{StaticResource FieldLabel}" Margin="0,18,0,4" />
+            <ComboBox ItemsSource="{x:Static steps:KeyPressStepViewModel.Keys}" DisplayMemberPath="Name" SelectedValuePath="Code"
+                      SelectedValue="{Binding VirtualKey}" IsTextSearchEnabled="True" TextSearch.TextPath="Name"
+                      AutomationProperties.Name="Key" />
+
+            <TextBlock Text="Action" Style="{StaticResource FieldLabel}" />
+            <ComboBox ItemsSource="{x:Static steps:KeyPressStepViewModel.Actions}" SelectedItem="{Binding Action}" AutomationProperties.Name="Key action" />
+            <TextBlock Style="{StaticResource MutedText}" FontSize="11" Margin="0,4,0,0"
+                       Text="Press = down and up. Down / Up let you hold a key across several steps." />
+
+            <TextBlock Text="With modifier keys (Press only)" Style="{StaticResource FieldLabel}" />
+            <WrapPanel IsEnabled="{Binding IsPress}">
+                <CheckBox Content="Ctrl" IsChecked="{Binding Ctrl}" Margin="0,0,16,6" />
+                <CheckBox Content="Shift" IsChecked="{Binding Shift}" Margin="0,0,16,6" />
+                <CheckBox Content="Alt" IsChecked="{Binding Alt}" Margin="0,0,16,6" />
+                <CheckBox Content="Win" IsChecked="{Binding Win}" Margin="0,0,16,6" />
+            </WrapPanel>
+
+            <ContentControl Content="{Binding}" ContentTemplate="{StaticResource StepFooterTemplate}" Focusable="False" />
+        </StackPanel>
+    </DataTemplate>
+
+    <DataTemplate DataType="{x:Type steps:TypeTextStepViewModel}">
+        <StackPanel>
+            <ContentControl Content="{Binding}" ContentTemplate="{StaticResource StepHeaderTemplate}" Focusable="False" />
+
+            <TextBlock Text="Text to type" Style="{StaticResource FieldLabel}" Margin="0,18,0,4" />
+            <TextBox Text="{Binding Text, UpdateSourceTrigger=PropertyChanged}" AcceptsReturn="True" AcceptsTab="True" TextWrapping="Wrap"
+                     MinHeight="90" MaxHeight="220" VerticalContentAlignment="Top" VerticalScrollBarVisibility="Auto"
+                     MaxLength="10000" AutomationProperties.Name="Text to type" />
+            <TextBlock Text="{Binding CharacterCountText}" Style="{StaticResource MutedText}" FontSize="11" Margin="0,4,0,0" />
+
+            <TextBlock Text="Delay between characters (ms)" Style="{StaticResource FieldLabel}" />
+            <TextBox Text="{Binding CharacterDelayMs, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}"
+                     AutomationProperties.Name="Delay between characters" />
+
+            <ContentControl Content="{Binding}" ContentTemplate="{StaticResource StepFooterTemplate}" Focusable="False" />
+        </StackPanel>
+    </DataTemplate>
+
+    <DataTemplate DataType="{x:Type steps:FindTextStepViewModel}">
+        <StackPanel>
+            <ContentControl Content="{Binding}" ContentTemplate="{StaticResource StepHeaderTemplate}" Focusable="False" />
+
+            <Border Margin="0,10,0,0" Padding="10,8" CornerRadius="6" Background="{StaticResource WarningSoftBrush}"
+                    Visibility="{Binding OcrWarning, Converter={StaticResource NullToVisibility}}">
+                <TextBlock Text="{Binding OcrWarning}" TextWrapping="Wrap" FontSize="12" />
+            </Border>
+
+            <TextBlock Text="Text to find" Style="{StaticResource FieldLabel}" Margin="0,18,0,4" />
+            <TextBox Text="{Binding Text, UpdateSourceTrigger=PropertyChanged}" MaxLength="200" Tag="e.g. Sign in"
+                     AutomationProperties.Name="Text to find" />
+
+            <TextBlock Text="Where to look" Style="{StaticResource FieldLabel}" />
+            <CheckBox Content="Search the whole screen (all monitors)" IsChecked="{Binding SearchFullScreen}" />
+            <StackPanel Visibility="{Binding UsesRegion, Converter={StaticResource BoolToVisibility}}" Margin="0,6,0,0">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="6" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="6" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="6" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <StackPanel Grid.Column="0">
+                        <TextBlock Text="X" Style="{StaticResource FieldLabel}" Margin="0,4,0,2" />
+                        <TextBox Text="{Binding RegionX, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}" Padding="6,5" AutomationProperties.Name="Area left" />
+                    </StackPanel>
+                    <StackPanel Grid.Column="2">
+                        <TextBlock Text="Y" Style="{StaticResource FieldLabel}" Margin="0,4,0,2" />
+                        <TextBox Text="{Binding RegionY, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}" Padding="6,5" AutomationProperties.Name="Area top" />
+                    </StackPanel>
+                    <StackPanel Grid.Column="4">
+                        <TextBlock Text="Width" Style="{StaticResource FieldLabel}" Margin="0,4,0,2" />
+                        <TextBox Text="{Binding RegionWidth, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}" Padding="6,5" AutomationProperties.Name="Area width" />
+                    </StackPanel>
+                    <StackPanel Grid.Column="6">
+                        <TextBlock Text="Height" Style="{StaticResource FieldLabel}" Margin="0,4,0,2" />
+                        <TextBox Text="{Binding RegionHeight, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}" Padding="6,5" AutomationProperties.Name="Area height" />
+                    </StackPanel>
+                </Grid>
+            </StackPanel>
+            <Button Command="{Binding PickRegionCommand}" HorizontalAlignment="Left" Margin="0,10,0,0"
+                    ToolTip="SmartMacro hides, then you drag a rectangle around the part of the screen to search.">
+                <StackPanel Orientation="Horizontal">
+                    <TextBlock Text="&#xE8B0;" Style="{StaticResource IconText}" />
+                    <TextBlock Text="Pick area on screen" Margin="8,0,0,0" />
+                </StackPanel>
+            </Button>
+
+            <TextBlock Text="How to match" Style="{StaticResource FieldLabel}" />
+            <ComboBox ItemsSource="{x:Static steps:FindTextStepViewModel.MatchModes}" DisplayMemberPath="Label" SelectedValuePath="Value"
+                      SelectedValue="{Binding MatchMode}" AutomationProperties.Name="Match mode" />
+            <CheckBox Content="Match upper/lower case exactly" IsChecked="{Binding CaseSensitive}" Margin="0,10,0,0" />
+
+            <TextBlock Text="Match accuracy (%)" Style="{StaticResource FieldLabel}" />
+            <TextBox Text="{Binding MinSimilarityPercent, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}" Width="80" HorizontalAlignment="Left"
+                     AutomationProperties.Name="Match accuracy percent" />
+            <TextBlock Style="{StaticResource MutedText}" FontSize="11" Margin="0,4,0,0"
+                       Text="100 = exact. Lower values tolerate OCR mistakes (like reading I as l). Windows OCR doesn't report its own confidence, so this compares the text instead." />
+
+            <Grid Margin="0,4,0,0">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="10" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <StackPanel Grid.Column="0">
+                    <TextBlock Text="Keep looking for (ms)" Style="{StaticResource FieldLabel}" />
+                    <TextBox Text="{Binding TimeoutMs, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}"
+                             ToolTip="0 = look just once" AutomationProperties.Name="Timeout in milliseconds" />
+                </StackPanel>
+                <StackPanel Grid.Column="2">
+                    <TextBlock Text="Check every (ms)" Style="{StaticResource FieldLabel}" />
+                    <TextBox Text="{Binding CheckIntervalMs, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}"
+                             AutomationProperties.Name="Check interval in milliseconds" />
+                </StackPanel>
+            </Grid>
+
+            <TextBlock Text="When the text is found" Style="{StaticResource FieldLabel}" />
+            <ComboBox ItemsSource="{x:Static steps:FindTextStepViewModel.Actions}" DisplayMemberPath="Label" SelectedValuePath="Value"
+                      SelectedValue="{Binding Action}" AutomationProperties.Name="Action when found" />
+            <Grid Margin="0,4,0,0" Visibility="{Binding HasPointerAction, Converter={StaticResource BoolToVisibility}}">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="10" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <StackPanel Grid.Column="0">
+                    <TextBlock Text="Offset X from center" Style="{StaticResource FieldLabel}" />
+                    <TextBox Text="{Binding OffsetX, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}" AutomationProperties.Name="Offset X" />
+                </StackPanel>
+                <StackPanel Grid.Column="2">
+                    <TextBlock Text="Offset Y from center" Style="{StaticResource FieldLabel}" />
+                    <TextBox Text="{Binding OffsetY, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}" AutomationProperties.Name="Offset Y" />
+                </StackPanel>
+            </Grid>
+
+            <TextBlock Text="If it's not found in time" Style="{StaticResource FieldLabel}" />
+            <ComboBox ItemsSource="{x:Static steps:FindTextStepViewModel.NotFoundOptions}" DisplayMemberPath="Label" SelectedValuePath="Value"
+                      SelectedValue="{Binding WhenNotFound}" AutomationProperties.Name="When not found" />
+
+            <Button Command="{Binding TestCommand}" HorizontalAlignment="Left" Margin="0,16,0,0" Style="{StaticResource PrimaryButton}"
+                    ToolTip="SmartMacro hides for a moment and reads the search area once.">
+                <StackPanel Orientation="Horizontal">
+                    <TextBlock Text="&#xE721;" Style="{StaticResource IconText}" />
+                    <TextBlock Text="Test now" Margin="8,0,0,0" />
+                </StackPanel>
+            </Button>
+            <Border Margin="0,8,0,0" Padding="10,8" CornerRadius="6" Background="{StaticResource SurfaceAltBrush}"
+                    Visibility="{Binding TestResult, Converter={StaticResource NullToVisibility}}">
+                <TextBlock Text="{Binding TestResult}" TextWrapping="Wrap" FontSize="12" />
+            </Border>
+
+            <ContentControl Content="{Binding}" ContentTemplate="{StaticResource StepFooterTemplate}" Focusable="False" />
+        </StackPanel>
+    </DataTemplate>
+
+</ResourceDictionary>
