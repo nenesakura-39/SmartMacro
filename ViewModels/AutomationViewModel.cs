@@ -355,6 +355,8 @@ public sealed class AutomationViewModel : ObservableObject, IDisposable
 
         if (limitReached)
             _log.Warning($"The recording hit the limit of {GameRecordingConverter.MaxRecordedEvents:N0} events; input after that was not recorded.");
+        if (_gameRecorder is RawInputRecorder { LastHandlerError: { } handlerError })
+            _log.Warning("Some raw input couldn't be read during recording; the recording may be incomplete.", handlerError);
 
         if (step is null)
         {

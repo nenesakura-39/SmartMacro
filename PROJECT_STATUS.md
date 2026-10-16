@@ -90,6 +90,13 @@ _Last updated: 2026-10-16 (v1.0.0 + game-input fidelity work). Owner & developer
   - File format: `MacroDocument.CurrentSchemaVersion = 2`. A macro is written as version 2 only if it uses hold times or recorded-input steps; everything else is still written as version 1. Version 1 files load unchanged (new fields default to 0/off).
 - Not verified: whether Roblox (or any specific game) accepts SendInput relative mouse movement and keys. Unit tests only prove what SmartMacro sends and when.
 
+**Phase 6 audit** (2026-10-16; written, not yet rebuilt)
+- Owner's run of Phase 6 before this audit (`tools\verify.cmd`): build 0 warnings / 0 errors, 197/197 tests passed. Owner manually confirmed in Roblox RIVALS (game mode) that the camera turns left/right and movement/clicks play back; precision varies with starting position.
+- Defect: `KeyWithScanCode` sent wVk + wScan without KEYEVENTF_SCANCODE, so Windows identified the key by the generic virtual key (e.g. VK_SHIFT) and the recorded scan code was only extra info. Fixed: game-mode keys use scan-code mode (KEYEVENTF_SCANCODE, wVk = 0, EXTENDEDKEY for E0 keys, same flags on release). Encoding rules moved to `Core/Input/KeyboardInputEncoder` (unit tested); desktop steps still use virtual-key mode, unchanged.
+- Defect: `RawInputRecorder` kept window handle, buffer, event list and start error in shared fields. A session that didn't stop within 2 s could free the next session's buffer, clear its window handle (so it couldn't be stopped) or unregister its raw input. A start timeout left the thread running and registered. Fixed: each recording is its own `Session`; only the session that owns the Raw Input registration may remove it; a stop/timeout before the window exists is honoured by the thread.
+- Recorder: E1 keys (Pause) recorded without a scan code (sent by virtual key); keyboard overrun code ignored; handler errors are logged after recording.
+- `tools\verify.cmd`: stops when the build fails (tests not run), deletes old logs first, writes a .trx, returns a non-zero exit code on failure.
+
 ## Architecture
 - `SmartMacro.Core` (net10.0, no WPF): models, validation, storage, logging. All unit tested.
 - `SmartMacro` (net10.0-windows, WPF, MVVM): `Mvvm/`, `ViewModels/`, `Views/`, `Themes/`, `Services/`, `Converters/`.
@@ -122,7 +129,7 @@ _Last updated: 2026-10-16 (v1.0.0 + game-input fidelity work). Owner & developer
 - The Find text timeout counts paused time.
 
 ## Next task
-- Owner: run `tools\verify.cmd` and send `artifacts\build.log` / `artifacts\test.log` (Phase 6 has never been compiled).
+- Owner: run `tools\verify.cmd` again (Phase 6 audit changes are not built yet) and send `artifacts\build.log` / `artifacts\test.log`.
 - Then the manual checklist: desktop regression (Notepad record/play, clicks, scroll, typing, OCR, old saved macros), then game mode (recording fidelity → input delivery → actual game movement).
 - Then `tools\publish.cmd`.
 - Possible future ideas: loops/conditions in workflows (if text found then…), image matching, macro scheduling, an installer, a signed build.

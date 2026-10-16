@@ -27,6 +27,7 @@ internal static class NativeMethods
     public const uint KEYEVENTF_EXTENDEDKEY = 0x0001;
     public const uint KEYEVENTF_KEYUP = 0x0002;
     public const uint KEYEVENTF_UNICODE = 0x0004;
+    public const uint KEYEVENTF_SCANCODE = 0x0008;
 
     public const int WH_KEYBOARD_LL = 13;
     public const int WH_MOUSE_LL = 14;
@@ -343,6 +344,8 @@ internal static class NativeMethods
     public const ushort RI_MOUSE_HWHEEL = 0x0800;
     public const ushort RI_KEY_BREAK = 0x01;
     public const ushort RI_KEY_E0 = 0x02;
+    public const ushort RI_KEY_E1 = 0x04;
+    public const ushort KEYBOARD_OVERRUN_MAKE_CODE = 0xFF;
 
     public const int SM_CXSCREEN = 0;
     public const int SM_CYSCREEN = 1;

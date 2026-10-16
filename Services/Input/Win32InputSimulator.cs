@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using SmartMacro.Core.Input;
 using SmartMacro.Core.Models;
 using SmartMacro.Core.Playback;
 using static SmartMacro.Services.Input.NativeMethods;
@@ -14,18 +15,8 @@ public sealed class Win32InputSimulator : IInputSimulator
 {
     private const int VK_RETURN = 0x0D;
     private const int VK_TAB = 0x09;
+    private const uint MAPVK_VK_TO_VSC = 0;
     private static readonly int InputSize = Marshal.SizeOf<INPUT>();
-
-    // Keys that need the "extended key" flag, or apps can mix them up with the numpad versions.
-    private static readonly HashSet<int> ExtendedKeys = new()
-    {
-        0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27, 0x28, // PgUp, PgDn, End, Home, arrows
-        0x2C, 0x2D, 0x2E,                               // Print Screen, Insert, Delete
-        0x5B, 0x5C, 0x5D,                               // Windows keys, Apps
-        0x6F, 0x90,                                     // Numpad /, Num Lock
-        0xA3, 0xA5,                                     // Right Ctrl, Right Alt
-        0xAD, 0xAE, 0xAF, 0xB0, 0xB1, 0xB2, 0xB3,       // Volume / media keys
-    };
 
     public void MoveMouse(int x, int y)
     {
@@ -74,30 +65,17 @@ public sealed class Win32InputSimulator : IInputSimulator
 
     public void KeyWithScanCode(int virtualKey, int scanCode, bool extended, bool down)
     {
-        if (scanCode <= 0)
+        // Unknown / unusable scan code (0, E1-prefixed keys like Pause): fall back to the virtual key.
+        if (!KeyboardInputEncoder.CanUseScanCode(scanCode))
         {
             Send(KeyInput(virtualKey, down));
             return;
         }
 
-        // Same virtual key + the recorded hardware scan code and extended bit, so games that read either
-        // (window messages or raw input / DirectInput) see the same key, e.g. right Shift instead of left Shift.
-        var flags = down ? 0u : KEYEVENTF_KEYUP;
-        if (extended) flags |= KEYEVENTF_EXTENDEDKEY;
-        Send(new INPUT
-        {
-            type = INPUT_KEYBOARD,
-            U = new InputUnion
-            {
-                ki = new KEYBDINPUT
-                {
-                    wVk = (ushort)virtualKey,
-                    wScan = (ushort)scanCode,
-                    dwFlags = flags,
-                    dwExtraInfo = SmartMacroInputTag,
-                },
-            },
-        });
+        // Scan-code mode (KEYEVENTF_SCANCODE): the recorded hardware key + E0 flag identify the key and
+        // wVk is ignored, so right Shift stays right Shift and arrows don't turn into numpad keys.
+        // The release uses the same scan code and extended flag as the press.
+        Send(ToInput(KeyboardInputEncoder.ForScanCode(scanCode, extended, down)));
     }
 
     public void TypeCharacters(string text)
@@ -136,26 +114,24 @@ public sealed class Win32InputSimulator : IInputSimulator
         },
     };
 
-    private static INPUT KeyInput(int virtualKey, bool down)
-    {
-        var flags = down ? 0u : KEYEVENTF_KEYUP;
-        if (ExtendedKeys.Contains(virtualKey)) flags |= KEYEVENTF_EXTENDEDKEY;
+    /// <summary>Virtual-key mode (desktop steps): wVk identifies the key; wScan is the layout's matching scan code.</summary>
+    private static INPUT KeyInput(int virtualKey, bool down) =>
+        ToInput(KeyboardInputEncoder.ForVirtualKey(virtualKey, (int)MapVirtualKey((uint)virtualKey, MAPVK_VK_TO_VSC), down));
 
-        return new INPUT
+    private static INPUT ToInput(KeyboardInputFields fields) => new()
+    {
+        type = INPUT_KEYBOARD,
+        U = new InputUnion
         {
-            type = INPUT_KEYBOARD,
-            U = new InputUnion
+            ki = new KEYBDINPUT
             {
-                ki = new KEYBDINPUT
-                {
-                    wVk = (ushort)virtualKey,
-                    wScan = (ushort)MapVirtualKey((uint)virtualKey, 0), // MAPVK_VK_TO_VSC
-                    dwFlags = flags,
-                    dwExtraInfo = SmartMacroInputTag,
-                },
+                wVk = fields.VirtualKey,
+                wScan = fields.ScanCode,
+                dwFlags = fields.Flags,
+                dwExtraInfo = SmartMacroInputTag,
             },
-        };
-    }
+        },
+    };
 
     private static INPUT UnicodeInput(char c, bool down) => new()
     {
