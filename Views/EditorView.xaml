@@ -114,7 +114,14 @@
                     <DockPanel>
                         <StackPanel DockPanel.Dock="Top" Margin="2,0,0,10">
                             <TextBlock Text="Add step" Style="{StaticResource SectionTitle}" />
-                            <TextBlock Text="Inserted after the selected step." Style="{StaticResource MutedText}" FontSize="11" Margin="0,3,0,0" />
+                            <TextBlock Text="New steps go:" Style="{StaticResource MutedText}" FontSize="11" Margin="0,6,0,2" />
+                            <RadioButton Content="After the selected step" IsChecked="{Binding AddAfterSelected}" FontSize="12" Margin="0,2,0,0"
+                                         ToolTip="Adds the new step right after the step selected in the list (at the end when nothing is selected)."
+                                         AutomationProperties.Name="Insert new steps after the selected step" />
+                            <RadioButton Content="At the end" IsChecked="{Binding AddAtEnd}" FontSize="12" Margin="0,4,0,0"
+                                         ToolTip="Adds the new step after the last step of the workflow, wherever the selection is."
+                                         AutomationProperties.Name="Add new steps at the end" />
+                            <TextBlock Text="Right-click a step button for the other choice." Style="{StaticResource MutedText}" FontSize="10" Margin="0,4,0,0" TextWrapping="Wrap" />
                         </StackPanel>
                         <ScrollViewer VerticalScrollBarVisibility="Auto">
                             <StackPanel>
@@ -123,7 +130,16 @@
                                         <DataTemplate DataType="{x:Type steps:StepTypeInfo}">
                                             <Button Style="{StaticResource ToolboxButton}" ToolTip="{Binding Description}"
                                                     Command="{Binding DataContext.AddStepCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
-                                                    CommandParameter="{Binding Kind}" AutomationProperties.Name="{Binding DisplayName}">
+                                                    CommandParameter="{Binding Kind}" AutomationProperties.Name="{Binding DisplayName}"
+                                                    Tag="{Binding DataContext, RelativeSource={RelativeSource AncestorType=UserControl}}">
+                                                <Button.ContextMenu>
+                                                    <ContextMenu>
+                                                        <MenuItem Header="Add to end" Command="{Binding PlacementTarget.Tag.AddToEndCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
+                                                                  CommandParameter="{Binding Kind}" ToolTip="Adds this step after the last step in the workflow." />
+                                                        <MenuItem Header="Insert after selected" Command="{Binding PlacementTarget.Tag.InsertAfterSelectedCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
+                                                                  CommandParameter="{Binding Kind}" ToolTip="Adds this step right after the selected step (at the end when nothing is selected)." />
+                                                    </ContextMenu>
+                                                </Button.ContextMenu>
                                                 <StackPanel Orientation="Horizontal">
                                                     <TextBlock Text="{Binding Glyph}" Style="{StaticResource IconText}" Foreground="{StaticResource AccentBrush}" Width="20" />
                                                     <TextBlock Text="{Binding DisplayName}" Margin="8,0,0,0" />
@@ -141,7 +157,16 @@
                                         <DataTemplate DataType="{x:Type steps:StepTypeInfo}">
                                             <Button Style="{StaticResource ToolboxButton}" ToolTip="{Binding Description}"
                                                     Command="{Binding DataContext.AddStepCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
-                                                    CommandParameter="{Binding Kind}" AutomationProperties.Name="{Binding DisplayName}">
+                                                    CommandParameter="{Binding Kind}" AutomationProperties.Name="{Binding DisplayName}"
+                                                    Tag="{Binding DataContext, RelativeSource={RelativeSource AncestorType=UserControl}}">
+                                                <Button.ContextMenu>
+                                                    <ContextMenu>
+                                                        <MenuItem Header="Add to end" Command="{Binding PlacementTarget.Tag.AddToEndCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
+                                                                  CommandParameter="{Binding Kind}" ToolTip="Adds this step after the last step in the workflow." />
+                                                        <MenuItem Header="Insert after selected" Command="{Binding PlacementTarget.Tag.InsertAfterSelectedCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
+                                                                  CommandParameter="{Binding Kind}" ToolTip="Adds this step right after the selected step (at the end when nothing is selected)." />
+                                                    </ContextMenu>
+                                                </Button.ContextMenu>
                                                 <StackPanel Orientation="Horizontal">
                                                     <TextBlock Text="{Binding Glyph}" Style="{StaticResource IconText}" Foreground="{StaticResource AccentBrush}" Width="20" />
                                                     <TextBlock Text="{Binding DisplayName}" Margin="8,0,0,0" />
@@ -176,14 +201,17 @@
                                         <TextBlock Text="Wrap in Repeat" Margin="6,0,0,0" />
                                     </StackPanel>
                                 </Button>
-                                <Button Style="{StaticResource IconButton}" Content="&#xE74A;" Command="{Binding MoveUpCommand}" ToolTip="Move up (Alt+Up)" AutomationProperties.Name="Move step up" />
-                                <Button Style="{StaticResource IconButton}" Content="&#xE74B;" Command="{Binding MoveDownCommand}" ToolTip="Move down (Alt+Down)" AutomationProperties.Name="Move step down" />
+                                <Button Style="{StaticResource IconButton}" Content="&#xE70E;" Command="{Binding MoveToTopCommand}" ToolTip="Move to top (Alt+Home). An If / Repeat moves together with its whole block." AutomationProperties.Name="Move to top" />
+                                <Button Style="{StaticResource IconButton}" Content="&#xE74A;" Command="{Binding MoveUpCommand}" ToolTip="Move up one place (Alt+Up)" AutomationProperties.Name="Move step up" />
+                                <Button Style="{StaticResource IconButton}" Content="&#xE74B;" Command="{Binding MoveDownCommand}" ToolTip="Move down one place (Alt+Down)" AutomationProperties.Name="Move step down" />
+                                <Button Style="{StaticResource IconButton}" Content="&#xE70D;" Command="{Binding MoveToBottomCommand}" ToolTip="Move to bottom (Alt+End). An If / Repeat moves together with its whole block." AutomationProperties.Name="Move to bottom" />
                                 <Button Style="{StaticResource IconButton}" Content="&#xE8C8;" Command="{Binding DuplicateStepCommand}" ToolTip="Duplicate step (Ctrl+D)" AutomationProperties.Name="Duplicate step" />
                                 <Button Style="{StaticResource IconButton}" Content="&#xE74D;" Command="{Binding DeleteStepCommand}" ToolTip="Delete step (Delete)" AutomationProperties.Name="Delete step" />
                             </StackPanel>
                             <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
                                 <TextBlock Text="Workflow steps" Style="{StaticResource SectionTitle}" />
-                                <TextBlock Text="{Binding StepCountText}" Foreground="{StaticResource MutedTextBrush}" Margin="10,0,0,0" FontSize="12" VerticalAlignment="Center" />
+                                <TextBlock Text="{Binding StepCountText}" Foreground="{StaticResource MutedTextBrush}" Margin="10,0,0,0" FontSize="12" VerticalAlignment="Center"
+                                           ToolTip="Drag steps to reorder them (Shift+click to select several). Right-click a step for Move to top / bottom and more." />
                             </StackPanel>
                         </DockPanel>
 
@@ -193,7 +221,28 @@
                                      VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling"
                                      AutomationProperties.Name="Workflow steps"
                                      SelectionChanged="StepList_SelectionChanged"
+                                     AllowDrop="True"
+                                     PreviewMouseLeftButtonDown="StepList_PreviewMouseLeftButtonDown"
+                                     PreviewMouseMove="StepList_PreviewMouseMove"
+                                     PreviewMouseLeftButtonUp="StepList_PreviewMouseLeftButtonUp"
+                                     DragOver="StepList_DragOver"
+                                     DragLeave="StepList_DragLeave"
+                                     Drop="StepList_Drop"
                                      Visibility="{Binding HasSteps, Converter={StaticResource BoolToVisibility}}">
+                                <ListBox.ContextMenu>
+                                    <ContextMenu>
+                                        <MenuItem Header="Move to top" InputGestureText="Alt+Home" Command="{Binding MoveToTopCommand}" />
+                                        <MenuItem Header="Move up" InputGestureText="Alt+Up" Command="{Binding MoveUpCommand}" />
+                                        <MenuItem Header="Move down" InputGestureText="Alt+Down" Command="{Binding MoveDownCommand}" />
+                                        <MenuItem Header="Move to bottom" InputGestureText="Alt+End" Command="{Binding MoveToBottomCommand}" />
+                                        <Separator />
+                                        <MenuItem Header="Wrap in If" InputGestureText="Ctrl+Shift+I" Command="{Binding WrapInIfCommand}" />
+                                        <MenuItem Header="Wrap in Repeat" InputGestureText="Ctrl+Shift+R" Command="{Binding WrapInRepeatCommand}" />
+                                        <Separator />
+                                        <MenuItem Header="Duplicate" InputGestureText="Ctrl+D" Command="{Binding DuplicateStepCommand}" />
+                                        <MenuItem Header="Delete" InputGestureText="Delete" Command="{Binding DeleteStepCommand}" />
+                                    </ContextMenu>
+                                </ListBox.ContextMenu>
                                 <ListBox.InputBindings>
                                     <KeyBinding Key="Delete" Command="{Binding DeleteStepCommand}" />
                                     <KeyBinding Key="R" Modifiers="Control+Shift" Command="{Binding WrapInRepeatCommand}" />
@@ -201,6 +250,8 @@
                                     <KeyBinding Key="D" Modifiers="Control" Command="{Binding DuplicateStepCommand}" />
                                     <KeyBinding Key="Up" Modifiers="Alt" Command="{Binding MoveUpCommand}" />
                                     <KeyBinding Key="Down" Modifiers="Alt" Command="{Binding MoveDownCommand}" />
+                                    <KeyBinding Key="Home" Modifiers="Alt" Command="{Binding MoveToTopCommand}" />
+                                    <KeyBinding Key="End" Modifiers="Alt" Command="{Binding MoveToBottomCommand}" />
                                 </ListBox.InputBindings>
                                 <ListBox.ItemTemplate>
                                     <DataTemplate DataType="{x:Type steps:StepViewModel}">
@@ -246,7 +297,7 @@
                                         Visibility="{Binding HasSteps, Converter={StaticResource BoolToVisibility}, ConverterParameter=Invert}">
                                 <TextBlock Text="&#xE8FD;" Style="{StaticResource IconText}" FontSize="28" Foreground="{StaticResource MutedTextBrush}" HorizontalAlignment="Center" />
                                 <TextBlock Text="This macro has no steps yet" Style="{StaticResource SectionTitle}" HorizontalAlignment="Center" Margin="0,12,0,0" />
-                                <TextBlock Text="Add steps from the panel on the left. You can reorder, duplicate and configure them afterwards."
+                                <TextBlock Text="Add steps from the panel on the left. Then drag steps to reorder them, right-click a step for more actions, and set them up on the right."
                                            Style="{StaticResource MutedText}" TextAlignment="Center" Margin="0,6,0,0" />
                             </StackPanel>
                         </Grid>

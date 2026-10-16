@@ -18,9 +18,9 @@ public static class StepTypeCatalog
     public static IReadOnlyList<StepTypeInfo> All { get; } = new[]
     {
         new StepTypeInfo(StepKind.Delay, StepDescriber.DisplayName(StepKind.Delay), "", "Wait for a set amount of time."),
-        new StepTypeInfo(StepKind.MouseMove, StepDescriber.DisplayName(StepKind.MouseMove), "", "Move the cursor to a screen position."),
-        new StepTypeInfo(StepKind.MouseClick, StepDescriber.DisplayName(StepKind.MouseClick), "", "Click, double-click, press or release a mouse button."),
-        new StepTypeInfo(StepKind.MouseScroll, StepDescriber.DisplayName(StepKind.MouseScroll), "", "Scroll the mouse wheel up/down or left/right."),
+        new StepTypeInfo(StepKind.MouseMove, StepDescriber.DisplayName(StepKind.MouseMove), "", "Moves the cursor straight to a screen position (it jumps there; it isn't animated). Use \"Pick position\" to choose the spot on your screen."),
+        new StepTypeInfo(StepKind.MouseClick, StepDescriber.DisplayName(StepKind.MouseClick), "", "Clicks (or double-clicks, presses, releases) a mouse button at a chosen screen position, where the cursor already is, or on what a Find step found."),
+        new StepTypeInfo(StepKind.MouseScroll, StepDescriber.DisplayName(StepKind.MouseScroll), "", "Turns the mouse wheel up, down, left or right by a number of notches, where the cursor already is or at a chosen screen position."),
         new StepTypeInfo(StepKind.KeyPress, StepDescriber.DisplayName(StepKind.KeyPress), "", "Press a key or shortcut, or hold/release a key."),
         new StepTypeInfo(StepKind.TypeText, StepDescriber.DisplayName(StepKind.TypeText), "", "Type a piece of text."),
         new StepTypeInfo(StepKind.FindText, StepDescriber.DisplayName(StepKind.FindText), "\uE721", "Wait for text to appear on screen (OCR), and optionally click it."),
@@ -222,7 +222,22 @@ public sealed class MouseMoveStepViewModel : StepViewModel
 {
     private readonly MouseMoveStep _step;
 
-    public MouseMoveStepViewModel(MouseMoveStep step) : base(step) => _step = step;
+    public MouseMoveStepViewModel(MouseMoveStep step) : base(step)
+    {
+        _step = step;
+        PositionPicker = new PositionPickerViewModel(SetPosition);
+    }
+
+    /// <summary>"Pick position" / "Use cursor position" for the destination.</summary>
+    public PositionPickerViewModel PositionPicker { get; }
+
+    private void SetPosition(int x, int y)
+    {
+        _step.X = x;
+        _step.Y = y;
+        OnPropertyChanged(nameof(X));
+        NotifyChanged(nameof(Y));
+    }
 
     public int X
     {
@@ -241,11 +256,50 @@ public sealed class MouseClickStepViewModel : StepViewModel
 {
     private readonly MouseClickStep _step;
 
-    public MouseClickStepViewModel(MouseClickStep step) : base(step) => _step = step;
+    public MouseClickStepViewModel(MouseClickStep step) : base(step)
+    {
+        _step = step;
+        PositionPicker = new PositionPickerViewModel(SetPosition);
+    }
 
     public static IReadOnlyList<MacroMouseButton> Buttons { get; } = Enum.GetValues<MacroMouseButton>();
 
     public static IReadOnlyList<MouseClickAction> Actions { get; } = Enum.GetValues<MouseClickAction>();
+
+    public static IReadOnlyList<Choice<ClickTarget>> Targets { get; } = new[]
+    {
+        new Choice<ClickTarget>(ClickTarget.ChosenPosition, "At a chosen position (X / Y below)"),
+        new Choice<ClickTarget>(ClickTarget.CurrentCursor, "Where the cursor already is"),
+        new Choice<ClickTarget>(ClickTarget.LastFound, "On what the last Find text / image / color step found"),
+    };
+
+    /// <summary>"Pick position" / "Use cursor position" for the click position.</summary>
+    public PositionPickerViewModel PositionPicker { get; }
+
+    /// <summary>Where the click happens: one choice instead of two check boxes (same two settings underneath).</summary>
+    public ClickTarget Target
+    {
+        get => _step.UseLastFoundText ? ClickTarget.LastFound : _step.UseCurrentPosition ? ClickTarget.CurrentCursor : ClickTarget.ChosenPosition;
+        set
+        {
+            if (Target == value) return;
+            _step.UseLastFoundText = value == ClickTarget.LastFound;
+            _step.UseCurrentPosition = value == ClickTarget.CurrentCursor;
+            NotifyChanged();
+            OnPropertyChanged(nameof(UseCurrentPosition));
+            OnPropertyChanged(nameof(UseLastFoundText));
+            OnPropertyChanged(nameof(UsesFixedPosition));
+        }
+    }
+
+    private void SetPosition(int x, int y)
+    {
+        _step.X = x;
+        _step.Y = y;
+        Target = ClickTarget.ChosenPosition; // picking a spot means "click there"
+        OnPropertyChanged(nameof(X));
+        NotifyChanged(nameof(Y));
+    }
 
     public MacroMouseButton Button
     {
@@ -278,6 +332,7 @@ public sealed class MouseClickStepViewModel : StepViewModel
             NotifyChanged();
             OnPropertyChanged(nameof(UseLastFoundText));
             OnPropertyChanged(nameof(UsesFixedPosition));
+            OnPropertyChanged(nameof(Target));
         }
     }
 
@@ -293,6 +348,7 @@ public sealed class MouseClickStepViewModel : StepViewModel
             NotifyChanged();
             OnPropertyChanged(nameof(UseCurrentPosition));
             OnPropertyChanged(nameof(UsesFixedPosition));
+            OnPropertyChanged(nameof(Target));
         }
     }
 
@@ -318,29 +374,148 @@ public sealed class MouseClickStepViewModel : StepViewModel
     }
 }
 
+/// <summary>Where a Mouse click happens.</summary>
+public enum ClickTarget
+{
+    ChosenPosition,
+    CurrentCursor,
+    LastFound,
+}
+
+/// <summary>Which way the wheel turns (a Scroll wheel step's sign + horizontal setting, as one choice).</summary>
+public enum ScrollDirection
+{
+    Up,
+    Down,
+    Left,
+    Right,
+}
+
+/// <summary>
+/// Scroll wheel editor. The step stores Windows' wheel amount (120 = one notch, positive = up / right) and a
+/// "horizontal" flag; the editor shows that as Direction + Number of notches. Stored values are only changed when
+/// the user edits them, so old macros keep exactly what they had (including amounts that aren't whole notches).
+/// </summary>
 public sealed class MouseScrollStepViewModel : StepViewModel
 {
+    /// <summary>Windows' wheel amount for one notch (WHEEL_DELTA).</summary>
+    public const int NotchDelta = 120;
+
     private readonly MouseScrollStep _step;
 
-    public MouseScrollStepViewModel(MouseScrollStep step) : base(step) => _step = step;
+    public MouseScrollStepViewModel(MouseScrollStep step) : base(step)
+    {
+        _step = step;
+        PositionPicker = new PositionPickerViewModel(SetPosition);
+    }
 
+    public static IReadOnlyList<Choice<ScrollDirection>> Directions { get; } = new[]
+    {
+        new Choice<ScrollDirection>(ScrollDirection.Up, "Up"),
+        new Choice<ScrollDirection>(ScrollDirection.Down, "Down"),
+        new Choice<ScrollDirection>(ScrollDirection.Left, "Left (sideways)"),
+        new Choice<ScrollDirection>(ScrollDirection.Right, "Right (sideways)"),
+    };
+
+    public static IReadOnlyList<Choice<bool>> PositionModes { get; } = new[]
+    {
+        new Choice<bool>(true, "Where the cursor already is"),
+        new Choice<bool>(false, "At a chosen position (X / Y below)"),
+    };
+
+    /// <summary>"Pick position" / "Use cursor position" for where to scroll.</summary>
+    public PositionPickerViewModel PositionPicker { get; }
+
+    /// <summary>Raw Windows amount (120 = one notch). Shown under "exact amount" for recorded / odd values.</summary>
     public int Delta
     {
         get => _step.Delta;
-        set { if (_step.Delta == value) return; _step.Delta = value; NotifyChanged(); }
+        set
+        {
+            if (_step.Delta == value) return;
+            _step.Delta = value;
+            NotifyChanged();
+            OnPropertyChanged(nameof(Direction));
+            OnPropertyChanged(nameof(Notches));
+            OnPropertyChanged(nameof(AmountText));
+        }
+    }
+
+    public ScrollDirection Direction
+    {
+        get => _step.Horizontal
+            ? (_step.Delta >= 0 ? ScrollDirection.Right : ScrollDirection.Left)
+            : (_step.Delta >= 0 ? ScrollDirection.Up : ScrollDirection.Down);
+        set
+        {
+            if (Direction == value) return;
+            var horizontal = value is ScrollDirection.Left or ScrollDirection.Right;
+            var positive = value is ScrollDirection.Up or ScrollDirection.Right;
+            var size = Math.Abs((long)_step.Delta);
+            if (size == 0) size = NotchDelta;
+            _step.Horizontal = horizontal;
+            _step.Delta = (int)(positive ? size : -size);
+            NotifyChanged();
+            OnPropertyChanged(nameof(Horizontal));
+            OnPropertyChanged(nameof(Delta));
+            OnPropertyChanged(nameof(Notches));
+            OnPropertyChanged(nameof(AmountText));
+        }
+    }
+
+    /// <summary>Whole notches. Typing a number sets the amount to that many notches in the current direction.</summary>
+    public int Notches
+    {
+        get => (int)(Math.Abs((long)_step.Delta) / NotchDelta);
+        set
+        {
+            if (Notches == value && Math.Abs((long)_step.Delta) % NotchDelta == 0) return;
+            var positive = Direction is ScrollDirection.Up or ScrollDirection.Right;
+            var size = Math.Clamp((long)value, 0, int.MaxValue / NotchDelta) * NotchDelta;
+            _step.Delta = (int)(positive ? size : -size);
+            NotifyChanged();
+            OnPropertyChanged(nameof(Delta));
+            OnPropertyChanged(nameof(AmountText));
+        }
+    }
+
+    /// <summary>Explains the amount in words, including amounts that aren't whole notches (some recordings / touchpads).</summary>
+    public string AmountText
+    {
+        get
+        {
+            var size = Math.Abs((long)_step.Delta);
+            var notches = size / (double)NotchDelta;
+            var exact = size % NotchDelta == 0 ? "" : $" Exact amount: {size} (= {notches:0.##} notches; Windows counts 120 per notch).";
+            return $"1 notch = one click of a normal mouse wheel (often about 3 lines of text).{exact}";
+        }
     }
 
     public bool Horizontal
     {
         get => _step.Horizontal;
-        set { if (_step.Horizontal == value) return; _step.Horizontal = value; NotifyChanged(); }
+        set
+        {
+            if (_step.Horizontal == value) return;
+            _step.Horizontal = value;
+            NotifyChanged();
+            OnPropertyChanged(nameof(Direction));
+        }
     }
 
     public bool UseCurrentPosition
     {
         get => _step.UseCurrentPosition;
-        set { if (_step.UseCurrentPosition == value) return; _step.UseCurrentPosition = value; NotifyChanged(); }
+        set
+        {
+            if (_step.UseCurrentPosition == value) return;
+            _step.UseCurrentPosition = value;
+            NotifyChanged();
+            OnPropertyChanged(nameof(UsesFixedPosition));
+        }
     }
+
+    public bool UsesFixedPosition => !_step.UseCurrentPosition;
 
     public int X
     {
@@ -352,6 +527,15 @@ public sealed class MouseScrollStepViewModel : StepViewModel
     {
         get => _step.Y;
         set { if (_step.Y == value) return; _step.Y = value; NotifyChanged(); }
+    }
+
+    private void SetPosition(int x, int y)
+    {
+        _step.X = x;
+        _step.Y = y;
+        UseCurrentPosition = false; // picking a spot means "scroll there"
+        OnPropertyChanged(nameof(X));
+        NotifyChanged(nameof(Y));
     }
 }
 

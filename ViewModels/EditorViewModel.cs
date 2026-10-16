@@ -43,6 +43,7 @@ public sealed class EditorViewModel : ObservableObject
     private int _warningCount;
     private ScreenBounds? _screenBounds;
     private List<StepViewModel> _selection = new(); // all selected steps (the list allows Ctrl / Shift selection)
+    private bool _addAtEnd;
 
     public EditorViewModel(
         IMacroRepository repository,
@@ -67,12 +68,15 @@ public sealed class EditorViewModel : ObservableObject
 
         Steps.CollectionChanged += OnStepsChanged;
 
-        AddStepCommand = new RelayCommand(p => AddStep(p), p => HasMacro && p is StepKind);
+        AddStepCommand = new RelayCommand(p => AddStep(p, AddAtEnd ? InsertPosition.AtEnd : InsertPosition.AfterSelected), p => HasMacro && p is StepKind);
         DeleteStepCommand = new RelayCommand(DeleteSelectedSteps, () => SelectedStep is not null);
         DuplicateStepCommand = new RelayCommand(DuplicateSelectedStep, () => SelectedStep is not null);
-        MoveUpCommand = new RelayCommand(() => MoveSelected(-1), () => SelectedStep is not null && Steps.IndexOf(SelectedStep) > 0);
-        MoveDownCommand = new RelayCommand(() => MoveSelected(+1),
-            () => SelectedStep is not null && Steps.IndexOf(SelectedStep) < Steps.Count - 1);
+        MoveUpCommand = new RelayCommand(() => MoveSelected(MoveDirection.Up), () => CanMove(up: true));
+        MoveDownCommand = new RelayCommand(() => MoveSelected(MoveDirection.Down), () => CanMove(up: false));
+        MoveToTopCommand = new RelayCommand(() => MoveSelected(MoveDirection.ToTop), () => CanMove(up: true));
+        MoveToBottomCommand = new RelayCommand(() => MoveSelected(MoveDirection.ToBottom), () => CanMove(up: false));
+        AddToEndCommand = new RelayCommand(p => AddStep(p, InsertPosition.AtEnd), p => HasMacro && p is StepKind);
+        InsertAfterSelectedCommand = new RelayCommand(p => AddStep(p, InsertPosition.AfterSelected), p => HasMacro && p is StepKind);
         SaveCommand = new AsyncRelayCommand(async () => await SaveAsync(), HandleUnexpectedError, () => HasMacro && !_isSaving);
         RevertCommand = new RelayCommand(Revert, () => HasMacro && IsDirty);
         GoToLibraryCommand = new RelayCommand(goToLibrary);
@@ -94,6 +98,40 @@ public sealed class EditorViewModel : ObservableObject
     public RelayCommand DuplicateStepCommand { get; }
     public RelayCommand MoveUpCommand { get; }
     public RelayCommand MoveDownCommand { get; }
+    public RelayCommand MoveToTopCommand { get; }
+    public RelayCommand MoveToBottomCommand { get; }
+
+    /// <summary>Adds the step kind given as parameter after the last step (whatever the toolbox setting is).</summary>
+    public RelayCommand AddToEndCommand { get; }
+
+    /// <summary>Adds the step kind given as parameter right after the selected step (or at the end if none).</summary>
+    public RelayCommand InsertAfterSelectedCommand { get; }
+
+    /// <summary>
+    /// Raised after a move with the steps that should be selected afterwards (the view selects them in the list,
+    /// so a multi-step selection survives the move).
+    /// </summary>
+    public event EventHandler<IReadOnlyList<StepViewModel>>? SelectStepsRequested;
+
+    /// <summary>
+    /// Toolbox setting: true = new steps go to the end of the workflow, false = right after the selected step
+    /// (also the end when nothing is selected).
+    /// </summary>
+    public bool AddAtEnd
+    {
+        get => _addAtEnd;
+        set
+        {
+            if (SetProperty(ref _addAtEnd, value)) OnPropertyChanged(nameof(AddAfterSelected));
+        }
+    }
+
+    /// <summary>The other radio button of <see cref="AddAtEnd"/>.</summary>
+    public bool AddAfterSelected
+    {
+        get => !_addAtEnd;
+        set => AddAtEnd = !value;
+    }
     public AsyncRelayCommand SaveCommand { get; }
     public RelayCommand RevertCommand { get; }
     public RelayCommand GoToLibraryCommand { get; }
@@ -353,12 +391,13 @@ public sealed class EditorViewModel : ObservableObject
         _setStatus($"Changes to \"{name}\" were discarded.", StatusKind.Info);
     }
 
-    private void AddStep(object? parameter)
+    private void AddStep(object? parameter, InsertPosition position)
     {
         if (!HasMacro || parameter is not StepKind kind) return;
 
         var step = CreateStepViewModel(MacroFactory.CreateStep(kind, _defaultDelayMs()));
-        var index = SelectedStep is null ? Steps.Count : Steps.IndexOf(SelectedStep) + 1;
+        var selectedIndex = SelectedStep is null ? -1 : Steps.IndexOf(SelectedStep);
+        var index = StepListEditing.InsertIndex(Steps.Count, selectedIndex, position);
         Steps.Insert(index, step);
 
         // If and Repeat come with their End, so the new block is complete straight away.
@@ -370,10 +409,13 @@ public sealed class EditorViewModel : ObservableObject
         };
         if (closer is not null) Steps.Insert(index + 1, CreateStepViewModel(closer));
 
-        SelectedStep = step;
+        _selection.Clear();
+        SelectedStep = step; // the list scrolls the new step into view
         Touch();
         if (closer is not null)
-            _setStatus($"Added {StepDescriber.DisplayName(kind)} and {StepDescriber.DisplayName(closer.Kind)}. Add steps between them, or select steps and use \"Wrap in\".", StatusKind.Info);
+            _setStatus($"Added {StepDescriber.DisplayName(kind)} and {StepDescriber.DisplayName(closer.Kind)} as steps {index + 1}–{index + 2}. Add steps between them, or select steps and use \"Wrap in\".", StatusKind.Info);
+        else
+            _setStatus($"Added {StepDescriber.DisplayName(kind)} as step {index + 1}{(index == Steps.Count - 1 ? " (at the end)" : "")}.", StatusKind.Info);
     }
 
     /// <summary>
@@ -457,17 +499,73 @@ public sealed class EditorViewModel : ObservableObject
         Touch();
     }
 
-    private void MoveSelected(int offset)
+    private bool CanMove(bool up)
     {
-        if (SelectedStep is not { } step) return;
+        var selected = SelectedInOrder();
+        if (selected.Count == 0) return false;
+        return up ? Steps.IndexOf(selected[0]) > 0 : Steps.IndexOf(selected[^1]) < Steps.Count - 1;
+    }
 
-        var from = Steps.IndexOf(step);
-        var to = from + offset;
-        if (to < 0 || to >= Steps.Count) return;
+    /// <summary>Move up / down / to top / to bottom for the selected steps (they must be next to each other).</summary>
+    private void MoveSelected(MoveDirection direction)
+    {
+        if (!TryGetSelectedRange(out var first, out var last)) return;
+        Apply(StepListEditing.PlanMove(Steps.Select(s => s.Model).ToList(), first, last, direction));
+    }
 
-        Steps.Move(from, to);
-        SelectedStep = step;
+    /// <summary>
+    /// Drag and drop: moves the selected steps (whole blocks when an If / Repeat is part of them) in front of the
+    /// step that is now at <paramref name="dropIndex"/> (Steps.Count = after the last step).
+    /// </summary>
+    public void MoveSelectionTo(int dropIndex)
+    {
+        if (!HasMacro || !TryGetSelectedRange(out var first, out var last)) return;
+        Apply(StepListEditing.PlanDrop(Steps.Select(s => s.Model).ToList(), first, last, dropIndex));
+    }
+
+    private bool TryGetSelectedRange(out int first, out int last)
+    {
+        first = last = -1;
+        var selected = SelectedInOrder();
+        if (selected.Count == 0) return false;
+
+        first = Steps.IndexOf(selected[0]);
+        last = Steps.IndexOf(selected[^1]);
+        if (last - first + 1 == selected.Count) return true;
+
+        _setStatus("To move several steps at once, select steps that are next to each other (click the first, then Shift+click the last).", StatusKind.Warning);
+        return false;
+    }
+
+    /// <summary>Carries out a planned move (or explains why it isn't possible) and keeps the moved steps selected.</summary>
+    private void Apply(MovePlan plan)
+    {
+        if (!plan.Allowed)
+        {
+            if (plan.Problem is not null) _setStatus(plan.Problem, StatusKind.Warning);
+            return;
+        }
+
+        var moved = Steps.Skip(plan.First).Take(plan.Count).ToList();
+        if (plan.NewFirst < plan.First)
+        {
+            for (var i = 0; i < plan.Count; i++) Steps.Move(plan.First + i, plan.NewFirst + i);
+        }
+        else
+        {
+            for (var i = plan.Count - 1; i >= 0; i--) Steps.Move(plan.First + i, plan.NewFirst + i);
+        }
+
+        _selection = moved;
+        SelectedStep = moved[0];
+        SelectStepsRequested?.Invoke(this, moved);
         Touch();
+
+        var where = plan.NewFirst == 0 ? "to the top" : plan.NewFirst + plan.Count == Steps.Count ? "to the bottom" : $"to step {plan.NewFirst + 1}";
+        var what = plan.Count == 1 ? "Moved the step" : $"Moved {plan.Count} steps";
+        var blocks = plan.TookWholeBlocks ? " (whole If / Repeat blocks were moved together)" : "";
+        if (plan.TookWholeBlocks || Math.Abs(plan.NewFirst - plan.First) > 1)
+            _setStatus($"{what} {where}{blocks}.", StatusKind.Info);
     }
 
     private StepViewModel CreateStepViewModel(MacroStep step)

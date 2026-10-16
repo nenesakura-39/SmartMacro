@@ -166,7 +166,12 @@ internal static class RegionPicker
     }
 }
 
-/// <summary>A dimmed overlay over one monitor. Drag to draw the search area; Esc or right-click cancels.</summary>
+/// <summary>
+/// A dimmed overlay over one monitor. Drag to draw the search area; Esc or right-click cancels.
+/// In point mode (Pick position / Pick color) it shows a crosshair and the exact X / Y under the cursor, and the
+/// pick happens when the button is released: both the press and the release land on this overlay, so nothing
+/// underneath is clicked.
+/// </summary>
 internal sealed class RegionPickerWindow : Window
 {
     private readonly ScreenRect _monitor;
@@ -175,7 +180,10 @@ internal sealed class RegionPickerWindow : Window
     private readonly Canvas _canvas = new();
     private readonly Rectangle _selection;
     private readonly TextBlock _sizeLabel;
+    private readonly Line _crossX;
+    private readonly Line _crossY;
     private NativeMethods.POINT? _start;
+    private bool _pointPressed;
     private bool _closed;
 
     public RegionPickerWindow(ScreenRect monitor, Action<ScreenRect?> done, string hintText, bool pickPoint)
@@ -211,6 +219,11 @@ internal sealed class RegionPickerWindow : Window
             Visibility = Visibility.Collapsed,
         };
 
+        // Point mode: a full-width / full-height crosshair through the cursor (positioned in OnMove).
+        var crossBrush = new SolidColorBrush(Color.FromArgb(0xDD, 0xF5, 0x9E, 0x0B));
+        _crossX = new Line { Stroke = crossBrush, StrokeThickness = 1, Visibility = Visibility.Collapsed, IsHitTestVisible = false };
+        _crossY = new Line { Stroke = crossBrush, StrokeThickness = 1, Visibility = Visibility.Collapsed, IsHitTestVisible = false };
+
         var hint = new Border
         {
             Background = new SolidColorBrush(Color.FromArgb(0xEE, 0x0E, 0x16, 0x26)),
@@ -226,6 +239,8 @@ internal sealed class RegionPickerWindow : Window
         Canvas.SetLeft(hint, 24);
         Canvas.SetTop(hint, 24);
 
+        _canvas.Children.Add(_crossX);
+        _canvas.Children.Add(_crossY);
         _canvas.Children.Add(_selection);
         _canvas.Children.Add(_sizeLabel);
         _canvas.Children.Add(hint);
@@ -280,8 +295,10 @@ internal sealed class RegionPickerWindow : Window
         NativeMethods.GetCursorPos(out var point);
         if (_pickPoint)
         {
-            // One click = one pixel.
-            if (Contains(point.X, point.Y)) _done(new ScreenRect(point.X, point.Y, 1, 1));
+            // One click = one pixel. Picked on release (see OnUp), so the release doesn't reach the app below.
+            _pointPressed = true;
+            CaptureMouse();
+            ShowCrosshair(point);
             return;
         }
 
@@ -294,13 +311,29 @@ internal sealed class RegionPickerWindow : Window
 
     private void OnMove(object sender, MouseEventArgs e)
     {
-        if (_start is null) return;
         NativeMethods.GetCursorPos(out var point);
+        if (_pickPoint)
+        {
+            ShowCrosshair(point);
+            return;
+        }
+
+        if (_start is null) return;
         UpdateSelection(point);
     }
 
     private void OnUp(object sender, MouseButtonEventArgs e)
     {
+        if (_pickPoint)
+        {
+            if (!_pointPressed) return;
+            _pointPressed = false;
+            ReleaseMouseCapture();
+            NativeMethods.GetCursorPos(out var picked);
+            if (Contains(picked.X, picked.Y)) _done(new ScreenRect(picked.X, picked.Y, 1, 1));
+            return;
+        }
+
         if (_start is not { } start) return;
         ReleaseMouseCapture();
         NativeMethods.GetCursorPos(out var end);
@@ -338,6 +371,30 @@ internal sealed class RegionPickerWindow : Window
         _sizeLabel.Text = $"{rect.Width} × {rect.Height}  at ({rect.X}, {rect.Y})";
         Canvas.SetLeft(_sizeLabel, topLeft.X);
         Canvas.SetTop(_sizeLabel, Math.Max(0, topLeft.Y - 24));
+    }
+
+    /// <summary>Point mode: crosshair lines through the cursor and its exact screen position next to it.</summary>
+    private void ShowCrosshair(NativeMethods.POINT point)
+    {
+        if (!Contains(point.X, point.Y))
+        {
+            _crossX.Visibility = _crossY.Visibility = _sizeLabel.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        // Physical screen pixels → this window's layout units (the window has one DPI: its monitor's).
+        var p = PointFromScreen(new Point(point.X, point.Y));
+        var width = ActualWidth;
+        var height = ActualHeight;
+        _crossX.X1 = 0; _crossX.X2 = width; _crossX.Y1 = _crossX.Y2 = p.Y;
+        _crossY.Y1 = 0; _crossY.Y2 = height; _crossY.X1 = _crossY.X2 = p.X;
+        _crossX.Visibility = _crossY.Visibility = Visibility.Visible;
+
+        _sizeLabel.Text = $"X {point.X}, Y {point.Y}";
+        _sizeLabel.Visibility = Visibility.Visible;
+        // Keep the label on screen: to the lower right of the cursor, or flipped near the right / bottom edge.
+        Canvas.SetLeft(_sizeLabel, p.X + 150 > width ? Math.Max(0, p.X - 150) : p.X + 14);
+        Canvas.SetTop(_sizeLabel, p.Y + 40 > height ? Math.Max(0, p.Y - 30) : p.Y + 14);
     }
 
     private static ScreenRect ToRect(NativeMethods.POINT a, NativeMethods.POINT b)

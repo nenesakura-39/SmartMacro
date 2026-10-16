@@ -260,7 +260,7 @@ public static class MacroValidator
 
             case MouseScrollStep s:
                 if (s.Delta == 0)
-                    issues.Add(Error("The scroll amount can't be 0.", nameof(MouseScrollStep.Delta)));
+                    issues.Add(Error("The scroll amount can't be 0. Scroll at least 1 notch.", nameof(MouseScrollStep.Delta)));
                 else if (Math.Abs((long)s.Delta) > MaxScrollDelta)
                     issues.Add(Error($"The scroll amount must be between -{MaxScrollDelta} and {MaxScrollDelta}.", nameof(MouseScrollStep.Delta)));
                 if (!s.UseCurrentPosition)
@@ -750,10 +750,16 @@ public static class MacroValidator
             issues.Add(Error("The image is a single flat color, so its shape can't be matched. Capture an area with some detail, or use a \"Find color\" step.", property));
     }
 
+    /// <summary>
+    /// A fixed mouse position: far outside any possible screen is an error (a typo or damaged file); outside the current
+    /// monitors is only a warning, because the macro may have been made with another monitor layout.
+    /// </summary>
     private static void CheckPosition(List<ValidationIssue> issues, int x, int y, ScreenBounds? screen)
     {
-        if (screen is not null && !screen.Contains(x, y))
-            issues.Add(Warning($"Position ({x}, {y}) is outside your current screen area ({screen}).", "Position"));
+        if (Math.Abs((long)x) > MaxScreenCoordinate || Math.Abs((long)y) > MaxScreenCoordinate)
+            issues.Add(Error($"Position ({x}, {y}) is far outside any screen (X and Y must be between -{MaxScreenCoordinate:N0} and {MaxScreenCoordinate:N0}). Use \"Pick position\" to choose a spot on your screen.", "Position"));
+        else if (screen is not null && !screen.Contains(x, y))
+            issues.Add(Warning($"Position ({x}, {y}) is outside your current screen area ({screen}). Use \"Pick position\" to choose a spot on your screen.", "Position"));
     }
 
     private static ValidationIssue Error(string message, string? property = null) =>

@@ -31,6 +31,13 @@ Your macros and settings live in `%LOCALAPPDATA%\SmartMacro`, separate from the 
 2. **Edit:** select a step to change it on the right. Use the left panel to add steps. Reorder with the arrows (Alt+Up/Down) and delete with Delete.
 3. **Play:** press **Play** (or Ctrl+Shift+F10).
    - In the editor header, set how many times to repeat (0 = until stopped), the speed, and a wait between repeats.
+   - **Where new steps go:** at the top of the toolbox choose *After the selected step* or *At the end* (right-click a
+     step button for the other choice). Drag steps to reorder them, or right-click a step for Move to top / bottom
+     (Alt+Home / Alt+End). An If or Repeat moved to the top / bottom (or dragged) takes its whole block along, and moves
+     that would break a block are refused with an explanation.
+   - **Mouse positions:** in Move mouse, Mouse click and Scroll wheel, click **Pick position** and then click the spot on
+     your screen (Esc cancels); X and Y are filled in for you. **Use cursor position (3 s)** takes wherever the mouse is
+     after a short countdown.
 4. **Find text:** add a **Find text (OCR)** step. Type the text, optionally click **Pick area on screen**, press **Test now**, and choose what happens when it's found (for example, "Click it").
 
 ## Recording (one Record button for apps and games)

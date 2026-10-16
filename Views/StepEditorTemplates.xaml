@@ -54,14 +54,52 @@
                 <ColumnDefinition Width="*" />
             </Grid.ColumnDefinitions>
             <StackPanel Grid.Column="0">
-                <TextBlock Text="X (pixels)" Style="{StaticResource FieldLabel}" />
-                <TextBox Text="{Binding X, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}" AutomationProperties.Name="X position" />
+                <TextBlock Text="X (pixels from the left)" Style="{StaticResource FieldLabel}" />
+                <TextBox Text="{Binding X, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}" AutomationProperties.Name="X position"
+                         ToolTip="The screen location where this action happens: pixels from the left edge of your main monitor (negative = a monitor further left)." />
             </StackPanel>
             <StackPanel Grid.Column="2">
-                <TextBlock Text="Y (pixels)" Style="{StaticResource FieldLabel}" />
-                <TextBox Text="{Binding Y, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}" AutomationProperties.Name="Y position" />
+                <TextBlock Text="Y (pixels from the top)" Style="{StaticResource FieldLabel}" />
+                <TextBox Text="{Binding Y, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}" AutomationProperties.Name="Y position"
+                         ToolTip="The screen location where this action happens: pixels down from the top edge of your main monitor (negative = a monitor above it)." />
             </StackPanel>
         </Grid>
+    </DataTemplate>
+
+    <!--
+        X / Y plus "Pick position" and "Use cursor position", shared by Move mouse, Mouse click and Scroll wheel.
+        DataContext = the step editor (it has X, Y and PositionPicker).
+    -->
+    <DataTemplate x:Key="PositionPickerTemplate">
+        <StackPanel>
+            <ContentControl Content="{Binding}" ContentTemplate="{StaticResource PositionFieldsTemplate}" Focusable="False" />
+            <WrapPanel Margin="0,10,0,0">
+                <Button Command="{Binding PositionPicker.PickCommand}" Style="{StaticResource PrimaryButton}" Margin="0,0,8,6"
+                        ToolTip="SmartMacro hides; click a point on your screen to fill in X and Y automatically. Esc or right-click cancels."
+                        AutomationProperties.Name="Pick position on screen">
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="&#xE8B0;" Style="{StaticResource IconText}" />
+                        <TextBlock Text="Pick position" Margin="8,0,0,0" />
+                    </StackPanel>
+                </Button>
+                <Button Command="{Binding PositionPicker.UseCursorCommand}" Margin="0,0,0,6"
+                        ToolTip="After a 3-second countdown, uses wherever your mouse cursor is. Move the mouse to the spot during the countdown."
+                        AutomationProperties.Name="Use current cursor position">
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="&#xE7C9;" Style="{StaticResource IconText}" />
+                        <TextBlock Text="Use cursor position (3 s)" Margin="8,0,0,0" />
+                    </StackPanel>
+                </Button>
+            </WrapPanel>
+            <Border Padding="10,6" CornerRadius="6" Background="{StaticResource SurfaceAltBrush}" Margin="0,2,0,0"
+                    Visibility="{Binding PositionPicker.Status, Converter={StaticResource NullToVisibility}}">
+                <TextBlock Text="{Binding PositionPicker.Status}" TextWrapping="Wrap" FontSize="12" />
+            </Border>
+            <TextBlock Text="{Binding DataContext.ScreenBoundsText, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                       Style="{StaticResource MutedText}" FontSize="11" Margin="0,6,0,0" TextWrapping="Wrap" />
+            <TextBlock Style="{StaticResource MutedText}" FontSize="11" Margin="0,2,0,0" TextWrapping="Wrap"
+                       Text="X counts pixels from the left edge of your main monitor, Y from its top edge (so X 500, Y 300 is 500 px right and 300 px down). Monitors to the left of or above the main one have negative values. These are real screen pixels, so Windows display scaling is already included." />
+        </StackPanel>
     </DataTemplate>
 
     <DataTemplate DataType="{x:Type steps:DelayStepViewModel}">
@@ -87,9 +125,10 @@
     <DataTemplate DataType="{x:Type steps:MouseMoveStepViewModel}">
         <StackPanel>
             <ContentControl Content="{Binding}" ContentTemplate="{StaticResource StepHeaderTemplate}" Focusable="False" Visibility="{Binding IsStandalone, Converter={StaticResource BoolToVisibility}}" />
-            <ContentControl Content="{Binding}" ContentTemplate="{StaticResource PositionFieldsTemplate}" Focusable="False" Margin="0,6,0,0" />
-            <TextBlock Text="{Binding DataContext.ScreenBoundsText, RelativeSource={RelativeSource AncestorType=UserControl}}"
-                       Style="{StaticResource MutedText}" FontSize="11" Margin="0,6,0,0" />
+            <TextBlock Text="Destination" Style="{StaticResource FieldLabel}" Margin="0,18,0,0" />
+            <ContentControl Content="{Binding}" ContentTemplate="{StaticResource PositionPickerTemplate}" Focusable="False" />
+            <TextBlock Style="{StaticResource MutedText}" FontSize="11" Margin="0,8,0,0" TextWrapping="Wrap"
+                       Text="Moves the cursor to this spot. It jumps there straight away (no gliding animation) and nothing is clicked. Add a Mouse click step to click, or use Mouse click on its own: it can move and click in one step." />
             <ContentControl Content="{Binding}" ContentTemplate="{StaticResource StepFooterTemplate}" Focusable="False" Visibility="{Binding IsStandalone, Converter={StaticResource BoolToVisibility}}" />
         </StackPanel>
     </DataTemplate>
@@ -106,7 +145,8 @@
                 </Grid.ColumnDefinitions>
                 <StackPanel Grid.Column="0">
                     <TextBlock Text="Button" Style="{StaticResource FieldLabel}" Margin="0,18,0,4" />
-                    <ComboBox ItemsSource="{x:Static steps:MouseClickStepViewModel.Buttons}" SelectedItem="{Binding Button}" AutomationProperties.Name="Mouse button" />
+                    <ComboBox ItemsSource="{x:Static steps:MouseClickStepViewModel.Buttons}" SelectedItem="{Binding Button}" AutomationProperties.Name="Mouse button"
+                              ToolTip="Which mouse button: Left (normal click), Right (context menu) or Middle (wheel button)." />
                 </StackPanel>
                 <StackPanel Grid.Column="2">
                     <TextBlock Text="Action" Style="{StaticResource FieldLabel}" Margin="0,18,0,4" />
@@ -120,12 +160,14 @@
             <TextBlock Style="{StaticResource MutedText}" FontSize="11" Margin="0,4,0,0"
                        Text="0 = instant click. Recordings fill in how long you actually held the button." />
 
-            <CheckBox Content="Click where the cursor already is" IsChecked="{Binding UseCurrentPosition}" Margin="0,16,0,0" />
-            <CheckBox Content="Click on what the last Find text / image / color step found" IsChecked="{Binding UseLastFoundText}" Margin="0,10,0,0" />
-            <ContentControl Content="{Binding}" ContentTemplate="{StaticResource PositionFieldsTemplate}" Focusable="False" Margin="0,4,0,0"
-                            IsEnabled="{Binding UsesFixedPosition}" />
-            <TextBlock Text="{Binding DataContext.ScreenBoundsText, RelativeSource={RelativeSource AncestorType=UserControl}}"
-                       Style="{StaticResource MutedText}" FontSize="11" Margin="0,6,0,0" />
+            <TextBlock Text="Where to click" Style="{StaticResource FieldLabel}" Margin="0,18,0,4" />
+            <ComboBox ItemsSource="{x:Static steps:MouseClickStepViewModel.Targets}" DisplayMemberPath="Label" SelectedValuePath="Value"
+                      SelectedValue="{Binding Target}" AutomationProperties.Name="Where to click"
+                      ToolTip="A chosen position (X / Y), wherever the cursor is when the step runs, or the spot the last Find text / image / color step found." />
+            <ContentControl Content="{Binding}" ContentTemplate="{StaticResource PositionPickerTemplate}" Focusable="False" Margin="0,4,0,0"
+                            Visibility="{Binding UsesFixedPosition, Converter={StaticResource BoolToVisibility}}" />
+            <TextBlock Style="{StaticResource MutedText}" FontSize="11" Margin="0,8,0,0" TextWrapping="Wrap"
+                       Text="Choose where the click should happen. With a chosen position, the cursor first jumps to X / Y, then the button is pressed and released there (Double-click = two clicks; Press / Release = only down or only up, to hold a button across steps). Pick position lets you choose the spot directly on your screen." />
 
             <ContentControl Content="{Binding}" ContentTemplate="{StaticResource StepFooterTemplate}" Focusable="False" Visibility="{Binding IsStandalone, Converter={StaticResource BoolToVisibility}}" />
         </StackPanel>
@@ -135,15 +177,42 @@
         <StackPanel>
             <ContentControl Content="{Binding}" ContentTemplate="{StaticResource StepHeaderTemplate}" Focusable="False" Visibility="{Binding IsStandalone, Converter={StaticResource BoolToVisibility}}" />
 
-            <TextBlock Text="Scroll amount" Style="{StaticResource FieldLabel}" Margin="0,18,0,4" />
-            <TextBox Text="{Binding Delta, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}" AutomationProperties.Name="Scroll amount" />
-            <TextBlock Style="{StaticResource MutedText}" FontSize="11" Margin="0,4,0,0"
-                       Text="120 = one wheel notch. Positive scrolls up (or right), negative scrolls down (or left)." />
+            <Grid Margin="0,18,0,0">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="10" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <StackPanel Grid.Column="0">
+                    <TextBlock Text="Direction" Style="{StaticResource FieldLabel}" Margin="0,0,0,4" />
+                    <ComboBox ItemsSource="{x:Static steps:MouseScrollStepViewModel.Directions}" DisplayMemberPath="Label" SelectedValuePath="Value"
+                              SelectedValue="{Binding Direction}" AutomationProperties.Name="Scroll direction"
+                              ToolTip="Up / Down turn the wheel like a normal mouse. Left / Right scroll sideways (tilt wheel)." />
+                </StackPanel>
+                <StackPanel Grid.Column="2">
+                    <TextBlock Text="Number of notches" Style="{StaticResource FieldLabel}" Margin="0,0,0,4" />
+                    <TextBox Text="{Binding Notches, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}" AutomationProperties.Name="Number of notches"
+                             ToolTip="How far to scroll: 1 notch = one click of a mouse wheel." />
+                </StackPanel>
+            </Grid>
+            <TextBlock Text="{Binding AmountText}" Style="{StaticResource MutedText}" FontSize="11" Margin="0,4,0,0" TextWrapping="Wrap" />
 
-            <CheckBox Content="Scroll sideways (horizontal)" IsChecked="{Binding Horizontal}" Margin="0,14,0,0" />
-            <CheckBox Content="Scroll where the cursor already is" IsChecked="{Binding UseCurrentPosition}" Margin="0,10,0,0" />
-            <ContentControl Content="{Binding}" ContentTemplate="{StaticResource PositionFieldsTemplate}" Focusable="False" Margin="0,4,0,0"
-                            IsEnabled="{Binding UseCurrentPosition, Converter={StaticResource InverseBool}}" />
+            <TextBlock Text="Scroll position" Style="{StaticResource FieldLabel}" />
+            <ComboBox ItemsSource="{x:Static steps:MouseScrollStepViewModel.PositionModes}" DisplayMemberPath="Label" SelectedValuePath="Value"
+                      SelectedValue="{Binding UseCurrentPosition}" AutomationProperties.Name="Scroll position"
+                      ToolTip="Windows scrolls whatever is under the cursor. Choose a position to move the cursor there first." />
+            <ContentControl Content="{Binding}" ContentTemplate="{StaticResource PositionPickerTemplate}" Focusable="False" Margin="0,4,0,0"
+                            Visibility="{Binding UsesFixedPosition, Converter={StaticResource BoolToVisibility}}" />
+            <TextBlock Style="{StaticResource MutedText}" FontSize="11" Margin="0,8,0,0" TextWrapping="Wrap"
+                       Text="Scrolls whatever is under the cursor. With a chosen position the cursor first jumps to X / Y, then the wheel turns; otherwise it scrolls wherever the cursor already is." />
+
+            <Expander Header="Exact amount (advanced)" Margin="0,12,0,0" Foreground="{StaticResource MutedTextBrush}">
+                <StackPanel Margin="0,6,0,0">
+                    <TextBox Text="{Binding Delta, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}" AutomationProperties.Name="Exact scroll amount" />
+                    <TextBlock Style="{StaticResource MutedText}" FontSize="11" Margin="0,4,0,0" TextWrapping="Wrap"
+                               Text="Windows' own number: 120 = one notch. Positive scrolls up (or right), negative down (or left). Recordings and some touchpads use amounts between whole notches." />
+                </StackPanel>
+            </Expander>
 
             <ContentControl Content="{Binding}" ContentTemplate="{StaticResource StepFooterTemplate}" Focusable="False" Visibility="{Binding IsStandalone, Converter={StaticResource BoolToVisibility}}" />
         </StackPanel>

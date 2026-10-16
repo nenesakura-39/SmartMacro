@@ -1,6 +1,18 @@
 # SmartMacro – Project Status / Handoff
 
-_Last updated: 2026-10-16 (v1.0.0 + game-input fidelity work + Stage 1 smart recording + Stage 2 visual detection + Stage 3 conditions and loops — built and tested + Stage 4 continuous visual feedback — written, not yet built). Owner & developer: Riku_
+_Last updated: 2026-10-16. Stages 1–3: built, automated tests passed, manually tested by the owner. Stage 4 (feedback
+loops) and the Editor UX task: built, automated tests passed (573/573), **manual tests NOT done yet**. Not released.
+Developer: Riku (リク) · Brand: KuroLogic_
+
+## Current status at a glance (2026-10-16)
+| Area | Build + automated tests | Manual tests | Committed |
+|---|---|---|---|
+| Stages 1–3 | passed (Stage 3 run: 389/389) | done by owner (reported "Done"; details for Stage 3 not sent) | yes (`ef78ce4`) |
+| Stage 4 – feedback loops | passed: 0 warnings, 0 errors, 573/573 | **not done** (`docs/STAGE4_MANUAL_TESTS.md`) | yes (`bb18e56`, test fix `01d0168`) |
+| Editor UX – Pick position, mouse editors, add/move steps | passed in the same 573/573 run | **not done** (`docs/EDITOR_UX_MANUAL_TESTS.md`) | **no** – uncommitted changes on top of `91b67ff` |
+| Release documents (EULA, LICENSE, notices, README) | – | – | drafts; `release-docs/` not committed yet |
+| Release package | `publish\SmartMacro-1.0.0-win-x64\SmartMacro.exe` is an OLD build (made right after `159d6b3`, before Stage 1) | – | ignored by git |
+
 
 ## Done
 **Phase 1: Foundation**
@@ -243,7 +255,7 @@ _Last updated: 2026-10-16 (v1.0.0 + game-input fidelity work + Stage 1 smart rec
 - Owner build (2026-10-16): `tools\verify.cmd` → 0 warnings, 0 errors; tests **389/389 passed** (first run, no fixes needed).
   Owner then reported the Stage 3 work "Done" (manual-test details not sent; ask if anything failed).
 
-**Stage 4: Continuous visual feedback** (2026-10-16; written, NOT built or tested yet — the AI's environment had no .NET SDK
+**Stage 4: Continuous visual feedback** (2026-10-16; written by the AI without a .NET SDK, then built and unit-tested by the owner – manual tests still open. The original note follows. The AI's environment had no .NET SDK
 and no network access to install one, so nothing below has been compiled or run)
 - Audit before the change: Stage 2 `MarkerTracker` (Found / Ambiguous / Lost / IgnoredJump) was only used by the editor's
   "Track for 3 s". Stage 3 gave the program-counter engine, `HeldInput` (released on every exit, released / re-pressed on
@@ -316,6 +328,39 @@ and no network access to install one, so nothing below has been compiled or run)
   of latency, but only 2–47 % of rounds with the "heavy" (momentum) zone. That's the documented honest limit.
 - Not verified: build, test run, any measurement on a real PC, any app or game.
 
+**Editor UX: Pick position, clearer mouse steps, adding and moving steps** (2026-10-16; built and unit-tested by the owner – manual tests still open; originally written without a .NET SDK —
+no .NET SDK in the AI's environment)
+- Audit: Move mouse / Mouse click / Scroll wheel already used physical virtual-screen pixels everywhere (GetCursorPos,
+  SetCursorPos + SendInput absolute move, per-monitor DPI aware app, recording uses the same). Playback: Move = instant
+  jump; Click = jump to X/Y (unless "current position" / "last found") then down/up (HoldMs, double, down, up); Scroll =
+  optional jump to X/Y, then one wheel event of `Delta` (120 = 1 notch, + = up/right). `MouseScrollStep` already had
+  `UseCurrentPosition` + X/Y, so positional scrolling needed **no model, file-format or engine change**. The OCR/vision
+  `RegionPicker` already had a one-click point mode (Pick color) – reused.
+- Pick position: `IVisionTools.PickPositionAsync` (hide SmartMacro, one overlay per monitor, crosshair + live
+  "X …, Y …" label, Esc / right-click cancel) and `GetCursorPosition`. Point mode now picks on **button release**, so
+  both press and release land on the overlay (before, the release went to the app underneath; also affects Pick color).
+  `PositionPickerViewModel` (Pick position, "Use cursor position (3 s)" countdown) shared by Move / Click / Scroll;
+  picking switches Click / Scroll to "at a chosen position". Shared XAML `PositionPickerTemplate` with screen-range text
+  and an explanation of the coordinate system.
+- Editors: Move = Destination + picker + accurate help (jumps, doesn't click). Click = Button, Action, Hold, "Where to
+  click" (chosen position / current cursor / last found – same two flags underneath) + picker + help. Scroll = Direction
+  (Up/Down/Left/Right = sign + Horizontal) + Number of notches + "Scroll position" + picker + "Exact amount (advanced)"
+  raw Delta; stored values change only when edited (odd amounts like -60 are kept and explained). Tooltips on X/Y.
+- Validation: a fixed position beyond ±100,000 px is now an **error**; off-screen stays a warning; both messages point
+  to "Pick position". Zero scroll message says "Scroll at least 1 notch".
+- Adding steps: toolbox "New steps go: After the selected step / At the end" (+ right-click a toolbox button: Add to end
+  / Insert after selected). New step is selected and scrolled into view; status says where it went.
+- Moving steps: `Core/Workflow/StepListEditing` (pure, tested): insert index, Move up / down / to top / to bottom, drop
+  index; contiguous multi-selection moves as a group; Move to top/bottom and drag-and-drop take whole If / Repeat blocks
+  along; a move that would turn valid blocks invalid is refused with a reason (allowed when blocks are already broken,
+  so they can be fixed). Editor: Move to top / bottom buttons + Alt+Home / Alt+End, right-click menu on the list,
+  drag-and-drop with a blue insertion line and edge auto-scroll, moved steps stay selected (`SelectStepsRequested`).
+- Tests: `SmartMacro.Tests/EditorUxTests.cs` (insert positions, every move kind, drop positions, block safety/expansion,
+  broken-structure fixing, objects/settings preserved, save/reload order; mouse playback incl. negative coordinates,
+  click modes, scroll direction/amount/position, old scroll/click/move JSON, odd scroll amounts, coordinate validation).
+- Docs: `docs/EDITOR_UX_MANUAL_TESTS.md`.
+- Not verified: build, tests, the overlay on multi-monitor / mixed-DPI, drag-and-drop feel.
+
 ## Architecture
 - `SmartMacro.Core` (net10.0, no WPF): models, validation, storage, logging. All unit tested.
 - `SmartMacro` (net10.0-windows, WPF, MVVM): `Mvvm/`, `ViewModels/`, `Views/`, `Themes/`, `Services/`, `Converters/`.
@@ -330,7 +375,12 @@ and no network access to install one, so nothing below has been compiled or run)
 
 ## Verification
 - `tools\verify.cmd` builds the solution and runs the tests. Output goes to `artifacts\build.log` and `artifacts\test.log`.
-- Last verified build: 0 warnings, 0 errors. Tests: 57/57 passed.
+- **Latest run (2026-10-16, owner's PC, working copy = commit `91b67ff` + the uncommitted Editor UX changes):**
+  build 0 warnings / 0 errors (`BUILD_EXIT=0`); tests **573 passed, 0 failed, 0 skipped** (`TEST_EXIT=0`).
+  Includes Stage 4 (`FeedbackLoopTests`) and Editor UX (`EditorUxTests`). Unit tests use fake input / screen / clock:
+  they don't prove that real apps or games react.
+- Previous runs: Stage 4 first run 530/531 (one test bug, fixed in `01d0168`); Stage 3 389/389; Stage 2 317/318 then green.
+- Older history: 57/57 (early phases).
 - Manually verified on the owner's PC: app launch, create macro, add steps, validation blocking save, Delete key, Ctrl+S, key/modifier editing, close prompt, data kept after restart.
 - The fix batch (command refresh, dark title bar, labels) built OK: 0 warnings, 57/57 tests.
 - Phase 3 built and ran on the owner's PC. The "Wait between repeats" addition hasn't been built yet.
@@ -357,9 +407,23 @@ and no network access to install one, so nothing below has been compiled or run)
   the cursor is. One input per loop. Stop conditions that use OCR pause the loop while they read. Default rate limits
   are guesses until the owner's measurements (STAGE4 tests B3 / D2) are in.
 
+## Release preparation (not released; nothing published)
+- Public documents live in `release-docs/` (EULA.txt, LICENSE.txt, THIRD-PARTY-NOTICES.txt, DOTNET-THIRD-PARTY-NOTICES.txt,
+  README.txt). They are DRAFTS with [PLACEHOLDER] / [REVIEW] / [VERIFY] markers; not lawyer-reviewed, not legally cleared.
+  Private notes (audit, checklist) stay in `Claude outputs/` and are never packaged.
+- Dependencies read from the last publish's bundle manifest + local NuGet packages: .NET runtime 10.0.11 (MIT; single-file
+  runtime parts under the .NET Library License), Windows Desktop/WPF 10.0.11 (MIT; PresentationNative_cor3 / wpfgfx_cor3 /
+  vcruntime140_cor3 under the .NET Library License; D3DCompiler_47_cor3 under the Windows SDK license),
+  Microsoft.Windows.SDK.NET.Ref 10.0.19041.57 (Microsoft.Windows.SDK.NET.dll – Windows SDK license / redist list;
+  WinRT.Runtime.dll 2.2.0.48161 – MIT). No other packages ship. Re-check after the next publish.
+- `tools\publish.cmd` now packages only SmartMacro.exe + the five `release-docs` files, refuses unfinished documents
+  (markers) unless `--allow-drafts` (then the ZIP is named ...-DRAFT-NOT-FOR-RELEASE), and stops if any other file appears.
+- Attribution is not yet standardized in the app (AppInfo.Owner "Riku", "Owner & developer: Riku", sidebar "by Riku",
+  csproj Company/Authors "Riku", Copyright "© 2026 Riku", README "© 2026 Riku") – change awaits owner approval.
+
 ## Next task
-- Owner: run `tools\verify.cmd`, send `artifacts\build.log` + `artifacts\test.log`, then do `docs/STAGE4_MANUAL_TESTS.md`
-  (start with the test page) and send the 📏 numbers.
+- Owner: do `docs/STAGE4_MANUAL_TESTS.md` (start with `docs/feedback-test-page.html`) and send the 📏 numbers, then
+  `docs/EDITOR_UX_MANUAL_TESTS.md`. Commit the Editor UX changes once they pass.
 - Fix whatever the build / tests / manual tests show; set the default captures-per-second / min-change values from the
   measured numbers.
 - Then the polish pass (Stage 2 / 3 improvements the owner mentioned + anything from Stage 4 testing), then `tools\publish.cmd`.

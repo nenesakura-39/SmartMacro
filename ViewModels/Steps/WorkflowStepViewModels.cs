@@ -20,6 +20,15 @@ public sealed record ScreenTools(IFindTextTools? Text, IVisionTools? Vision)
     {
         switch (step)
         {
+            case MouseMoveStepViewModel move:
+                move.PositionPicker.Tools = Vision;
+                break;
+            case MouseClickStepViewModel click:
+                click.PositionPicker.Tools = Vision;
+                break;
+            case MouseScrollStepViewModel scroll:
+                scroll.PositionPicker.Tools = Vision;
+                break;
             case FindTextStepViewModel findText:
                 findText.Tools = Text;
                 break;

@@ -19,6 +19,9 @@ public sealed record CapturedTemplate(ScreenRect Bounds, BgraImage Image);
 /// <summary>A colour the user clicked on, and where.</summary>
 public sealed record PickedColor(int X, int Y, RgbColor Color);
 
+/// <summary>A point on the screen in physical pixels (virtual-screen coordinates, the same ones mouse steps use).</summary>
+public readonly record struct ScreenPoint(int X, int Y);
+
 /// <summary>
 /// Screen helpers for the Find image / Find color editors: picking areas, capturing the picture to find,
 /// picking a colour, and testing a step without playing the macro. SmartMacro hides itself while it looks.
@@ -32,6 +35,15 @@ public interface IVisionTools
 
     /// <summary>The user clicks a pixel; returns its colour (null if cancelled).</summary>
     Task<PickedColor?> PickColorAsync();
+
+    /// <summary>
+    /// SmartMacro hides and a crosshair overlay covers every monitor; the user clicks a spot and gets its exact
+    /// position (null if cancelled with Esc / right-click). The click goes to the overlay, never to the app below.
+    /// </summary>
+    Task<ScreenPoint?> PickPositionAsync();
+
+    /// <summary>Where the mouse cursor is right now (null if Windows doesn't say).</summary>
+    ScreenPoint? GetCursorPosition();
 
     /// <summary>Looks for the step's image once, shows a preview with the matches, and describes the result.</summary>
     Task<string> TestImageAsync(FindImageStep step);
@@ -113,6 +125,16 @@ public sealed class VisionTools : IVisionTools
         var frame = _capture.Capture(point);
         return (PickedColor?)new PickedColor(point.X, point.Y, frame.Image.GetPixel(0, 0));
     });
+
+    public Task<ScreenPoint?> PickPositionAsync() => WhileHiddenAsync(async () =>
+    {
+        var picked = await RegionPicker.PickAsync(
+            "Click the spot for this step. The crosshair shows the exact X / Y.   Esc or right-click to cancel.", pickPoint: true);
+        return picked is { } point ? new ScreenPoint(point.X, point.Y) : (ScreenPoint?)null;
+    });
+
+    public ScreenPoint? GetCursorPosition() =>
+        NativeMethods.GetCursorPos(out var point) ? new ScreenPoint(point.X, point.Y) : null;
 
     public async Task<string> TestImageAsync(FindImageStep step)
     {
