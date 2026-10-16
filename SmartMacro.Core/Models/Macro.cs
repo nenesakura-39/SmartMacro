@@ -34,8 +34,11 @@ public sealed class MacroDocument
     /// 5 = adds workflow blocks: If / Else / End If and Repeat / End Repeat steps with conditions.
     /// 6 = adds "Feedback loop" steps (continuous visual feedback).
     /// 7 = adds "skip the next step" as a Find step's "when the time is up" choice and "ignore the edges" on Find image.
+    /// 8 = adds quality-of-life options: "hold the left button on it" as a Find step's "when found" action, a "when true"
+    ///     action on If steps, Hold / Drag mouse click actions, and feedback loop presets, pulse rule and
+    ///     "finish when it reaches the zone".
     /// </summary>
-    public const int CurrentSchemaVersion = 7;
+    public const int CurrentSchemaVersion = 8;
 
     public int SchemaVersion { get; set; }
     public Macro? Macro { get; set; }
@@ -56,6 +59,7 @@ public sealed class MacroDocument
         {
             var needed = step switch
             {
+                _ when UsesQualityOfLifeFeatures(step) => 8,
                 ScreenSearchStep { WhenNotFound: TextNotFoundBehavior.SkipNextStep } => 7,
                 FindImageStep { IgnoreEdgesPercent: not 0 } => 7,
                 FeedbackLoopStep => 6,
@@ -73,6 +77,18 @@ public sealed class MacroDocument
 
         return required;
     }
+
+    /// <summary>True if the step uses an option added in format 8 (see <see cref="CurrentSchemaVersion"/>).</summary>
+    private static bool UsesQualityOfLifeFeatures(MacroStep step) => step switch
+    {
+        ScreenSearchStep { Action: FoundTextAction.Hold } => true,
+        IfStep { ThenAction: not FoundTextAction.None } => true,
+        MouseClickStep { Action: MouseClickAction.Hold or MouseClickAction.Drag } => true,
+        FeedbackLoopStep f => f.Preset != FeedbackPreset.Custom || f.FinishWhenInZone
+                              || f.WhenBeforeZone == FeedbackAction.Pulse || f.WhenInsideZone == FeedbackAction.Pulse
+                              || f.WhenAfterZone == FeedbackAction.Pulse,
+        _ => false,
+    };
 
     private static bool UsesSmartRecordingFeatures(InputSequenceStep step)
     {

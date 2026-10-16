@@ -7,6 +7,7 @@ using System.Windows.Shapes;
 using SmartMacro.Core.Models;
 using SmartMacro.Core.Ocr;
 using SmartMacro.Services.Input;
+using SmartMacro.Services.Vision;
 
 namespace SmartMacro.Services.Ocr;
 
@@ -22,6 +23,12 @@ public interface IFindTextTools
 
     /// <summary>Hides SmartMacro, reads the step's search area once, and describes what was found.</summary>
     Task<string> TestAsync(FindTextStep step);
+
+    /// <summary>Where the most recent test found the text (null when it wasn't found).</summary>
+    ScreenPoint? LastTestMatch { get; }
+
+    /// <summary>Moves the mouse cursor to a spot so the user can see where a match is (nothing is clicked).</summary>
+    void ShowSpot(ScreenPoint point);
 }
 
 public sealed class FindTextTools : IFindTextTools
@@ -40,12 +47,17 @@ public sealed class FindTextTools : IFindTextTools
 
     public bool IsOcrAvailable => _ocr.IsAvailable;
 
+    public ScreenPoint? LastTestMatch { get; private set; }
+
+    public void ShowSpot(ScreenPoint point) => NativeMethods.SetCursorPos(point.X, point.Y);
+
     public string OcrStatus => _ocr.StatusText;
 
     public Task<ScreenRect?> PickRegionAsync() => WhileHiddenAsync(() => RegionPicker.PickAsync());
 
     public async Task<string> TestAsync(FindTextStep step)
     {
+        LastTestMatch = null;
         if (!_ocr.IsAvailable) return _ocr.StatusText;
         if (string.IsNullOrWhiteSpace(step.Text)) return "Enter the text to look for first.";
 
@@ -80,14 +92,15 @@ public sealed class FindTextTools : IFindTextTools
         {
             var best = matches[0];
             var more = matches.Count > 1 ? $" ({matches.Count} matches; the first one is used)" : "";
-            return $"Found \"{best.Text}\" at ({best.Bounds.CenterX}, {best.Bounds.CenterY}), {best.Similarity:P0} match{more}. Searched {where}.{picture}";
+            LastTestMatch = new ScreenPoint(best.Bounds.CenterX, best.Bounds.CenterY);
+            return $"Matched! Read text in area: '{best.Text}' at ({best.Bounds.CenterX}, {best.Bounds.CenterY}) — {best.Similarity:P0} match{more}. Searched {where}.{picture}";
         }
 
         var text = read.FullText.Replace(Environment.NewLine, "  |  ");
         if (text.Length > 400) text = text[..400] + "…";
         return string.IsNullOrWhiteSpace(text)
             ? $"Not found. No text could be read in {where}.{picture}"
-            : $"Not found in {where}. Text read there: {text}{picture}";
+            : $"Not found. Text read in area: '{text}' (searched {where}).{picture}";
     }
 
     private async Task<T> WhileHiddenAsync<T>(Func<Task<T>> action)

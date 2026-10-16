@@ -44,6 +44,13 @@ public sealed class AppSettings
     /// </summary>
     public bool KeepTapHoldTime { get; set; } = true;
 
+    /// <summary>
+    /// "Simplify mouse paths": in editable recorded steps, cursor travel between clicks isn't kept as Move steps (each
+    /// click already stores its position), so 5 shop clicks become 5 Click + Delay steps instead of hundreds of Moves.
+    /// Drags (moving with a button held) are always kept. On by default (also for settings files made before it existed).
+    /// </summary>
+    public bool SimplifyMousePaths { get; set; } = true;
+
     /// <summary>Global shortcut to start/stop recording.</summary>
     public HotkeyBinding RecordHotkey { get; set; } = HotkeyBinding.DefaultRecord;
 

@@ -19,7 +19,7 @@ public static class StepTypeCatalog
     {
         new StepTypeInfo(StepKind.Delay, StepDescriber.DisplayName(StepKind.Delay), "", "Wait for a set amount of time."),
         new StepTypeInfo(StepKind.MouseMove, StepDescriber.DisplayName(StepKind.MouseMove), "", "Moves the cursor straight to a screen position (it jumps there; it isn't animated). Use \"Pick position\" to choose the spot on your screen."),
-        new StepTypeInfo(StepKind.MouseClick, StepDescriber.DisplayName(StepKind.MouseClick), "", "Clicks (or double-clicks, presses, releases) a mouse button at a chosen screen position, where the cursor already is, or on what a Find step found."),
+        new StepTypeInfo(StepKind.MouseClick, StepDescriber.DisplayName(StepKind.MouseClick), "", "Clicks, double-clicks, holds for a set time or drags with a mouse button: at a chosen screen position, where the cursor already is, or on what a Find step found."),
         new StepTypeInfo(StepKind.MouseScroll, StepDescriber.DisplayName(StepKind.MouseScroll), "", "Turns the mouse wheel up, down, left or right by a number of notches, where the cursor already is or at a chosen screen position."),
         new StepTypeInfo(StepKind.KeyPress, StepDescriber.DisplayName(StepKind.KeyPress), "", "Press a key or shortcut, or hold/release a key."),
         new StepTypeInfo(StepKind.TypeText, StepDescriber.DisplayName(StepKind.TypeText), "", "Type a piece of text."),
@@ -260,11 +260,26 @@ public sealed class MouseClickStepViewModel : StepViewModel
     {
         _step = step;
         PositionPicker = new PositionPickerViewModel(SetPosition);
+        EndPoint = new PointEditorViewModel(
+            () => _step.EndX, v => _step.EndX = v,
+            () => _step.EndY, v => _step.EndY = v,
+            () => NotifyChanged(nameof(EndPoint)));
     }
 
     public static IReadOnlyList<MacroMouseButton> Buttons { get; } = Enum.GetValues<MacroMouseButton>();
 
-    public static IReadOnlyList<MouseClickAction> Actions { get; } = Enum.GetValues<MouseClickAction>();
+    public static IReadOnlyList<Choice<MouseClickAction>> Actions { get; } = new[]
+    {
+        new Choice<MouseClickAction>(MouseClickAction.Click, "Single click"),
+        new Choice<MouseClickAction>(MouseClickAction.DoubleClick, "Double click"),
+        new Choice<MouseClickAction>(MouseClickAction.Hold, "Hold for a duration (ms)"),
+        new Choice<MouseClickAction>(MouseClickAction.Drag, "Drag to a position"),
+        new Choice<MouseClickAction>(MouseClickAction.Down, "Press down only (release in a later step)"),
+        new Choice<MouseClickAction>(MouseClickAction.Up, "Release only"),
+    };
+
+    /// <summary>Drag: where the drag ends ("Pick position" works here too).</summary>
+    public PointEditorViewModel EndPoint { get; }
 
     public static IReadOnlyList<Choice<ClickTarget>> Targets { get; } = new[]
     {
@@ -314,12 +329,47 @@ public sealed class MouseClickStepViewModel : StepViewModel
         {
             if (_step.Action == value) return;
             _step.Action = value;
+            if (value == MouseClickAction.Hold && _step.HoldMs <= 0) _step.HoldMs = MouseClickStep.DefaultHoldActionMs;
+            if (value == MouseClickAction.Drag && _step.EndX == 0 && _step.EndY == 0)
+            {
+                // Start the end point a little to the right of the start, so the drag does something visible.
+                _step.EndX = _step.X + 100;
+                _step.EndY = _step.Y;
+                EndPoint.Refresh();
+            }
+
             NotifyChanged();
             OnPropertyChanged(nameof(IsClick));
+            OnPropertyChanged(nameof(UsesHoldTime));
+            OnPropertyChanged(nameof(IsDrag));
+            OnPropertyChanged(nameof(HoldMs));
+            OnPropertyChanged(nameof(ActionHelp));
         }
     }
 
     public bool IsClick => _step.Action == MouseClickAction.Click;
+
+    /// <summary>The hold-time box is used by Single click (recorded hold) and Hold.</summary>
+    public bool UsesHoldTime => _step.Action is MouseClickAction.Click or MouseClickAction.Hold;
+
+    public bool IsDrag => _step.Action == MouseClickAction.Drag;
+
+    /// <summary>Drag: how long the glide from start to end takes.</summary>
+    public int DragDurationMs
+    {
+        get => _step.DragDurationMs;
+        set { if (_step.DragDurationMs == value) return; _step.DragDurationMs = value; NotifyChanged(); }
+    }
+
+    public string ActionHelp => _step.Action switch
+    {
+        MouseClickAction.Hold => "Presses the button, keeps it down for the time below, then releases it. Good for casting meters and hold-to-buy buttons.",
+        MouseClickAction.Drag => "Presses the button at the start position, glides smoothly to the end position over the drag time while holding it, then releases. Good for sliders and dragging items.",
+        MouseClickAction.Down => "Only presses the button. Add a \"Release only\" step later to let go (everything held is released when the macro ends).",
+        MouseClickAction.Up => "Only releases the button (pressed by an earlier \"Press down only\" step).",
+        MouseClickAction.DoubleClick => "Two quick clicks.",
+        _ => "One click. A hold time above 0 keeps the button down that long (recordings fill it in).",
+    };
 
     public bool UseCurrentPosition
     {
@@ -371,6 +421,56 @@ public sealed class MouseClickStepViewModel : StepViewModel
     {
         get => _step.Y;
         set { if (_step.Y == value) return; _step.Y = value; NotifyChanged(); }
+    }
+}
+
+/// <summary>
+/// An extra X / Y pair with its own "Pick position" buttons (e.g. where a Drag ends). Works with the shared
+/// PositionPickerTemplate, which binds X, Y and PositionPicker.
+/// </summary>
+public sealed class PointEditorViewModel : Mvvm.ObservableObject
+{
+    private readonly Func<int> _getX;
+    private readonly Action<int> _setX;
+    private readonly Func<int> _getY;
+    private readonly Action<int> _setY;
+    private readonly Action _changed;
+
+    public PointEditorViewModel(Func<int> getX, Action<int> setX, Func<int> getY, Action<int> setY, Action changed)
+    {
+        _getX = getX;
+        _setX = setX;
+        _getY = getY;
+        _setY = setY;
+        _changed = changed;
+        PositionPicker = new PositionPickerViewModel((x, y) =>
+        {
+            _setX(x);
+            _setY(y);
+            Refresh();
+            _changed();
+        });
+    }
+
+    public PositionPickerViewModel PositionPicker { get; }
+
+    public int X
+    {
+        get => _getX();
+        set { if (_getX() == value) return; _setX(value); OnPropertyChanged(); _changed(); }
+    }
+
+    public int Y
+    {
+        get => _getY();
+        set { if (_getY() == value) return; _setY(value); OnPropertyChanged(); _changed(); }
+    }
+
+    /// <summary>Re-reads X / Y after the step was changed elsewhere.</summary>
+    public void Refresh()
+    {
+        OnPropertyChanged(nameof(X));
+        OnPropertyChanged(nameof(Y));
     }
 }
 
@@ -651,28 +751,65 @@ public abstract class ScreenSearchStepViewModel : StepViewModel
     private readonly ScreenSearchStep _search;
     private string? _testResult;
     private bool _isBusy;
+    private ScreenPoint? _testMatch;
+    private bool? _testFound;
 
     protected ScreenSearchStepViewModel(ScreenSearchStep step) : base(step)
     {
         _search = step;
         PickRegionCommand = new AsyncRelayCommand(PickRegionAsync, ex => TestResult = ex.Message, () => HasTools && !_isBusy);
+        ShowMatchCommand = new RelayCommand(() =>
+        {
+            if (_testMatch is { } spot) ShowSpot(spot);
+        }, () => _testMatch is not null && !_isBusy);
     }
 
+    /// <summary>
+    /// "When found" choices. Click / double / right-click / hold happen at the CENTER of what was found (plus the
+    /// offset), so a button that moves around the screen (a "Shake" button, a shop item) is still hit.
+    /// </summary>
     public static IReadOnlyList<Choice<FoundTextAction>> Actions { get; } = new[]
     {
-        new Choice<FoundTextAction>(FoundTextAction.None, "Just continue"),
-        new Choice<FoundTextAction>(FoundTextAction.Move, "Move the mouse to it"),
-        new Choice<FoundTextAction>(FoundTextAction.Click, "Click it"),
-        new Choice<FoundTextAction>(FoundTextAction.DoubleClick, "Double-click it"),
-        new Choice<FoundTextAction>(FoundTextAction.RightClick, "Right-click it"),
+        new Choice<FoundTextAction>(FoundTextAction.None, "Do nothing (just continue)"),
+        new Choice<FoundTextAction>(FoundTextAction.Click, "Click its center (left click)"),
+        new Choice<FoundTextAction>(FoundTextAction.DoubleClick, "Double-click its center"),
+        new Choice<FoundTextAction>(FoundTextAction.RightClick, "Right-click its center"),
+        new Choice<FoundTextAction>(FoundTextAction.Move, "Move the mouse to it (no click)"),
+        new Choice<FoundTextAction>(FoundTextAction.Hold, "Hold the left button on it for…"),
     };
 
     public static IReadOnlyList<Choice<TextNotFoundBehavior>> NotFoundOptions { get; } = new[]
     {
-        new Choice<TextNotFoundBehavior>(TextNotFoundBehavior.StopMacro, "Stop the macro (show an error)"),
+        new Choice<TextNotFoundBehavior>(TextNotFoundBehavior.Continue, "Continue to the next step"),
         new Choice<TextNotFoundBehavior>(TextNotFoundBehavior.SkipNextStep, "Skip the next step, then continue"),
-        new Choice<TextNotFoundBehavior>(TextNotFoundBehavior.Continue, "Ignore it and run the next step anyway"),
+        new Choice<TextNotFoundBehavior>(TextNotFoundBehavior.StopMacro, "Stop the macro (show an error)"),
     };
+
+    /// <summary>Moves the cursor to where the last "Test detection now" found the match, so you can see it.</summary>
+    public RelayCommand ShowMatchCommand { get; }
+
+    /// <summary>True when the last test found something (the "Show me" button is enabled).</summary>
+    public bool HasTestMatch => _testMatch is not null;
+
+    /// <summary>Whether the last test found it (null before any test). Conditions turn this into "true / false right now".</summary>
+    public bool? TestFound
+    {
+        get => _testFound;
+        private set => SetProperty(ref _testFound, value);
+    }
+
+    /// <summary>Moves the cursor with this step's own screen tools.</summary>
+    protected abstract void ShowSpot(ScreenPoint point);
+
+    /// <summary>Shows a test's text and remembers where it matched (null = not found).</summary>
+    protected void SetTestResult(string text, ScreenPoint? match, bool found)
+    {
+        TestResult = text;
+        _testMatch = match;
+        TestFound = found;
+        OnPropertyChanged(nameof(HasTestMatch));
+        System.Windows.Input.CommandManager.InvalidateRequerySuggested();
+    }
 
     public static IReadOnlyList<Choice<WaitGoal>> Goals { get; } = new[]
     {
@@ -753,6 +890,7 @@ public abstract class ScreenSearchStepViewModel : StepViewModel
             NotifyChanged();
             OnPropertyChanged(nameof(WaitsForAppear));
             OnPropertyChanged(nameof(HasPointerAction));
+            OnPropertyChanged(nameof(IsHoldAction));
             OnPropertyChanged(nameof(NotFoundLabel));
         }
     }
@@ -760,7 +898,7 @@ public abstract class ScreenSearchStepViewModel : StepViewModel
     /// <summary>The "when found" options only matter while waiting for something to appear.</summary>
     public bool WaitsForAppear => _search.Goal == WaitGoal.Appear;
 
-    public string NotFoundLabel => _search.Goal == WaitGoal.Appear ? "If it's not found in time" : "If it's still there when the time is up";
+    public string NotFoundLabel => _search.Goal == WaitGoal.Appear ? "When not found (time is up)" : "If it's still there when the time is up";
 
     public FoundTextAction Action
     {
@@ -771,10 +909,21 @@ public abstract class ScreenSearchStepViewModel : StepViewModel
             _search.Action = value;
             NotifyChanged();
             OnPropertyChanged(nameof(HasPointerAction));
+            OnPropertyChanged(nameof(IsHoldAction));
         }
     }
 
     public bool HasPointerAction => _search.Goal == WaitGoal.Appear && _search.Action != FoundTextAction.None;
+
+    /// <summary>Shows the hold time box for "hold the left button on it".</summary>
+    public bool IsHoldAction => _search.Goal == WaitGoal.Appear && _search.Action == FoundTextAction.Hold;
+
+    /// <summary>How long "hold the left button on it" holds, in ms.</summary>
+    public int ActionHoldMs
+    {
+        get => _search.ActionHoldMs;
+        set { if (_search.ActionHoldMs == value) return; _search.ActionHoldMs = value; NotifyChanged(); }
+    }
 
     public int OffsetX
     {
@@ -936,8 +1085,11 @@ public sealed class FindTextStepViewModel : ScreenSearchStepViewModel
     {
         if (_tools is null) return;
         TestResult = "Reading the screen…";
-        TestResult = await _tools.TestAsync(_step);
+        var text = await _tools.TestAsync(_step);
+        SetTestResult(text, _tools.LastTestMatch, _tools.LastTestMatch is not null);
     });
+
+    protected override void ShowSpot(ScreenPoint point) => _tools?.ShowSpot(point);
 }
 
 /// <summary>Editor for "Find image": capture the picture, choose where and how strictly to search, test it.</summary>
@@ -1063,8 +1215,11 @@ public sealed class FindImageStepViewModel : ScreenSearchStepViewModel
     {
         if (_tools is null) return;
         TestResult = "Looking at the screen…";
-        TestResult = await _tools.TestImageAsync(_step);
+        var text = await _tools.TestImageAsync(_step);
+        SetTestResult(text, _tools.LastTestMatch, _tools.LastTestMatch is not null);
     });
+
+    protected override void ShowSpot(ScreenPoint point) => _tools?.ShowSpot(point);
 
     private void RefreshPreview()
     {
@@ -1162,8 +1317,11 @@ public sealed class FindColorStepViewModel : ScreenSearchStepViewModel
     {
         if (_tools is null) return;
         TestResult = "Looking at the screen…";
-        TestResult = await _tools.TestColorAsync(_step);
+        var text = await _tools.TestColorAsync(_step);
+        SetTestResult(text, _tools.LastTestMatch, _tools.LastTestMatch is not null);
     });
+
+    protected override void ShowSpot(ScreenPoint point) => _tools?.ShowSpot(point);
 
     private Task TrackAsync() => RunBusyAsync(async () =>
     {

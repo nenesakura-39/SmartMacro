@@ -40,6 +40,15 @@ public enum MouseClickAction
     DoubleClick,
     Down,
     Up,
+
+    /// <summary>Press, keep the button down for <see cref="MouseClickStep.HoldMs"/>, release (casting meters, hold-to-buy).</summary>
+    Hold,
+
+    /// <summary>
+    /// Press at the start point, glide to (<see cref="MouseClickStep.EndX"/>, <see cref="MouseClickStep.EndY"/>) over
+    /// <see cref="MouseClickStep.DragDurationMs"/> with the button held, release there (sliders, dragging items).
+    /// </summary>
+    Drag,
 }
 
 public enum KeyAction
@@ -133,6 +142,19 @@ public sealed class MouseClickStep : MacroStep
     /// </summary>
     public int HoldMs { get; set; }
 
+    /// <summary>Drag only: where the drag ends (physical pixels, like X / Y).</summary>
+    public int EndX { get; set; }
+    public int EndY { get; set; }
+
+    /// <summary>Drag only: how long the glide from the start to the end takes, in ms (0 = jump straight there).</summary>
+    public int DragDurationMs { get; set; } = DefaultDragDurationMs;
+
+    /// <summary>Default glide time for a new Drag.</summary>
+    public const int DefaultDragDurationMs = 500;
+
+    /// <summary>Default hold time when the user switches a click to "Hold for a duration".</summary>
+    public const int DefaultHoldActionMs = 850;
+
     [JsonIgnore]
     public override StepKind Kind => StepKind.MouseClick;
 }
@@ -205,6 +227,9 @@ public enum FoundTextAction
     Click,
     DoubleClick,
     RightClick,
+
+    /// <summary>Hold the left button on it for <see cref="ScreenSearchStep.ActionHoldMs"/>, then release.</summary>
+    Hold,
 }
 
 /// <summary>What happens when a Find text / image / color step times out.</summary>
@@ -260,6 +285,11 @@ public abstract class ScreenSearchStep : MacroStep
     /// <summary>Offset from the center of what was found, for Move / Click.</summary>
     public int OffsetX { get; set; }
     public int OffsetY { get; set; }
+
+    /// <summary>For the "hold the left button on it" action: how long to hold, in ms.</summary>
+    public int ActionHoldMs { get; set; } = DefaultActionHoldMs;
+
+    public const int DefaultActionHoldMs = 500;
 
     public TextNotFoundBehavior WhenNotFound { get; set; } = TextNotFoundBehavior.StopMacro;
 

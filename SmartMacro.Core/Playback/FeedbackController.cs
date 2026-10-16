@@ -56,8 +56,12 @@ public sealed record FeedbackRules(
     double DeadBandPercent,
     TimeSpan MinInputChange,
     TimeSpan LostTimeout,
-    FeedbackLostAction WhenLost)
+    FeedbackLostAction WhenLost,
+    TimeSpan PulsePeriod = default)
 {
+    /// <summary>Pulse cycle used when none is set.</summary>
+    public static readonly TimeSpan DefaultPulsePeriod = TimeSpan.FromMilliseconds(FeedbackLoopStep.DefaultPulsePeriodMs);
+
     public static FeedbackRules From(FeedbackLoopStep step)
     {
         ArgumentNullException.ThrowIfNull(step);
@@ -65,7 +69,8 @@ public sealed record FeedbackRules(
             Math.Max(0, step.DeadBandPercent),
             TimeSpan.FromMilliseconds(Math.Max(0, step.MinInputChangeMs)),
             TimeSpan.FromMilliseconds(Math.Max(0, step.LostTimeoutMs)),
-            step.WhenTargetLost);
+            step.WhenTargetLost,
+            TimeSpan.FromMilliseconds(Math.Max(0, step.PulsePeriodMs)));
     }
 
     public FeedbackAction ActionFor(FeedbackRegion region) => region switch
@@ -142,6 +147,7 @@ public sealed class FeedbackController
             FeedbackAction.Hold when !IsHeld => FeedbackCommand.Press,
             FeedbackAction.Release when IsHeld => FeedbackCommand.Release,
             FeedbackAction.Tap when _tapPending => FeedbackCommand.Tap,
+            FeedbackAction.Pulse => PulseCommand(observation, now),
             _ => FeedbackCommand.None,
         };
 
@@ -166,6 +172,39 @@ public sealed class FeedbackController
 
         _lastChangeAt = now;
         return new FeedbackDecision(wanted, region);
+    }
+
+    /// <summary>
+    /// Proportional pulsing inside the zone: the share of each pulse cycle the input is held follows how far the marker
+    /// is toward the zone edge whose side holds (see <see cref="PulseDuty"/>).
+    /// </summary>
+    private FeedbackCommand PulseCommand(FeedbackObservation observation, TimeSpan now)
+    {
+        var duty = PulseDuty(observation.MarkerPercent!.Value, observation.ZoneStartPercent, observation.ZoneEndPercent,
+            _rules.WhenBefore, _rules.WhenAfter);
+        var period = _rules.PulsePeriod > TimeSpan.Zero ? _rules.PulsePeriod : FeedbackRules.DefaultPulsePeriod;
+        var phase = (now.Ticks % period.Ticks) / (double)period.Ticks;
+        var wantHeld = phase < duty;
+        if (wantHeld && !IsHeld) return FeedbackCommand.Press;
+        if (!wantHeld && IsHeld) return FeedbackCommand.Release;
+        return FeedbackCommand.None;
+    }
+
+    /// <summary>
+    /// How much of a pulse cycle to hold (0-1) for a marker inside the zone. 0 at the edge facing the "release" side,
+    /// 1 at the edge facing the "hold" side, in between proportionally; values close to 0 / 1 snap to 0 / 1 so the
+    /// input isn't flicked for nothing. When neither or both sides hold, it's 0.5.
+    /// </summary>
+    public static double PulseDuty(double position, double zoneStart, double zoneEnd, FeedbackAction whenBefore, FeedbackAction whenAfter)
+    {
+        var width = zoneEnd - zoneStart;
+        var towardAfter = width <= 0 ? 0.5 : Math.Clamp((position - zoneStart) / width, 0, 1);
+        var afterHolds = whenAfter == FeedbackAction.Hold;
+        var beforeHolds = whenBefore == FeedbackAction.Hold;
+        var duty = afterHolds == beforeHolds ? 0.5 : afterHolds ? towardAfter : 1 - towardAfter;
+        if (duty < 0.15) return 0;
+        if (duty > 0.85) return 1;
+        return duty;
     }
 
     private FeedbackDecision Untrusted(TimeSpan now)

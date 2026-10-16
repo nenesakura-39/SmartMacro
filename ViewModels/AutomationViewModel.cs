@@ -343,6 +343,7 @@ public sealed class AutomationViewModel : ObservableObject, IDisposable
             KeepHoldTime = _hooks.Settings().KeepTapHoldTime,
             TrimTrailingKeys = _hooks.Settings().RecordHotkey.AllKeys(),
             SimplifyMousePath = true, // a few meaningful Move steps instead of one every 30 ms
+            CollapseMousePaths = _hooks.Settings().SimplifyMousePaths, // clicks / drags only, no hover paths
         };
         var steps = RecordingConverter.Convert(raw, options);
 
@@ -415,6 +416,7 @@ public sealed class AutomationViewModel : ObservableObject, IDisposable
             TrimTrailingKeys = settings.RecordHotkey.AllKeys(),
             RecordMouseMoves = settings.RecordMouseMovement,
             KeepHoldTime = settings.KeepTapHoldTime,
+            CollapseMousePaths = settings.SimplifyMousePaths,
             StartX = _smartRecorder.StartX,
             StartY = _smartRecorder.StartY,
         };

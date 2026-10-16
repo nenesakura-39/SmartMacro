@@ -780,10 +780,10 @@ public class VisionValidationAndFileTests
     [Fact]
     public void Describes_visual_steps()
     {
-        Assert.Equal("Wait up to 10 s for image (20×16) on screen", StepDescriber.Describe(ValidImageStep()));
-        Assert.Equal("Look for image (not captured yet) on screen", StepDescriber.Describe(new FindImageStep { TimeoutMs = 0 }));
+        Assert.Equal("Find image (20×16) on screen → Continue when found (wait up to 10 s)", StepDescriber.Describe(ValidImageStep()));
+        Assert.Equal("Find image (not captured yet) on screen → Continue when found (look once)", StepDescriber.Describe(new FindImageStep { TimeoutMs = 0 }));
         Assert.Equal("Wait up to 2 s until \"Loading\" is gone on screen",
             StepDescriber.Describe(new FindTextStep { Text = "Loading", Goal = WaitGoal.Disappear, TimeoutMs = 2000 }));
-        Assert.StartsWith("Wait up to 10 s for color #FF0000", StepDescriber.Describe(new FindColorStep()));
+        Assert.StartsWith("Find color #FF0000", StepDescriber.Describe(new FindColorStep()));
     }
 }

@@ -88,6 +88,20 @@ public sealed class IfStep : MacroStep
 {
     public Condition Condition { get; set; } = Condition.Create(ConditionKind.TextVisible);
 
+    /// <summary>
+    /// Optional "when true" action: when the condition is true because it SAW its text / image / colour (not a negated
+    /// condition), move to / click / hold on that spot before the steps inside run. Saves a separate Mouse click step
+    /// with "the last found spot". None (default) = only decide which steps run, like before.
+    /// </summary>
+    public FoundTextAction ThenAction { get; set; } = FoundTextAction.None;
+
+    /// <summary>Offset from the center of what the condition saw, for <see cref="ThenAction"/>.</summary>
+    public int ThenOffsetX { get; set; }
+    public int ThenOffsetY { get; set; }
+
+    /// <summary>Hold time for <see cref="FoundTextAction.Hold"/>, in ms.</summary>
+    public int ThenHoldMs { get; set; } = ScreenSearchStep.DefaultActionHoldMs;
+
     [JsonIgnore]
     public override StepKind Kind => StepKind.If;
 }

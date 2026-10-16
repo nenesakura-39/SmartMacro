@@ -80,6 +80,15 @@ public sealed class RecordingOptions
     /// </summary>
     public bool SimplifyMousePath { get; init; }
 
+    /// <summary>
+    /// "Simplify mouse paths": cursor movement while no mouse button is held is not kept as Move steps at all. A click
+    /// or wheel step already stores where it happens, so wandering to a button and clicking it becomes just
+    /// Delay + Click. Only where the cursor ends up before a key press (hovering over something, then pressing a key)
+    /// is kept, as ONE Move step. Movement while a button is held (dragging a slider or an item) is always kept.
+    /// Off by default here; the app turns it on from Settings ("Simplify mouse paths", on by default).
+    /// </summary>
+    public bool CollapseMousePaths { get; init; }
+
     /// <summary>How far (pixels) the simplified path may stray from the recorded one.</summary>
     public int PathTolerancePx { get; init; } = 3;
 
@@ -113,6 +122,7 @@ public static class RecordingConverter
         TrimTrailing(events, options.TrimTrailingKeys);
         var simplified = options.SimplifyMousePath && options.RecordMouseMoves;
         if (simplified) events = MousePathSimplifier.Simplify(events, options.PathTolerancePx, options.RestMs);
+        if (options.CollapseMousePaths && options.RecordMouseMoves) events = CollapseFreeMoves(events);
 
         var steps = new List<MacroStep>();
         var consumed = new bool[events.Count];
@@ -294,6 +304,40 @@ public static class RecordingConverter
             steps.Add(new MouseClickStep { Button = button, Action = MouseClickAction.Up, UseCurrentPosition = true });
 
         return steps;
+    }
+
+    /// <summary>
+    /// Drops cursor movement made while no mouse button is held, except the last position before a key event (the spot
+    /// the cursor hovered on while a key was pressed). Clicks and wheel turns carry their own position, so nothing is
+    /// lost for them. Movement while a button is held (drags) is untouched. Times of the remaining events don't change,
+    /// so the dropped time simply becomes part of the next Delay step.
+    /// </summary>
+    internal static List<RawInputEvent> CollapseFreeMoves(List<RawInputEvent> events)
+    {
+        var result = new List<RawInputEvent>(events.Count);
+        var held = new HashSet<MacroMouseButton>();
+        var i = 0;
+        while (i < events.Count)
+        {
+            var e = events[i];
+            if (e.Kind != RawInputKind.MouseMove || held.Count > 0)
+            {
+                if (e.Kind == RawInputKind.MouseDown) held.Add(e.Button);
+                else if (e.Kind == RawInputKind.MouseUp) held.Remove(e.Button);
+                result.Add(e);
+                i++;
+                continue;
+            }
+
+            // A stretch of free cursor movement: keep at most its last point, and only if a key event comes next.
+            var last = i;
+            while (last + 1 < events.Count && events[last + 1].Kind == RawInputKind.MouseMove) last++;
+            var next = last + 1 < events.Count ? events[last + 1].Kind : (RawInputKind?)null;
+            if (next is RawInputKind.KeyDown or RawInputKind.KeyUp) result.Add(events[last]);
+            i = last + 1;
+        }
+
+        return result;
     }
 
     /// <summary>

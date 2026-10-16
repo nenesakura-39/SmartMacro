@@ -82,6 +82,9 @@
                                   IsEnabled="{Binding MakesEditableSteps}" />
                         <CheckBox Content="Keep how long each key / click was held (editable steps)" IsChecked="{Binding KeepTapHoldTime}" Margin="0,10,0,0"
                                   IsEnabled="{Binding MakesEditableSteps}" />
+                        <CheckBox Content="Simplify mouse paths (recommended for menus and shops)" IsChecked="{Binding SimplifyMousePaths}" Margin="0,10,0,0"
+                                  IsEnabled="{Binding MakesEditableSteps}" AutomationProperties.Name="Simplify mouse paths"
+                                  ToolTip="Cursor travel between clicks isn't turned into Move mouse steps: each click already remembers where it happens. Recording 5 shop clicks gives 5 Click + Delay steps. Dragging with a button held (sliders, items) and the spot you hover before pressing a key are still kept. Turn off to keep the whole path." />
                     </StackPanel>
                 </Border>
 

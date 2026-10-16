@@ -32,7 +32,7 @@ public static class StepDescriber
             ? $"Wait {d.DurationMs / 1000.0:0.###} s"
             : $"Wait {d.DurationMs} ms",
         MouseMoveStep m => $"Move to ({m.X}, {m.Y})",
-        MouseClickStep c => $"{ClickVerb(c.Action)} {c.Button.ToString().ToLowerInvariant()} button {(c.UseLastFoundText ? "at the last found spot" : Where(c.UseCurrentPosition, c.X, c.Y))}{Hold(c.Action == MouseClickAction.Click, c.HoldMs)}",
+        MouseClickStep c => DescribeClick(c),
         MouseScrollStep s => $"Scroll {ScrollDirection(s)} {Notches(s.Delta)} {Where(s.UseCurrentPosition, s.X, s.Y)}",
         KeyPressStep k => $"{KeyVerb(k.Action)} {KeyCombo(k)}{Hold(k.Action == KeyAction.Press, k.HoldMs)}",
         TypeTextStep t => $"Type \"{Preview(t.Text)}\"",
@@ -40,7 +40,7 @@ public static class StepDescriber
         FindImageStep i => DescribeSearch(i, i.TemplateWidth > 0 ? $"image ({i.TemplateWidth}×{i.TemplateHeight})" : "image (not captured yet)"),
         FindColorStep c => DescribeSearch(c, $"color {c.Color} (±{c.Tolerance})"),
         InputSequenceStep q => DescribeSequence(q),
-        IfStep i => $"If {DescribeCondition(i.Condition)}",
+        IfStep i => $"If {DescribeCondition(i.Condition)}{ThenText(i)}",
         ElseStep => "Otherwise (when the If's condition is false)",
         EndIfStep => "End of the If block",
         RepeatStep r => DescribeRepeat(r),
@@ -48,6 +48,40 @@ public static class StepDescriber
         FeedbackLoopStep f => DescribeFeedback(f),
         _ => step.GetType().Name,
     };
+
+    private static string DescribeClick(MouseClickStep c)
+    {
+        var button = $"{c.Button.ToString().ToLowerInvariant()} button";
+        var where = c.UseLastFoundText ? "at the last found spot" : Where(c.UseCurrentPosition, c.X, c.Y);
+        return c.Action switch
+        {
+            MouseClickAction.Hold => $"Hold {button} for {c.HoldMs} ms {where}",
+            MouseClickAction.Drag => $"Drag {button} from {(c.UseLastFoundText ? "the last found spot" : c.UseCurrentPosition ? "the cursor" : $"({c.X}, {c.Y})")} to ({c.EndX}, {c.EndY}) over {c.DragDurationMs / 1000.0:0.##} s",
+            _ => $"{ClickVerb(c.Action)} {button} {where}{Hold(c.Action == MouseClickAction.Click, c.HoldMs)}",
+        };
+    }
+
+    /// <summary>E.g. " → click it" for an If with a "when true" action (empty without one).</summary>
+    private static string ThenText(IfStep i)
+    {
+        if (i.ThenAction == FoundTextAction.None) return "";
+        return $" → {FoundActionText(i.ThenAction, i.ThenOffsetX, i.ThenOffsetY, i.ThenHoldMs)} when true";
+    }
+
+    /// <summary>E.g. "Click center", "Hold left button 500 ms on it", "Click center (+10, -5)".</summary>
+    public static string FoundActionText(FoundTextAction action, int offsetX, int offsetY, int holdMs)
+    {
+        var offset = offsetX != 0 || offsetY != 0 ? $" ({offsetX:+0;-0;0}, {offsetY:+0;-0;0})" : "";
+        return action switch
+        {
+            FoundTextAction.Move => $"Move to center{offset}",
+            FoundTextAction.Click => $"Click center{offset}",
+            FoundTextAction.DoubleClick => $"Double-click center{offset}",
+            FoundTextAction.RightClick => $"Right-click center{offset}",
+            FoundTextAction.Hold => $"Hold left button {holdMs} ms on center{offset}",
+            _ => "Continue",
+        };
+    }
 
     /// <summary>E.g. "\"OK\" is on screen", "the image (40×30) is not in area (…)", plus the wait time if any.</summary>
     public static string DescribeCondition(Condition? condition)
@@ -84,9 +118,16 @@ public static class StepDescriber
         var what = rules.Count == 0 ? "no rules" : string.Join(", ", rules);
 
         var stops = new List<string> { $"max {f.MaxRuntimeMs / 1000.0:0.#} s" };
+        if (f.FinishWhenInZone) stops.Add("ends when it reaches the zone");
         if (f.CompleteWhen is not null) stops.Add("until done");
         if (f.FailWhen is not null) stops.Add("fail check");
-        return $"Keep marker {f.MarkerColor} in {zone}: {what} ({input}; {string.Join(", ", stops)})";
+        var details = $"{what} ({input}; {string.Join(", ", stops)})";
+        return f.Preset switch
+        {
+            FeedbackPreset.FollowTargetBar => $"Follow target {f.MarkerColor} with bar {f.ZoneColor}: {details}",
+            FeedbackPreset.ClickWhenInZone => $"{(f.WhenInsideZone == FeedbackAction.Release ? "Release" : "Click")} when marker {f.MarkerColor} enters {zone}: {details}",
+            _ => $"Keep marker {f.MarkerColor} in {zone}: {details}",
+        };
     }
 
     private static void AddRule(List<string> rules, FeedbackAction action, string where)
@@ -96,6 +137,7 @@ public static class StepDescriber
             FeedbackAction.Hold => "hold",
             FeedbackAction.Release => "release",
             FeedbackAction.Tap => "tap",
+            FeedbackAction.Pulse => "pulse",
             _ => null,
         };
         if (verb is not null) rules.Add($"{verb} {where}");
@@ -205,16 +247,15 @@ public static class StepDescriber
         if (f.Goal == WaitGoal.Disappear)
             return f.TimeoutMs > 0 ? $"Wait up to {seconds} until {what} is gone {where}" : $"Check that {what} is not {where}";
 
-        var verb = f.TimeoutMs > 0 ? $"Wait up to {seconds} for" : "Look for";
-        var then = f.Action switch
+        // E.g. "Find image (121×134) on screen → Click center when found (wait up to 10 s)".
+        var wait = f.TimeoutMs > 0 ? $"wait up to {seconds}" : "look once";
+        var notFound = f.WhenNotFound switch
         {
-            FoundTextAction.Move => ", then move to it",
-            FoundTextAction.Click => ", then click it",
-            FoundTextAction.DoubleClick => ", then double-click it",
-            FoundTextAction.RightClick => ", then right-click it",
+            TextNotFoundBehavior.SkipNextStep => "; if not found: skip next step",
+            TextNotFoundBehavior.Continue => "; if not found: continue",
             _ => "",
         };
-        return $"{verb} {what} {where}{then}";
+        return $"Find {what} {where} → {FoundActionText(f.Action, f.OffsetX, f.OffsetY, f.ActionHoldMs)} when found ({wait}{notFound})";
     }
 
     private static string ClickVerb(MouseClickAction action) => action switch

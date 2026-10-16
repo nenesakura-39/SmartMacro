@@ -267,7 +267,24 @@ public static class MacroValidator
                     issues.Add(Error("Unknown click action.", nameof(MouseClickStep.Action)));
                 if (!c.UseCurrentPosition && !c.UseLastFoundText)
                     CheckPosition(issues, c.X, c.Y, screen);
-                CheckHold(issues, c.HoldMs, c.Action == MouseClickAction.Click, nameof(MouseClickStep.HoldMs), "Click");
+                if (c.Action == MouseClickAction.Hold)
+                {
+                    if (c.HoldMs < 1 || c.HoldMs > MaxHoldMs)
+                        issues.Add(Error($"Set how long to hold the button: 1 to {MaxHoldMs:N0} ms.", nameof(MouseClickStep.HoldMs)));
+                }
+                else
+                {
+                    CheckHold(issues, c.HoldMs, c.Action == MouseClickAction.Click, nameof(MouseClickStep.HoldMs), "Click");
+                }
+
+                if (c.Action == MouseClickAction.Drag)
+                {
+                    CheckPosition(issues, c.EndX, c.EndY, screen, "End position", "EndPosition");
+                    if (c.DragDurationMs < 0 || c.DragDurationMs > MaxHoldMs)
+                        issues.Add(Error($"The drag time must be 0 to {MaxHoldMs:N0} ms.", nameof(MouseClickStep.DragDurationMs)));
+                    if (!c.UseCurrentPosition && !c.UseLastFoundText && c.X == c.EndX && c.Y == c.EndY)
+                        issues.Add(Warning("The drag starts and ends at the same spot, so nothing is dragged. Pick an end position.", "EndPosition"));
+                }
                 break;
 
             case MouseScrollStep s:
@@ -336,6 +353,17 @@ public static class MacroValidator
 
             case IfStep ifStep:
                 ValidateCondition(issues, ifStep.Condition, screen);
+                if (!Enum.IsDefined(ifStep.ThenAction))
+                    issues.Add(Error("This If step has an unknown \"when true\" action. The macro may be damaged.", nameof(IfStep.ThenAction)));
+                else if (ifStep.ThenAction != FoundTextAction.None)
+                {
+                    if (Math.Abs((long)ifStep.ThenOffsetX) > MaxOffset || Math.Abs((long)ifStep.ThenOffsetY) > MaxOffset)
+                        issues.Add(Error($"Offsets must be between -{MaxOffset} and {MaxOffset} pixels.", "ThenOffset"));
+                    if (ifStep.ThenAction == FoundTextAction.Hold && (ifStep.ThenHoldMs < 1 || ifStep.ThenHoldMs > MaxHoldMs))
+                        issues.Add(Error($"The hold time must be 1 to {MaxHoldMs:N0} ms.", nameof(IfStep.ThenHoldMs)));
+                    if (ifStep.Condition is { Negate: true })
+                        issues.Add(Warning("With \"is NOT on screen\" the condition is true when nothing is found, so there's nothing to click: the \"when true\" action never runs.", nameof(IfStep.ThenAction)));
+                }
                 break;
 
             case ElseStep or EndIfStep or EndRepeatStep:
@@ -440,7 +468,8 @@ public static class MacroValidator
     {
         if (!Enum.IsDefined(f.Orientation) || !Enum.IsDefined(f.ZoneMode) || !Enum.IsDefined(f.InputKind)
             || !Enum.IsDefined(f.WhenBeforeZone) || !Enum.IsDefined(f.WhenInsideZone) || !Enum.IsDefined(f.WhenAfterZone)
-            || !Enum.IsDefined(f.WhenTargetLost) || !Enum.IsDefined(f.WhenTimeUp) || !Enum.IsDefined(f.WhenFailed))
+            || !Enum.IsDefined(f.WhenTargetLost) || !Enum.IsDefined(f.WhenTimeUp) || !Enum.IsDefined(f.WhenFailed)
+            || !Enum.IsDefined(f.Preset))
         {
             issues.Add(Error("This Feedback loop step has an unknown option value. The macro may be damaged."));
             return;
@@ -495,7 +524,13 @@ public static class MacroValidator
         if (f.DeadBandPercent < 0 || f.DeadBandPercent > MaxDeadBandPercent)
             issues.Add(Error($"The dead band must be 0 to {MaxDeadBandPercent} %.", nameof(FeedbackLoopStep.DeadBandPercent)));
         var actions = new[] { f.WhenBeforeZone, f.WhenInsideZone, f.WhenAfterZone };
-        if (!actions.Any(a => a is FeedbackAction.Hold or FeedbackAction.Tap))
+        if (f.WhenBeforeZone == FeedbackAction.Pulse || f.WhenAfterZone == FeedbackAction.Pulse)
+            issues.Add(Error("\"Pulse\" only works while the marker is INSIDE the zone. Use Hold or Release before / after it.", "Rules"));
+        if (f.WhenInsideZone == FeedbackAction.Pulse && (f.PulsePeriodMs < 50 || f.PulsePeriodMs > MaxInputChangeMs))
+            issues.Add(Error($"The pulse cycle must be 50 to {MaxInputChangeMs:N0} ms.", nameof(FeedbackLoopStep.PulsePeriodMs)));
+        if (f.FinishWhenInZone && f.WhenInsideZone is not (FeedbackAction.Tap or FeedbackAction.Release))
+            issues.Add(Error("\"Finish when the marker reaches the zone\" needs the INSIDE rule to be Tap (click) or Release.", nameof(FeedbackLoopStep.FinishWhenInZone)));
+        if (!actions.Any(a => a is FeedbackAction.Hold or FeedbackAction.Tap or FeedbackAction.Pulse))
             issues.Add(Error("None of the rules presses anything. Set at least one place to \"Hold\" or \"Tap\".", "Rules"));
         else if (actions.Contains(FeedbackAction.Hold) && !actions.Contains(FeedbackAction.Release) && !actions.Contains(FeedbackAction.Tap))
             issues.Add(Warning("A rule holds the input but no rule releases it, so it stays held until the loop ends.", "Rules"));
@@ -732,6 +767,8 @@ public static class MacroValidator
             issues.Add(Error("This step has an unknown option value."));
         else if (f.Goal == WaitGoal.Disappear && f.Action != FoundTextAction.None)
             issues.Add(Warning("The \"when found\" action isn't used while waiting for something to disappear.", nameof(ScreenSearchStep.Action)));
+        else if (f.Action == FoundTextAction.Hold && (f.ActionHoldMs < 1 || f.ActionHoldMs > MaxHoldMs))
+            issues.Add(Error($"The hold time must be 1 to {MaxHoldMs:N0} ms.", nameof(ScreenSearchStep.ActionHoldMs)));
     }
 
     /// <summary>The stored picture must exist, decode to its stated size, and not be one flat color.</summary>
@@ -771,12 +808,13 @@ public static class MacroValidator
     /// A fixed mouse position: far outside any possible screen is an error (a typo or damaged file); outside the current
     /// monitors is only a warning, because the macro may have been made with another monitor layout.
     /// </summary>
-    private static void CheckPosition(List<ValidationIssue> issues, int x, int y, ScreenBounds? screen)
+    private static void CheckPosition(List<ValidationIssue> issues, int x, int y, ScreenBounds? screen,
+        string label = "Position", string property = "Position")
     {
         if (Math.Abs((long)x) > MaxScreenCoordinate || Math.Abs((long)y) > MaxScreenCoordinate)
-            issues.Add(Error($"Position ({x}, {y}) is far outside any screen (X and Y must be between -{MaxScreenCoordinate:N0} and {MaxScreenCoordinate:N0}). Use \"Pick position\" to choose a spot on your screen.", "Position"));
+            issues.Add(Error($"{label} ({x}, {y}) is far outside any screen (X and Y must be between -{MaxScreenCoordinate:N0} and {MaxScreenCoordinate:N0}). Use \"Pick position\" to choose a spot on your screen.", property));
         else if (screen is not null && !screen.Contains(x, y))
-            issues.Add(Warning($"Position ({x}, {y}) is outside your current screen area ({screen}). Use \"Pick position\" to choose a spot on your screen.", "Position"));
+            issues.Add(Warning($"{label} ({x}, {y}) is outside your current screen area ({screen}). Use \"Pick position\" to choose a spot on your screen.", property));
     }
 
     private static ValidationIssue Error(string message, string? property = null) =>

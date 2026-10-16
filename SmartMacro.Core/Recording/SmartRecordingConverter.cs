@@ -50,6 +50,12 @@ public sealed class SmartRecordingOptions
     /// </summary>
     public bool SimplifyMousePath { get; init; } = true;
 
+    /// <summary>
+    /// Editable parts: drop cursor movement while no button is held, so clicks become just Delay + Click (see
+    /// <see cref="RecordingOptions.CollapseMousePaths"/>). Off by default here; the app sets it from Settings.
+    /// </summary>
+    public bool CollapseMousePaths { get; init; }
+
     public int StartX { get; init; }
 
     public int StartY { get; init; }
@@ -409,6 +415,7 @@ public static class SmartRecordingConverter
             RecordMouseMoves = options.RecordMouseMoves,
             KeepHoldTime = options.KeepHoldTime,
             SimplifyMousePath = options.SimplifyMousePath,
+            CollapseMousePaths = options.CollapseMousePaths,
         });
         if (steps.Count == 0) return false;
 

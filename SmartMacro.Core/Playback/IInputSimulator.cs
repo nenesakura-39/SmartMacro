@@ -38,6 +38,17 @@ public interface IInputSimulator
     /// Types one character (or one surrogate pair). "\n" means Enter and "\t" means Tab.
     /// </summary>
     void TypeCharacters(string text);
+
+    /// <summary>
+    /// Where the cursor is right now (physical pixels), if the simulator can tell. Used by a Drag that starts "where
+    /// the cursor already is" to glide from there. The default says "unknown" (the drag then jumps to its end).
+    /// </summary>
+    bool TryGetCursorPosition(out int x, out int y)
+    {
+        x = 0;
+        y = 0;
+        return false;
+    }
 }
 
 /// <summary>Thrown by an input simulator when Windows refuses the input.</summary>

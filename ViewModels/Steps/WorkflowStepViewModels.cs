@@ -25,6 +25,7 @@ public sealed record ScreenTools(IFindTextTools? Text, IVisionTools? Vision)
                 break;
             case MouseClickStepViewModel click:
                 click.PositionPicker.Tools = Vision;
+                click.EndPoint.PositionPicker.Tools = Vision;
                 break;
             case MouseScrollStepViewModel scroll:
                 scroll.PositionPicker.Tools = Vision;
@@ -130,9 +131,17 @@ public sealed class ConditionViewModel : ObservableObject
             _condition.Negate = value;
             OnPropertyChanged();
             OnPropertyChanged(nameof(TestHint));
+            OnPropertyChanged(nameof(TestVerdict));
             _changed();
         }
     }
+
+    /// <summary>After "Test detection now": what the whole condition (with "is" / "is NOT") answers right now.</summary>
+    public string? TestVerdict => _checkEditor?.TestFound is not { } found
+        ? null
+        : (found != _condition.Negate)
+            ? $"Right now this condition is TRUE ({(found ? "it was found" : "it was not found")})."
+            : $"Right now this condition is FALSE ({(found ? "it was found" : "it was not found")}).";
 
     /// <summary>The Find text / image / color editor for the search settings (null if the condition is damaged).</summary>
     public ScreenSearchStepViewModel? CheckEditor
@@ -144,12 +153,16 @@ public sealed class ConditionViewModel : ObservableObject
     public bool IsDamaged => _checkEditor is null;
 
     public string TestHint => _condition.Negate
-        ? "\"Test now\" shows whether it's found. With \"is NOT on screen\" the condition is true when it is NOT found."
-        : "\"Test now\" shows whether it's found. The condition is true when it is found.";
+        ? "\"Test detection now\" shows whether it's found. With \"is NOT on screen\" the condition is true when it is NOT found."
+        : "\"Test detection now\" shows whether it's found. The condition is true when it is found.";
 
     private void RebuildCheckEditor()
     {
-        if (_checkEditor is not null) _checkEditor.Modified -= OnCheckModified;
+        if (_checkEditor is not null)
+        {
+            _checkEditor.Modified -= OnCheckModified;
+            _checkEditor.PropertyChanged -= OnCheckPropertyChanged;
+        }
 
         ScreenSearchStepViewModel? editor = null;
         if (_condition.Search is { } search && StepViewModel.Create(search) is ScreenSearchStepViewModel created)
@@ -158,25 +171,82 @@ public sealed class ConditionViewModel : ObservableObject
             editor.IsStandalone = false;
             _tools.ApplyTo(editor);
             editor.Modified += OnCheckModified;
+            editor.PropertyChanged += OnCheckPropertyChanged;
         }
 
         CheckEditor = editor;
         OnPropertyChanged(nameof(IsDamaged));
+        OnPropertyChanged(nameof(TestVerdict));
     }
 
     private void OnCheckModified(object? sender, EventArgs e) => _changed();
+
+    private void OnCheckPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(ScreenSearchStepViewModel.TestFound)) OnPropertyChanged(nameof(TestVerdict));
+    }
 }
 
-/// <summary>Editor for an If step: just its condition.</summary>
+/// <summary>Editor for an If step: its condition and the optional "when true" action on what it saw.</summary>
 public sealed class IfStepViewModel : StepViewModel
 {
+    private readonly IfStep _step;
+
     public IfStepViewModel(IfStep step) : base(step)
     {
+        _step = step;
         if (step.Condition is null) step.Condition = new MacroCondition(); // a damaged file may have no condition; the validator reports it
-        Condition = new ConditionViewModel(step.Condition, () => NotifyChanged(nameof(Condition)));
+        Condition = new ConditionViewModel(step.Condition, () =>
+        {
+            NotifyChanged(nameof(Condition));
+            OnPropertyChanged(nameof(ThenActionHint));
+        });
     }
 
     public ConditionViewModel Condition { get; }
+
+    /// <summary>The same choices as a Find step's "when found".</summary>
+    public static IReadOnlyList<Choice<FoundTextAction>> ThenActions => ScreenSearchStepViewModel.Actions;
+
+    public FoundTextAction ThenAction
+    {
+        get => _step.ThenAction;
+        set
+        {
+            if (_step.ThenAction == value) return;
+            _step.ThenAction = value;
+            NotifyChanged();
+            OnPropertyChanged(nameof(HasThenAction));
+            OnPropertyChanged(nameof(IsThenHold));
+            OnPropertyChanged(nameof(ThenActionHint));
+        }
+    }
+
+    public bool HasThenAction => _step.ThenAction != FoundTextAction.None;
+
+    public bool IsThenHold => _step.ThenAction == FoundTextAction.Hold;
+
+    public int ThenOffsetX
+    {
+        get => _step.ThenOffsetX;
+        set { if (_step.ThenOffsetX == value) return; _step.ThenOffsetX = value; NotifyChanged(); }
+    }
+
+    public int ThenOffsetY
+    {
+        get => _step.ThenOffsetY;
+        set { if (_step.ThenOffsetY == value) return; _step.ThenOffsetY = value; NotifyChanged(); }
+    }
+
+    public int ThenHoldMs
+    {
+        get => _step.ThenHoldMs;
+        set { if (_step.ThenHoldMs == value) return; _step.ThenHoldMs = value; NotifyChanged(); }
+    }
+
+    public string ThenActionHint => _step.Condition is { Negate: true } && HasThenAction
+        ? "This only works with \"is on screen\": with \"is NOT on screen\" nothing is found, so there's nothing to click."
+        : "When the condition sees its text / image / color, this happens at its center (plus the offset) before the steps inside the If run. Works even when it shows up at a different spot every time.";
 
     public ScreenTools Tools
     {
@@ -200,9 +270,9 @@ public sealed class RepeatStepViewModel : StepViewModel
 
     public static IReadOnlyList<Choice<RepeatMode>> Modes { get; } = new[]
     {
-        new Choice<RepeatMode>(RepeatMode.Times, "A number of times"),
-        new Choice<RepeatMode>(RepeatMode.While, "While a condition is true"),
-        new Choice<RepeatMode>(RepeatMode.Until, "Until a condition becomes true"),
+        new Choice<RepeatMode>(RepeatMode.Times, "A fixed number of times"),
+        new Choice<RepeatMode>(RepeatMode.While, "While a condition is true (e.g. while a button is on screen)"),
+        new Choice<RepeatMode>(RepeatMode.Until, "Until a condition becomes true (e.g. until the next screen appears)"),
     };
 
     public static IReadOnlyList<Choice<LoopLimitBehavior>> LimitOptions { get; } = new[]

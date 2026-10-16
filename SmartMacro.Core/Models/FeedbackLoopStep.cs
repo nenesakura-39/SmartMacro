@@ -50,6 +50,34 @@ public enum FeedbackAction
 
     /// <summary>One short press when the marker moves into this region (not again until it leaves and comes back).</summary>
     Tap,
+
+    /// <summary>
+    /// Inside the zone only: proportional pulsing. The key / button is held for part of every
+    /// <see cref="FeedbackLoopStep.PulsePeriodMs"/>: almost always near the zone's far edge (after / below side),
+    /// almost never near its near edge, half the time in the middle. Keeps a "follow the target" bar steady instead
+    /// of bouncing between full hold and full release.
+    /// </summary>
+    Pulse,
+}
+
+/// <summary>A ready-made set of feedback loop settings, so beginners only pick the area and the colours.</summary>
+public enum FeedbackPreset
+{
+    /// <summary>Every setting is shown and set by hand (also all loops made before presets existed).</summary>
+    Custom,
+
+    /// <summary>
+    /// Follow the target (fishing / reeling minigames): the zone is the bar you control (found by its colour), the marker
+    /// is the target it must stay on. Hold when the target is ahead of the bar (right / above), release when it's behind,
+    /// pulse proportionally while it's inside the bar.
+    /// </summary>
+    FollowTargetBar,
+
+    /// <summary>
+    /// Click when the marker enters the zone (timing bars, skill checks, casting meters): wait for the moving marker to
+    /// reach the zone, then click (or release the held button) once and end the loop.
+    /// </summary>
+    ClickWhenInZone,
 }
 
 /// <summary>Which kind of input the loop controls.</summary>
@@ -84,6 +112,10 @@ public enum FeedbackLostAction
 /// </summary>
 public sealed class FeedbackLoopStep : MacroStep
 {
+    /// <summary>Which preset the editor shows (Custom = all settings). Only the editor uses it; playback reads the settings below.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public FeedbackPreset Preset { get; set; } = FeedbackPreset.Custom;
+
     // ---------------- Observe ----------------
 
     /// <summary>The bar area to watch (physical screen pixels). Keep it tight around the bar.</summary>
@@ -136,6 +168,18 @@ public sealed class FeedbackLoopStep : MacroStep
     /// as having crossed. Stops rapid on/off flicker when the marker sits right on an edge. 0 = off.
     /// </summary>
     public int DeadBandPercent { get; set; } = 2;
+
+    /// <summary>Length of one pulse cycle for the <see cref="FeedbackAction.Pulse"/> rule, in ms.</summary>
+    public int PulsePeriodMs { get; set; } = DefaultPulsePeriodMs;
+
+    public const int DefaultPulsePeriodMs = 200;
+
+    /// <summary>
+    /// End the loop (successfully) as soon as the marker is inside the zone, right after doing the "inside" rule once
+    /// (Tap = click, Release = let go of the held input). For timing bars and casting meters.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public bool FinishWhenInZone { get; set; }
 
     // ---------------- Act ----------------
 

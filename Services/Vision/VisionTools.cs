@@ -70,6 +70,18 @@ public interface IVisionTools
     /// </summary>
     Task<string> PreviewFeedbackAsync(FeedbackLoopStep step, TimeSpan duration);
 
+    /// <summary>
+    /// Feedback loop "Test detection now": captures the bar once, finds the marker and the zone, and says where the
+    /// marker is compared with the zone and what the loop would do right now (no input is sent).
+    /// </summary>
+    Task<string> TestFeedbackOnceAsync(FeedbackLoopStep step);
+
+    /// <summary>Where the most recent test found its match (null when it found nothing).</summary>
+    ScreenPoint? LastTestMatch { get; }
+
+    /// <summary>Moves the mouse cursor to a spot so the user can see where a match is (nothing is clicked).</summary>
+    void ShowSpot(ScreenPoint point);
+
     /// <summary>Turns a picture into something WPF can show (frozen, so any thread may use it).</summary>
     ImageSource ToImageSource(BgraImage image);
 }
@@ -93,6 +105,11 @@ public sealed class VisionTools : IVisionTools
     private readonly GdiScreenCapture _capture;
     private readonly string _logsDirectory;
     private Window? _preview;
+    private ScreenPoint? _lastMatch;
+
+    public ScreenPoint? LastTestMatch => _lastMatch;
+
+    public void ShowSpot(ScreenPoint point) => NativeMethods.SetCursorPos(point.X, point.Y);
 
     public VisionTools(Window mainWindow, GdiScreenCapture capture, string logsDirectory)
     {
@@ -138,6 +155,7 @@ public sealed class VisionTools : IVisionTools
 
     public async Task<string> TestImageAsync(FindImageStep step)
     {
+        _lastMatch = null;
         if (!TemplateCodec.TryDecode(step.TemplateData, step.TemplateWidth, step.TemplateHeight, out var decoded, out var error))
             return error ?? "Capture the image first.";
         var template = decoded!;
@@ -145,6 +163,7 @@ public sealed class VisionTools : IVisionTools
         var region = step.SearchFullScreen ? _capture.GetVirtualScreen() : step.Region;
         var where = step.SearchFullScreen ? "the whole screen" : $"area {region}";
         ClosePreview();
+        _lastMatch = null;
 
         ScreenFrame frame;
         TimeSpan captureTime;
@@ -179,11 +198,12 @@ public sealed class VisionTools : IVisionTools
                 ? $" {result.Matches.Count} matches (green = the one a macro uses, orange = others): " +
                   string.Join(", ", result.Matches.Skip(1).Select(m => $"{m.Score:P0} at ({frame.ToScreen(m.Bounds).CenterX}, {frame.ToScreen(m.Bounds).CenterY})")) + "."
                 : "";
-            text = $"Found at ({bounds.CenterX}, {bounds.CenterY}), {best.Score:P0} match (needs {step.MinSimilarityPercent}%). Searched {where}.{more}";
+            _lastMatch = new ScreenPoint(bounds.CenterX, bounds.CenterY);
+            text = $"Matched at ({bounds.CenterX}, {bounds.CenterY}) — {best.Score:P0} confidence (needs {step.MinSimilarityPercent}%). Searched {where}.{more}";
         }
         else
         {
-            text = $"Not found in {where}. The best similarity was {result.BestScore:P0} (needs {step.MinSimilarityPercent}%).";
+            text = $"Not found in {where}. The best spot was only {result.BestScore:P0} similar (needs {step.MinSimilarityPercent}%).";
             if (result.RejectedForColor > 0)
                 text += $" {result.RejectedForColor} spot(s) had the right shape but a different color; turn on \"Ignore color\" if the color changes.";
             if (result.BestScore >= 0.6 && result.RejectedForColor == 0)
@@ -198,11 +218,13 @@ public sealed class VisionTools : IVisionTools
 
     public async Task<string> TestColorAsync(FindColorStep step)
     {
+        _lastMatch = null;
         if (!RgbColor.TryParse(step.Color, out var color)) return "Enter the color as #RRGGBB or pick it from the screen first.";
 
         var region = step.SearchFullScreen ? _capture.GetVirtualScreen() : step.Region;
         var where = step.SearchFullScreen ? "the whole screen" : $"area {region}";
         ClosePreview();
+        _lastMatch = null;
 
         ScreenFrame frame;
         TimeSpan captureTime;
@@ -229,7 +251,8 @@ public sealed class VisionTools : IVisionTools
         {
             var x = frame.Bounds.X + (int)Math.Round(blob.CenterX);
             var y = frame.Bounds.Y + (int)Math.Round(blob.CenterY);
-            text = $"Found color {color} at ({x}, {y}): {blob.PixelCount:N0} pixels (green box). Searched {where}.";
+            _lastMatch = new ScreenPoint(x, y);
+            text = $"Matched at ({x}, {y}) — color {color}, a patch of {blob.PixelCount:N0} pixels (green box). Searched {where}.";
             if (result.Blobs.Count > 1)
                 text += $" There are {result.Blobs.Count} separate patches of this color (orange); a macro uses the biggest. If that's wrong, pick a smaller area, lower the tolerance or raise the minimum size.";
         }
@@ -350,6 +373,74 @@ public sealed class VisionTools : IVisionTools
         text += " \"Done when\" / \"failed when\" conditions aren't checked in the preview.";
 
         if (summary.LastFrame is not null) ShowPreview("Feedback loop – preview (last frame)", DrawFeedbackOverlay(summary.LastFrame, copy), text);
+        return text;
+    }
+
+    public async Task<string> TestFeedbackOnceAsync(FeedbackLoopStep step)
+    {
+        var copy = (FeedbackLoopStep)MacroJson.CloneStep(step);
+        ClosePreview();
+        _lastMatch = null;
+
+        FeedbackFrame frame;
+        try
+        {
+            var sensor = new FeedbackSensor(copy, _capture);
+            frame = await WhileHiddenAsync(() => Task.Run(() => sensor.ReadAsync(CancellationToken.None)));
+        }
+        catch (Exception ex)
+        {
+            return $"Test failed: {ex.Message}";
+        }
+
+        var horizontal = copy.Orientation == BarOrientation.Horizontal;
+        var marker = frame.Marker;
+        string text;
+        if (marker.Bounds is { } local)
+        {
+            var spot = frame.Frame.ToScreen(local);
+            _lastMatch = new ScreenPoint(spot.CenterX, spot.CenterY);
+        }
+
+        text = marker.Status switch
+        {
+            MarkerStatus.Found => $"Marker found at {marker.PositionPercent:0} % along the bar ({(horizontal ? "0 % = left" : "0 % = top")}).",
+            MarkerStatus.Ambiguous => $"Marker unclear: {marker.Candidates} patches of the marker color. Lower the tolerance, raise the minimum size or pick a tighter area.",
+            _ => "Marker NOT found: no patch of the marker color in the bar area. Pick its color again or raise the tolerance.",
+        };
+        text += frame.Zone.Found
+            ? $" Zone: {frame.Zone.StartPercent:0}–{frame.Zone.EndPercent:0} %{(copy.ZoneMode == FeedbackZoneMode.DetectedByColor ? " (found by its color)" : " (fixed)")}."
+            : " Zone NOT found: no patch of the zone color. Pick it again or raise its tolerance.";
+
+        if (frame.Observation.IsTrusted)
+        {
+            var region = FeedbackController.Classify(frame.Observation.MarkerPercent!.Value, frame.Observation.ZoneStartPercent,
+                frame.Observation.ZoneEndPercent, null, 0);
+            var place = region switch
+            {
+                FeedbackRegion.Before => horizontal ? "LEFT of the zone" : "ABOVE the zone",
+                FeedbackRegion.After => horizontal ? "RIGHT of the zone" : "BELOW the zone",
+                _ => "INSIDE the zone",
+            };
+            var action = copy.ActionFor(region);
+            var input = copy.InputKind == FeedbackInputKind.MouseButton ? $"the {copy.MouseButton.ToString().ToLowerInvariant()} button" : Core.Input.VirtualKeys.GetName(copy.VirtualKey);
+            var would = action switch
+            {
+                FeedbackAction.Hold => $"HOLD {input}",
+                FeedbackAction.Release => $"RELEASE {input}",
+                FeedbackAction.Tap => $"TAP {input} when the marker moves in here",
+                FeedbackAction.Pulse => $"PULSE {input}, holding about {FeedbackController.PulseDuty(frame.Observation.MarkerPercent!.Value, frame.Observation.ZoneStartPercent, frame.Observation.ZoneEndPercent, copy.WhenBeforeZone, copy.WhenAfterZone):P0} of the time",
+                _ => "change nothing",
+            };
+            text += $" The marker is {place}, so the loop would {would}{(copy.FinishWhenInZone && region == FeedbackRegion.Inside ? " and then finish" : "")}. No input was sent.";
+        }
+        else
+        {
+            text += " This frame can't be trusted, so the loop wouldn't change anything.";
+        }
+
+        text += $" Capture {frame.CaptureTime.TotalMilliseconds:0.0} ms, detection {frame.DetectTime.TotalMilliseconds:0.0} ms.";
+        ShowPreview("Feedback loop – detection test", DrawFeedbackOverlay(frame, copy), text);
         return text;
     }
 

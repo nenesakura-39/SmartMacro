@@ -201,6 +201,14 @@
                                         <TextBlock Text="Wrap in Repeat" Margin="6,0,0,0" />
                                     </StackPanel>
                                 </Button>
+                                <Button Command="{Binding CleanUpMousePathsCommand}" Padding="8,4" FontSize="12" Margin="0,0,10,0"
+                                        ToolTip="Convert recording to clean steps: long runs of recorded Delay + Move mouse steps become one Delay (+ one Move only where it's needed). Clicks keep their own positions; drags, steps with a comment and turned-off steps are kept. Select several steps to clean only those."
+                                        AutomationProperties.Name="Clean up mouse paths">
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock Text="&#xE7E6;" Style="{StaticResource IconText}" FontSize="12" />
+                                        <TextBlock Text="Clean up mouse paths" Margin="6,0,0,0" />
+                                    </StackPanel>
+                                </Button>
                                 <Button Style="{StaticResource IconButton}" Content="&#xE70E;" Command="{Binding MoveToTopCommand}" ToolTip="Move to top (Alt+Home). An If / Repeat moves together with its whole block." AutomationProperties.Name="Move to top" />
                                 <Button Style="{StaticResource IconButton}" Content="&#xE74A;" Command="{Binding MoveUpCommand}" ToolTip="Move up one place (Alt+Up)" AutomationProperties.Name="Move step up" />
                                 <Button Style="{StaticResource IconButton}" Content="&#xE74B;" Command="{Binding MoveDownCommand}" ToolTip="Move down one place (Alt+Down)" AutomationProperties.Name="Move step down" />
@@ -238,6 +246,7 @@
                                         <Separator />
                                         <MenuItem Header="Wrap in If" InputGestureText="Ctrl+Shift+I" Command="{Binding WrapInIfCommand}" />
                                         <MenuItem Header="Wrap in Repeat" InputGestureText="Ctrl+Shift+R" Command="{Binding WrapInRepeatCommand}" />
+                                        <MenuItem Header="Clean up mouse paths" Command="{Binding CleanUpMousePathsCommand}" />
                                         <Separator />
                                         <MenuItem Header="Duplicate" InputGestureText="Ctrl+D" Command="{Binding DuplicateStepCommand}" />
                                         <MenuItem Header="Delete" InputGestureText="Delete" Command="{Binding DeleteStepCommand}" />

@@ -56,6 +56,21 @@ public sealed class Win32InputSimulator : IInputSimulator
         _log = log;
     }
 
+    /// <summary>Where the cursor is now (physical pixels; the app is per-monitor DPI aware). Used by Drag "from the cursor".</summary>
+    public bool TryGetCursorPosition(out int x, out int y)
+    {
+        if (GetCursorPos(out var point))
+        {
+            x = point.X;
+            y = point.Y;
+            return true;
+        }
+
+        x = 0;
+        y = 0;
+        return false;
+    }
+
     /// <summary>
     /// Moves the cursor to exact screen pixels. Two parts:
     /// 1. A SendInput absolute move, so the move arrives as a real mouse-input event. SetCursorPos alone only

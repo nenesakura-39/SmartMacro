@@ -468,6 +468,14 @@ public sealed class PlaybackEngine
                     run.StepsExecuted++;
                     LogIfAnswer(run, pc, answer.IsTrue, answer.Text);
 
+                    // Optional "when true" action on the spot the condition saw (not for "is NOT on screen").
+                    if (answer.IsTrue && answer.Seen && ifStep.ThenAction != FoundTextAction.None)
+                    {
+                        await PerformFoundActionAsync(ifStep.ThenAction, answer.X + ifStep.ThenOffsetX, answer.Y + ifStep.ThenOffsetY,
+                            ifStep.ThenHoldMs, run.Held, token).ConfigureAwait(false);
+                        ResetTimeline();
+                    }
+
                     var elseIndex = blocks.ElseOf(pc);
                     pc = answer.IsTrue ? pc + 1 : (elseIndex >= 0 ? elseIndex + 1 : blocks.EndOf(pc) + 1);
                     break;
@@ -661,7 +669,7 @@ public sealed class PlaybackEngine
     }
 
     /// <summary>The answer to a condition plus a sentence for the log.</summary>
-    private readonly record struct ConditionAnswer(bool IsTrue, string Text);
+    private readonly record struct ConditionAnswer(bool IsTrue, string Text, bool Seen = false, int X = 0, int Y = 0);
 
     /// <summary>
     /// Checks a condition, waiting up to its "keep checking for" time for it to become true (0 = look once).
@@ -691,7 +699,8 @@ public sealed class PlaybackEngine
 
         ResetTimeline(); // checking takes as long as it takes; start timing again from here
         var stats = timer is null ? string.Empty : " " + timer.Describe(ActiveTime - started);
-        return new ConditionAnswer(check.IsTrue, $"({conditions.Describe(condition)}: {(check.IsTrue ? "true" : "false")}) {check.Details}{stats}");
+        return new ConditionAnswer(check.IsTrue, $"({conditions.Describe(condition)}: {(check.IsTrue ? "true" : "false")}) {check.Details}{stats}",
+            check.Seen, check.X, check.Y);
     }
 
     // ---------------- Feedback loop (Stage 4) ----------------
@@ -829,6 +838,28 @@ public sealed class PlaybackEngine
                         break;
                 }
 
+                // "Finish when it reaches the zone": do the inside rule once (if this frame didn't already) and end.
+                if (step.FinishWhenInZone && decision.Region == FeedbackRegion.Inside)
+                {
+                    switch (step.WhenInsideZone)
+                    {
+                        case FeedbackAction.Tap when decision.Command != FeedbackCommand.Tap:
+                            if (IsDown()) SetInput(false);
+                            SetInput(true);
+                            await WaitAsync(TimeSpan.FromMilliseconds(step.TapMs), token).ConfigureAwait(false);
+                            if (IsDown()) SetInput(false);
+                            stats.Taps++;
+                            break;
+                        case FeedbackAction.Release when IsDown():
+                            SetInput(false);
+                            stats.Releases++;
+                            break;
+                    }
+
+                    ending = $"finished: the marker reached the zone after {frameStart.TotalSeconds:0.00} s";
+                    break;
+                }
+
                 if (controller.IsWaiting && !waiting) stats.LostEpisodes++;
                 waiting = controller.IsWaiting;
 
@@ -892,15 +923,22 @@ public sealed class PlaybackEngine
                 break;
 
             case MouseClickStep c:
+                (int X, int Y)? start = null; // where the click happens, if known (needed for a smooth drag)
                 if (c.UseLastFoundText)
                 {
                     var found = _lastFound ?? throw new TextNotFoundException(
                         "This click uses the last found spot, but no Find text / image / color step has found anything yet in this run.");
                     _input.MoveMouse(found.X, found.Y);
+                    start = found;
                 }
                 else if (!c.UseCurrentPosition)
                 {
                     _input.MoveMouse(c.X, c.Y);
+                    start = (c.X, c.Y);
+                }
+                else if (_input.TryGetCursorPosition(out var cursorX, out var cursorY))
+                {
+                    start = (cursorX, cursorY);
                 }
 
                 switch (c.Action)
@@ -928,6 +966,18 @@ public sealed class PlaybackEngine
                     case MouseClickAction.Up:
                         _input.MouseButton(c.Button, false);
                         held.Buttons.Remove(c.Button);
+                        break;
+                    case MouseClickAction.Hold:
+                        // Press, keep it down for HoldMs (on the timeline, so Speed applies), release.
+                        _input.MouseButton(c.Button, true);
+                        held.Buttons.Add(c.Button);
+                        AdvanceTimeline(Math.Max(0, c.HoldMs) / speed);
+                        await WaitForTimelineAsync(token).ConfigureAwait(false);
+                        _input.MouseButton(c.Button, false);
+                        held.Buttons.Remove(c.Button);
+                        break;
+                    case MouseClickAction.Drag:
+                        await DragAsync(c, start, speed, held, token).ConfigureAwait(false);
                         break;
                 }
                 break;
@@ -1183,9 +1233,8 @@ public sealed class PlaybackEngine
             {
                 _lastFound = (result.X, result.Y);
                 Message?.Invoke(this, result.FoundText + Stats());
-                DoFoundAction(step, result.X, result.Y);
-                if (step.Action is FoundTextAction.Click or FoundTextAction.DoubleClick or FoundTextAction.RightClick)
-                    await WaitAsync(ClickSettleMs, token).ConfigureAwait(false);
+                await PerformFoundActionAsync(step.Action, result.X + step.OffsetX, result.Y + step.OffsetY, step.ActionHoldMs,
+                    _held ?? throw new InvalidOperationException("Playback isn't running."), token).ConfigureAwait(false);
                 return;
             }
 
@@ -1232,12 +1281,18 @@ public sealed class PlaybackEngine
         }
     }
 
-    private void DoFoundAction(ScreenSearchStep step, int x, int y)
+    /// <summary>
+    /// The "when found" action of a Find step (and the "when true" action of an If) at a spot on screen (offset already
+    /// added): move there, click / double-click / right-click, or hold the left button for <paramref name="holdMs"/>.
+    /// The hold is tracked, so Stop / Esc / pause release it. Clicks and holds are followed by a short settle so the
+    /// clicked window can react before the next step.
+    /// </summary>
+    private async Task PerformFoundActionAsync(FoundTextAction action, int x, int y, int holdMs, HeldInput held, CancellationToken token)
     {
-        if (step.Action == FoundTextAction.None) return;
+        if (action == FoundTextAction.None) return;
 
-        _input.MoveMouse(x + step.OffsetX, y + step.OffsetY);
-        switch (step.Action)
+        _input.MoveMouse(x, y);
+        switch (action)
         {
             case FoundTextAction.Click:
                 Click(MacroMouseButton.Left);
@@ -1249,7 +1304,56 @@ public sealed class PlaybackEngine
             case FoundTextAction.RightClick:
                 Click(MacroMouseButton.Right);
                 break;
+            case FoundTextAction.Hold:
+                _input.MouseButton(MacroMouseButton.Left, true);
+                held.Buttons.Add(MacroMouseButton.Left);
+                await WaitAsync(TimeSpan.FromMilliseconds(Math.Max(0, holdMs)), token).ConfigureAwait(false);
+                _input.MouseButton(MacroMouseButton.Left, false);
+                held.Buttons.Remove(MacroMouseButton.Left);
+                break;
         }
+
+        if (action != FoundTextAction.Move) await WaitAsync(ClickSettleMs, token).ConfigureAwait(false);
+    }
+
+    /// <summary>Time between cursor updates while dragging (about 60 per second, smooth enough for sliders).</summary>
+    public static readonly TimeSpan DragStepInterval = TimeSpan.FromMilliseconds(16);
+
+    /// <summary>
+    /// Drag: press at the start, move the cursor to (EndX, EndY) in small even steps over DragDurationMs (on the
+    /// timeline, so Speed applies and Pause / Stop work in between), release at the end. Every step is a real move
+    /// event with the button held, which is what sliders and drag-and-drop listen for. If the start isn't known (the
+    /// cursor position couldn't be read), the cursor goes straight to the end.
+    /// </summary>
+    private async Task DragAsync(MouseClickStep c, (int X, int Y)? start, double speed, HeldInput held, CancellationToken token)
+    {
+        _input.MouseButton(c.Button, true);
+        held.Buttons.Add(c.Button);
+
+        var duration = TimeSpan.FromMilliseconds(Math.Max(0, c.DragDurationMs) / speed);
+        var steps = start is null ? 1 : Math.Max(1, (int)Math.Ceiling(duration / DragStepInterval));
+        var stepTime = duration / steps;
+        for (var i = 1; i <= steps; i++)
+        {
+            if (stepTime > TimeSpan.Zero)
+            {
+                _timelineTarget += stepTime;
+                await WaitForTimelineAsync(token).ConfigureAwait(false);
+            }
+
+            if (start is { } from && i < steps)
+            {
+                var t = i / (double)steps;
+                _input.MoveMouse((int)Math.Round(from.X + (c.EndX - from.X) * t), (int)Math.Round(from.Y + (c.EndY - from.Y) * t));
+            }
+            else
+            {
+                _input.MoveMouse(c.EndX, c.EndY); // always end exactly on the target
+            }
+        }
+
+        _input.MouseButton(c.Button, false);
+        held.Buttons.Remove(c.Button);
     }
 
     private void Click(MacroMouseButton button)

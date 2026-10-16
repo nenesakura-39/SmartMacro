@@ -27,6 +27,7 @@ public sealed class SettingsViewModel : ObservableObject
     private bool _recordMouseMovement;
     private RecordingMode _recordingMode;
     private bool _keepTapHoldTime;
+    private bool _simplifyMousePaths;
     private HotkeyBinding _recordHotkey = HotkeyBinding.DefaultRecord;
     private HotkeyBinding _playHotkey = HotkeyBinding.DefaultPlay;
     private HotkeyBinding _pauseHotkey = HotkeyBinding.DefaultPause;
@@ -230,6 +231,13 @@ public sealed class SettingsViewModel : ObservableObject
         set { if (SetProperty(ref _keepTapHoldTime, value)) IsDirty = true; }
     }
 
+    /// <summary>"Simplify mouse paths": only clicks, drags and the spot before key presses become steps.</summary>
+    public bool SimplifyMousePaths
+    {
+        get => _simplifyMousePaths;
+        set { if (SetProperty(ref _simplifyMousePaths, value)) IsDirty = true; }
+    }
+
     public bool IsDirty
     {
         get => _isDirty;
@@ -264,6 +272,7 @@ public sealed class SettingsViewModel : ObservableObject
         _recordMouseMovement = settings.RecordMouseMovement;
         _recordingMode = settings.RecordingMode;
         _keepTapHoldTime = settings.KeepTapHoldTime;
+        _simplifyMousePaths = settings.SimplifyMousePaths;
         _recordHotkey = settings.RecordHotkey;
         _playHotkey = settings.PlayHotkey;
         _pauseHotkey = settings.PauseHotkey;
@@ -285,6 +294,7 @@ public sealed class SettingsViewModel : ObservableObject
             RecordMouseMovement = RecordMouseMovement,
             RecordingMode = RecordingMode,
             KeepTapHoldTime = KeepTapHoldTime,
+            SimplifyMousePaths = SimplifyMousePaths,
             RecordHotkey = RecordHotkey,
             PlayHotkey = PlayHotkey,
             PauseHotkey = PauseHotkey,

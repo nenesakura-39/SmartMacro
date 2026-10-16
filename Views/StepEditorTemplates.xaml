@@ -149,16 +149,19 @@
                               ToolTip="Which mouse button: Left (normal click), Right (context menu) or Middle (wheel button)." />
                 </StackPanel>
                 <StackPanel Grid.Column="2">
-                    <TextBlock Text="Action" Style="{StaticResource FieldLabel}" Margin="0,18,0,4" />
-                    <ComboBox ItemsSource="{x:Static steps:MouseClickStepViewModel.Actions}" SelectedItem="{Binding Action}" AutomationProperties.Name="Click action" />
+                    <TextBlock Text="Action type" Style="{StaticResource FieldLabel}" Margin="0,18,0,4" />
+                    <ComboBox ItemsSource="{x:Static steps:MouseClickStepViewModel.Actions}" DisplayMemberPath="Label" SelectedValuePath="Value"
+                              SelectedValue="{Binding Action}" AutomationProperties.Name="Click action type" />
                 </StackPanel>
             </Grid>
+            <TextBlock Text="{Binding ActionHelp}" Style="{StaticResource MutedText}" FontSize="11" Margin="0,4,0,0" TextWrapping="Wrap" />
 
-            <TextBlock Text="Hold the button for (ms, Click only)" Style="{StaticResource FieldLabel}" />
-            <TextBox Text="{Binding HoldMs, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}" IsEnabled="{Binding IsClick}"
-                     AutomationProperties.Name="Hold time in milliseconds" />
-            <TextBlock Style="{StaticResource MutedText}" FontSize="11" Margin="0,4,0,0"
-                       Text="0 = instant click. Recordings fill in how long you actually held the button." />
+            <StackPanel Visibility="{Binding UsesHoldTime, Converter={StaticResource BoolToVisibility}}">
+                <TextBlock Text="Hold the button for (ms)" Style="{StaticResource FieldLabel}" />
+                <TextBox Text="{Binding HoldMs, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}"
+                         AutomationProperties.Name="Hold time in milliseconds"
+                         ToolTip="Single click: 0 = instant (recordings fill in how long you held it). Hold for a duration: e.g. 850 for a casting meter." />
+            </StackPanel>
 
             <TextBlock Text="Where to click" Style="{StaticResource FieldLabel}" Margin="0,18,0,4" />
             <ComboBox ItemsSource="{x:Static steps:MouseClickStepViewModel.Targets}" DisplayMemberPath="Label" SelectedValuePath="Value"
@@ -167,7 +170,16 @@
             <ContentControl Content="{Binding}" ContentTemplate="{StaticResource PositionPickerTemplate}" Focusable="False" Margin="0,4,0,0"
                             Visibility="{Binding UsesFixedPosition, Converter={StaticResource BoolToVisibility}}" />
             <TextBlock Style="{StaticResource MutedText}" FontSize="11" Margin="0,8,0,0" TextWrapping="Wrap"
-                       Text="Choose where the click should happen. With a chosen position, the cursor first jumps to X / Y, then the button is pressed and released there (Double-click = two clicks; Press / Release = only down or only up, to hold a button across steps). Pick position lets you choose the spot directly on your screen." />
+                       Text="Choose where the click should happen (for a drag: where it starts). With a chosen position, the cursor first jumps to X / Y, then the button is used there. Pick position lets you choose the spot directly on your screen." />
+
+            <StackPanel Visibility="{Binding IsDrag, Converter={StaticResource BoolToVisibility}}">
+                <TextBlock Text="Drag to (end position)" Style="{StaticResource FieldLabel}" Margin="0,18,0,0" />
+                <ContentControl Content="{Binding EndPoint}" ContentTemplate="{StaticResource PositionPickerTemplate}" Focusable="False" />
+                <TextBlock Text="Drag time (ms)" Style="{StaticResource FieldLabel}" />
+                <TextBox Text="{Binding DragDurationMs, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}" Width="100" HorizontalAlignment="Left"
+                         AutomationProperties.Name="Drag time in milliseconds"
+                         ToolTip="How long the cursor takes to glide from the start to the end while holding the button. 300-800 ms works for most sliders; 0 = jump straight there." />
+            </StackPanel>
 
             <ContentControl Content="{Binding}" ContentTemplate="{StaticResource StepFooterTemplate}" Focusable="False" Visibility="{Binding IsStandalone, Converter={StaticResource BoolToVisibility}}" />
         </StackPanel>
@@ -347,9 +359,15 @@
     <DataTemplate x:Key="SearchResultTemplate" DataType="{x:Type steps:ScreenSearchStepViewModel}">
         <StackPanel>
             <StackPanel Visibility="{Binding WaitsForAppear, Converter={StaticResource BoolToVisibility}}">
-                <TextBlock Text="When it's found" Style="{StaticResource FieldLabel}" />
+                <TextBlock Text="When found" Style="{StaticResource FieldLabel}" />
                 <ComboBox ItemsSource="{x:Static steps:ScreenSearchStepViewModel.Actions}" DisplayMemberPath="Label" SelectedValuePath="Value"
-                          SelectedValue="{Binding Action}" AutomationProperties.Name="Action when found" />
+                          SelectedValue="{Binding Action}" AutomationProperties.Name="Action when found"
+                          ToolTip="Acts on the CENTER of what was found, wherever it shows up this time, so buttons that move around (Shake buttons, shop items) are still hit. No separate Mouse click step with fixed X / Y needed." />
+            </StackPanel>
+            <StackPanel Margin="0,4,0,0" Visibility="{Binding IsHoldAction, Converter={StaticResource BoolToVisibility}}">
+                <TextBlock Text="Hold the left button for (ms)" Style="{StaticResource FieldLabel}" />
+                <TextBox Text="{Binding ActionHoldMs, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}" Width="100" HorizontalAlignment="Left"
+                         AutomationProperties.Name="Hold time in milliseconds" />
             </StackPanel>
             <Grid Margin="0,4,0,0" Visibility="{Binding HasPointerAction, Converter={StaticResource BoolToVisibility}}">
                 <Grid.ColumnDefinitions>
@@ -377,7 +395,18 @@
     <DataTemplate x:Key="SearchTestResultTemplate" DataType="{x:Type steps:ScreenSearchStepViewModel}">
         <Border Margin="0,8,0,0" Padding="10,8" CornerRadius="6" Background="{StaticResource SurfaceAltBrush}"
                 Visibility="{Binding TestResult, Converter={StaticResource NullToVisibility}}">
-            <TextBlock Text="{Binding TestResult}" TextWrapping="Wrap" FontSize="12" />
+            <StackPanel>
+                <TextBlock Text="{Binding TestResult}" TextWrapping="Wrap" FontSize="12" />
+                <Button Command="{Binding ShowMatchCommand}" HorizontalAlignment="Left" Margin="0,8,0,0" Padding="8,4" FontSize="12"
+                        Visibility="{Binding HasTestMatch, Converter={StaticResource BoolToVisibility}}"
+                        ToolTip="Moves your mouse cursor onto the match so you can see exactly where it is. Nothing is clicked."
+                        AutomationProperties.Name="Move the cursor to the match">
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="&#xE7C9;" Style="{StaticResource IconText}" FontSize="12" />
+                        <TextBlock Text="Show me (move cursor to the match)" Margin="6,0,0,0" />
+                    </StackPanel>
+                </Button>
+            </StackPanel>
         </Border>
     </DataTemplate>
 
@@ -417,7 +446,7 @@
                     ToolTip="SmartMacro hides for a moment and reads the search area once.">
                 <StackPanel Orientation="Horizontal">
                     <TextBlock Text="&#xE721;" Style="{StaticResource IconText}" />
-                    <TextBlock Text="Test now" Margin="8,0,0,0" />
+                    <TextBlock Text="Test detection now" Margin="8,0,0,0" />
                 </StackPanel>
             </Button>
             <ContentControl Content="{Binding}" ContentTemplate="{StaticResource SearchTestResultTemplate}" Focusable="False" />
@@ -453,7 +482,7 @@
             <TextBox Text="{Binding MinSimilarityPercent, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}" Width="80" HorizontalAlignment="Left"
                      AutomationProperties.Name="Match accuracy percent" />
             <TextBlock Style="{StaticResource MutedText}" FontSize="11" Margin="0,4,0,0" TextWrapping="Wrap"
-                       Text="90 is a good start. Lower it a little if the image changes slightly (glow, animation); raise it if wrong things match. &quot;Test now&quot; shows the best similarity it saw." />
+                       Text="90 is a good start. Lower it a little if the image changes slightly (glow, animation); raise it if wrong things match. &quot;Test detection now&quot; shows the best similarity it saw." />
             <CheckBox Content="Ignore color (match the shape only)" IsChecked="{Binding IgnoreColor}" Margin="0,10,0,0"
                       ToolTip="Normally a match must also have about the same colors, so a grey disabled button doesn't match a green one." />
             <CheckBox Content="Ignore the edges (round buttons, game UI)" IsChecked="{Binding IgnoreEdges}" Margin="0,8,0,0"
@@ -472,7 +501,7 @@
                     ToolTip="SmartMacro hides for a moment, looks once, and shows a picture with the matches marked.">
                 <StackPanel Orientation="Horizontal">
                     <TextBlock Text="&#xE721;" Style="{StaticResource IconText}" />
-                    <TextBlock Text="Test now" Margin="8,0,0,0" />
+                    <TextBlock Text="Test detection now" Margin="8,0,0,0" />
                 </StackPanel>
             </Button>
             <ContentControl Content="{Binding}" ContentTemplate="{StaticResource SearchTestResultTemplate}" Focusable="False" />
@@ -534,7 +563,7 @@
                         ToolTip="SmartMacro hides for a moment, looks once, and shows a picture with the matching patches marked.">
                     <StackPanel Orientation="Horizontal">
                         <TextBlock Text="&#xE721;" Style="{StaticResource IconText}" />
-                        <TextBlock Text="Test now" Margin="8,0,0,0" />
+                        <TextBlock Text="Test detection now" Margin="8,0,0,0" />
                     </StackPanel>
                 </Button>
                 <Button Command="{Binding TrackCommand}" Margin="8,0,0,0"
@@ -685,6 +714,10 @@
             <TextBlock Style="{StaticResource MutedText}" FontSize="11" Margin="0,6,0,0" TextWrapping="Wrap"
                        Text="&quot;Keep checking for&quot; = how long to wait for the condition to become true (0 = look once). Paused time doesn't count." />
             <TextBlock Style="{StaticResource MutedText}" FontSize="11" Margin="0,4,0,0" TextWrapping="Wrap" Text="{Binding TestHint}" />
+            <Border Margin="0,6,0,0" Padding="10,6" CornerRadius="6" Background="{StaticResource AccentSoftBrush}"
+                    Visibility="{Binding TestVerdict, Converter={StaticResource NullToVisibility}}">
+                <TextBlock Text="{Binding TestVerdict}" TextWrapping="Wrap" FontSize="12" FontWeight="SemiBold" />
+            </Border>
         </StackPanel>
     </DataTemplate>
 
@@ -694,6 +727,33 @@
 
             <TextBlock Text="Condition" Style="{StaticResource FieldLabel}" Margin="0,18,0,4" />
             <ContentControl Content="{Binding Condition}" ContentTemplate="{StaticResource ConditionEditorTemplate}" Focusable="False" />
+
+            <TextBlock Text="When true (and it was found)" Style="{StaticResource FieldLabel}" Margin="0,18,0,4" />
+            <ComboBox ItemsSource="{x:Static steps:IfStepViewModel.ThenActions}" DisplayMemberPath="Label" SelectedValuePath="Value"
+                      SelectedValue="{Binding ThenAction}" AutomationProperties.Name="Action when the condition is true" />
+            <StackPanel Visibility="{Binding HasThenAction, Converter={StaticResource BoolToVisibility}}">
+                <Grid Margin="0,4,0,0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="10" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <StackPanel Grid.Column="0">
+                        <TextBlock Text="Offset X from center" Style="{StaticResource FieldLabel}" />
+                        <TextBox Text="{Binding ThenOffsetX, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}" AutomationProperties.Name="Offset X" />
+                    </StackPanel>
+                    <StackPanel Grid.Column="2">
+                        <TextBlock Text="Offset Y from center" Style="{StaticResource FieldLabel}" />
+                        <TextBox Text="{Binding ThenOffsetY, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}" AutomationProperties.Name="Offset Y" />
+                    </StackPanel>
+                </Grid>
+                <StackPanel Visibility="{Binding IsThenHold, Converter={StaticResource BoolToVisibility}}">
+                    <TextBlock Text="Hold the left button for (ms)" Style="{StaticResource FieldLabel}" />
+                    <TextBox Text="{Binding ThenHoldMs, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}" Width="100" HorizontalAlignment="Left"
+                             AutomationProperties.Name="Hold time in milliseconds" />
+                </StackPanel>
+            </StackPanel>
+            <TextBlock Text="{Binding ThenActionHint}" Style="{StaticResource MutedText}" FontSize="11" Margin="0,4,0,0" TextWrapping="Wrap" />
 
             <TextBlock Style="{StaticResource MutedText}" FontSize="11" Margin="0,10,0,0" TextWrapping="Wrap"
                        Text="True: the steps up to Else (or End If) run. False: the steps after Else run, or nothing if there's no Else. When the condition sees the text / image / color, a later Mouse click can use &quot;the last found spot&quot;. Turning this If off skips its whole block." />
@@ -748,7 +808,7 @@
                       SelectedValue="{Binding WhenLimitReached}" AutomationProperties.Name="When a limit is reached" />
 
             <TextBlock Style="{StaticResource MutedText}" FontSize="11" Margin="0,10,0,0" TextWrapping="Wrap"
-                       Text="The condition is checked before every turn (so a While loop may run 0 times), and checks are at least &quot;Check every&quot; apart. Stop, Esc and Pause work at any time inside the loop. Turning this Repeat off skips its whole block." />
+                       Text="The condition is checked before every turn (so a While loop may run 0 times), and checks are at least &quot;Check every&quot; apart. Example: Repeat UNTIL the reeling bar image is on screen, with a Find image &quot;Shake&quot; step set to &quot;Click its center&quot; inside. Stop, Esc and Pause work at any time inside the loop. Turning this Repeat off skips its whole block." />
 
             <ContentControl Content="{Binding}" ContentTemplate="{StaticResource StepFooterTemplate}" Focusable="False" />
         </StackPanel>
@@ -762,6 +822,63 @@
         <StackPanel>
             <ContentControl Content="{Binding}" ContentTemplate="{StaticResource StepHeaderTemplate}" Focusable="False" />
 
+            <!-- Preset / mode: a guided setup for the common minigames -->
+            <TextBlock Text="Preset / mode" Style="{StaticResource FieldLabel}" Margin="0,18,0,4" />
+            <ComboBox ItemsSource="{x:Static steps:FeedbackLoopStepViewModel.Presets}" DisplayMemberPath="Label" SelectedValuePath="Value"
+                      SelectedValue="{Binding Preset}" AutomationProperties.Name="Feedback loop preset" />
+            <TextBlock Text="{Binding PresetHelp}" Style="{StaticResource MutedText}" FontSize="11" Margin="0,4,0,0" TextWrapping="Wrap" />
+
+            <StackPanel Visibility="{Binding IsGuided, Converter={StaticResource BoolToVisibility}}" Margin="0,8,0,0">
+                <Button Command="{Binding PickAreaCommand}" HorizontalAlignment="Left" Margin="0,6,0,0" Style="{StaticResource PrimaryButton}"
+                        ToolTip="SmartMacro hides, then you drag a box tightly around the minigame's bar or track.">
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="&#xE8B0;" Style="{StaticResource IconText}" />
+                        <TextBlock Text="1. Pick minigame area" Margin="8,0,0,0" />
+                    </StackPanel>
+                </Button>
+                <TextBlock Style="{StaticResource MutedText}" FontSize="11" Margin="0,4,0,0" TextWrapping="Wrap">
+                    <Run Text="Area: (" /><Run Text="{Binding RegionX, Mode=OneWay}" /><Run Text=", " /><Run Text="{Binding RegionY, Mode=OneWay}" /><Run Text="), " /><Run Text="{Binding RegionWidth, Mode=OneWay}" /><Run Text=" × " /><Run Text="{Binding RegionHeight, Mode=OneWay}" /><Run Text=" px" />
+                </TextBlock>
+
+                <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
+                    <Border Width="30" Height="30" CornerRadius="6" Background="{Binding MarkerBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" />
+                    <Button Command="{Binding PickMarkerColorCommand}" Margin="10,0,0,0" ToolTip="SmartMacro hides, then you click the moving marker / target.">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="&#xEF3C;" Style="{StaticResource IconText}" />
+                            <TextBlock Text="{Binding MarkerStepLabel}" Margin="8,0,0,0" />
+                        </StackPanel>
+                    </Button>
+                </StackPanel>
+
+                <StackPanel Orientation="Horizontal" Margin="0,10,0,0" Visibility="{Binding IsDetectedZone, Converter={StaticResource BoolToVisibility}}">
+                    <Border Width="30" Height="30" CornerRadius="6" Background="{Binding ZoneBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" />
+                    <Button Command="{Binding PickZoneColorCommand}" Margin="10,0,0,0" ToolTip="SmartMacro hides, then you click the target zone (or your own bar).">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="&#xEF3C;" Style="{StaticResource IconText}" />
+                            <TextBlock Text="{Binding ZoneStepLabel}" Margin="8,0,0,0" />
+                        </StackPanel>
+                    </Button>
+                </StackPanel>
+                <TextBlock Style="{StaticResource MutedText}" FontSize="11" Margin="0,6,0,0" TextWrapping="Wrap"
+                           Visibility="{Binding IsFixedZone, Converter={StaticResource BoolToVisibility}}">
+                    <Run Text="3. Target zone: a fixed part of the bar, " /><Run Text="{Binding ZoneStartPercent, Mode=OneWay}" /><Run Text="–" /><Run Text="{Binding ZoneEndPercent, Mode=OneWay}" /><Run Text=" % (change it under all settings)." />
+                </TextBlock>
+
+                <StackPanel Visibility="{Binding IsZoneClickPreset, Converter={StaticResource BoolToVisibility}}">
+                    <TextBlock Text="When the marker enters the zone" Style="{StaticResource FieldLabel}" />
+                    <ComboBox ItemsSource="{x:Static steps:FeedbackLoopStepViewModel.ZoneEntryActions}" DisplayMemberPath="Label" SelectedValuePath="Value"
+                              SelectedValue="{Binding ZoneEntryReleases}" AutomationProperties.Name="What to do when the marker enters the zone" />
+                </StackPanel>
+
+                <TextBlock Text="Max runtime (ms)" Style="{StaticResource FieldLabel}" />
+                <TextBox Text="{Binding MaxRuntimeMs, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}" Width="120" HorizontalAlignment="Left"
+                         AutomationProperties.Name="Max runtime in milliseconds" />
+                <TextBlock Text="{Binding MaxRuntimeText}" Style="{StaticResource MutedText}" FontSize="11" Margin="0,4,0,0" />
+
+                <CheckBox Content="Show all settings (advanced)" IsChecked="{Binding ShowAdvanced}" Margin="0,12,0,0" />
+            </StackPanel>
+
+            <StackPanel Visibility="{Binding ShowAdvanced, Converter={StaticResource BoolToVisibility}}">
             <!-- 1. The bar and the marker -->
             <TextBlock Text="1. The bar and the moving marker" Style="{StaticResource SectionTitle}" FontSize="13" Margin="0,18,0,0" />
             <Grid Margin="0,4,0,0">
@@ -920,6 +1037,14 @@
                      AutomationProperties.Name="Dead band percent" />
             <TextBlock Style="{StaticResource MutedText}" FontSize="11" Margin="0,4,0,0" TextWrapping="Wrap"
                        Text="The marker must be this far past a zone edge before it counts as crossed, so the input doesn't flicker on and off at an edge. 0 = off; 1-5 is typical." />
+            <StackPanel Visibility="{Binding UsesPulse, Converter={StaticResource BoolToVisibility}}">
+                <TextBlock Text="Pulse cycle (ms)" Style="{StaticResource FieldLabel}" />
+                <TextBox Text="{Binding PulsePeriodMs, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}" Width="100" HorizontalAlignment="Left"
+                         AutomationProperties.Name="Pulse cycle in milliseconds"
+                         ToolTip="Inside the zone the input is held for part of every cycle: more the closer the marker is to the side that holds, less toward the side that releases." />
+            </StackPanel>
+            <CheckBox Content="Finish the loop when the marker reaches the zone (after the INSIDE rule: Tap or Release)" IsChecked="{Binding FinishWhenInZone}" Margin="0,10,0,0"
+                      AutomationProperties.Name="Finish when the marker reaches the zone" />
 
             <!-- 4. The input -->
             <TextBlock Text="4. Which input" Style="{StaticResource SectionTitle}" FontSize="13" Margin="0,18,0,0" />
@@ -1009,9 +1134,18 @@
             <TextBlock Style="{StaticResource MutedText}" FontSize="11" Margin="0,6,0,0" TextWrapping="Wrap"
                        Text="Conditions are checked about every &quot;Check every&quot; while the loop runs (&quot;Keep checking for&quot; isn't used here). Image and color conditions are fast; text (OCR) pauses the loop while it reads." />
 
+            </StackPanel>
+
             <!-- Tools -->
             <TextBlock Text="Try it (no input is sent)" Style="{StaticResource SectionTitle}" FontSize="13" Margin="0,18,0,0" />
             <WrapPanel Margin="0,8,0,0">
+                <Button Command="{Binding TestDetectionCommand}" Style="{StaticResource PrimaryButton}" Margin="0,0,8,8"
+                        ToolTip="Looks at the bar once: where the marker and the zone are, and what the loop would do right now.">
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="&#xE721;" Style="{StaticResource IconText}" />
+                        <TextBlock Text="Test detection now" Margin="8,0,0,0" />
+                    </StackPanel>
+                </Button>
                 <Button Command="{Binding MeasureCommand}" Margin="0,0,8,8"
                         ToolTip="For 3 seconds SmartMacro captures the bar and finds the marker as fast as it can, then shows the frames per second, the time per frame and a suggested captures-per-second setting.">
                     <StackPanel Orientation="Horizontal">
@@ -1019,7 +1153,7 @@
                         <TextBlock Text="Measure loop speed" Margin="8,0,0,0" />
                     </StackPanel>
                 </Button>
-                <Button Command="{Binding PreviewCommand}" Style="{StaticResource PrimaryButton}" Margin="0,0,8,8"
+                <Button Command="{Binding PreviewCommand}" Margin="0,0,8,8"
                         ToolTip="Runs the loop for 10 seconds WITHOUT pressing anything. A small window shows the marker, the zone and what the loop would do.">
                     <StackPanel Orientation="Horizontal">
                         <TextBlock Text="&#xE768;" Style="{StaticResource IconText}" />
@@ -1029,7 +1163,16 @@
             </WrapPanel>
             <Border Margin="0,4,0,0" Padding="10,8" CornerRadius="6" Background="{StaticResource SurfaceAltBrush}"
                     Visibility="{Binding TestResult, Converter={StaticResource NullToVisibility}}">
-                <TextBlock Text="{Binding TestResult}" TextWrapping="Wrap" FontSize="12" />
+                <StackPanel>
+                    <TextBlock Text="{Binding TestResult}" TextWrapping="Wrap" FontSize="12" />
+                    <Button Command="{Binding ShowMatchCommand}" HorizontalAlignment="Left" Margin="0,8,0,0" Padding="8,4" FontSize="12"
+                            ToolTip="Moves your mouse cursor onto the marker the test found. Nothing is clicked.">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="&#xE7C9;" Style="{StaticResource IconText}" FontSize="12" />
+                            <TextBlock Text="Show me (move cursor to the marker)" Margin="6,0,0,0" />
+                        </StackPanel>
+                    </Button>
+                </StackPanel>
             </Border>
 
             <TextBlock Style="{StaticResource MutedText}" FontSize="11" Margin="0,10,0,0" TextWrapping="Wrap"

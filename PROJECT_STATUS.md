@@ -1,6 +1,6 @@
 # SmartMacro – Project Status / Handoff
 
-_Last updated: 2026-10-17 (8-bug fix batch: built, 616/616 tests passed, manual re-test pending). Earlier: Stages 1–3: built, automated tests passed, manually tested by the owner. Stage 4 (feedback
+_Last updated: 2026-10-17 (QoL batch: written WITHOUT a .NET SDK, NOT built or tested yet. Before it: 8-bug fix batch built, 616/616 tests passed, manual re-test pending). Earlier: Stages 1–3: built, automated tests passed, manually tested by the owner. Stage 4 (feedback
 loops) and the Editor UX task: built, automated tests passed (573/573), **manual tests NOT done yet**. Not released.
 Developer: Riku (リク) · Brand: KuroLogic_
 
@@ -13,6 +13,49 @@ Developer: Riku (リク) · Brand: KuroLogic_
 | Release documents (EULA, LICENSE, notices, README) | – | – | drafts; `release-docs/` not committed yet |
 | Release package | `publish\SmartMacro-1.0.0-win-x64\SmartMacro.exe` is an OLD build (made right after `159d6b3`, before Stage 1) | – | ignored by git |
 
+
+## QoL batch (2026-10-17) – written by the AI WITHOUT a .NET SDK: **NOT built, NOT tested yet**
+The AI's environment had no .NET SDK and no package access, so nothing below was compiled. Next step for the owner:
+`tools\verify.cmd`, send the build / test log if anything fails, then `docs/QOL_MANUAL_TESTS.md`.
+Audit first: several asked-for parts already existed (Find steps already had click / move / double / right-click at the
+center + offset and Stop / Skip next / Continue; Repeat already had Times / While / Until with conditions and limits;
+Find text / image / color already had "Test now"; `MousePathSimplifier` already thinned paths). The batch adds what was missing:
+1. **When found / when true**: new `FoundTextAction.Hold` + `ScreenSearchStep.ActionHoldMs` (hold the left button on the
+   match). `IfStep.ThenAction / ThenOffsetX / ThenOffsetY / ThenHoldMs`: when the condition SAW its target, act on that
+   spot before the inner steps (never for "is NOT on screen"; validator warns). Engine: shared `PerformFoundActionAsync`
+   (hold is tracked in HeldInput; click / hold settle 100 ms). Describer: `Find image (121×134) on screen → Click center
+   when found (wait up to 10 s; if not found: skip next step)`, `If … → Click center when true`. Editor: "When found" /
+   "When not found" drop-downs reworded, hold-time box, If "When true" section.
+2. **Repeat while / until**: already there (Stage 3). Only labels / help text improved (example: Repeat UNTIL reeling bar
+   is on screen with Find "Shake" → Click its center inside).
+3. **Test detection now**: buttons renamed; results now read `Matched at (x, y) — 94% confidence` / `Matched! Read text in
+   area: 'OK'` / `Not found. Text read in area: '0K'`; **Show me** moves the cursor onto the match (`LastTestMatch`,
+   `ShowSpot` on IVisionTools / IFindTextTools); conditions show `Right now this condition is TRUE / FALSE`; Feedback loop
+   got `TestFeedbackOnceAsync` (one capture: marker %, zone, region, what it would do, overlay picture, no input).
+4. **Feedback presets**: `FeedbackPreset` (Custom default, not written to files when Custom) + `Core/Models/FeedbackPresets`.
+   FollowTargetBar = zone found by colour (your bar), marker = target; horizontal: before Release / inside **Pulse** /
+   after Hold (vertical swapped), lost 1.5 s → exit loop, 60 s max. New `FeedbackAction.Pulse` (inside only; duty =
+   how far the marker is toward the "hold" edge, snapped to 0 / 1 near the edges, `PulsePeriodMs` 200) in
+   `FeedbackController.PulseDuty`. ClickWhenInZone = before / after Release, inside Tap (or Hold / Release / Hold for the
+   "release the held input" variant), dead band 0, new `FinishWhenInZone` (engine does the inside rule once, then ends
+   "finished: the marker reached the zone"). Editor: preset selector, guided "1. Pick minigame area / 2. Pick marker /
+   3. Pick zone" panel, "Show all settings (advanced)". Marker detection is still colour only (no image marker).
+5. **Mouse click Hold / Drag**: `MouseClickAction.Hold` (HoldMs, required 1–60,000; default 850 when chosen) and
+   `MouseClickAction.Drag` (`EndX / EndY / DragDurationMs` 500; 16 ms steps on the timeline, Speed applies, end exactly
+   on target; from "cursor" uses new default-interface `IInputSimulator.TryGetCursorPosition`, Win32 implements it).
+   Editor: "Action type" drop-down with labels, end-position picker (`PointEditorViewModel`).
+6. **Simplified recordings**: `RecordingOptions.CollapseMousePaths` / `SmartRecordingOptions.CollapseMousePaths`
+   (Core default off) drop cursor travel while no button is held (clicks / wheel carry their position; one Move is kept
+   before a key event; drags untouched). Setting `AppSettings.SimplifyMousePaths` (default on, also for old settings
+   files) + checkbox in Settings. **Clean up mouse paths** command (toolbar + right-click) = `Core/Workflow/StepCleanup`:
+   runs of enabled, comment-less Delay / Move steps → Delay (+ Move only if needed) (+ Delay), same total time; drags,
+   commented and disabled steps untouched; selection-only when several steps are selected.
+- Files: `MacroDocument.CurrentSchemaVersion = 8`, written only when one of the new options is used.
+- Tests: new `SmartMacro.Tests/QolTests.cs` (found / when-true actions incl. negated, hold timing, moving target;
+  click hold / drag timing + unknown cursor + stop releases; pulse duty / cycle, presets, finish-in-zone tap / release /
+  already-inside; validation; describer; format 8 round trip + old files + preset not written; 5 clicks → 9 steps with
+  timing kept, drags kept, hover-before-key; StepCleanup cases). Updated on purpose: `VisionTests.Describes_visual_steps`
+  (new "Find … → … when found" wording).
 
 ## 8-bug fix batch (2026-10-17) – built + tested on the owner's PC: 0 warnings, 0 errors, **616/616 tests passed**
 Found by the owner's testing (screenshots + logs). Manual re-test of each bug is still to do. Not committed to git yet.
@@ -467,6 +510,8 @@ no .NET SDK in the AI's environment)
   csproj Company/Authors "Riku", Copyright "© 2026 Riku", README "© 2026 Riku") – change awaits owner approval.
 
 ## Next task
+- Owner: run `tools\verify.cmd` for the QoL batch (never compiled yet; expect a few compile fixes), then
+  `docs/QOL_MANUAL_TESTS.md`.
 - Owner: manual re-test of the 8-bug fix batch (list above), then commit it together with the Editor UX changes.
 - Owner: do `docs/STAGE4_MANUAL_TESTS.md` (start with `docs/feedback-test-page.html`) and send the 📏 numbers, then
   `docs/EDITOR_UX_MANUAL_TESTS.md`. Commit the Editor UX changes once they pass.

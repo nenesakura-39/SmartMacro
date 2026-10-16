@@ -82,6 +82,7 @@ public sealed class EditorViewModel : ObservableObject
         GoToLibraryCommand = new RelayCommand(goToLibrary);
         WrapInIfCommand = new RelayCommand(() => WrapSelection(StepKind.If), () => HasMacro && SelectedStep is not null);
         WrapInRepeatCommand = new RelayCommand(() => WrapSelection(StepKind.Repeat), () => HasMacro && SelectedStep is not null);
+        CleanUpMousePathsCommand = new RelayCommand(CleanUpMousePaths, () => HasMacro && Steps.Any(s => s.Model is MouseMoveStep));
     }
 
     public ObservableCollection<StepViewModel> Steps { get; } = new();
@@ -137,6 +138,9 @@ public sealed class EditorViewModel : ObservableObject
     public RelayCommand GoToLibraryCommand { get; }
     public RelayCommand WrapInIfCommand { get; }
     public RelayCommand WrapInRepeatCommand { get; }
+
+    /// <summary>"Clean up mouse paths": recorded Delay + Move runs become at most Delay + Move + Delay (see StepCleanup).</summary>
+    public RelayCommand CleanUpMousePathsCommand { get; }
 
     public bool HasMacro => _saved is not null;
 
@@ -450,6 +454,47 @@ public sealed class EditorViewModel : ObservableObject
         SelectedStep = opener;
         Touch();
         _setStatus($"Wrapped {selected.Count} step{(selected.Count == 1 ? "" : "s")} in {StepDescriber.DisplayName(kind)}. Set it up in Properties.", StatusKind.Success);
+    }
+
+    /// <summary>
+    /// "Convert recording to clean steps": collapses runs of recorded Delay + Move mouse steps. With several steps
+    /// selected (next to each other) only those are cleaned; otherwise the whole macro. Drags (moves while a button is
+    /// held) and steps with a comment or turned off are kept. Total waiting time stays the same.
+    /// </summary>
+    private void CleanUpMousePaths()
+    {
+        if (!HasMacro) return;
+        var selected = SelectedInOrder();
+        var models = Steps.Select(s => s.Model).ToList();
+        var first = 0;
+        var last = models.Count - 1;
+        var scope = "the macro";
+        if (selected.Count > 1)
+        {
+            first = Steps.IndexOf(selected[0]);
+            last = Steps.IndexOf(selected[^1]);
+            scope = "the selected steps";
+        }
+
+        var result = StepCleanup.CollapseMouseMoves(models, first, last);
+        if (result.RemovedSteps <= 0)
+        {
+            _setStatus($"Nothing to clean up in {scope}: no runs of Delay + Move mouse steps outside drags.", StatusKind.Info);
+            return;
+        }
+
+        var existing = new Dictionary<MacroStep, StepViewModel>(ReferenceEqualityComparer.Instance);
+        foreach (var vm in Steps) existing[vm.Model] = vm;
+        var keepSelected = SelectedStep is { } current && result.Steps.Contains(current.Model) ? current : null;
+        foreach (var old in Steps) old.Modified -= OnStepModified;
+        Steps.Clear();
+        foreach (var step in result.Steps)
+            Steps.Add(existing.TryGetValue(step, out var kept) ? kept : CreateStepViewModel(step));
+
+        _selection.Clear();
+        SelectedStep = keepSelected ?? Steps.ElementAtOrDefault(Math.Min(first, Steps.Count - 1));
+        Touch();
+        _setStatus($"Cleaned up {result.CollapsedRuns} mouse path(s) in {scope}: {result.RemovedSteps:N0} step(s) fewer, same total timing. Discard changes undoes it.", StatusKind.Success);
     }
 
     /// <summary>
