@@ -15,6 +15,8 @@ public static class StepDescriber
         StepKind.TypeText => "Type text",
         StepKind.FindText => "Find text (OCR)",
         StepKind.InputSequence => "Recorded input",
+        StepKind.FindImage => "Find image",
+        StepKind.FindColor => "Find color",
         _ => kind.ToString(),
     };
 
@@ -24,11 +26,13 @@ public static class StepDescriber
             ? $"Wait {d.DurationMs / 1000.0:0.###} s"
             : $"Wait {d.DurationMs} ms",
         MouseMoveStep m => $"Move to ({m.X}, {m.Y})",
-        MouseClickStep c => $"{ClickVerb(c.Action)} {c.Button.ToString().ToLowerInvariant()} button {(c.UseLastFoundText ? "at found text" : Where(c.UseCurrentPosition, c.X, c.Y))}{Hold(c.Action == MouseClickAction.Click, c.HoldMs)}",
+        MouseClickStep c => $"{ClickVerb(c.Action)} {c.Button.ToString().ToLowerInvariant()} button {(c.UseLastFoundText ? "at the last found spot" : Where(c.UseCurrentPosition, c.X, c.Y))}{Hold(c.Action == MouseClickAction.Click, c.HoldMs)}",
         MouseScrollStep s => $"Scroll {ScrollDirection(s)} {Notches(s.Delta)} {Where(s.UseCurrentPosition, s.X, s.Y)}",
         KeyPressStep k => $"{KeyVerb(k.Action)} {KeyCombo(k)}{Hold(k.Action == KeyAction.Press, k.HoldMs)}",
         TypeTextStep t => $"Type \"{Preview(t.Text)}\"",
-        FindTextStep f => DescribeFindText(f),
+        FindTextStep f => DescribeSearch(f, $"\"{Preview(f.Text)}\""),
+        FindImageStep i => DescribeSearch(i, i.TemplateWidth > 0 ? $"image ({i.TemplateWidth}×{i.TemplateHeight})" : "image (not captured yet)"),
+        FindColorStep c => DescribeSearch(c, $"color {c.Color} (±{c.Tolerance})"),
         InputSequenceStep q => DescribeSequence(q),
         _ => step.GetType().Name,
     };
@@ -114,10 +118,14 @@ public static class StepDescriber
         return string.Join(" + ", parts);
     }
 
-    private static string DescribeFindText(FindTextStep f)
+    private static string DescribeSearch(ScreenSearchStep f, string what)
     {
-        var verb = f.TimeoutMs > 0 ? $"Wait up to {f.TimeoutMs / 1000.0:0.#} s for" : "Look for";
+        var seconds = $"{f.TimeoutMs / 1000.0:0.#} s";
         var where = f.SearchFullScreen ? "on screen" : $"in area ({f.RegionX}, {f.RegionY}, {f.RegionWidth}×{f.RegionHeight})";
+        if (f.Goal == WaitGoal.Disappear)
+            return f.TimeoutMs > 0 ? $"Wait up to {seconds} until {what} is gone {where}" : $"Check that {what} is not {where}";
+
+        var verb = f.TimeoutMs > 0 ? $"Wait up to {seconds} for" : "Look for";
         var then = f.Action switch
         {
             FoundTextAction.Move => ", then move to it",
@@ -126,7 +134,7 @@ public static class StepDescriber
             FoundTextAction.RightClick => ", then right-click it",
             _ => "",
         };
-        return $"{verb} \"{Preview(f.Text)}\" {where}{then}";
+        return $"{verb} {what} {where}{then}";
     }
 
     private static string ClickVerb(MouseClickAction action) => action switch

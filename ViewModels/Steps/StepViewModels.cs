@@ -1,9 +1,12 @@
 using System.Runtime.CompilerServices;
 using SmartMacro.Core.Input;
 using SmartMacro.Core.Models;
+using SmartMacro.Core.Ocr;
 using SmartMacro.Core.Validation;
+using SmartMacro.Core.Vision;
 using SmartMacro.Mvvm;
 using SmartMacro.Services.Ocr;
+using SmartMacro.Services.Vision;
 
 namespace SmartMacro.ViewModels.Steps;
 
@@ -21,6 +24,8 @@ public static class StepTypeCatalog
         new StepTypeInfo(StepKind.KeyPress, StepDescriber.DisplayName(StepKind.KeyPress), "", "Press a key or shortcut, or hold/release a key."),
         new StepTypeInfo(StepKind.TypeText, StepDescriber.DisplayName(StepKind.TypeText), "", "Type a piece of text."),
         new StepTypeInfo(StepKind.FindText, StepDescriber.DisplayName(StepKind.FindText), "\uE721", "Wait for text to appear on screen (OCR), and optionally click it."),
+        new StepTypeInfo(StepKind.FindImage, StepDescriber.DisplayName(StepKind.FindImage), "\uE8B9", "Wait for a picture (button, icon…) to appear on screen or disappear, and optionally click it."),
+        new StepTypeInfo(StepKind.FindColor, StepDescriber.DisplayName(StepKind.FindColor), "\uE790", "Wait for a color to appear in an area (or disappear), and optionally click it. Simple color matching, not object recognition."),
         new StepTypeInfo(StepKind.InputSequence, StepDescriber.DisplayName(StepKind.InputSequence), "\uE7FC", "Mouse and keyboard input recorded on one timeline and played back with its original timing: exact key and button down/up, plus cursor positions or relative (camera) mouse movement."),
     };
 
@@ -138,6 +143,8 @@ public abstract class StepViewModel : ObservableObject
         KeyPressStep k => new KeyPressStepViewModel(k),
         TypeTextStep t => new TypeTextStepViewModel(t),
         FindTextStep f => new FindTextStepViewModel(f),
+        FindImageStep i => new FindImageStepViewModel(i),
+        FindColorStep c => new FindColorStepViewModel(c),
         InputSequenceStep q => new InputSequenceStepViewModel(q),
         _ => throw new NotSupportedException($"No editor for step type {step.GetType().Name}."),
     };
@@ -236,7 +243,7 @@ public sealed class MouseClickStepViewModel : StepViewModel
         }
     }
 
-    /// <summary>Click where the last "Find text" step found its text.</summary>
+    /// <summary>Click where the last Find text / image / color step found something.</summary>
     public bool UseLastFoundText
     {
         get => _step.UseLastFoundText;
@@ -413,25 +420,21 @@ public sealed class TypeTextStepViewModel : StepViewModel
 /// <summary>A choice in a drop-down: the stored value plus a friendly label.</summary>
 public sealed record Choice<T>(T Value, string Label);
 
-public sealed class FindTextStepViewModel : StepViewModel
+/// <summary>
+/// Shared editor part of Find text / Find image / Find color: search area, timing, what to wait for, what to do
+/// with the result, plus "busy" handling for the screen tools (only one tool runs at a time).
+/// </summary>
+public abstract class ScreenSearchStepViewModel : StepViewModel
 {
-    private readonly FindTextStep _step;
-    private IFindTextTools? _tools;
+    private readonly ScreenSearchStep _search;
     private string? _testResult;
     private bool _isBusy;
 
-    public FindTextStepViewModel(FindTextStep step) : base(step)
+    protected ScreenSearchStepViewModel(ScreenSearchStep step) : base(step)
     {
-        _step = step;
-        PickRegionCommand = new AsyncRelayCommand(PickRegionAsync, ex => TestResult = ex.Message, () => _tools is not null && !_isBusy);
-        TestCommand = new AsyncRelayCommand(TestAsync, ex => TestResult = ex.Message, () => _tools is not null && !_isBusy);
+        _search = step;
+        PickRegionCommand = new AsyncRelayCommand(PickRegionAsync, ex => TestResult = ex.Message, () => HasTools && !_isBusy);
     }
-
-    public static IReadOnlyList<Choice<TextMatchMode>> MatchModes { get; } = new[]
-    {
-        new Choice<TextMatchMode>(TextMatchMode.Contains, "Contains the text (can be part of a word)"),
-        new Choice<TextMatchMode>(TextMatchMode.WholeWords, "Whole word(s) only"),
-    };
 
     public static IReadOnlyList<Choice<FoundTextAction>> Actions { get; } = new[]
     {
@@ -448,7 +451,193 @@ public sealed class FindTextStepViewModel : StepViewModel
         new Choice<TextNotFoundBehavior>(TextNotFoundBehavior.Continue, "Skip and continue with the next step"),
     };
 
+    public static IReadOnlyList<Choice<WaitGoal>> Goals { get; } = new[]
+    {
+        new Choice<WaitGoal>(WaitGoal.Appear, "Wait until it appears"),
+        new Choice<WaitGoal>(WaitGoal.Disappear, "Wait until it disappears"),
+    };
+
     public AsyncRelayCommand PickRegionCommand { get; }
+
+    /// <summary>True once the editor has given this step its screen tools.</summary>
+    protected abstract bool HasTools { get; }
+
+    protected bool IsBusy => _isBusy;
+
+    public string? TestResult
+    {
+        get => _testResult;
+        protected set => SetProperty(ref _testResult, value);
+    }
+
+    public bool SearchFullScreen
+    {
+        get => _search.SearchFullScreen;
+        set
+        {
+            if (_search.SearchFullScreen == value) return;
+            _search.SearchFullScreen = value;
+            NotifyChanged();
+            OnPropertyChanged(nameof(UsesRegion));
+        }
+    }
+
+    public bool UsesRegion => !_search.SearchFullScreen;
+
+    public int RegionX
+    {
+        get => _search.RegionX;
+        set { if (_search.RegionX == value) return; _search.RegionX = value; NotifyChanged(); }
+    }
+
+    public int RegionY
+    {
+        get => _search.RegionY;
+        set { if (_search.RegionY == value) return; _search.RegionY = value; NotifyChanged(); }
+    }
+
+    public int RegionWidth
+    {
+        get => _search.RegionWidth;
+        set { if (_search.RegionWidth == value) return; _search.RegionWidth = value; NotifyChanged(); }
+    }
+
+    public int RegionHeight
+    {
+        get => _search.RegionHeight;
+        set { if (_search.RegionHeight == value) return; _search.RegionHeight = value; NotifyChanged(); }
+    }
+
+    public int TimeoutMs
+    {
+        get => _search.TimeoutMs;
+        set { if (_search.TimeoutMs == value) return; _search.TimeoutMs = value; NotifyChanged(); }
+    }
+
+    public int CheckIntervalMs
+    {
+        get => _search.CheckIntervalMs;
+        set { if (_search.CheckIntervalMs == value) return; _search.CheckIntervalMs = value; NotifyChanged(); }
+    }
+
+    public WaitGoal Goal
+    {
+        get => _search.Goal;
+        set
+        {
+            if (_search.Goal == value) return;
+            _search.Goal = value;
+            NotifyChanged();
+            OnPropertyChanged(nameof(WaitsForAppear));
+            OnPropertyChanged(nameof(HasPointerAction));
+            OnPropertyChanged(nameof(NotFoundLabel));
+        }
+    }
+
+    /// <summary>The "when found" options only matter while waiting for something to appear.</summary>
+    public bool WaitsForAppear => _search.Goal == WaitGoal.Appear;
+
+    public string NotFoundLabel => _search.Goal == WaitGoal.Appear ? "If it's not found in time" : "If it's still there when the time is up";
+
+    public FoundTextAction Action
+    {
+        get => _search.Action;
+        set
+        {
+            if (_search.Action == value) return;
+            _search.Action = value;
+            NotifyChanged();
+            OnPropertyChanged(nameof(HasPointerAction));
+        }
+    }
+
+    public bool HasPointerAction => _search.Goal == WaitGoal.Appear && _search.Action != FoundTextAction.None;
+
+    public int OffsetX
+    {
+        get => _search.OffsetX;
+        set { if (_search.OffsetX == value) return; _search.OffsetX = value; NotifyChanged(); }
+    }
+
+    public int OffsetY
+    {
+        get => _search.OffsetY;
+        set { if (_search.OffsetY == value) return; _search.OffsetY = value; NotifyChanged(); }
+    }
+
+    public TextNotFoundBehavior WhenNotFound
+    {
+        get => _search.WhenNotFound;
+        set { if (_search.WhenNotFound == value) return; _search.WhenNotFound = value; NotifyChanged(); }
+    }
+
+    /// <summary>Lets the user drag the search area (each step type uses its own tool).</summary>
+    protected abstract Task<ScreenRect?> PickRegionCoreAsync();
+
+    /// <summary>Sets the search area (and turns off "whole screen"), marking the macro as changed.</summary>
+    protected void SetRegion(ScreenRect rect)
+    {
+        _search.SearchFullScreen = false;
+        _search.RegionX = rect.X;
+        _search.RegionY = rect.Y;
+        _search.RegionWidth = rect.Width;
+        _search.RegionHeight = rect.Height;
+        OnPropertyChanged(string.Empty); // refresh all fields
+        NotifyChanged(nameof(RegionX));  // mark the macro as changed + re-validate
+    }
+
+    /// <summary>Runs a screen tool with the buttons disabled; errors end up in the result box.</summary>
+    protected async Task RunBusyAsync(Func<Task> action)
+    {
+        if (_isBusy) return;
+        SetBusy(true);
+        try
+        {
+            await action();
+        }
+        finally
+        {
+            SetBusy(false);
+        }
+    }
+
+    private Task PickRegionAsync() => RunBusyAsync(async () =>
+    {
+        var picked = await PickRegionCoreAsync();
+        if (picked is not { } rect)
+        {
+            TestResult = "Picking the area was cancelled.";
+            return;
+        }
+
+        SetRegion(rect);
+        TestResult = $"Search area set to {rect}.";
+    });
+
+    private void SetBusy(bool busy)
+    {
+        _isBusy = busy;
+        System.Windows.Input.CommandManager.InvalidateRequerySuggested();
+    }
+}
+
+public sealed class FindTextStepViewModel : ScreenSearchStepViewModel
+{
+    private readonly FindTextStep _step;
+    private IFindTextTools? _tools;
+
+    public FindTextStepViewModel(FindTextStep step) : base(step)
+    {
+        _step = step;
+        TestCommand = new AsyncRelayCommand(TestAsync, ex => TestResult = ex.Message, () => _tools is not null && !IsBusy);
+    }
+
+    public static IReadOnlyList<Choice<TextMatchMode>> MatchModes { get; } = new[]
+    {
+        new Choice<TextMatchMode>(TextMatchMode.Contains, "Contains the text (can be part of a word)"),
+        new Choice<TextMatchMode>(TextMatchMode.WholeWords, "Whole word(s) only"),
+    };
+
     public AsyncRelayCommand TestCommand { get; }
 
     /// <summary>Screen tools from the editor (set right after creation).</summary>
@@ -462,14 +651,10 @@ public sealed class FindTextStepViewModel : StepViewModel
         }
     }
 
+    protected override bool HasTools => _tools is not null;
+
     /// <summary>Shown when OCR isn't available on this PC.</summary>
     public string? OcrWarning => _tools is { IsOcrAvailable: false } tools ? tools.OcrStatus : null;
-
-    public string? TestResult
-    {
-        get => _testResult;
-        private set => SetProperty(ref _testResult, value);
-    }
 
     public string Text
     {
@@ -481,44 +666,6 @@ public sealed class FindTextStepViewModel : StepViewModel
             _step.Text = value;
             NotifyChanged();
         }
-    }
-
-    public bool SearchFullScreen
-    {
-        get => _step.SearchFullScreen;
-        set
-        {
-            if (_step.SearchFullScreen == value) return;
-            _step.SearchFullScreen = value;
-            NotifyChanged();
-            OnPropertyChanged(nameof(UsesRegion));
-        }
-    }
-
-    public bool UsesRegion => !_step.SearchFullScreen;
-
-    public int RegionX
-    {
-        get => _step.RegionX;
-        set { if (_step.RegionX == value) return; _step.RegionX = value; NotifyChanged(); }
-    }
-
-    public int RegionY
-    {
-        get => _step.RegionY;
-        set { if (_step.RegionY == value) return; _step.RegionY = value; NotifyChanged(); }
-    }
-
-    public int RegionWidth
-    {
-        get => _step.RegionWidth;
-        set { if (_step.RegionWidth == value) return; _step.RegionWidth = value; NotifyChanged(); }
-    }
-
-    public int RegionHeight
-    {
-        get => _step.RegionHeight;
-        set { if (_step.RegionHeight == value) return; _step.RegionHeight = value; NotifyChanged(); }
     }
 
     public TextMatchMode MatchMode
@@ -539,98 +686,223 @@ public sealed class FindTextStepViewModel : StepViewModel
         set { if (_step.MinSimilarityPercent == value) return; _step.MinSimilarityPercent = value; NotifyChanged(); }
     }
 
-    public int TimeoutMs
+    protected override Task<ScreenRect?> PickRegionCoreAsync() =>
+        _tools?.PickRegionAsync() ?? Task.FromResult<ScreenRect?>(null);
+
+    private Task TestAsync() => RunBusyAsync(async () =>
     {
-        get => _step.TimeoutMs;
-        set { if (_step.TimeoutMs == value) return; _step.TimeoutMs = value; NotifyChanged(); }
+        if (_tools is null) return;
+        TestResult = "Reading the screen…";
+        TestResult = await _tools.TestAsync(_step);
+    });
+}
+
+/// <summary>Editor for "Find image": capture the picture, choose where and how strictly to search, test it.</summary>
+public sealed class FindImageStepViewModel : ScreenSearchStepViewModel
+{
+    private readonly FindImageStep _step;
+    private IVisionTools? _tools;
+    private System.Windows.Media.ImageSource? _preview;
+
+    public FindImageStepViewModel(FindImageStep step) : base(step)
+    {
+        _step = step;
+        CaptureTemplateCommand = new AsyncRelayCommand(CaptureTemplateAsync, ex => TestResult = ex.Message, () => _tools is not null && !IsBusy);
+        TestCommand = new AsyncRelayCommand(TestAsync, ex => TestResult = ex.Message, () => _tools is not null && !IsBusy);
     }
 
-    public int CheckIntervalMs
-    {
-        get => _step.CheckIntervalMs;
-        set { if (_step.CheckIntervalMs == value) return; _step.CheckIntervalMs = value; NotifyChanged(); }
-    }
+    public AsyncRelayCommand CaptureTemplateCommand { get; }
+    public AsyncRelayCommand TestCommand { get; }
 
-    public FoundTextAction Action
+    /// <summary>Screen tools from the editor (set right after creation).</summary>
+    public IVisionTools? Tools
     {
-        get => _step.Action;
+        get => _tools;
         set
         {
-            if (_step.Action == value) return;
-            _step.Action = value;
+            _tools = value;
+            RefreshPreview();
+        }
+    }
+
+    protected override bool HasTools => _tools is not null;
+
+    /// <summary>The stored picture, for the editor to show. Null if none (or damaged).</summary>
+    public System.Windows.Media.ImageSource? TemplatePreview
+    {
+        get => _preview;
+        private set => SetProperty(ref _preview, value);
+    }
+
+    public bool HasTemplate => !string.IsNullOrEmpty(_step.TemplateData);
+
+    public string TemplateInfo => HasTemplate
+        ? $"{_step.TemplateWidth} × {_step.TemplateHeight} pixels"
+        : "No image yet. Click \"Capture image\" and drag a box around the button or icon to find.";
+
+    public int MinSimilarityPercent
+    {
+        get => _step.MinSimilarityPercent;
+        set { if (_step.MinSimilarityPercent == value) return; _step.MinSimilarityPercent = value; NotifyChanged(); }
+    }
+
+    public bool IgnoreColor
+    {
+        get => _step.IgnoreColor;
+        set { if (_step.IgnoreColor == value) return; _step.IgnoreColor = value; NotifyChanged(); }
+    }
+
+    protected override Task<ScreenRect?> PickRegionCoreAsync() =>
+        _tools?.PickRegionAsync() ?? Task.FromResult<ScreenRect?>(null);
+
+    private Task CaptureTemplateAsync() => RunBusyAsync(async () =>
+    {
+        if (_tools is null) return;
+        var captured = await _tools.CaptureTemplateAsync();
+        if (captured is null)
+        {
+            TestResult = "Capturing the image was cancelled.";
+            return;
+        }
+
+        var image = captured.Image;
+        if (image.Width < MacroValidator.MinTemplateSize || image.Height < MacroValidator.MinTemplateSize
+            || image.Width > MacroValidator.MaxTemplateSize || image.Height > MacroValidator.MaxTemplateSize)
+        {
+            TestResult = $"The box was {image.Width} × {image.Height} pixels. The image must be {MacroValidator.MinTemplateSize} to {MacroValidator.MaxTemplateSize} pixels on each side; please drag again.";
+            return;
+        }
+
+        if (TemplateMatcher.IsFlat(image))
+        {
+            TestResult = "That area is one flat color, so its shape can't be matched. Capture an area with some detail (text, an icon edge), or use a \"Find color\" step instead.";
+            return;
+        }
+
+        _step.TemplateWidth = image.Width;
+        _step.TemplateHeight = image.Height;
+        _step.TemplateData = TemplateCodec.Encode(image);
+        RefreshPreview();
+        OnPropertyChanged(nameof(HasTemplate));
+        OnPropertyChanged(nameof(TemplateInfo));
+        NotifyChanged(nameof(TemplatePreview));
+
+        var b = captured.Bounds;
+        TestResult = $"Image captured ({image.Width} × {image.Height}) at ({b.X}, {b.Y}). Tip: a search area around where it appears makes the search faster. Click \"Test now\" to check it.";
+    });
+
+    private Task TestAsync() => RunBusyAsync(async () =>
+    {
+        if (_tools is null) return;
+        TestResult = "Looking at the screen…";
+        TestResult = await _tools.TestImageAsync(_step);
+    });
+
+    private void RefreshPreview()
+    {
+        TemplatePreview = _tools is not null
+                          && TemplateCodec.TryDecode(_step.TemplateData, _step.TemplateWidth, _step.TemplateHeight, out var image, out _)
+            ? _tools.ToImageSource(image!)
+            : null;
+    }
+}
+
+/// <summary>Editor for "Find color": pick the color, tolerance and area, test it, or watch it move.</summary>
+public sealed class FindColorStepViewModel : ScreenSearchStepViewModel
+{
+    private static readonly TimeSpan TrackDuration = TimeSpan.FromSeconds(3);
+
+    private readonly FindColorStep _step;
+    private IVisionTools? _tools;
+
+    public FindColorStepViewModel(FindColorStep step) : base(step)
+    {
+        _step = step;
+        PickColorCommand = new AsyncRelayCommand(PickColorAsync, ex => TestResult = ex.Message, () => _tools is not null && !IsBusy);
+        TestCommand = new AsyncRelayCommand(TestAsync, ex => TestResult = ex.Message, () => _tools is not null && !IsBusy);
+        TrackCommand = new AsyncRelayCommand(TrackAsync, ex => TestResult = ex.Message, () => _tools is not null && !IsBusy);
+    }
+
+    public AsyncRelayCommand PickColorCommand { get; }
+    public AsyncRelayCommand TestCommand { get; }
+    public AsyncRelayCommand TrackCommand { get; }
+
+    /// <summary>Screen tools from the editor (set right after creation).</summary>
+    public IVisionTools? Tools
+    {
+        get => _tools;
+        set => _tools = value;
+    }
+
+    protected override bool HasTools => _tools is not null;
+
+    public string Color
+    {
+        get => _step.Color ?? string.Empty;
+        set
+        {
+            value = (value ?? string.Empty).Trim();
+            if (_step.Color == value) return;
+            _step.Color = value;
             NotifyChanged();
-            OnPropertyChanged(nameof(HasPointerAction));
+            OnPropertyChanged(nameof(ColorBrush));
         }
     }
 
-    public bool HasPointerAction => _step.Action != FoundTextAction.None;
-
-    public int OffsetX
+    /// <summary>A swatch of the colour (transparent while the text isn't a valid #RRGGBB).</summary>
+    public System.Windows.Media.Brush ColorBrush
     {
-        get => _step.OffsetX;
-        set { if (_step.OffsetX == value) return; _step.OffsetX = value; NotifyChanged(); }
+        get
+        {
+            if (!RgbColor.TryParse(_step.Color, out var c)) return System.Windows.Media.Brushes.Transparent;
+            var brush = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(c.R, c.G, c.B));
+            brush.Freeze();
+            return brush;
+        }
     }
 
-    public int OffsetY
+    public int Tolerance
     {
-        get => _step.OffsetY;
-        set { if (_step.OffsetY == value) return; _step.OffsetY = value; NotifyChanged(); }
+        get => _step.Tolerance;
+        set { if (_step.Tolerance == value) return; _step.Tolerance = value; NotifyChanged(); }
     }
 
-    public TextNotFoundBehavior WhenNotFound
+    public int MinPixels
     {
-        get => _step.WhenNotFound;
-        set { if (_step.WhenNotFound == value) return; _step.WhenNotFound = value; NotifyChanged(); }
+        get => _step.MinPixels;
+        set { if (_step.MinPixels == value) return; _step.MinPixels = value; NotifyChanged(); }
     }
 
-    private async Task PickRegionAsync()
+    protected override Task<ScreenRect?> PickRegionCoreAsync() =>
+        _tools?.PickRegionAsync() ?? Task.FromResult<ScreenRect?>(null);
+
+    private Task PickColorAsync() => RunBusyAsync(async () =>
     {
         if (_tools is null) return;
-        SetBusy(true);
-        try
+        var picked = await _tools.PickColorAsync();
+        if (picked is null)
         {
-            var picked = await _tools.PickRegionAsync();
-            if (picked is not { } rect)
-            {
-                TestResult = "Picking the area was cancelled.";
-                return;
-            }
-
-            _step.SearchFullScreen = false;
-            _step.RegionX = rect.X;
-            _step.RegionY = rect.Y;
-            _step.RegionWidth = rect.Width;
-            _step.RegionHeight = rect.Height;
-            OnPropertyChanged(string.Empty); // refresh all fields
-            NotifyChanged(nameof(RegionX));  // mark the macro as changed + re-validate
-            TestResult = $"Search area set to {rect}.";
+            TestResult = "Picking the color was cancelled.";
+            return;
         }
-        finally
-        {
-            SetBusy(false);
-        }
-    }
 
-    private async Task TestAsync()
+        Color = picked.Color.ToString();
+        TestResult = $"Color {picked.Color} picked at ({picked.X}, {picked.Y}). Click \"Test now\" to see what matches.";
+    });
+
+    private Task TestAsync() => RunBusyAsync(async () =>
     {
         if (_tools is null) return;
-        SetBusy(true);
-        TestResult = "Reading the screen…";
-        try
-        {
-            TestResult = await _tools.TestAsync(_step);
-        }
-        finally
-        {
-            SetBusy(false);
-        }
-    }
+        TestResult = "Looking at the screen…";
+        TestResult = await _tools.TestColorAsync(_step);
+    });
 
-    private void SetBusy(bool busy)
+    private Task TrackAsync() => RunBusyAsync(async () =>
     {
-        _isBusy = busy;
-        System.Windows.Input.CommandManager.InvalidateRequerySuggested();
-    }
+        if (_tools is null) return;
+        TestResult = $"Tracking for {TrackDuration.TotalSeconds:0} seconds…";
+        TestResult = await _tools.TrackColorAsync(_step, TrackDuration);
+    });
 }
 
 /// <summary>

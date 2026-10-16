@@ -1,6 +1,7 @@
 using SmartMacro.Core.Models;
 using SmartMacro.Core.Ocr;
 using SmartMacro.Core.Validation;
+using SmartMacro.Core.Vision;
 
 namespace SmartMacro.Core.Playback;
 
@@ -49,16 +50,18 @@ public sealed class PlaybackEngine
     /// <summary>If playback is more than this far behind schedule, it skips ahead instead of catching up.</summary>
     public static readonly TimeSpan MaxTimelineLag = TimeSpan.FromMilliseconds(250);
 
-    /// <summary>Short pause after clicking found text so the clicked window can take focus before the next step.</summary>
+    /// <summary>Short pause after clicking found text / an image so the clicked window can take focus before the next step.</summary>
     public const int ClickSettleMs = 100;
 
     private readonly IInputSimulator _input;
     private readonly IPlaybackClock _clock;
     private readonly IOcrService? _ocr;
+    private readonly IScreenCapture? _capture;
     private readonly object _gate = new();
 
-    // Where the most recent "Find text" step found its text (only one run at a time, so a field is fine).
-    private TextMatch? _lastFound;
+    // Where the most recent Find text / image / color step found something, in screen pixels
+    // (only one run at a time, so a field is fine). Mouse click steps can click it.
+    private (int X, int Y)? _lastFound;
 
     // Per-run playback state. Only touched by the playback flow itself (never by Pause/Stop callers).
     private HeldInput? _held;
@@ -69,11 +72,12 @@ public sealed class PlaybackEngine
     private CancellationTokenSource? _cts;
     private TaskCompletionSource? _resumeSignal;
 
-    public PlaybackEngine(IInputSimulator input, IPlaybackClock? clock = null, IOcrService? ocr = null)
+    public PlaybackEngine(IInputSimulator input, IPlaybackClock? clock = null, IOcrService? ocr = null, IScreenCapture? capture = null)
     {
         _input = input ?? throw new ArgumentNullException(nameof(input));
         _clock = clock ?? new SystemPlaybackClock();
         _ocr = ocr;
+        _capture = capture;
     }
 
     /// <summary>
@@ -370,8 +374,8 @@ public sealed class PlaybackEngine
                 if (c.UseLastFoundText)
                 {
                     var found = _lastFound ?? throw new TextNotFoundException(
-                        "This click uses the last found text, but no text has been found yet in this run.");
-                    _input.MoveMouse(found.Bounds.CenterX, found.Bounds.CenterY);
+                        "This click uses the last found spot, but no Find text / image / color step has found anything yet in this run.");
+                    _input.MoveMouse(found.X, found.Y);
                 }
                 else if (!c.UseCurrentPosition)
                 {
@@ -467,6 +471,16 @@ public sealed class PlaybackEngine
             case FindTextStep f:
                 await FindTextAsync(f, token).ConfigureAwait(false);
                 ResetTimeline(); // the search takes as long as it takes; start timing again from here
+                break;
+
+            case FindImageStep i:
+                await FindImageAsync(i, token).ConfigureAwait(false);
+                ResetTimeline();
+                break;
+
+            case FindColorStep c:
+                await FindColorAsync(c, token).ConfigureAwait(false);
+                ResetTimeline();
                 break;
 
             case InputSequenceStep q:
@@ -627,63 +641,181 @@ public sealed class PlaybackEngine
         else _input.KeyWithScanCode(key.VirtualKey, key.ScanCode, key.Extended, down);
     }
 
-    /// <summary>
-    /// Reads the screen with OCR until the text shows up or the timeout passes, then does the step's action.
-    /// Timeouts and check intervals are real time (not affected by the Speed setting).
-    /// </summary>
-    private async Task FindTextAsync(FindTextStep step, CancellationToken token)
-    {
-        if (_ocr is null || !_ocr.IsAvailable)
-            throw new OcrUnavailableException(_ocr?.StatusText ?? "Text recognition (OCR) isn't available.");
+    // ---------------- Screen search (Find text / image / color) ----------------
 
-        var region = step.SearchFullScreen
-            ? _ocr.GetVirtualScreen()
-            : new ScreenRect(step.RegionX, step.RegionY, step.RegionWidth, step.RegionHeight);
+    /// <summary>
+    /// Result of one look at the screen. X / Y is the spot to act on (screen pixels). FoundText describes the
+    /// find for the log; MissText (starting with a space) explains a miss, e.g. what OCR read instead.
+    /// </summary>
+    private readonly record struct Probe(bool Found, int X, int Y, string FoundText, string MissText)
+    {
+        public static Probe Miss(string missText) => new(false, 0, 0, string.Empty, missText);
+    }
+
+    /// <summary>
+    /// The shared waiting loop: looks at the screen until the goal is met (it appeared / it's gone) or the
+    /// timeout passes. Timeouts and check intervals are real time (not affected by the Speed setting), and time
+    /// spent paused doesn't count. Pause / Stop / Esc are honoured between and during checks.
+    /// </summary>
+    private async Task SearchAsync(ScreenSearchStep step, string what, Func<CancellationToken, Task<Probe>> probe,
+        DetectionTimer? timer, CancellationToken token)
+    {
         var started = _clock.Elapsed;
+        var shiftAtStart = _timelineShift;
         var timeout = TimeSpan.FromMilliseconds(step.TimeoutMs);
-        var lastText = string.Empty;
+        TimeSpan Elapsed() => _clock.Elapsed - started - (_timelineShift - shiftAtStart);
+        string Stats() => timer is null ? string.Empty : " " + timer.Describe(Elapsed());
 
         while (true)
         {
             await WaitIfPausedAsync(token).ConfigureAwait(false);
             token.ThrowIfCancellationRequested();
 
-            var read = await _ocr.ReadAsync(region, token).ConfigureAwait(false);
-            lastText = read.FullText;
-            var match = OcrTextMatcher.Find(read, step.Text, step.MatchMode, step.CaseSensitive, step.MinSimilarityPercent / 100.0)
-                .FirstOrDefault();
+            var result = await probe(token).ConfigureAwait(false);
 
-            if (match is not null)
+            if (step.Goal == WaitGoal.Appear && result.Found)
             {
-                _lastFound = match;
-                Message?.Invoke(this, $"Found \"{match.Text}\" at ({match.Bounds.CenterX}, {match.Bounds.CenterY}), {match.Similarity:P0} match.");
-                DoFoundTextAction(step, match);
+                _lastFound = (result.X, result.Y);
+                Message?.Invoke(this, result.FoundText + Stats());
+                DoFoundAction(step, result.X, result.Y);
                 if (step.Action is FoundTextAction.Click or FoundTextAction.DoubleClick or FoundTextAction.RightClick)
                     await WaitAsync(ClickSettleMs, token).ConfigureAwait(false);
                 return;
             }
 
-            if (_clock.Elapsed - started >= timeout)
+            if (step.Goal == WaitGoal.Disappear && !result.Found)
+            {
+                Message?.Invoke(this, $"{what} is no longer on screen." + Stats());
+                return;
+            }
+
+            if (Elapsed() >= timeout)
             {
                 var seconds = timeout.TotalSeconds;
-                var message = step.TimeoutMs == 0
-                    ? $"\"{step.Text}\" wasn't found on screen."
-                    : $"\"{step.Text}\" didn't appear within {seconds:0.#} s.";
-                message += DescribeLastRead(lastText);
+                string message;
+                if (step.Goal == WaitGoal.Appear)
+                {
+                    message = step.TimeoutMs == 0
+                        ? $"{what} wasn't found on screen."
+                        : $"{what} didn't appear within {seconds:0.#} s.";
+                    message += result.MissText;
+                }
+                else
+                {
+                    message = step.TimeoutMs == 0
+                        ? $"{what} is still on screen."
+                        : $"{what} was still on screen after {seconds:0.#} s.";
+                    message += " " + result.FoundText;
+                }
+
+                message += Stats();
 
                 if (step.WhenNotFound == TextNotFoundBehavior.Continue)
                 {
-                    _lastFound = null;
+                    if (step.Goal == WaitGoal.Appear) _lastFound = null;
                     Message?.Invoke(this, message + " Continuing.");
                     return;
                 }
 
-                throw new TextNotFoundException(message);
+                throw new DetectionTimeoutException(message);
             }
 
             await WaitAsync(step.CheckIntervalMs, token).ConfigureAwait(false);
         }
     }
+
+    /// <summary>Reads the screen with OCR until the text shows up (or goes away) or the timeout passes.</summary>
+    private Task FindTextAsync(FindTextStep step, CancellationToken token)
+    {
+        var ocr = _ocr;
+        if (ocr is null || !ocr.IsAvailable)
+            throw new OcrUnavailableException(ocr?.StatusText ?? "Text recognition (OCR) isn't available.");
+
+        var region = step.SearchFullScreen ? ocr.GetVirtualScreen() : step.Region;
+        return SearchAsync(step, $"\"{step.Text}\"", async t =>
+        {
+            var read = await ocr.ReadAsync(region, t).ConfigureAwait(false);
+            var match = OcrTextMatcher.Find(read, step.Text, step.MatchMode, step.CaseSensitive, step.MinSimilarityPercent / 100.0)
+                .FirstOrDefault();
+            return match is null
+                ? Probe.Miss(DescribeLastRead(read.FullText))
+                : new Probe(true, match.Bounds.CenterX, match.Bounds.CenterY,
+                    $"Found \"{match.Text}\" at ({match.Bounds.CenterX}, {match.Bounds.CenterY}), {match.Similarity:P0} match.", string.Empty);
+        }, timer: null, token);
+    }
+
+    /// <summary>Captures the screen and looks for the step's picture until it shows up (or goes away).</summary>
+    private Task FindImageAsync(FindImageStep step, CancellationToken token)
+    {
+        var capture = RequireCapture();
+        if (!TemplateCodec.TryDecode(step.TemplateData, step.TemplateWidth, step.TemplateHeight, out var decoded, out var error))
+            throw new InvalidOperationException($"The image of this step can't be used: {error}");
+        var template = decoded!;
+
+        var region = step.SearchFullScreen ? capture.GetVirtualScreen() : step.Region;
+        var options = new TemplateMatchOptions { MinScore = step.MinSimilarityPercent / 100.0, IgnoreColor = step.IgnoreColor };
+        var timer = new DetectionTimer();
+
+        return SearchAsync(step, "The image", async t =>
+        {
+            var t0 = _clock.Elapsed;
+            var frame = await capture.CaptureAsync(region, t).ConfigureAwait(false);
+            var t1 = _clock.Elapsed;
+            var result = TemplateMatcher.Find(frame.Image, template, options, t);
+            timer.Add(t1 - t0, _clock.Elapsed - t1);
+
+            if (frame.Image.Width < template.Width || frame.Image.Height < template.Height)
+                return Probe.Miss(" The search area (on screen) is smaller than the image.");
+
+            if (result.Best is not { } best)
+            {
+                var miss = $" The best similarity was {result.BestScore:P0} (needs {step.MinSimilarityPercent}%).";
+                if (result.RejectedForColor > 0)
+                    miss += $" {result.RejectedForColor} spot(s) had the right shape but a different color (turn on \"Ignore color\" if the color changes).";
+                return Probe.Miss(miss);
+            }
+
+            var bounds = frame.ToScreen(best.Bounds);
+            var more = result.Matches.Count > 1 ? $" ({result.Matches.Count} matches; the best one is used)" : "";
+            return new Probe(true, bounds.CenterX, bounds.CenterY,
+                $"Found the image at ({bounds.CenterX}, {bounds.CenterY}), {best.Score:P0} match{more}.", string.Empty);
+        }, timer, token);
+    }
+
+    /// <summary>Captures the screen and looks for the step's colour until it shows up (or goes away).</summary>
+    private Task FindColorAsync(FindColorStep step, CancellationToken token)
+    {
+        var capture = RequireCapture();
+        if (!RgbColor.TryParse(step.Color, out var color))
+            throw new InvalidOperationException($"\"{step.Color}\" is not a valid color. Use #RRGGBB.");
+
+        var region = step.SearchFullScreen ? capture.GetVirtualScreen() : step.Region;
+        var timer = new DetectionTimer();
+
+        return SearchAsync(step, $"Color {color}", async t =>
+        {
+            var t0 = _clock.Elapsed;
+            var frame = await capture.CaptureAsync(region, t).ConfigureAwait(false);
+            var t1 = _clock.Elapsed;
+            var result = ColorFinder.Find(frame.Image, color, step.Tolerance, step.MinPixels, maxResults: 20, t);
+            timer.Add(t1 - t0, _clock.Elapsed - t1);
+
+            if (result.Largest is not { } blob)
+            {
+                return Probe.Miss(result.MatchingPixels > 0
+                    ? $" {result.MatchingPixels:N0} pixel(s) of that color were found, but no patch had at least {step.MinPixels} pixels."
+                    : " No pixels of that color were found in the search area.");
+            }
+
+            var x = frame.Bounds.X + (int)Math.Round(blob.CenterX);
+            var y = frame.Bounds.Y + (int)Math.Round(blob.CenterY);
+            var more = result.Blobs.Count > 1 ? $", {result.Blobs.Count} patches; the biggest is used" : "";
+            return new Probe(true, x, y, $"Found color {color} at ({x}, {y}): {blob.PixelCount:N0} pixels{more}.", string.Empty);
+        }, timer, token);
+    }
+
+    private IScreenCapture RequireCapture() =>
+        _capture ?? throw new ScreenCaptureUnavailableException("Screen capture isn't available, so Find image / Find color steps can't run.");
 
     /// <summary>Adds what OCR actually saw, which makes "not found" problems much easier to fix.</summary>
     private static string DescribeLastRead(string text)
@@ -694,11 +826,11 @@ public sealed class PlaybackEngine
         return $" Text read in the search area: \"{oneLine}\"";
     }
 
-    private void DoFoundTextAction(FindTextStep step, TextMatch match)
+    private void DoFoundAction(ScreenSearchStep step, int x, int y)
     {
         if (step.Action == FoundTextAction.None) return;
 
-        _input.MoveMouse(match.Bounds.CenterX + step.OffsetX, match.Bounds.CenterY + step.OffsetY);
+        _input.MoveMouse(x + step.OffsetX, y + step.OffsetY);
         switch (step.Action)
         {
             case FoundTextAction.Click:

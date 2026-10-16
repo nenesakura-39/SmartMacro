@@ -42,7 +42,7 @@ public sealed class FindTextTools : IFindTextTools
 
     public string OcrStatus => _ocr.StatusText;
 
-    public Task<ScreenRect?> PickRegionAsync() => WhileHiddenAsync(RegionPicker.PickAsync);
+    public Task<ScreenRect?> PickRegionAsync() => WhileHiddenAsync(() => RegionPicker.PickAsync());
 
     public async Task<string> TestAsync(FindTextStep step)
     {
@@ -115,7 +115,11 @@ public sealed class FindTextTools : IFindTextTools
 /// </summary>
 internal static class RegionPicker
 {
-    public static Task<ScreenRect?> PickAsync()
+    public const string DefaultHint = "Drag a box around the text to search for. Leave a little space around it.   Esc or right-click to cancel.";
+
+    /// <param name="hint">Instruction shown at the top of each monitor.</param>
+    /// <param name="pickPoint">True = a single click picks one pixel (returned as a 1×1 rectangle) instead of dragging a box.</param>
+    public static Task<ScreenRect?> PickAsync(string? hint = null, bool pickPoint = false)
     {
         var result = new TaskCompletionSource<ScreenRect?>();
         var windows = new List<RegionPickerWindow>();
@@ -127,7 +131,7 @@ internal static class RegionPicker
         }
 
         foreach (var monitor in MonitorBounds())
-            windows.Add(new RegionPickerWindow(monitor, Finish));
+            windows.Add(new RegionPickerWindow(monitor, Finish, hint ?? DefaultHint, pickPoint));
 
         if (windows.Count == 0)
         {
@@ -167,16 +171,18 @@ internal sealed class RegionPickerWindow : Window
 {
     private readonly ScreenRect _monitor;
     private readonly Action<ScreenRect?> _done;
+    private readonly bool _pickPoint;
     private readonly Canvas _canvas = new();
     private readonly Rectangle _selection;
     private readonly TextBlock _sizeLabel;
     private NativeMethods.POINT? _start;
     private bool _closed;
 
-    public RegionPickerWindow(ScreenRect monitor, Action<ScreenRect?> done)
+    public RegionPickerWindow(ScreenRect monitor, Action<ScreenRect?> done, string hintText, bool pickPoint)
     {
         _monitor = monitor;
         _done = done;
+        _pickPoint = pickPoint;
 
         WindowStyle = WindowStyle.None;
         AllowsTransparency = true;
@@ -212,7 +218,7 @@ internal sealed class RegionPickerWindow : Window
             Padding = new Thickness(14, 8, 14, 8),
             Child = new TextBlock
             {
-                Text = "Drag a box around the text to search for. Leave a little space around it.   Esc or right-click to cancel.",
+                Text = hintText,
                 Foreground = Brushes.White,
                 FontSize = 14,
             },
@@ -272,6 +278,13 @@ internal sealed class RegionPickerWindow : Window
     private void OnDown(object sender, MouseButtonEventArgs e)
     {
         NativeMethods.GetCursorPos(out var point);
+        if (_pickPoint)
+        {
+            // One click = one pixel.
+            if (Contains(point.X, point.Y)) _done(new ScreenRect(point.X, point.Y, 1, 1));
+            return;
+        }
+
         _start = point;
         CaptureMouse();
         UpdateSelection(point);

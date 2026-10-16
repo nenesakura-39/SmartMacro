@@ -482,7 +482,8 @@ public class SmartRecordingTests
     [Fact]
     public void Files_from_a_newer_version_are_refused()
     {
-        const string json = """{ "schemaVersion": 4, "macro": { "name": "x", "steps": [] } }""";
+        // Always one above the newest format this build understands (so the test keeps working after format bumps).
+        var json = $$"""{ "schemaVersion": {{MacroDocument.CurrentSchemaVersion + 1}}, "macro": { "name": "x", "steps": [] } }""";
         Assert.False(MacroFileFormat.TryParse(json, out _, out var error));
         Assert.Contains("newer version", error);
     }

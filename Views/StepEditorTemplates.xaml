@@ -121,7 +121,7 @@
                        Text="0 = instant click. Recordings fill in how long you actually held the button." />
 
             <CheckBox Content="Click where the cursor already is" IsChecked="{Binding UseCurrentPosition}" Margin="0,16,0,0" />
-            <CheckBox Content="Click on the text found by the last &quot;Find text&quot; step" IsChecked="{Binding UseLastFoundText}" Margin="0,10,0,0" />
+            <CheckBox Content="Click on what the last Find text / image / color step found" IsChecked="{Binding UseLastFoundText}" Margin="0,10,0,0" />
             <ContentControl Content="{Binding}" ContentTemplate="{StaticResource PositionFieldsTemplate}" Focusable="False" Margin="0,4,0,0"
                             IsEnabled="{Binding UsesFixedPosition}" />
             <TextBlock Text="{Binding DataContext.ScreenBoundsText, RelativeSource={RelativeSource AncestorType=UserControl}}"
@@ -199,19 +199,12 @@
         </StackPanel>
     </DataTemplate>
 
-    <DataTemplate DataType="{x:Type steps:FindTextStepViewModel}">
+    <!--
+        Parts shared by Find text / Find image / Find color (all ScreenSearchStepViewModel):
+        where to look, what to wait for, what to do with the result, and the test result box.
+    -->
+    <DataTemplate x:Key="SearchAreaTemplate" DataType="{x:Type steps:ScreenSearchStepViewModel}">
         <StackPanel>
-            <ContentControl Content="{Binding}" ContentTemplate="{StaticResource StepHeaderTemplate}" Focusable="False" />
-
-            <Border Margin="0,10,0,0" Padding="10,8" CornerRadius="6" Background="{StaticResource WarningSoftBrush}"
-                    Visibility="{Binding OcrWarning, Converter={StaticResource NullToVisibility}}">
-                <TextBlock Text="{Binding OcrWarning}" TextWrapping="Wrap" FontSize="12" />
-            </Border>
-
-            <TextBlock Text="Text to find" Style="{StaticResource FieldLabel}" Margin="0,18,0,4" />
-            <TextBox Text="{Binding Text, UpdateSourceTrigger=PropertyChanged}" MaxLength="200" Tag="e.g. Sign in"
-                     AutomationProperties.Name="Text to find" />
-
             <TextBlock Text="Where to look" Style="{StaticResource FieldLabel}" />
             <CheckBox Content="Search the whole screen (all monitors)" IsChecked="{Binding SearchFullScreen}" />
             <StackPanel Visibility="{Binding UsesRegion, Converter={StaticResource BoolToVisibility}}" Margin="0,6,0,0">
@@ -250,18 +243,14 @@
                     <TextBlock Text="Pick area on screen" Margin="8,0,0,0" />
                 </StackPanel>
             </Button>
+        </StackPanel>
+    </DataTemplate>
 
-            <TextBlock Text="How to match" Style="{StaticResource FieldLabel}" />
-            <ComboBox ItemsSource="{x:Static steps:FindTextStepViewModel.MatchModes}" DisplayMemberPath="Label" SelectedValuePath="Value"
-                      SelectedValue="{Binding MatchMode}" AutomationProperties.Name="Match mode" />
-            <CheckBox Content="Match upper/lower case exactly" IsChecked="{Binding CaseSensitive}" Margin="0,10,0,0" />
-
-            <TextBlock Text="Match accuracy (%)" Style="{StaticResource FieldLabel}" />
-            <TextBox Text="{Binding MinSimilarityPercent, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}" Width="80" HorizontalAlignment="Left"
-                     AutomationProperties.Name="Match accuracy percent" />
-            <TextBlock Style="{StaticResource MutedText}" FontSize="11" Margin="0,4,0,0"
-                       Text="100 = exact. Lower values tolerate OCR mistakes (like reading I as l). Windows OCR doesn't report its own confidence, so this compares the text instead." />
-
+    <DataTemplate x:Key="SearchWaitTemplate" DataType="{x:Type steps:ScreenSearchStepViewModel}">
+        <StackPanel>
+            <TextBlock Text="Wait for" Style="{StaticResource FieldLabel}" />
+            <ComboBox ItemsSource="{x:Static steps:ScreenSearchStepViewModel.Goals}" DisplayMemberPath="Label" SelectedValuePath="Value"
+                      SelectedValue="{Binding Goal}" AutomationProperties.Name="Wait for" />
             <Grid Margin="0,4,0,0">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*" />
@@ -269,7 +258,7 @@
                     <ColumnDefinition Width="*" />
                 </Grid.ColumnDefinitions>
                 <StackPanel Grid.Column="0">
-                    <TextBlock Text="Keep looking for (ms)" Style="{StaticResource FieldLabel}" />
+                    <TextBlock Text="Keep checking for (ms)" Style="{StaticResource FieldLabel}" />
                     <TextBox Text="{Binding TimeoutMs, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}"
                              ToolTip="0 = look just once" AutomationProperties.Name="Timeout in milliseconds" />
                 </StackPanel>
@@ -279,10 +268,16 @@
                              AutomationProperties.Name="Check interval in milliseconds" />
                 </StackPanel>
             </Grid>
+        </StackPanel>
+    </DataTemplate>
 
-            <TextBlock Text="When the text is found" Style="{StaticResource FieldLabel}" />
-            <ComboBox ItemsSource="{x:Static steps:FindTextStepViewModel.Actions}" DisplayMemberPath="Label" SelectedValuePath="Value"
-                      SelectedValue="{Binding Action}" AutomationProperties.Name="Action when found" />
+    <DataTemplate x:Key="SearchResultTemplate" DataType="{x:Type steps:ScreenSearchStepViewModel}">
+        <StackPanel>
+            <StackPanel Visibility="{Binding WaitsForAppear, Converter={StaticResource BoolToVisibility}}">
+                <TextBlock Text="When it's found" Style="{StaticResource FieldLabel}" />
+                <ComboBox ItemsSource="{x:Static steps:ScreenSearchStepViewModel.Actions}" DisplayMemberPath="Label" SelectedValuePath="Value"
+                          SelectedValue="{Binding Action}" AutomationProperties.Name="Action when found" />
+            </StackPanel>
             <Grid Margin="0,4,0,0" Visibility="{Binding HasPointerAction, Converter={StaticResource BoolToVisibility}}">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*" />
@@ -299,9 +294,47 @@
                 </StackPanel>
             </Grid>
 
-            <TextBlock Text="If it's not found in time" Style="{StaticResource FieldLabel}" />
-            <ComboBox ItemsSource="{x:Static steps:FindTextStepViewModel.NotFoundOptions}" DisplayMemberPath="Label" SelectedValuePath="Value"
-                      SelectedValue="{Binding WhenNotFound}" AutomationProperties.Name="When not found" />
+            <TextBlock Text="{Binding NotFoundLabel}" Style="{StaticResource FieldLabel}" />
+            <ComboBox ItemsSource="{x:Static steps:ScreenSearchStepViewModel.NotFoundOptions}" DisplayMemberPath="Label" SelectedValuePath="Value"
+                      SelectedValue="{Binding WhenNotFound}" AutomationProperties.Name="When the time is up" />
+        </StackPanel>
+    </DataTemplate>
+
+    <DataTemplate x:Key="SearchTestResultTemplate" DataType="{x:Type steps:ScreenSearchStepViewModel}">
+        <Border Margin="0,8,0,0" Padding="10,8" CornerRadius="6" Background="{StaticResource SurfaceAltBrush}"
+                Visibility="{Binding TestResult, Converter={StaticResource NullToVisibility}}">
+            <TextBlock Text="{Binding TestResult}" TextWrapping="Wrap" FontSize="12" />
+        </Border>
+    </DataTemplate>
+
+    <DataTemplate DataType="{x:Type steps:FindTextStepViewModel}">
+        <StackPanel>
+            <ContentControl Content="{Binding}" ContentTemplate="{StaticResource StepHeaderTemplate}" Focusable="False" />
+
+            <Border Margin="0,10,0,0" Padding="10,8" CornerRadius="6" Background="{StaticResource WarningSoftBrush}"
+                    Visibility="{Binding OcrWarning, Converter={StaticResource NullToVisibility}}">
+                <TextBlock Text="{Binding OcrWarning}" TextWrapping="Wrap" FontSize="12" />
+            </Border>
+
+            <TextBlock Text="Text to find" Style="{StaticResource FieldLabel}" Margin="0,18,0,4" />
+            <TextBox Text="{Binding Text, UpdateSourceTrigger=PropertyChanged}" MaxLength="200" Tag="e.g. Sign in"
+                     AutomationProperties.Name="Text to find" />
+
+            <ContentControl Content="{Binding}" ContentTemplate="{StaticResource SearchAreaTemplate}" Focusable="False" />
+
+            <TextBlock Text="How to match" Style="{StaticResource FieldLabel}" />
+            <ComboBox ItemsSource="{x:Static steps:FindTextStepViewModel.MatchModes}" DisplayMemberPath="Label" SelectedValuePath="Value"
+                      SelectedValue="{Binding MatchMode}" AutomationProperties.Name="Match mode" />
+            <CheckBox Content="Match upper/lower case exactly" IsChecked="{Binding CaseSensitive}" Margin="0,10,0,0" />
+
+            <TextBlock Text="Match accuracy (%)" Style="{StaticResource FieldLabel}" />
+            <TextBox Text="{Binding MinSimilarityPercent, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}" Width="80" HorizontalAlignment="Left"
+                     AutomationProperties.Name="Match accuracy percent" />
+            <TextBlock Style="{StaticResource MutedText}" FontSize="11" Margin="0,4,0,0"
+                       Text="100 = exact. Lower values tolerate OCR mistakes (like reading I as l). Windows OCR doesn't report its own confidence, so this compares the text instead." />
+
+            <ContentControl Content="{Binding}" ContentTemplate="{StaticResource SearchWaitTemplate}" Focusable="False" />
+            <ContentControl Content="{Binding}" ContentTemplate="{StaticResource SearchResultTemplate}" Focusable="False" />
 
             <Button Command="{Binding TestCommand}" HorizontalAlignment="Left" Margin="0,16,0,0" Style="{StaticResource PrimaryButton}"
                     ToolTip="SmartMacro hides for a moment and reads the search area once.">
@@ -310,10 +343,124 @@
                     <TextBlock Text="Test now" Margin="8,0,0,0" />
                 </StackPanel>
             </Button>
-            <Border Margin="0,8,0,0" Padding="10,8" CornerRadius="6" Background="{StaticResource SurfaceAltBrush}"
-                    Visibility="{Binding TestResult, Converter={StaticResource NullToVisibility}}">
-                <TextBlock Text="{Binding TestResult}" TextWrapping="Wrap" FontSize="12" />
+            <ContentControl Content="{Binding}" ContentTemplate="{StaticResource SearchTestResultTemplate}" Focusable="False" />
+
+            <ContentControl Content="{Binding}" ContentTemplate="{StaticResource StepFooterTemplate}" Focusable="False" />
+        </StackPanel>
+    </DataTemplate>
+
+    <DataTemplate DataType="{x:Type steps:FindImageStepViewModel}">
+        <StackPanel>
+            <ContentControl Content="{Binding}" ContentTemplate="{StaticResource StepHeaderTemplate}" Focusable="False" />
+
+            <TextBlock Text="Image to find" Style="{StaticResource FieldLabel}" Margin="0,18,0,4" />
+            <Border Padding="8" CornerRadius="6" Background="{StaticResource SurfaceAltBrush}" HorizontalAlignment="Left"
+                    Visibility="{Binding TemplatePreview, Converter={StaticResource NullToVisibility}}">
+                <Image Source="{Binding TemplatePreview}" Stretch="Uniform" StretchDirection="Both" MaxHeight="120" MaxWidth="320"
+                       RenderOptions.BitmapScalingMode="NearestNeighbor" AutomationProperties.Name="Image to find" />
             </Border>
+            <TextBlock Text="{Binding TemplateInfo}" Style="{StaticResource MutedText}" FontSize="12" TextWrapping="Wrap" Margin="0,6,0,0" />
+            <Button Command="{Binding CaptureTemplateCommand}" HorizontalAlignment="Left" Margin="0,10,0,0"
+                    ToolTip="SmartMacro hides, then you drag a box tightly around the button or icon to find.">
+                <StackPanel Orientation="Horizontal">
+                    <TextBlock Text="&#xE722;" Style="{StaticResource IconText}" />
+                    <TextBlock Text="Capture image" Margin="8,0,0,0" />
+                </StackPanel>
+            </Button>
+            <TextBlock Style="{StaticResource MutedText}" FontSize="11" Margin="0,6,0,0" TextWrapping="Wrap"
+                       Text="The image must look the same size on screen as when you captured it. Changing display scaling, game resolution or graphics quality can stop it from matching; capture it again if that happens." />
+
+            <ContentControl Content="{Binding}" ContentTemplate="{StaticResource SearchAreaTemplate}" Focusable="False" />
+
+            <TextBlock Text="Match accuracy (%)" Style="{StaticResource FieldLabel}" />
+            <TextBox Text="{Binding MinSimilarityPercent, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}" Width="80" HorizontalAlignment="Left"
+                     AutomationProperties.Name="Match accuracy percent" />
+            <TextBlock Style="{StaticResource MutedText}" FontSize="11" Margin="0,4,0,0" TextWrapping="Wrap"
+                       Text="90 is a good start. Lower it a little if the image changes slightly (glow, animation); raise it if wrong things match. &quot;Test now&quot; shows the best similarity it saw." />
+            <CheckBox Content="Ignore color (match the shape only)" IsChecked="{Binding IgnoreColor}" Margin="0,10,0,0"
+                      ToolTip="Normally a match must also have about the same colors, so a grey disabled button doesn't match a green one." />
+
+            <ContentControl Content="{Binding}" ContentTemplate="{StaticResource SearchWaitTemplate}" Focusable="False" />
+            <ContentControl Content="{Binding}" ContentTemplate="{StaticResource SearchResultTemplate}" Focusable="False" />
+
+            <Button Command="{Binding TestCommand}" HorizontalAlignment="Left" Margin="0,16,0,0" Style="{StaticResource PrimaryButton}"
+                    ToolTip="SmartMacro hides for a moment, looks once, and shows a picture with the matches marked.">
+                <StackPanel Orientation="Horizontal">
+                    <TextBlock Text="&#xE721;" Style="{StaticResource IconText}" />
+                    <TextBlock Text="Test now" Margin="8,0,0,0" />
+                </StackPanel>
+            </Button>
+            <ContentControl Content="{Binding}" ContentTemplate="{StaticResource SearchTestResultTemplate}" Focusable="False" />
+
+            <ContentControl Content="{Binding}" ContentTemplate="{StaticResource StepFooterTemplate}" Focusable="False" />
+        </StackPanel>
+    </DataTemplate>
+
+    <DataTemplate DataType="{x:Type steps:FindColorStepViewModel}">
+        <StackPanel>
+            <ContentControl Content="{Binding}" ContentTemplate="{StaticResource StepHeaderTemplate}" Focusable="False" />
+
+            <TextBlock Text="Color to find (#RRGGBB)" Style="{StaticResource FieldLabel}" Margin="0,18,0,4" />
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="10" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="10" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <Border Grid.Column="0" Width="30" Height="30" CornerRadius="6" Background="{Binding ColorBrush}"
+                        BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" />
+                <TextBox Grid.Column="2" Text="{Binding Color, UpdateSourceTrigger=PropertyChanged}" MaxLength="7" Tag="#FF0000"
+                         AutomationProperties.Name="Color to find" />
+                <Button Grid.Column="4" Command="{Binding PickColorCommand}"
+                        ToolTip="SmartMacro hides, then you click the color on screen.">
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="&#xEF3C;" Style="{StaticResource IconText}" />
+                        <TextBlock Text="Pick from screen" Margin="8,0,0,0" />
+                    </StackPanel>
+                </Button>
+            </Grid>
+
+            <Grid Margin="0,4,0,0">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="10" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <StackPanel Grid.Column="0">
+                    <TextBlock Text="Tolerance (0-255)" Style="{StaticResource FieldLabel}" />
+                    <TextBox Text="{Binding Tolerance, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}" AutomationProperties.Name="Color tolerance" />
+                </StackPanel>
+                <StackPanel Grid.Column="2">
+                    <TextBlock Text="Minimum size (pixels)" Style="{StaticResource FieldLabel}" />
+                    <TextBox Text="{Binding MinPixels, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}" AutomationProperties.Name="Minimum size in pixels" />
+                </StackPanel>
+            </Grid>
+            <TextBlock Style="{StaticResource MutedText}" FontSize="11" Margin="0,4,0,0" TextWrapping="Wrap"
+                       Text="Tolerance = how far each of red, green and blue may differ (about 20-40 is typical). This only matches colors, it doesn't recognize objects: anything else with a similar color in the area also counts, so keep the area small." />
+
+            <ContentControl Content="{Binding}" ContentTemplate="{StaticResource SearchAreaTemplate}" Focusable="False" />
+            <ContentControl Content="{Binding}" ContentTemplate="{StaticResource SearchWaitTemplate}" Focusable="False" />
+            <ContentControl Content="{Binding}" ContentTemplate="{StaticResource SearchResultTemplate}" Focusable="False" />
+
+            <StackPanel Orientation="Horizontal" Margin="0,16,0,0">
+                <Button Command="{Binding TestCommand}" Style="{StaticResource PrimaryButton}"
+                        ToolTip="SmartMacro hides for a moment, looks once, and shows a picture with the matching patches marked.">
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="&#xE721;" Style="{StaticResource IconText}" />
+                        <TextBlock Text="Test now" Margin="8,0,0,0" />
+                    </StackPanel>
+                </Button>
+                <Button Command="{Binding TrackCommand}" Margin="8,0,0,0"
+                        ToolTip="Follows the color inside the search area for 3 seconds (like a moving marker on a bar) and reports its positions and the frame rate.">
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="&#xE916;" Style="{StaticResource IconText}" />
+                        <TextBlock Text="Track for 3 s" Margin="8,0,0,0" />
+                    </StackPanel>
+                </Button>
+            </StackPanel>
+            <ContentControl Content="{Binding}" ContentTemplate="{StaticResource SearchTestResultTemplate}" Focusable="False" />
 
             <ContentControl Content="{Binding}" ContentTemplate="{StaticResource StepFooterTemplate}" Focusable="False" />
         </StackPanel>

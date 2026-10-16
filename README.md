@@ -61,6 +61,25 @@ SmartMacro never tries to get around anti-cheat.
 **Advanced:** Settings → Recording mode still offers the older **Desktop only** and **Game only** recorders as fallbacks.
 Macros made with them keep working exactly as before.
 
+## Find image and Find color (visual detection)
+
+These steps look at the screen instead of using fixed positions, so a macro keeps working when a button moves.
+Everything stays on your PC; no screenshots are uploaded.
+
+- **Find image:** click **Capture image** and drag a box tightly around a button or icon. The step waits until that
+  picture appears (or **disappears**) and can move to / click it. **Match accuracy** (90 % is a good start) says how
+  similar it must be; **Ignore color** matches the shape only. It finds the picture only at the **same size**, so
+  changing display scaling, game resolution or graphics quality may need a new capture.
+- **Find color:** pick a color from the screen (**Pick from screen**), set a **tolerance** and a **small search area**.
+  The biggest patch of that color counts as found. This is simple color matching, not object recognition: anything
+  else with a similar color in the area also counts. **Track for 3 s** follows a moving colored marker in the area and
+  reports its positions (0–100 % along the area) and how many frames per second were reached.
+- **Find text** can now also **wait until the text disappears** (for example "Loading…").
+- **Test now** checks a step without playing the macro and opens a picture with the matches marked
+  (saved as `Logs\last-image-test.png` / `Logs\last-color-test.png`). The log says how long each capture and search took.
+- A **Mouse click** step can click "what the last Find text / image / color step found".
+- Games in exclusive full-screen mode may look black to screen capture; use windowed or borderless mode.
+
 ## Safety
 
 - **Esc** on your keyboard stops playback immediately.
@@ -80,12 +99,16 @@ Macros made with them keep working exactly as before.
 - Some games with anti-cheat ignore simulated input. SmartMacro doesn't try to bypass this.
 - Mouse positions are exact screen pixels. If you change monitors, resolution or scaling, recorded clicks may land in the wrong place. Use **Find text** steps for more robust macros.
 - OCR reads normal horizontal text best. Very small, stylized or rotated text may not be found.
+- Find image only finds the picture at the size it was captured, and Find color only compares colors. Neither one
+  "understands" what is on screen, and neither can guarantee that a game will react to the clicks it sends.
 
 ## Troubleshooting
 
 - **Settings → Copy diagnostics** copies version, Windows, screen and OCR info plus the recent log, for bug reports.
 - Daily log files: `%LOCALAPPDATA%\SmartMacro\Logs`.
 - **Find text → Test now** saves `Logs\last-ocr-test.png`, which shows exactly what was captured.
+- **Find image / Find color → Test now** shows (and saves) the captured area with matches marked: green = the one a
+  macro would use, orange = other matches. "Not found" results include the best similarity seen.
 - **Clicks in a game's menus don't register:** check the log for lines starting with "Input check:". They say if the
   game window wasn't active (the click only switched to it) or if the game had locked the mouse.
 - **The camera didn't turn (or the cursor jumped instead):** open the **Recorded input** step and check its parts. A

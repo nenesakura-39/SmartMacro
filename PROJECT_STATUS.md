@@ -1,6 +1,6 @@
 # SmartMacro – Project Status / Handoff
 
-_Last updated: 2026-10-16 (v1.0.0 + game-input fidelity work + Stage 1 smart recording). Owner & developer: Riku_
+_Last updated: 2026-10-16 (v1.0.0 + game-input fidelity work + Stage 1 smart recording + Stage 2 visual detection). Owner & developer: Riku_
 
 ## Done
 **Phase 1: Foundation**
@@ -154,12 +154,57 @@ _Last updated: 2026-10-16 (v1.0.0 + game-input fidelity work + Stage 1 smart rec
   round trip + damaged text, schema 3/2, newer-version refusal, segment validation, settings migration).
 - Docs: `docs/STAGE1_MANUAL_TESTS.md` (beginner checklist: Notepad + games), `docs/ROADMAP_STAGES_2_4.md` (plan only).
 - Not verified: build, test run, any real app or game. Detection thresholds are first guesses and need real-world tuning.
+- **Update:** the owner then ran `tools\verify.cmd` and the Stage 1 manual tests and reported everything green
+  ("100/100"). The exact test count from `artifacts\test.log` wasn't sent, so it isn't recorded here.
+
+**Stage 2: Reusable visual detection** (2026-10-16; written, NOT built or tested yet — the AI's environment had no .NET SDK)
+- New Core folder `SmartMacro.Core/Vision` (no Windows code, all unit tested with fake screens):
+  - `BgraImage` (BGRA pixels, crop / fill / draw rectangle), `ScreenFrame` (picture + its screen bounds), `RgbColor`
+    ("#RRGGBB"), `TemplateCodec` (picture stored in the macro: BGR bytes → zlib → Base64; size and checksum checked).
+  - `IScreenCapture` (capture an area in physical pixels; returns the on-screen part), `DetectionTimer` (capture/search
+    time, "busy %" for the log), `DetectionTimeoutException`, `ScreenCaptureUnavailableException`.
+  - `TemplateMatcher`: grey NCC, coarse pass on a shrunken copy (1/2, 1/4, 1/8 chosen by a ~40 M operations budget,
+    template ≥ 8 px after shrinking), local peaks spread apart, exact refine at full size, average-colour check
+    (≤ 48 per channel) unless IgnoreColor, overlapping matches removed, best first. Reports BestScore even on a miss and
+    how many shape matches were rejected for colour. Rejects flat (one-colour) templates.
+  - `ColorFinder`: per-channel tolerance mask + 4-neighbour flood fill → patches (bounds, size, centroid), biggest first.
+  - `MarkerTracker`: marker position 0–100 % along a horizontal / vertical area, Found / Ambiguous / Lost / IgnoredJump
+    (one-frame jumps > 35 % are ignored once), confidence = share of marker-coloured pixels in the chosen patch.
+- Models (`MacroStep.cs`): new abstract `ScreenSearchStep` (area, TimeoutMs, CheckIntervalMs, **Goal** Appear/Disappear,
+  Action, Offset, WhenNotFound) shared by `FindTextStep` (unchanged JSON names), new `FindImageStep` (TemplateWidth /
+  Height / Data, MinSimilarityPercent 90, IgnoreColor, check every 250 ms) and `FindColorStep` (Color "#RRGGBB",
+  Tolerance 24, MinPixels 10, check every 250 ms). JSON types "findImage" / "findColor".
+- Engine: one shared wait loop `SearchAsync` for all three (appear / disappear, timeout, continue-or-stop, pause / stop,
+  click settle). **Paused time no longer counts toward the timeout.** One log line per step with capture/search
+  averages, never per frame. "Last found" is now a point shared by all three steps. `PlaybackEngine` takes an optional
+  `IScreenCapture` (4th constructor argument); without it, image/colour steps fail with a clear message.
+- Validation: template present / 6–400 px / decodes / not flat; area ≥ template; similarity 50–100 (warning < 70);
+  check interval ≥ 50 ms for image/colour (OCR stays ≥ 100); colour must parse; tolerance 0–255 (warning > 100);
+  warning for whole-screen colour search; warning if a "when found" action is set while waiting for disappear.
+- Files: `MacroDocument.CurrentSchemaVersion = 4`. Written as 4 only when a Find image / Find color step or a Find text
+  with Goal = Disappear exists. `RequiredSchemaVersion` now takes the highest need of all steps (it used to return 3 as
+  soon as it saw a smart recording, even if a later step needed more). Old files load unchanged (Goal defaults to Appear).
+- App: `Services/Vision/GdiScreenCapture` (reuses the OCR GDI capture), `Services/Vision/VisionTools` (Pick area,
+  Capture image, Pick color = one click, Test now with a preview window + `Logs\last-image-test.png` /
+  `last-color-test.png`, Track for 3 s ≈ 30 fps max with positions, fps and ms per frame). The region picker got a
+  custom hint text and a one-click "pick point" mode. Heavy work runs on background threads; SmartMacro hides and is
+  excluded from capture while it looks.
+- Editor: `ScreenSearchStepViewModel` base (shared fields, busy handling) + `FindImageStepViewModel` (preview of the stored
+  picture) + `FindColorStepViewModel` (swatch). XAML: shared keyed templates `SearchAreaTemplate`, `SearchWaitTemplate`,
+  `SearchResultTemplate`, `SearchTestResultTemplate`; Find text now has "Wait for: appears / disappears".
+- Tests: `SmartMacro.Tests/VisionTests.cs` (codec, matcher incl. coarse path / multiple copies / colour check /
+  brightness, colour finder, tracker, engine with `FakeCapture` incl. negative monitor coordinates, timeout, continue,
+  disappear, stop, validation, schema 4 round trip, old-file loading, descriptions). The matcher maths was also
+  sanity-checked with a NumPy port of the same algorithm (not a substitute for running the C# tests).
+- Docs: `docs/STAGE2_MANUAL_TESTS.md`, README section "Find image and Find color", roadmap updated with Stage 3/4 breakdown.
+- Not verified: build, test run, real capture speed, real games.
 
 ## Architecture
 - `SmartMacro.Core` (net10.0, no WPF): models, validation, storage, logging. All unit tested.
 - `SmartMacro` (net10.0-windows, WPF, MVVM): `Mvvm/`, `ViewModels/`, `Views/`, `Themes/`, `Services/`, `Converters/`.
 - Recording: `Core/Recording/RecordingConverter` (desktop), `Core/Recording/GameRecordingConverter` + `IRelativeInputRecorder` (game), and `Core/Recording/SmartRecordingConverter` + `MouseContextClassifier` + `ISmartInputRecorder` (smart, the default). Model: `Core/Models/InputSequence.cs` (InputEvent, codec v1/u1) and `Core/Models/MouseSegment.cs`.
 - `SmartMacro.Tests` (xUnit): 57 tests verified, plus about 35 new Phase 3 tests (engine, converter, validation) not yet run.
+- Visual detection: `Core/Vision` (BgraImage, TemplateCodec, TemplateMatcher, ColorFinder, MarkerTracker, IScreenCapture) and `Services/Vision` (GdiScreenCapture, VisionTools + preview window).
 - OCR: `Core/Ocr` (ScreenRect, IOcrService, OcrTextMatcher) and `Services/Ocr` (WindowsOcrService + ScreenCapture, FindTextTools + RegionPickerWindow). The app's TFM is now `net10.0-windows10.0.19041.0`, which is needed for the WinRT projections; Core and Tests stay on plain `net10.0`.
 - Windows-only code is in `Services/Input` (NativeMethods, Win32InputSimulator, LowLevelInputHook / WindowsInputRecorder / EmergencyStopWatcher), `Services/HotkeyService.cs` and `Services/RunModeHost.cs` (banner + minimize).
 - The composition root is in `App.xaml.cs`, with dependencies wired by hand (no DI container needed yet).
@@ -184,13 +229,15 @@ _Last updated: 2026-10-16 (v1.0.0 + game-input fidelity work + Stage 1 smart rec
 - Windows OCR has no confidence score. "Match accuracy" compares the text instead.
 - OCR reads straight horizontal text best. Very small or stylized text and rotated text may not be read.
 - If "Minimize while running" is turned off, OCR can read SmartMacro's own window.
-- The Find text timeout counts paused time.
+- Find image matches only at the captured size (no scaling / rotation). Display scaling, game resolution or graphics
+  quality changes need a new capture. Find color is colour matching only, not object recognition.
+- GDI capture can return black for exclusive full-screen games or some overlays; windowed / borderless mode usually works.
+- Full-screen image search costs tens of ms per check on a big screen (estimate; to be measured with STAGE2 test E).
 
 ## Next task
-- Owner: run `tools\verify.cmd` (Stage 1 + the earlier audit / Roblox click fixes are not built yet) and send
-  `artifacts\build.log` / `artifacts\test.log` if anything fails.
-- Then `docs/STAGE1_MANUAL_TESTS.md`: section A (Notepad + old macros), B (editor), C (games where allowed). Note the
-  "Smart recording: …" log line for each test.
-- Tune `MouseContextOptions` thresholds from real results if parts are detected wrongly.
-- Only after Stage 1 passes: Stage 2 (visual detection) per `docs/ROADMAP_STAGES_2_4.md`.
-- Then `tools\publish.cmd`.
+- Owner: run `tools\verify.cmd` (Stage 2 is not built yet) and send `artifacts\build.log` / `artifacts\test.log` if
+  anything fails. Fix compile errors / failing tests first.
+- Then `docs/STAGE2_MANUAL_TESTS.md` (A: Find image in Notepad/Paint, B: Find color + Track, C: Find text disappear,
+  D: games where allowed, E: CPU / responsiveness). Report the "Found…/Checked N times…" log lines and tracking fps.
+- Tune defaults (similarity 90 %, colour check 48, check interval 250 ms) from the results.
+- Only after Stage 2 passes: Stage 3 (conditions and loops) per `docs/ROADMAP_STAGES_2_4.md`.

@@ -7,6 +7,7 @@ using SmartMacro.Core.Validation;
 using SmartMacro.Mvvm;
 using SmartMacro.Services;
 using SmartMacro.Services.Ocr;
+using SmartMacro.Services.Vision;
 using SmartMacro.ViewModels.Steps;
 
 namespace SmartMacro.ViewModels;
@@ -25,6 +26,7 @@ public sealed class EditorViewModel : ObservableObject
     private readonly Action<Macro> _onSaved;
     private readonly Action<string, StatusKind> _setStatus;
     private readonly IFindTextTools? _findTextTools;
+    private readonly IVisionTools? _visionTools;
 
     private Macro? _saved;          // last saved version (copy)
     private Guid _id;
@@ -50,9 +52,11 @@ public sealed class EditorViewModel : ObservableObject
         Action<Macro> onSaved,
         Action<string, StatusKind> setStatus,
         Action goToLibrary,
-        IFindTextTools? findTextTools = null)
+        IFindTextTools? findTextTools = null,
+        IVisionTools? visionTools = null)
     {
         _findTextTools = findTextTools;
+        _visionTools = visionTools;
         _repository = repository;
         _log = log;
         _dialogs = dialogs;
@@ -376,7 +380,19 @@ public sealed class EditorViewModel : ObservableObject
     private StepViewModel CreateStepViewModel(MacroStep step)
     {
         var vm = StepViewModel.Create(step);
-        if (vm is FindTextStepViewModel findText) findText.Tools = _findTextTools;
+        switch (vm)
+        {
+            case FindTextStepViewModel findText:
+                findText.Tools = _findTextTools;
+                break;
+            case FindImageStepViewModel findImage:
+                findImage.Tools = _visionTools;
+                break;
+            case FindColorStepViewModel findColor:
+                findColor.Tools = _visionTools;
+                break;
+        }
+
         return vm;
     }
 

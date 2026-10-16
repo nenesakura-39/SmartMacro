@@ -30,15 +30,16 @@ public sealed class MacroDocument
     /// Newest format this version understands.
     /// 1 = original format. 2 = adds hold times on Press / Click steps and "Recorded input (game mode)" steps.
     /// 3 = adds smart recordings: recorded input with cursor positions ("u1" event text) and mouse segments.
+    /// 4 = adds visual detection: "Find image" and "Find color" steps, and "wait until it disappears" on Find text.
     /// </summary>
-    public const int CurrentSchemaVersion = 3;
+    public const int CurrentSchemaVersion = 4;
 
     public int SchemaVersion { get; set; }
     public Macro? Macro { get; set; }
 
     /// <summary>
     /// The oldest format that can hold this macro without losing anything. Macros that don't use the
-    /// version 2 / 3 features are still written as the older version, so older copies of SmartMacro can keep
+    /// version 2 / 3 / 4 features are still written as the older version, so older copies of SmartMacro can keep
     /// opening them. Older files need no migration: the new fields simply default to 0 / off / null, which is
     /// exactly the old behavior (game-mode recordings stay relative-only).
     /// </summary>
@@ -50,16 +51,17 @@ public sealed class MacroDocument
         var required = 1;
         foreach (var step in macro.Steps)
         {
-            switch (step)
+            var needed = step switch
             {
-                case InputSequenceStep q when UsesSmartRecordingFeatures(q):
-                    return 3;
-                case InputSequenceStep:
-                case KeyPressStep { HoldMs: not 0 }:
-                case MouseClickStep { HoldMs: not 0 }:
-                    required = 2;
-                    break;
-            }
+                FindImageStep or FindColorStep => 4,
+                FindTextStep { Goal: not WaitGoal.Appear } => 4,
+                InputSequenceStep q when UsesSmartRecordingFeatures(q) => 3,
+                InputSequenceStep => 2,
+                KeyPressStep { HoldMs: not 0 } => 2,
+                MouseClickStep { HoldMs: not 0 } => 2,
+                _ => 1,
+            };
+            if (needed > required) required = needed;
         }
 
         return required;

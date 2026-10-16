@@ -9,6 +9,7 @@ using SmartMacro.Mvvm;
 using SmartMacro.Services;
 using SmartMacro.Services.Input;
 using SmartMacro.Services.Ocr;
+using SmartMacro.Services.Vision;
 
 namespace SmartMacro.ViewModels;
 
@@ -37,7 +38,8 @@ public sealed record AutomationServices(
     EmergencyStopWatcher Emergency,
     IRunModeHost Host,
     IOcrService Ocr,
-    IFindTextTools FindTextTools);
+    IFindTextTools FindTextTools,
+    IVisionTools? VisionTools = null);
 
 /// <summary>Top-level view model: owns the pages, navigation, the automation bar and the status bar.</summary>
 public sealed class MainViewModel : ObservableObject, IDisposable
@@ -74,7 +76,8 @@ public sealed class MainViewModel : ObservableObject, IDisposable
             onSaved: saved => Library!.Upsert(saved),
             setStatus: SetStatus,
             goToLibrary: () => CurrentPage = AppPage.Library,
-            findTextTools: automation.FindTextTools);
+            findTextTools: automation.FindTextTools,
+            visionTools: automation.VisionTools);
 
         Library = new LibraryViewModel(
             repository, log, dialogs,

@@ -13,6 +13,8 @@ public enum StepKind
     TypeText,
     FindText,
     InputSequence,
+    FindImage,
+    FindColor,
 }
 
 public enum MacroMouseButton
@@ -62,6 +64,8 @@ public enum KeyModifiers
 [JsonDerivedType(typeof(TypeTextStep), "typeText")]
 [JsonDerivedType(typeof(FindTextStep), "findText")]
 [JsonDerivedType(typeof(InputSequenceStep), "inputSequence")]
+[JsonDerivedType(typeof(FindImageStep), "findImage")]
+[JsonDerivedType(typeof(FindColorStep), "findColor")]
 public abstract class MacroStep
 {
     public Guid Id { get; set; } = Guid.NewGuid();
@@ -169,6 +173,7 @@ public enum TextMatchMode
     WholeWords,
 }
 
+/// <summary>What to do with the thing a Find text / Find image / Find color step found.</summary>
 public enum FoundTextAction
 {
     None,
@@ -178,20 +183,30 @@ public enum FoundTextAction
     RightClick,
 }
 
+/// <summary>What happens when a Find text / image / color step times out.</summary>
 public enum TextNotFoundBehavior
 {
     StopMacro,
     Continue,
 }
 
-/// <summary>
-/// Uses OCR to look for text on the screen, waiting up to a timeout, and optionally
-/// moves to / clicks on it. Later Mouse click steps can also click "the last found text".
-/// </summary>
-public sealed class FindTextStep : MacroStep
+/// <summary>What a Find text / image / color step waits for.</summary>
+public enum WaitGoal
 {
-    public string Text { get; set; } = string.Empty;
+    /// <summary>Wait until it is on screen (the original behaviour).</summary>
+    Appear,
 
+    /// <summary>Wait until it is no longer on screen (e.g. a "Loading…" message or a progress bar).</summary>
+    Disappear,
+}
+
+/// <summary>
+/// Shared settings of the steps that look at the screen (Find text, Find image, Find color): where to look,
+/// how long to keep checking, what to wait for, and what to do with the result.
+/// Coordinates are physical screen pixels (virtual-screen coordinates), the same as mouse steps.
+/// </summary>
+public abstract class ScreenSearchStep : MacroStep
+{
     /// <summary>Search the whole (virtual) screen instead of a specific area.</summary>
     public bool SearchFullScreen { get; set; } = true;
 
@@ -200,28 +215,101 @@ public sealed class FindTextStep : MacroStep
     public int RegionWidth { get; set; } = 400;
     public int RegionHeight { get; set; } = 200;
 
-    public TextMatchMode MatchMode { get; set; } = TextMatchMode.Contains;
-    public bool CaseSensitive { get; set; }
-
-    /// <summary>How close the OCR text must be to the search text (50-100). Lower = more forgiving of OCR mistakes.</summary>
-    public int MinSimilarityPercent { get; set; } = 85;
-
     /// <summary>How long to keep looking. 0 = look once.</summary>
     public int TimeoutMs { get; set; } = 10_000;
 
     /// <summary>Pause between screen checks while waiting.</summary>
     public int CheckIntervalMs { get; set; } = 500;
 
+    /// <summary>Wait for it to appear (default) or to disappear. Files made before this option load as Appear.</summary>
+    public WaitGoal Goal { get; set; } = WaitGoal.Appear;
+
+    /// <summary>What to do once it's found (only used when waiting for it to appear).</summary>
     public FoundTextAction Action { get; set; } = FoundTextAction.None;
 
-    /// <summary>Offset from the center of the found text for Move / Click.</summary>
+    /// <summary>Offset from the center of what was found, for Move / Click.</summary>
     public int OffsetX { get; set; }
     public int OffsetY { get; set; }
 
     public TextNotFoundBehavior WhenNotFound { get; set; } = TextNotFoundBehavior.StopMacro;
 
+    /// <summary>The search area as a rectangle (ignored when <see cref="SearchFullScreen"/> is on).</summary>
+    [JsonIgnore]
+    public Ocr.ScreenRect Region => new(RegionX, RegionY, RegionWidth, RegionHeight);
+}
+
+/// <summary>
+/// Uses OCR to look for text on the screen, waiting up to a timeout, and optionally
+/// moves to / clicks on it. Later Mouse click steps can also click "the last found" spot.
+/// Can also wait until the text disappears.
+/// </summary>
+public sealed class FindTextStep : ScreenSearchStep
+{
+    public string Text { get; set; } = string.Empty;
+
+    public TextMatchMode MatchMode { get; set; } = TextMatchMode.Contains;
+    public bool CaseSensitive { get; set; }
+
+    /// <summary>How close the OCR text must be to the search text (50-100). Lower = more forgiving of OCR mistakes.</summary>
+    public int MinSimilarityPercent { get; set; } = 85;
+
     [JsonIgnore]
     public override StepKind Kind => StepKind.FindText;
+}
+
+/// <summary>
+/// Looks for a small picture (a button, icon, symbol…) on the screen by comparing pixels, waiting up to a timeout,
+/// and optionally moves to / clicks on it, or waits until it disappears. The picture is captured in the editor and
+/// stored inside the macro (see <see cref="Vision.TemplateCodec"/>). It must look the same size on screen as when it
+/// was captured (same display scaling and game resolution).
+/// </summary>
+public sealed class FindImageStep : ScreenSearchStep
+{
+    public FindImageStep()
+    {
+        CheckIntervalMs = 250;
+    }
+
+    /// <summary>Size of the stored picture in pixels.</summary>
+    public int TemplateWidth { get; set; }
+    public int TemplateHeight { get; set; }
+
+    /// <summary>The stored picture: B, G, R bytes per pixel, zlib-compressed, Base64. Empty until captured.</summary>
+    public string TemplateData { get; set; } = string.Empty;
+
+    /// <summary>How similar a spot must be (50-100 %). 90 is a good start; lower it for slightly changing images.</summary>
+    public int MinSimilarityPercent { get; set; } = 90;
+
+    /// <summary>Match the shape only, even if the colours are different (e.g. any colour of the same icon).</summary>
+    public bool IgnoreColor { get; set; }
+
+    [JsonIgnore]
+    public override StepKind Kind => StepKind.FindImage;
+}
+
+/// <summary>
+/// Looks for pixels of a colour (within a tolerance) on the screen, waiting up to a timeout. The biggest patch of
+/// that colour counts as "found" (its middle is used for Move / Click). Simple colour matching, not object
+/// recognition: use a small search area and a distinctive colour.
+/// </summary>
+public sealed class FindColorStep : ScreenSearchStep
+{
+    public FindColorStep()
+    {
+        CheckIntervalMs = 250;
+    }
+
+    /// <summary>The colour to look for, written as "#RRGGBB".</summary>
+    public string Color { get; set; } = "#FF0000";
+
+    /// <summary>Allowed difference per red / green / blue channel (0 = exact, 255 = anything).</summary>
+    public int Tolerance { get; set; } = 24;
+
+    /// <summary>The patch must have at least this many pixels (ignores stray single pixels).</summary>
+    public int MinPixels { get; set; } = 10;
+
+    [JsonIgnore]
+    public override StepKind Kind => StepKind.FindColor;
 }
 
 /// <summary>

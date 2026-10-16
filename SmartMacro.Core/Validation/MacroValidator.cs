@@ -1,5 +1,6 @@
 using SmartMacro.Core.Input;
 using SmartMacro.Core.Models;
+using SmartMacro.Core.Vision;
 
 namespace SmartMacro.Core.Validation;
 
@@ -64,6 +65,11 @@ public static class MacroValidator
     public const int MaxRepeatCount = 100_000;
     public const int MaxSearchTextLength = 200;
     public const int MinCheckIntervalMs = 100;
+    public const int MinVisionCheckIntervalMs = 50;  // Find image / Find color (cheaper than OCR)
+    public const int MinTemplateSize = 6;            // pixels, each side
+    public const int MaxTemplateSize = 400;          // pixels, each side
+    public const int MaxTemplateDataLength = 1_500_000; // characters of Base64
+    public const int MaxColorPixels = 10_000_000;
     public const int MaxCheckIntervalMs = 60_000;
     public const int MaxOffset = 5_000;
     public const int MaxRegionSize = 20_000;
@@ -133,8 +139,8 @@ public static class MacroValidator
 
             if (step is MouseClickStep { UseLastFoundText: true } && !hasFindTextBefore)
                 issues.Add(new ValidationIssue(IssueSeverity.Warning,
-                    "This click uses the last found text, but there's no \"Find text\" step before it.", i, step.Id, nameof(MouseClickStep.UseLastFoundText)));
-            if (step is FindTextStep { Enabled: true }) hasFindTextBefore = true;
+                    "This click uses the last found spot, but there's no \"Find text\", \"Find image\" or \"Find color\" step before it.", i, step.Id, nameof(MouseClickStep.UseLastFoundText)));
+            if (step is ScreenSearchStep { Enabled: true, Goal: WaitGoal.Appear }) hasFindTextBefore = true;
 
             if (step.Id == Guid.Empty || !seenIds.Add(step.Id))
                 issues.Add(new ValidationIssue(IssueSeverity.Error, "This step has a missing or duplicate ID.", i, step.Id));
@@ -229,28 +235,37 @@ public static class MacroValidator
                     issues.Add(Error("Enter the text to look for.", nameof(FindTextStep.Text)));
                 else if (f.Text.Length > MaxSearchTextLength)
                     issues.Add(Error($"The search text can be at most {MaxSearchTextLength} characters.", nameof(FindTextStep.Text)));
-
-                if (!f.SearchFullScreen)
-                {
-                    if (f.RegionWidth < 5 || f.RegionHeight < 5)
-                        issues.Add(Error("The search area must be at least 5×5 pixels.", "Region"));
-                    else if (f.RegionWidth > MaxRegionSize || f.RegionHeight > MaxRegionSize)
-                        issues.Add(Error($"The search area can be at most {MaxRegionSize:N0} pixels wide or tall.", "Region"));
-                    else if (screen is not null && !new Ocr.ScreenRect(f.RegionX, f.RegionY, f.RegionWidth, f.RegionHeight)
-                                 .IntersectsWith(new Ocr.ScreenRect(screen.Left, screen.Top, screen.Width, screen.Height)))
-                        issues.Add(Warning("The search area is outside your current screen.", "Region"));
-                }
-
                 if (f.MinSimilarityPercent < 50 || f.MinSimilarityPercent > 100)
                     issues.Add(Error("Match accuracy must be between 50% and 100%.", nameof(FindTextStep.MinSimilarityPercent)));
-                if (f.TimeoutMs < 0 || f.TimeoutMs > MaxDelayMs)
-                    issues.Add(Error($"The wait time must be 0 to {MaxDelayMs:N0} ms.", nameof(FindTextStep.TimeoutMs)));
-                if (f.CheckIntervalMs < MinCheckIntervalMs || f.CheckIntervalMs > MaxCheckIntervalMs)
-                    issues.Add(Error($"Check every must be {MinCheckIntervalMs} to {MaxCheckIntervalMs:N0} ms.", nameof(FindTextStep.CheckIntervalMs)));
-                if (Math.Abs((long)f.OffsetX) > MaxOffset || Math.Abs((long)f.OffsetY) > MaxOffset)
-                    issues.Add(Error($"Offsets must be between -{MaxOffset} and {MaxOffset} pixels.", "Offset"));
-                if (!Enum.IsDefined(f.MatchMode) || !Enum.IsDefined(f.Action) || !Enum.IsDefined(f.WhenNotFound))
+                if (!Enum.IsDefined(f.MatchMode))
                     issues.Add(Error("This step has an unknown option value."));
+                ValidateSearch(issues, f, screen, MinCheckIntervalMs);
+                break;
+
+            case FindImageStep img:
+                ValidateTemplate(issues, img);
+                if (img.MinSimilarityPercent < 50 || img.MinSimilarityPercent > 100)
+                    issues.Add(Error("Match accuracy must be between 50% and 100%.", nameof(FindImageStep.MinSimilarityPercent)));
+                else if (img.MinSimilarityPercent < 70)
+                    issues.Add(Warning("Match accuracy below 70% often matches the wrong thing. Test it with \"Test now\".", nameof(FindImageStep.MinSimilarityPercent)));
+                ValidateSearch(issues, img, screen, MinVisionCheckIntervalMs);
+                if (!img.SearchFullScreen && img.TemplateWidth > 0
+                    && (img.RegionWidth < img.TemplateWidth || img.RegionHeight < img.TemplateHeight))
+                    issues.Add(Error("The search area is smaller than the image to find. Make the area bigger.", "Region"));
+                break;
+
+            case FindColorStep c:
+                if (!RgbColor.TryParse(c.Color, out _))
+                    issues.Add(Error("Enter the color as #RRGGBB (for example #FF0000 for red), or pick it from the screen.", nameof(FindColorStep.Color)));
+                if (c.Tolerance < 0 || c.Tolerance > 255)
+                    issues.Add(Error("Tolerance must be 0 to 255.", nameof(FindColorStep.Tolerance)));
+                else if (c.Tolerance > 100)
+                    issues.Add(Warning("A tolerance above 100 matches many different colors.", nameof(FindColorStep.Tolerance)));
+                if (c.MinPixels < 1 || c.MinPixels > MaxColorPixels)
+                    issues.Add(Error($"Minimum size must be 1 to {MaxColorPixels:N0} pixels.", nameof(FindColorStep.MinPixels)));
+                ValidateSearch(issues, c, screen, MinVisionCheckIntervalMs);
+                if (c.SearchFullScreen)
+                    issues.Add(Warning("Searching the whole screen for a color often finds something else. Pick a small area if you can.", "Region"));
                 break;
 
             default:
@@ -395,6 +410,65 @@ public static class MacroValidator
         if (segments.Any(s => s.Effective == MouseMovementMode.CursorPosition)
             && step.Events is { } events && events.Any(e => e.Kind == InputEventKind.MouseMove && !e.HasPosition))
             issues.Add(Warning("Some mouse movement has no recorded cursor position; it's played as relative movement.", property));
+    }
+
+    /// <summary>Shared checks for Find text / image / color: area, timing, goal, action, offsets.</summary>
+    private static void ValidateSearch(List<ValidationIssue> issues, ScreenSearchStep f, ScreenBounds? screen, int minInterval)
+    {
+        if (!f.SearchFullScreen)
+        {
+            if (f.RegionWidth < 5 || f.RegionHeight < 5)
+                issues.Add(Error("The search area must be at least 5×5 pixels.", "Region"));
+            else if (f.RegionWidth > MaxRegionSize || f.RegionHeight > MaxRegionSize)
+                issues.Add(Error($"The search area can be at most {MaxRegionSize:N0} pixels wide or tall.", "Region"));
+            else if (screen is not null && !new Ocr.ScreenRect(f.RegionX, f.RegionY, f.RegionWidth, f.RegionHeight)
+                         .IntersectsWith(new Ocr.ScreenRect(screen.Left, screen.Top, screen.Width, screen.Height)))
+                issues.Add(Warning("The search area is outside your current screen.", "Region"));
+        }
+
+        if (f.TimeoutMs < 0 || f.TimeoutMs > MaxDelayMs)
+            issues.Add(Error($"The wait time must be 0 to {MaxDelayMs:N0} ms.", nameof(ScreenSearchStep.TimeoutMs)));
+        if (f.CheckIntervalMs < minInterval || f.CheckIntervalMs > MaxCheckIntervalMs)
+            issues.Add(Error($"Check every must be {minInterval} to {MaxCheckIntervalMs:N0} ms.", nameof(ScreenSearchStep.CheckIntervalMs)));
+        if (Math.Abs((long)f.OffsetX) > MaxOffset || Math.Abs((long)f.OffsetY) > MaxOffset)
+            issues.Add(Error($"Offsets must be between -{MaxOffset} and {MaxOffset} pixels.", "Offset"));
+        if (!Enum.IsDefined(f.Action) || !Enum.IsDefined(f.WhenNotFound) || !Enum.IsDefined(f.Goal))
+            issues.Add(Error("This step has an unknown option value."));
+        else if (f.Goal == WaitGoal.Disappear && f.Action != FoundTextAction.None)
+            issues.Add(Warning("The \"when found\" action isn't used while waiting for something to disappear.", nameof(ScreenSearchStep.Action)));
+    }
+
+    /// <summary>The stored picture must exist, decode to its stated size, and not be one flat color.</summary>
+    private static void ValidateTemplate(List<ValidationIssue> issues, FindImageStep step)
+    {
+        const string property = nameof(FindImageStep.TemplateData);
+        if (string.IsNullOrEmpty(step.TemplateData))
+        {
+            issues.Add(Error("Capture the image to look for first (\"Capture image\").", property));
+            return;
+        }
+
+        if (step.TemplateWidth < MinTemplateSize || step.TemplateHeight < MinTemplateSize
+            || step.TemplateWidth > MaxTemplateSize || step.TemplateHeight > MaxTemplateSize)
+        {
+            issues.Add(Error($"The image must be {MinTemplateSize} to {MaxTemplateSize} pixels wide and tall. Capture a different area.", property));
+            return;
+        }
+
+        if (step.TemplateData.Length > MaxTemplateDataLength)
+        {
+            issues.Add(Error("The stored image is too large. The macro may be damaged; capture the image again.", property));
+            return;
+        }
+
+        if (!TemplateCodec.TryDecode(step.TemplateData, step.TemplateWidth, step.TemplateHeight, out var image, out var error))
+        {
+            issues.Add(Error(error ?? "The stored image is damaged.", property));
+            return;
+        }
+
+        if (TemplateMatcher.IsFlat(image!))
+            issues.Add(Error("The image is a single flat color, so its shape can't be matched. Capture an area with some detail, or use a \"Find color\" step.", property));
     }
 
     private static void CheckPosition(List<ValidationIssue> issues, int x, int y, ScreenBounds? screen)
