@@ -7,7 +7,7 @@ KUROLOGIC SMARTMACRO – END-USER LICENSE AGREEMENT (EULA)
 Version: [PLACEHOLDER: EULA version, e.g. 1.0]      Effective date: [PLACEHOLDER: date]
 Software: KuroLogic SmartMacro, version [PLACEHOLDER: e.g. 1.0.0] and later versions that
           come with this EULA.
-Copyright (c) 2026 KuroLogic. All rights reserved. Developer: Riku (リク).
+Copyright © 2026 KuroLogic. All rights reserved. Developer: Riku (リク).
 
 Please read this Agreement before installing or using the Software. By installing,
 copying or using the Software you agree to this Agreement. If you do not agree, do not
@@ -84,8 +84,10 @@ Except as expressly allowed by this Agreement or by mandatory law, you may not:
     controls, to cheat in competitive play, to spam, to harm others, or to access
     systems or accounts without permission.
 7.4 Data: as published, the Software stores its macros, settings, logs and test
-    screenshots only on your computer and does not send them to the Licensor. [REVIEW:
-    keep this statement accurate if network features are ever added.]
+    screenshots only on your computer and does not send them to the Licensor. If the
+    Software crashes, Windows may send an error report to Microsoft according to your
+    Windows settings (Windows Error Reporting). [REVIEW: keep this statement accurate if
+    network features are ever added.]
 
 8. THIRD-PARTY COMPONENTS
 8.1 The Software includes third-party components (for example the Microsoft .NET
@@ -94,6 +96,12 @@ Except as expressly allowed by this Agreement or by mandatory law, you may not:
     listed in THIRD-PARTY-NOTICES.txt.
 8.2 Those third-party terms apply to those components, and nothing in this Agreement
     limits any right you have under them.
+8.3 Some included Microsoft components (for example parts of the .NET runtime and WPF)
+    are licensed to the Licensor under the Microsoft .NET Library License and the Windows
+    SDK license. You may use them only as part of the Software, not separately, and the
+    restrictions in section 6 also protect them. [REVIEW: proposed wording. The .NET
+    Library License requires end users to agree to terms that protect those components
+    at least as much as that license; check this clause covers it.]
 
 9. UPDATES AND SUPPORT
 9.1 The Licensor may, but does not have to, provide updates, fixes or support. Updates
@@ -167,5 +175,5 @@ address created for KuroLogic, or the official Discord server – not a personal
 17.4 If this Agreement is translated, the English version prevails, unless the law
      requires otherwise.
 
-KuroLogic SmartMacro – Copyright (c) 2026 KuroLogic. All rights reserved.
+KuroLogic SmartMacro – Copyright © 2026 KuroLogic. All rights reserved.
 Developer: Riku (リク).

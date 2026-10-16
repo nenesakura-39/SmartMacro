@@ -1,9 +1,8 @@
 KuroLogic SmartMacro – THIRD-PARTY NOTICES
 
-*** DRAFT – not legally reviewed. Versions below were read from the bundle manifest
-    (SmartMacro.deps.json) of the last published SmartMacro.exe and from the NuGet
-    packages on the build PC. Re-check them after every new publish (see
-    RELEASE_CHECKLIST.md). Open items are marked [VERIFY]. ***
+Not reviewed by a lawyer. The component names and versions below come from the
+bundle manifest (SmartMacro.deps.json) of the build. tools\publish.cmd checks them
+against every new build and refuses to package a release when they don't match.
 
 KuroLogic SmartMacro is proprietary software (see LICENSE.txt and EULA.txt). It is
 published as a self-contained Windows program, so it includes the Microsoft components
@@ -20,7 +19,10 @@ are not part of the download.
    (managed libraries 10.0.1126.37416; source: github.com/dotnet/dotnet commit
    e2f47b0110ed922f21a1522da67279133ce28f32)
    Copyright (c) .NET Foundation and Contributors
-   License: MIT (full text in section A below).
+   License: MIT (full text in section A below). This includes msquic.dll 2.5.9.0,
+   which ships inside the .NET runtime pack and is not named separately in Microsoft's
+   license information for Windows ("All other binaries and files are licensed with
+   the MIT license").
    The .NET runtime's own third-party notices are in DOTNET-THIRD-PARTY-NOTICES.txt,
    included unchanged next to this file.
    Note from Microsoft's license information for Windows binaries: when a .NET app is
@@ -30,9 +32,11 @@ are not part of the download.
 2. Windows Desktop runtime / WPF – Microsoft.WindowsDesktop.App.Runtime.win-x64 10.0.11
    Copyright (c) .NET Foundation and Contributors
    License: MIT (section A), except the native files listed in section 4 and 5.
-   WPF's own third-party notices (zlib, Json.NET) are listed at
-   https://github.com/dotnet/wpf/blob/main/THIRD-PARTY-NOTICES.TXT
-   [VERIFY: paste that file's text, unchanged, at the end of this file before release.]
+   This includes PenImc_cor3.dll 10.0.1126.37416, which is not named separately in
+   Microsoft's license information for Windows.
+   WPF's own third-party notices (https://github.com/dotnet/wpf/blob/main/
+   THIRD-PARTY-NOTICES.TXT, checked 2026-10-17) list zlib 1.2.11 and Json.NET. Their
+   license texts are in section C below.
 
 3. C#/WinRT runtime – WinRT.Runtime.dll 2.2.0.48161
    (from Microsoft.Windows.SDK.NET.Ref 10.0.19041.57)
@@ -45,6 +49,7 @@ are not part of the download.
    - PresentationNative_cor3.dll 10.0.526.35501 (WPF)
    - wpfgfx_cor3.dll 10.0.1126.37416 (WPF)
    - vcruntime140_cor3.dll 14.44.35211.0 (WPF)
+   - Microsoft.DiaSymReader.Native.amd64.dll 14.42.34436.0 (.NET runtime)
    - .NET runtime parts of the single-file bundle (coreclr)
    Copyright (c) Microsoft Corporation. All rights reserved.
    License: Microsoft .NET Library License,
@@ -58,8 +63,9 @@ are not part of the download.
    Copyright (c) Microsoft Corporation. All rights reserved.
    License: Microsoft Windows SDK license terms (https://aka.ms/WinSDKLicenseURL);
    distributable files: https://learn.microsoft.com/en-us/legal/windows-sdk/redist
-   [VERIFY: the redist list names the net6.0 / net8.0 builds of
-   Microsoft.Windows.SDK.NET.dll; confirm the build used for .NET 10 is covered.]
+   (Microsoft.Windows.SDK.NET.Ref 10.0.19041.57 contains only lib/net8.0, and
+   lib/net8.0/Microsoft.Windows.SDK.NET.dll is on that list. The shipped file is that
+   one: same size, 24,877,600 bytes.)
 
 Windows features used but not included (part of Windows, under your Windows license):
 Windows.Media.Ocr text recognition, GDI screen capture, SendInput / Raw Input, and the
@@ -95,8 +101,7 @@ SOFTWARE.
 
 =========================================================================================
 B. MIT License – C#/WinRT (item 3)
-   [VERIFY: the copyright line was confirmed from the CsWinRT repository; compare the
-   rest with https://github.com/microsoft/CsWinRT/blob/master/LICENSE before release.]
+   (compared with https://github.com/microsoft/CsWinRT/blob/master/LICENSE on 2026-10-17)
 
 MIT License
 
@@ -121,11 +126,51 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 =========================================================================================
-UNRESOLVED (remove this section when done)
-- [VERIFY] WPF THIRD-PARTY-NOTICES text (item 2) not yet pasted.
-- [VERIFY] Windows SDK redist coverage of the .NET 10 projection build (item 5).
-- [VERIFY] Re-read all versions after the next publish (the current SmartMacro.exe in
-  publish\ is an old build; the bundled versions may change if the .NET SDK updates).
-- The .NET Library License (item 4) asks distributors to have end users agree to terms
-  that protect those components at least as much as that license, and to indemnify
-  Microsoft. See EULA review notes.
+C. Third-party notices listed by WPF (item 2)
+
+License notice for zlib (version 1.2.11)
+-----------------------------------------
+
+(C) 1995-2017 Jean-loup Gailly and Mark Adler
+
+This software is provided 'as-is', without any express or implied
+warranty. In no event will the authors be held liable for any damages
+arising from the use of this software.
+
+Permission is granted to anyone to use this software for any purpose,
+including commercial applications, and to alter it and redistribute it
+freely, subject to the following restrictions:
+
+1. The origin of this software must not be misrepresented; you must not
+   claim that you wrote the original software. If you use this software
+   in a product, an acknowledgment in the product documentation would be
+   appreciated but is not required.
+
+2. Altered source versions must be plainly marked as such, and must not be
+   misrepresented as being the original software.
+
+3. This notice may not be removed or altered from any source distribution.
+
+License notice for Json.NET
+---------------------------
+
+The MIT License (MIT)
+
+Copyright (c) 2007 James Newton-King
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of
+this software and associated documentation files (the "Software"), to deal in
+the Software without restriction, including without limitation the rights to
+use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software is furnished to do so,
+subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
+FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
+COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
+IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.

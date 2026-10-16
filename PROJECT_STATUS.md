@@ -496,6 +496,27 @@ no .NET SDK in the AI's environment)
   are guesses until the owner's measurements (STAGE4 tests B3 / D2) are in.
 
 ## Release preparation (not released; nothing published)
+- **2026-10-17 EULA simplification (docs only, no code changed):** `release-docs/EULA.txt` rewritten as a shorter
+  plain-English draft (old text: `Claude outputs/archive/EULA-long-draft-2026-10-16.txt`). Privacy section written from the
+  source (no network code; local data folder, daily logs, last test PNGs, diagnostics on click only). README version set to
+  1.0.0; two [VERIFY] items added to THIRD-PARTY-NOTICES. Still open: licensor name, contact, commercial use, liability and
+  governing-law decisions, download link, third-party [VERIFY] items, fresh publish, manual tests. Details and the full
+  marker list: `Claude outputs/EULA_AND_RELEASE_REVIEW_2026-10-17.md`. App UI text in `Views/SettingsView.xaml` ("never saved")
+  contradicts the saved test PNGs – needs a wording fix before release (awaiting owner approval).
+- The package in `publish\` (DRAFT, EXE 2026-10-16 23:04) predates the 8-bug fix and QoL batches – do not use it.
+- **Owner decisions (2026-10-17):** licensor Riku (リク) (individual, KuroLogic = unregistered brand), any use incl.
+  commercial, contact via the KuroLogic Discord server, distribution via Discord + Google Drive, early test release for
+  feedback. EULA / LICENSE / README now have no markers. THIRD-PARTY-NOTICES still needs the WPF notices pasted by hand
+  and a version re-check after the fresh publish.
+- `tools\publish.cmd` updated (2026-10-17): version read from `SmartMacro.csproj`, EULA/README must mention that
+  version, a real build removes the old DRAFT package of the same version, writes `release\bundle-versions.txt` (via new
+  `tools\bundle-versions.ps1`) and a SHA-256 file next to the ZIP. README/EULA now carry the real YouTube, Discord and
+  Ko-fi links. Written without a Windows machine – first run on the owner's PC still to do.
+- Later the same day: THIRD-PARTY-NOTICES finished (WPF's zlib 1.2.11 + Json.NET notices added as section C; DRAFT
+  header and UNRESOLVED list removed). `bundle-versions.ps1` now checks every bundled file name + version against the
+  notices and `publish.cmd` stops a real release on a mismatch. All five public documents now pass the marker check.
+  Icon `Assets/SmartMacro.ico` (AI-made blue square + lightning bolt) kept as is. Cleanup of old drafts / old DRAFT
+  package left to the owner (this session can't delete files).
 - Public documents live in `release-docs/` (EULA.txt, LICENSE.txt, THIRD-PARTY-NOTICES.txt, DOTNET-THIRD-PARTY-NOTICES.txt,
   README.txt). They are DRAFTS with [PLACEHOLDER] / [REVIEW] / [VERIFY] markers; not lawyer-reviewed, not legally cleared.
   Private notes (audit, checklist) stay in `Claude outputs/` and are never packaged.

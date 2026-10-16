@@ -2,8 +2,6 @@ KuroLogic SmartMacro
 Copyright © 2026 KuroLogic. All rights reserved.
 Developer: Riku (リク)
 
-DRAFT – NOT YET REVIEWED. See "Open points" at the end before publishing.
-
 PROPRIETARY SOFTWARE NOTICE
 
 1. KuroLogic SmartMacro (the "Software") is proprietary software. It is NOT open-source
@@ -11,9 +9,9 @@ PROPRIETARY SOFTWARE NOTICE
 
 2. The Software, including its original source code, object code, user interface,
    design, documentation and the "KuroLogic" and "SmartMacro" names and logos, is owned
-   by the rights holder identified in the End-User License Agreement (the "Licensor")
-   and is protected by copyright and other laws. "KuroLogic" is the public brand under
-   which the Software is published.
+   by the individual developer Riku (リク) (the "Licensor") and is protected by
+   copyright and other laws. "KuroLogic" is the public brand under which the Software
+   is published. It is a brand name, not a registered company.
 
 3. The Software is licensed, not sold. Downloading, installing or using the Software,
    and any voluntary support payment (for example through Ko-fi), does not transfer
@@ -31,12 +29,3 @@ PROPRIETARY SOFTWARE NOTICE
 
 6. The C# source code of the Software is not published. Access to a compiled copy does
    not grant any right to the source code.
-
----------------------------------------------------------------------------------------
-Open points for the owner (delete this section before release):
-- Who is the legal rights holder / Licensor? "KuroLogic" is a brand, not (as far as is
-  known) a registered company. See EULA.txt section 2 and LEGAL_AND_RELEASE_AUDIT.md.
-- Review the year in the copyright line for each release (keep the first-publication
-  year; you may add a range such as "2026-2027" for later versions).
-- Parts of the code were written with an AI coding assistant. See the audit document,
-  "Ownership questions", before relying on this notice.

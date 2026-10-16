@@ -1,179 +1,149 @@
 KUROLOGIC SMARTMACRO – END-USER LICENSE AGREEMENT (EULA)
 
-*** DRAFT – NOT REVIEWED BY A LAWYER. Do not publish until the items marked [REVIEW] and
-    [PLACEHOLDER] have been decided. This draft is not guaranteed to be enforceable in
-    every country. ***
+This EULA is written in plain English. It has not been reviewed by a lawyer.
 
-Version: [PLACEHOLDER: EULA version, e.g. 1.0]      Effective date: [PLACEHOLDER: date]
-Software: KuroLogic SmartMacro, version [PLACEHOLDER: e.g. 1.0.0] and later versions that
-          come with this EULA.
+EULA version: 1.0
+Effective date: 17 October 2026
+Software: KuroLogic SmartMacro 1.0.0 for Windows, and later versions that come with
+          this EULA.
 Copyright © 2026 KuroLogic. All rights reserved. Developer: Riku (リク).
 
-Please read this Agreement before installing or using the Software. By installing,
-copying or using the Software you agree to this Agreement. If you do not agree, do not
-install or use the Software, and delete any copies you have.
+This is an agreement between you and the Licensor named in section 1. By installing,
+copying or using SmartMacro, you agree to it. If you don't agree, don't install or use
+SmartMacro. If you are under 18, please have a parent or guardian read this with you.
 
-If you are under the age of majority where you live, a parent or legal guardian must
-read and agree to this Agreement for you.
+1. WHO OWNS SMARTMACRO
+1.1 SmartMacro is published under the brand name "KuroLogic". Riku (リク) is the
+    developer of SmartMacro and the owner of SmartMacro and of the KuroLogic brand.
+    "KuroLogic" is a brand name. It is not a registered company.
+1.2 The Licensor (the person who owns SmartMacro and gives you this license) is the
+    individual developer Riku (リク), publishing as KuroLogic.
+1.3 SmartMacro is licensed to you, not sold. The Licensor keeps all rights in
+    SmartMacro, including its code, design and the "KuroLogic" and "SmartMacro" names
+    and logos. Anything not expressly allowed by this EULA is reserved.
+1.4 Macros, recordings and other files you create with SmartMacro are yours.
 
-1. AGREEMENT AND SCOPE
-1.1 This Agreement is between you (the "User", "you") and the Licensor named in
-    section 2, and covers the KuroLogic SmartMacro application, its updates that come
-    with this Agreement, and its documentation (together, the "Software").
-1.2 Third-party components included with the Software are covered by section 8.
+2. WHAT YOU MAY DO
+2.1 SmartMacro is free. You may download, install and use it on computers you own or
+    control, and keep backup copies for yourself.
+2.2 You may use SmartMacro anywhere, for personal and for commercial purposes, for
+    example to automate tasks at your job or in your own business.
+2.3 Videos and streams: you may show SmartMacro in screenshots, videos and live
+    streams, including monetized ones (for example on YouTube or Twitch), and share
+    macros you made. A credit such as "KuroLogic SmartMacro" with a link to the
+    KuroLogic Discord server is appreciated but not required.
 
-2. THE LICENSOR
-2.1 The Software is published under the public brand "KuroLogic" and was created and is
-    developed by Riku (リク) (the "Developer").
-2.2 The licensor of the Software is: [PLACEHOLDER / REVIEW: legal rights holder – e.g.
-    "the individual developer known as Riku (リク), publishing as KuroLogic". "KuroLogic"
-    is a brand name, not a registered company, unless and until one is registered.
-    Decide whether your legal name must appear here, or must be given on request in
-    case of a legal dispute. Do not invent a company.] (the "Licensor").
+3. WHAT YOU MAY NOT DO
+Unless the Licensor allows it in writing, or the law allows it anyway, you may not:
+(a) sell, rent or charge money for SmartMacro or for access to it;
+(b) re-upload, mirror or share copies of SmartMacro elsewhere, or bundle it with other
+    software – please share the official download instead (the KuroLogic Discord
+    server at https://discord.gg/CKBk5KnGmk, or a download link posted there);
+(c) modify SmartMacro or share modified copies, or remove or change its copyright
+    notices, this EULA or the third-party notices;
+(d) reverse engineer, decompile or disassemble SmartMacro, except where the law
+    gives you that right even though this EULA says otherwise;
+(e) present SmartMacro as your own work, or use the KuroLogic or SmartMacro names or
+    logos in a way that suggests your product is official or endorsed by KuroLogic.
 
-3. LICENSE GRANT
-3.1 Subject to this Agreement, the Licensor gives you a personal, non-exclusive,
-    non-transferable, revocable, free-of-charge license to download, install and use
-    the compiled Software on computers that you own or control, for personal or
-    commercial purposes. [REVIEW: keep or remove "commercial purposes".]
-3.2 You may make backup copies of the Software for your own use.
-3.3 Free download. The Software is offered free of charge. No payment is required to
-    download, install or use it.
+4. USING AUTOMATION RESPONSIBLY
+4.1 You are responsible for what your macros do and where you run them. Use
+    SmartMacro only in ways that follow the law and the rules of every game, app,
+    website or service you use it with.
+4.2 Many online games and services forbid macros or automation. Using SmartMacro
+    with them can break their rules and may lead to penalties such as a ban.
+4.3 SmartMacro only reads the screen and sends normal keyboard and mouse input. Do
+    not use it to get around anti-cheat, security or access controls, to spam, or to
+    harm others.
+4.4 A running macro clicks and types for real. Test macros carefully, and press Esc
+    to stop one immediately.
 
-4. VIDEOS, STREAMS AND SCREENSHOTS
-4.1 You may show the Software in screenshots, videos and live streams (for example on
-    YouTube, Twitch or Discord), including on channels that earn money, and you may
-    show and share macros you made with it. [REVIEW: confirm that monetized videos are
-    allowed – this draft assumes yes.]
-4.2 Credit such as "KuroLogic SmartMacro by Riku (リク)" with a link to the official
-    download page is appreciated but not required.
-4.3 Do not present the Software as your own work, and do not offer downloads of the
-    Software from anywhere other than the official download page (see section 6).
+5. YOUR DATA AND PRIVACY
+5.1 SmartMacro has no online features. It does not send your macros, settings, logs,
+    recordings or screen captures to the Licensor or to anyone else.
+5.2 SmartMacro stores its files only on your PC, in %LOCALAPPDATA%\SmartMacro:
+    - your macros (they can contain the keys you recorded or text you typed into a
+      step, screen positions, and small pictures you captured from your screen for
+      "Find image"),
+    - settings, deleted macros (Trash) and daily log files (logs can contain text that
+      was read from your screen and folder paths that include your Windows user name),
+    - the picture from the last "Test" of a Find text / image / color step
+      (last-ocr-test.png, last-image-test.png, last-color-test.png in the Logs folder).
+    These files are not deleted automatically. You can delete that folder at any time.
+5.3 While you record, SmartMacro saves the keys you press. Don't type passwords or
+    other private information while recording.
+5.4 Reading text on screen ("Find text") uses the text recognition built into Windows
+    and runs on your PC.
+5.5 "Copy diagnostics" in Settings only copies information to your clipboard when you
+    click it (Windows version, screen size, data folder path and recent log lines).
+    You decide whether to share it with anyone.
+5.6 If SmartMacro crashes, Windows may send an error report to Microsoft, depending on
+    your Windows settings. This is handled by Windows, not by the Licensor.
+5.7 Discord, Google Drive, Ko-fi and YouTube are run by other companies under their
+    own privacy policies.
 
-5. OWNERSHIP
-5.1 The Software is licensed, not sold. The Licensor (or, for third-party components,
-    their owners) keeps all rights, title and interest in the Software, including
-    copyright, and in the "KuroLogic" and "SmartMacro" names and logos.
-5.2 All rights not expressly granted to you are reserved.
-5.3 Macros, recordings and other files that you create with the Software belong to you.
-    The Licensor claims no ownership of them.
+6. THIRD-PARTY COMPONENTS
+6.1 SmartMacro includes Microsoft components (the .NET runtime, Windows Presentation
+    Foundation and Windows SDK libraries). They belong to Microsoft and are licensed
+    under their own terms, listed in THIRD-PARTY-NOTICES.txt and
+    DOTNET-THIRD-PARTY-NOTICES.txt. Nothing in this EULA limits your rights under
+    those licenses.
+6.2 Some of those Microsoft components are licensed to the Licensor only for use as
+    part of SmartMacro. You may use them only as part of SmartMacro, not separately,
+    and section 3 applies to them too.
 
-6. RESTRICTIONS
-Except as expressly allowed by this Agreement or by mandatory law, you may not:
-(a) redistribute, re-upload, mirror, sell, rent, lease, lend or sublicense the
-    Software, or bundle it with other software, without written permission from the
-    Licensor – please share a link to the official download page instead;
-(b) charge money for the Software or for access to it;
-(c) distribute modified copies of the Software, or remove or change its copyright
-    notices, EULA or third-party notices;
-(d) reverse engineer, decompile or disassemble the Software, except to the extent that
-    applicable law expressly permits this despite this restriction (for example for
-    interoperability). [REVIEW: depends on the governing law.]
-(e) use the KuroLogic or SmartMacro names or logos in a way that suggests your product
-    or service is official or endorsed by KuroLogic.
+7. FEEDBACK AND VOLUNTARY SUPPORT
+7.1 Supporting KuroLogic (for example through Ko-fi) is completely optional and is
+    not needed to download or use SmartMacro.
+7.2 Support is a voluntary gift towards development. It does not buy SmartMacro or
+    any extra rights, does not change this EULA, and does not create a promise of
+    support, features or updates, unless the Licensor clearly offers something
+    specific in writing. Payments made through Ko-fi are also subject to Ko-fi's own
+    terms.
+7.3 Bug reports, ideas and other feedback are very welcome. If you send them, the
+    Licensor may use them to improve SmartMacro without paying you or owing you
+    anything. Please don't include passwords or other private information.
 
-7. ACCEPTABLE USE
-7.1 You are responsible for how you use the Software. Use it only in compliance with
-    applicable law and with the rules, terms of service and policies of every website,
-    game, application or service you use it with.
-7.2 Many online games and services restrict or forbid macros and automation. Using the
-    Software with them may break their rules and may lead to penalties such as account
-    suspension. The Licensor is not responsible for such consequences.
-7.3 The Software only reads the screen and sends normal keyboard and mouse input. It is
-    not designed to, and you may not use it to, bypass anti-cheat, security or access
-    controls, to cheat in competitive play, to spam, to harm others, or to access
-    systems or accounts without permission.
-7.4 Data: as published, the Software stores its macros, settings, logs and test
-    screenshots only on your computer and does not send them to the Licensor. If the
-    Software crashes, Windows may send an error report to Microsoft according to your
-    Windows settings (Windows Error Reporting). [REVIEW: keep this statement accurate if
-    network features are ever added.]
+8. NO GUARANTEE
+8.1 SmartMacro is provided free, "as is". As far as the law allows, the Licensor
+    gives no guarantee that it will work without errors or interruptions, that it
+    will work with a particular game, app or website, or that text, image or color
+    detection will be accurate.
+8.2 SmartMacro 1.0.0 is an early version shared so people can try it and report
+    problems. Expect bugs.
+8.3 If the law where you live gives you rights that cannot be removed by an
+    agreement, this EULA does not remove them.
 
-8. THIRD-PARTY COMPONENTS
-8.1 The Software includes third-party components (for example the Microsoft .NET
-    runtime, Windows Presentation Foundation and Windows SDK projection libraries).
-    They are owned by their respective owners and are licensed under their own terms,
-    listed in THIRD-PARTY-NOTICES.txt.
-8.2 Those third-party terms apply to those components, and nothing in this Agreement
-    limits any right you have under them.
-8.3 Some included Microsoft components (for example parts of the .NET runtime and WPF)
-    are licensed to the Licensor under the Microsoft .NET Library License and the Windows
-    SDK license. You may use them only as part of the Software, not separately, and the
-    restrictions in section 6 also protect them. [REVIEW: proposed wording. The .NET
-    Library License requires end users to agree to terms that protect those components
-    at least as much as that license; check this clause covers it.]
+9. LIMITATION OF LIABILITY
+9.1 As far as the law allows, the Licensor is not responsible for indirect or
+    consequential losses from using or being unable to use SmartMacro, such as lost
+    data, lost profits, banned or suspended accounts, or lost game items or progress.
+9.2 Nothing in this EULA limits liability for fraud, gross negligence, deliberate
+    wrongdoing, or anything else that the applicable law does not allow to be limited.
 
-9. UPDATES AND SUPPORT
-9.1 The Licensor may, but does not have to, provide updates, fixes or support. Updates
-    may come with an updated Agreement (see section 14).
-9.2 Help, if any, is offered on a best-effort basis through the contact methods in
-    section 16.
+10. ENDING THIS LICENSE
+10.1 You can end this license at any time by deleting SmartMacro.
+10.2 The license ends automatically if you seriously break this EULA. You must then
+     stop using SmartMacro and delete your copies.
+10.3 Sections 1.3, 1.4, 4, 5, 6, 8, 9, 11 and 12 keep applying after the license ends.
 
-10. VOLUNTARY SUPPORT (KO-FI)
-10.1 You can support KuroLogic voluntarily, for example through Ko-fi. Support is
-     completely optional and is not required to download or use the Software.
-10.2 Support payments are gifts/donations towards development. They do not buy the
-     Software, do not transfer any ownership or additional rights, do not change this
-     Agreement, and do not create an obligation to provide support, features or updates,
-     unless the Licensor clearly states otherwise in writing for a specific offer.
-     [REVIEW: Ko-fi's own terms and refund rules apply to payments made there.]
+11. CHANGES AND FUTURE VERSIONS
+11.1 Updates are optional and not guaranteed. A future version may come with a new
+     EULA, which applies to that version.
+11.2 The EULA that came with your copy keeps applying to that copy.
 
-11. NO WARRANTY
-11.1 To the maximum extent permitted by applicable law, the Software is provided "AS IS"
-     and "AS AVAILABLE", without warranty of any kind, express or implied, including
-     warranties of merchantability, fitness for a particular purpose, accuracy and
-     non-infringement.
-11.2 In particular, the Licensor does not promise that the Software works with any
-     particular game, application or website, that simulated input will be accepted,
-     that detection (text, image, color, feedback loops) is accurate, or that the
-     Software is free of errors. Test your macros carefully.
-11.3 Some laws do not allow these exclusions. In that case they apply only as far as
-     the law allows, and your mandatory rights as a consumer are not affected.
+12. GOVERNING LAW
+12.1 This EULA is governed by the laws of the Republic of the Philippines. If you
+     live elsewhere, this does not take away consumer protections that the laws of
+     your country do not allow to be removed.
 
-12. LIMITATION OF LIABILITY
-12.1 To the maximum extent permitted by applicable law, the Licensor is not liable for
-     any indirect, incidental, special, consequential or punitive damages, or for loss
-     of data, profits, accounts, game items or progress, arising from the use of or
-     inability to use the Software.
-12.2 To the maximum extent permitted by applicable law, the Licensor's total liability
-     under this Agreement is limited to the amount you paid for the Software, which for
-     this free release is zero, or [PLACEHOLDER/REVIEW: a small fixed amount if the law
-     requires one].
-12.3 Nothing in this Agreement limits liability that cannot be limited by law (for
-     example for intent or gross negligence in some countries). [REVIEW]
+13. CONTACT
+Questions, bug reports or permission requests: contact Riku (リク) through the
+KuroLogic Discord server: https://discord.gg/CKBk5KnGmk
 
-13. TERMINATION
-13.1 This license ends automatically if you materially break this Agreement and do not
-     fix the breach within [PLACEHOLDER: e.g. 14] days after becoming aware of it. You
-     may end it at any time by deleting the Software.
-13.2 When the license ends, you must stop using the Software and delete your copies.
-     Sections 5, 7, 8, 11, 12, 15 and this section 13.2 continue to apply.
-
-14. CHANGES TO THIS AGREEMENT AND FUTURE VERSIONS
-14.1 Future versions of the Software may come with a different agreement, which applies
-     to those versions when you install or use them.
-14.2 The version of this Agreement that came with a copy of the Software continues to
-     apply to that copy, unless you agree to a newer version.
-
-15. GOVERNING LAW AND DISPUTES
-15.1 This Agreement is governed by the laws of [PLACEHOLDER: country/region], without
-     regard to its conflict-of-law rules.
-15.2 Courts of [PLACEHOLDER: place] have jurisdiction, unless mandatory consumer law
-     gives you the right to bring proceedings where you live. [REVIEW: needs local
-     legal advice.]
-
-16. CONTACT
-Questions about this Agreement or permission requests: [PLACEHOLDER: e.g. an e-mail
-address created for KuroLogic, or the official Discord server – not a personal e-mail].
-
-17. GENERAL
-17.1 If a provision of this Agreement is invalid or unenforceable, it is limited to the
-     minimum extent necessary and the rest of the Agreement remains in effect.
-17.2 This Agreement, together with THIRD-PARTY-NOTICES.txt, is the entire agreement
-     about the Software.
-17.3 Failure to enforce a provision is not a waiver of it.
-17.4 If this Agreement is translated, the English version prevails, unless the law
-     requires otherwise.
+14. OTHER
+14.1 If one part of this EULA can't be enforced, the rest still applies.
+14.2 This EULA and the third-party notices are the whole agreement about SmartMacro.
 
 KuroLogic SmartMacro – Copyright © 2026 KuroLogic. All rights reserved.
 Developer: Riku (リク).
