@@ -137,6 +137,9 @@ public sealed class RawInputRecorder : IRelativeInputRecorder, IDisposable
         private readonly object _lock = new();
         private readonly List<CapturedInputEvent> _events = new();
         private readonly bool _captureCursor;
+
+        // Keys whose press was recorded and not released yet (only touched on the session thread).
+        private readonly HashSet<int> _keysRecordedDown = new();
         private readonly ManualResetEventSlim _ready = new(false); // not disposed: a late thread may still signal it
 
         private Thread? _thread;
@@ -360,7 +363,11 @@ public sealed class RawInputRecorder : IRelativeInputRecorder, IDisposable
             else if (header.dwType == RIM_TYPEKEYBOARD)
             {
                 var keyboard = Marshal.PtrToStructure<RAWKEYBOARD>(data);
-                if (keyboard.ExtraInformation == OwnTag || IsOwnAppInFront()) return;
+                if (keyboard.ExtraInformation == OwnTag) return;
+                // Keys typed inside SmartMacro aren't recorded, EXCEPT the rest of a combo that started in the other
+                // app: Alt+Tab (or Ctrl/Shift + key) that switches to SmartMacro must keep its Tab and the Alt release,
+                // or the recording ends up with a lone "Press Left Alt".
+                if (IsOwnAppInFront() && !ContinuesRecordedCombo(keyboard)) return;
                 AddKeyboard(timeUs, keyboard);
             }
         }
@@ -504,13 +511,27 @@ public sealed class RawInputRecorder : IRelativeInputRecorder, IDisposable
             return pid == OwnProcessId;
         }
 
+        /// <summary>
+        /// Key up: WM_KEYUP or WM_SYSKEYUP (Windows sends the SYS versions while Alt is held, e.g. Tab in Alt+Tab, and
+        /// for F10 / Alt itself), or the break flag. Both are checked so no release is mistaken for a press.
+        /// </summary>
+        private static bool IsKeyUp(RAWKEYBOARD k) =>
+            (k.Flags & RI_KEY_BREAK) != 0 || k.Message is (uint)WM_KEYUP or (uint)WM_SYSKEYUP;
+
+        /// <summary>A key event that belongs to a combo whose first key was recorded in another app.</summary>
+        private bool ContinuesRecordedCombo(RAWKEYBOARD k) =>
+            IsKeyUp(k) ? _keysRecordedDown.Contains(k.VKey) : _keysRecordedDown.Count > 0;
+
         private void AddKeyboard(long timeUs, RAWKEYBOARD k)
         {
             // 0xFF marks the "fake" keys Windows inserts for some escaped sequences (e.g. Print Screen),
             // and a make code of 0xFF means the keyboard buffer overflowed.
             if (k.VKey is 0 or >= 0xFF || k.MakeCode == KEYBOARD_OVERRUN_MAKE_CODE) return;
 
-            var up = (k.Flags & RI_KEY_BREAK) != 0;
+            // WM_KEYDOWN / WM_SYSKEYDOWN (and the UP versions) are all keyboard input; nothing is filtered by message.
+            var up = IsKeyUp(k);
+            if (up) _keysRecordedDown.Remove(k.VKey);
+            else _keysRecordedDown.Add(k.VKey);
             var extended = (k.Flags & RI_KEY_E0) != 0;
 
             // E1-prefixed keys (Pause/Break) can't be sent as a scan code with SendInput, so store scan 0 and

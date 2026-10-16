@@ -1238,10 +1238,11 @@ public class FeedbackLoopFileTests
     }
 
     [Fact]
-    public void Files_from_a_newer_version_than_6_are_refused()
+    public void Files_from_a_newer_version_than_the_current_one_are_refused()
     {
-        Assert.Equal(6, MacroDocument.CurrentSchemaVersion);
-        Assert.False(MacroFileFormat.TryParse("""{ "schemaVersion": 7, "macro": { "name": "x", "steps": [] } }""", out _, out var error));
+        Assert.True(MacroDocument.CurrentSchemaVersion >= 6);
+        var json = $$"""{ "schemaVersion": {{MacroDocument.CurrentSchemaVersion + 1}}, "macro": { "name": "x", "steps": [] } }""";
+        Assert.False(MacroFileFormat.TryParse(json, out _, out var error));
         Assert.Contains("newer version", error);
     }
 }

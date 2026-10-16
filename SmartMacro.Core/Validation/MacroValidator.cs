@@ -157,6 +157,18 @@ public static class MacroValidator
             if (step is ScreenSearchStep { Enabled: true, Goal: WaitGoal.Appear }) hasFindTextBefore = true;
             if (step.Enabled && WorkflowSteps.ConditionsOf(step).Any()) hasFindTextBefore = true; // conditions remember what they saw
 
+            if (step is ScreenSearchStep search)
+            {
+                var hasLaterEnabledStep = macro.Steps.Skip(i + 1).Any(later => later is { Enabled: true } && later is not (ElseStep or EndIfStep or EndRepeatStep));
+                if (!search.Enabled && hasLaterEnabledStep)
+                    issues.Add(new ValidationIssue(IssueSeverity.Warning,
+                        "This Find step is turned off, so the steps after it run without waiting for anything. Turn it on, or use an If step to guard them.", i, step.Id, nameof(MacroStep.Enabled)));
+                else if (search.Enabled && search.WhenNotFound == TextNotFoundBehavior.SkipNextStep
+                         && (i + 1 >= macro.Steps.Count || macro.Steps[i + 1] is ElseStep or EndIfStep or EndRepeatStep))
+                    issues.Add(new ValidationIssue(IssueSeverity.Warning,
+                        "\"Skip the next step\" has nothing to skip here: there's no step right after this one in the same block.", i, step.Id, nameof(ScreenSearchStep.WhenNotFound)));
+            }
+
             if (step.Id == Guid.Empty || !seenIds.Add(step.Id))
                 issues.Add(new ValidationIssue(IssueSeverity.Error, "This step has a missing or duplicate ID.", i, step.Id));
 
@@ -311,6 +323,11 @@ public static class MacroValidator
                     issues.Add(Error("Match accuracy must be between 50% and 100%.", nameof(FindImageStep.MinSimilarityPercent)));
                 else if (img.MinSimilarityPercent < 70)
                     issues.Add(Warning("Match accuracy below 70% often matches the wrong thing. Test it with \"Test now\".", nameof(FindImageStep.MinSimilarityPercent)));
+                if (img.IgnoreEdgesPercent < 0 || img.IgnoreEdgesPercent > 40)
+                    issues.Add(Error("\"Ignore the edges\" must be 0% to 40%.", nameof(FindImageStep.IgnoreEdgesPercent)));
+                else if (img.IgnoreEdgesPercent > 0 && img.TemplateWidth > 0
+                         && TemplateMatcher.InnerArea(img.TemplateWidth, img.TemplateHeight, img.IgnoreEdgesPercent / 100.0) is null)
+                    issues.Add(Warning("The image is too small to ignore its edges, so the whole image is compared. Capture a bigger area.", nameof(FindImageStep.IgnoreEdgesPercent)));
                 ValidateSearch(issues, img, screen, MinVisionCheckIntervalMs);
                 if (!img.SearchFullScreen && img.TemplateWidth > 0
                     && (img.RegionWidth < img.TemplateWidth || img.RegionHeight < img.TemplateHeight))

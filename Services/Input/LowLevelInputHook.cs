@@ -196,6 +196,7 @@ public sealed class WindowsInputRecorder : IInputRecorder, IDisposable
     public const int MaxEvents = 500_000;
 
     private readonly List<RawInputEvent> _events = new();
+    private readonly HashSet<int> _keysRecordedDown = new(); // pressed in another app, not released yet
     private LowLevelInputHook? _hook;
     private uint _startTick;
 
@@ -210,6 +211,7 @@ public sealed class WindowsInputRecorder : IInputRecorder, IDisposable
         if (IsRecording) throw new InvalidOperationException("Already recording.");
 
         _events.Clear();
+        _keysRecordedDown.Clear();
         LimitReached = false;
         _startTick = unchecked((uint)Environment.TickCount);
 
@@ -233,10 +235,25 @@ public sealed class WindowsInputRecorder : IInputRecorder, IDisposable
 
     public void Dispose() => Stop();
 
+    /// <summary>
+    /// Keys pressed while SmartMacro is in front aren't recorded, except the rest of a combo that started in the
+    /// other app (Alt+Tab into SmartMacro keeps its Tab and the Alt release instead of leaving a lone "Press Left Alt").
+    /// WM_SYSKEYDOWN / WM_SYSKEYUP (sent while Alt is held) arrive here as KeyDown / KeyUp like the normal messages.
+    /// </summary>
+    private bool ContinuesRecordedCombo(HookEvent e) =>
+        e.Kind == RawInputKind.KeyUp ? _keysRecordedDown.Contains(e.VirtualKey) : _keysRecordedDown.Count > 0;
+
     private void OnReceived(HookEvent e)
     {
         // Skip our own playback and anything done inside SmartMacro's own windows (like the Stop button).
-        if (e.FromSmartMacro || e.OverOwnWindow) return;
+        if (e.FromSmartMacro) return;
+        var isKey = e.Kind is RawInputKind.KeyDown or RawInputKind.KeyUp;
+        if (e.OverOwnWindow && !(isKey && ContinuesRecordedCombo(e))) return;
+        if (isKey)
+        {
+            if (e.Kind == RawInputKind.KeyDown) _keysRecordedDown.Add(e.VirtualKey);
+            else _keysRecordedDown.Remove(e.VirtualKey);
+        }
 
         if (_events.Count >= MaxEvents)
         {

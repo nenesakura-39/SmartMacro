@@ -342,6 +342,7 @@ public sealed class AutomationViewModel : ObservableObject, IDisposable
             RecordMouseMoves = _hooks.Settings().RecordMouseMovement,
             KeepHoldTime = _hooks.Settings().KeepTapHoldTime,
             TrimTrailingKeys = _hooks.Settings().RecordHotkey.AllKeys(),
+            SimplifyMousePath = true, // a few meaningful Move steps instead of one every 30 ms
         };
         var steps = RecordingConverter.Convert(raw, options);
 

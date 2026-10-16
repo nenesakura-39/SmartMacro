@@ -160,7 +160,7 @@ public sealed class VisionTools : IVisionTools
         if (frame.Image.Width < template.Width || frame.Image.Height < template.Height)
             return $"The search area on screen ({frame.Bounds.Width}×{frame.Bounds.Height}) is smaller than the image ({template.Width}×{template.Height}). Make the area bigger.";
 
-        var options = new TemplateMatchOptions { MinScore = step.MinSimilarityPercent / 100.0, IgnoreColor = step.IgnoreColor, MaxResults = 10 };
+        var options = new TemplateMatchOptions { MinScore = step.MinSimilarityPercent / 100.0, IgnoreColor = step.IgnoreColor, IgnoreEdgeFraction = step.IgnoreEdgesPercent / 100.0, MaxResults = 10 };
         var watch = Stopwatch.StartNew();
         var result = await Task.Run(() => TemplateMatcher.Find(frame.Image, template, options));
         var searchTime = watch.Elapsed;

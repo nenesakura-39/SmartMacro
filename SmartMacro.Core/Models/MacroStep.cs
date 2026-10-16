@@ -173,8 +173,16 @@ public sealed class KeyPressStep : MacroStep
 /// <summary>Types a piece of text as Unicode characters.</summary>
 public sealed class TypeTextStep : MacroStep
 {
+    /// <summary>Default pause between characters. 0 made some apps and games drop characters (e.g. after a space).</summary>
+    public const int DefaultCharacterDelayMs = 20;
+
     public string Text { get; set; } = string.Empty;
-    public int CharacterDelayMs { get; set; }
+
+    /// <summary>
+    /// "Delay between characters (ms)". New steps start at 20 ms. Older files that saved 0 keep 0; the input
+    /// simulator still keeps a few ms between key down / up and between characters so nothing gets dropped.
+    /// </summary>
+    public int CharacterDelayMs { get; set; } = DefaultCharacterDelayMs;
 
     [JsonIgnore]
     public override StepKind Kind => StepKind.TypeText;
@@ -204,6 +212,12 @@ public enum TextNotFoundBehavior
 {
     StopMacro,
     Continue,
+
+    /// <summary>
+    /// Skip the step right after this one (or the whole If / Repeat block that starts there), then continue.
+    /// Lets a Find step "gate" the action below it without stopping the whole macro.
+    /// </summary>
+    SkipNextStep,
 }
 
 /// <summary>What a Find text / image / color step waits for.</summary>
@@ -269,6 +283,12 @@ public sealed class FindTextStep : ScreenSearchStep
     /// <summary>How close the OCR text must be to the search text (50-100). Lower = more forgiving of OCR mistakes.</summary>
     public int MinSimilarityPercent { get; set; } = 85;
 
+    /// <summary>
+    /// Treat characters OCR often mixes up as equal (0 / O and 1 / I / l), so "OK" still matches a screen read as "0K".
+    /// On by default; files made before this option load with it on too.
+    /// </summary>
+    public bool NormalizeLookAlikes { get; set; } = true;
+
     [JsonIgnore]
     public override StepKind Kind => StepKind.FindText;
 }
@@ -298,6 +318,16 @@ public sealed class FindImageStep : ScreenSearchStep
 
     /// <summary>Match the shape only, even if the colours are different (e.g. any colour of the same icon).</summary>
     public bool IgnoreColor { get; set; }
+
+    /// <summary>
+    /// Ignore this much (0-40 %) of the picture on every side. Round buttons and game UI have background in the corners
+    /// of the captured rectangle; when that background changes (a 3D scene) the match fails although the button is
+    /// there. 15 % is a good value for round buttons. 0 = compare the whole picture (older files).
+    /// </summary>
+    public int IgnoreEdgesPercent { get; set; }
+
+    /// <summary>Recommended value for round buttons / game UI.</summary>
+    public const int RecommendedIgnoreEdgesPercent = 15;
 
     [JsonIgnore]
     public override StepKind Kind => StepKind.FindImage;

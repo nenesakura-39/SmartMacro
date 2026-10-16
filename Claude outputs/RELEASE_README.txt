@@ -39,6 +39,6 @@ REPORT A BUG
 - In SmartMacro: Settings -> Copy diagnostics, and paste it into your report.
 
 COMMUNITY AND SUPPORT
-- YouTube:  [PLACEHOLDER]
-- Discord:  [PLACEHOLDER]
-- Ko-fi (optional support): [PLACEHOLDER]
+- YouTube:  https://www.youtube.com/@KuroLogic039
+- Discord:  https://discord.gg/CKBk5KnGmk
+- Ko-fi (optional support): https://ko-fi.com/sakurariku

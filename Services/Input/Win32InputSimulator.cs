@@ -18,6 +18,22 @@ public sealed class Win32InputSimulator : IInputSimulator
 {
     private const int VK_RETURN = 0x0D;
     private const int VK_TAB = 0x09;
+    private const int VK_SPACE = 0x20;
+
+    /// <summary>
+    /// Minimum time a typed key stays down, and the minimum gap between two typed characters. Sending down + up
+    /// (and the next character) in the same instant made Notepad and games drop characters after a space, even
+    /// with "delay between characters" at 0. These floors apply on top of the step's own delay.
+    /// </summary>
+    internal const double MinKeyHoldMs = 6;
+    internal const double MinCharacterGapMs = 8;
+
+    /// <summary>
+    /// A button press / release right after a cursor jump waits until the cursor has been at the target this long.
+    /// Games (Roblox UI sliders, DirectInput) read the pointer once per frame; a release sent in the same instant as
+    /// the last move was handled at the old position, so a slider dragged back to 50 % stayed at 80 %.
+    /// </summary>
+    internal const double ButtonSettleMs = 20;
     private const uint MAPVK_VK_TO_VSC = 0;
     private const int DiagnosticIntervalMs = 2000;
     private static readonly int InputSize = Marshal.SizeOf<INPUT>();
@@ -25,6 +41,13 @@ public sealed class Win32InputSimulator : IInputSimulator
 
     private readonly ILogService? _log;
     private long _lastDiagnosticTick = long.MinValue / 2;
+    private long _lastTypedTimestamp; // Stopwatch timestamp of the last typed key release (0 = none yet)
+
+    // The last absolute cursor move that hasn't been followed by a button change yet (for the settle before a press / release).
+    private bool _movedSinceButton;
+    private long _lastMoveTimestamp;
+    private int _lastMoveX;
+    private int _lastMoveY;
 
     /// <param name="log">If given, unusual click conditions (window not active, cursor confined or moved by
     /// another program) are written to the log, at most once every 2 seconds.</param>
@@ -42,6 +65,24 @@ public sealed class Win32InputSimulator : IInputSimulator
     /// 2. SetCursorPos to the same point, to land on the exact pixel (normalized coordinates can be 1 px off).
     /// </summary>
     public void MoveMouse(int x, int y)
+    {
+        SendAbsoluteMove(x, y);
+
+        if (!SetCursorPos(x, y))
+            throw new InputSimulationException(
+                $"Windows refused to move the mouse (error {Marshal.GetLastWin32Error()}). This can happen when the screen is locked or a secure window is open.");
+
+        _movedSinceButton = true;
+        _lastMoveTimestamp = Stopwatch.GetTimestamp();
+        _lastMoveX = x;
+        _lastMoveY = y;
+
+        if (_log is not null && GetCursorPos(out var actual) && (actual.X != x || actual.Y != y))
+            Diagnose($"Mouse moved to ({x}, {y}) but the cursor is at ({actual.X}, {actual.Y}). Another program (for example a game that locks the mouse) moved or confined it.");
+    }
+
+    /// <summary>One SendInput absolute move (a real mouse-input event, so WM_MOUSEMOVE / Raw Input see it).</summary>
+    private static void SendAbsoluteMove(int x, int y)
     {
         var left = GetSystemMetrics(SM_XVIRTUALSCREEN);
         var top = GetSystemMetrics(SM_YVIRTUALSCREEN);
@@ -64,13 +105,29 @@ public sealed class Win32InputSimulator : IInputSimulator
                 },
             });
         }
+    }
 
-        if (!SetCursorPos(x, y))
-            throw new InputSimulationException(
-                $"Windows refused to move the mouse (error {Marshal.GetLastWin32Error()}). This can happen when the screen is locked or a secure window is open.");
+    /// <summary>
+    /// Before a button press / release that follows a cursor jump: nudge the cursor 1 px and back (two more real
+    /// mouse-move events, so apps that only look at movement events — Roblox, DirectInput games — pick up the final
+    /// spot), then make sure the cursor has rested at the target for <see cref="ButtonSettleMs"/>. Waits only for
+    /// what's missing: recordings that already paused there aren't slowed down. Double-click timing is untouched
+    /// (no move between its clicks).
+    /// </summary>
+    private void SettleBeforeButton()
+    {
+        if (!_movedSinceButton) return;
+        _movedSinceButton = false;
 
-        if (_log is not null && GetCursorPos(out var actual) && (actual.X != x || actual.Y != y))
-            Diagnose($"Mouse moved to ({x}, {y}) but the cursor is at ({actual.X}, {actual.Y}). Another program (for example a game that locks the mouse) moved or confined it.");
+        var x = _lastMoveX;
+        var y = _lastMoveY;
+        var sinceMoveMs = (Stopwatch.GetTimestamp() - _lastMoveTimestamp) * 1000.0 / Stopwatch.Frequency;
+        if (sinceMoveMs >= ButtonSettleMs) return; // already rested there long enough
+
+        SendAbsoluteMove(x + (x > int.MinValue ? -1 : 1), y);
+        SendAbsoluteMove(x, y);
+        SetCursorPos(x, y);
+        PreciseSleepUntil(_lastMoveTimestamp, ButtonSettleMs);
     }
 
     /// <summary>
@@ -81,6 +138,7 @@ public sealed class Win32InputSimulator : IInputSimulator
     public void MoveMouseRelative(int dx, int dy)
     {
         if (dx == 0 && dy == 0) return;
+        _movedSinceButton = false; // relative (camera) movement: never nudge the cursor, that would turn the camera
         Send(new INPUT
         {
             type = INPUT_MOUSE,
@@ -103,6 +161,7 @@ public sealed class Win32InputSimulator : IInputSimulator
             (MacroMouseButton.Middle, false) => MOUSEEVENTF_MIDDLEUP,
             _ => throw new ArgumentOutOfRangeException(nameof(button)),
         };
+        SettleBeforeButton();
         if (down) DiagnoseClickTarget(button);
         Send(MouseInput(flags, 0));
     }
@@ -168,8 +227,16 @@ public sealed class Win32InputSimulator : IInputSimulator
         }
     }
 
-    public void Scroll(int delta, bool horizontal) =>
+    /// <summary>
+    /// One wheel event. Multi-notch Scroll steps are split into one event per notch (120) by the playback engine,
+    /// 15 ms apart; recorded wheel events are sent exactly as recorded. A scroll right after a cursor jump settles
+    /// first (like a click), so the wheel reaches the list under the new position.
+    /// </summary>
+    public void Scroll(int delta, bool horizontal)
+    {
+        SettleBeforeButton();
         Send(MouseInput(horizontal ? MOUSEEVENTF_HWHEEL : MOUSEEVENTF_WHEEL, unchecked((uint)delta)));
+    }
 
     public void Key(int virtualKey, bool down) => Send(KeyInput(virtualKey, down));
 
@@ -192,27 +259,70 @@ public sealed class Win32InputSimulator : IInputSimulator
     {
         if (string.IsNullOrEmpty(text)) return;
 
-        // Enter and Tab are sent as real keys; many apps ignore them as Unicode characters.
-        if (text == "\n")
-        {
-            Send(KeyInput(VK_RETURN, true), KeyInput(VK_RETURN, false));
-            return;
-        }
+        // Give the target window's input queue a moment between characters, even at 0 ms "delay between characters".
+        if (_lastTypedTimestamp != 0)
+            PreciseSleepUntil(_lastTypedTimestamp, MinCharacterGapMs);
 
-        if (text == "\t")
+        try
         {
-            Send(KeyInput(VK_TAB, true), KeyInput(VK_TAB, false));
-            return;
-        }
+            // Enter, Tab and Space are sent as real keys: many apps and games ignore them (or what follows them)
+            // when they arrive as Unicode characters.
+            var realKey = text switch
+            {
+                "\n" => VK_RETURN,
+                "\t" => VK_TAB,
+                " " => VK_SPACE,
+                _ => 0,
+            };
+            if (realKey != 0)
+            {
+                Send(KeyInput(realKey, true));
+                PreciseSleep(MinKeyHoldMs);
+                Send(KeyInput(realKey, false));
+                return;
+            }
 
-        var inputs = new INPUT[text.Length * 2];
-        for (var i = 0; i < text.Length; i++)
+            if (text.Length == 1)
+            {
+                Send(UnicodeInput(text[0], down: true));
+                PreciseSleep(MinKeyHoldMs);
+                Send(UnicodeInput(text[0], down: false));
+                return;
+            }
+
+            // A surrogate pair (emoji etc.) has to arrive as one batch so the app can join the halves.
+            var inputs = new INPUT[text.Length * 2];
+            for (var i = 0; i < text.Length; i++)
+            {
+                inputs[i * 2] = UnicodeInput(text[i], down: true);
+                inputs[i * 2 + 1] = UnicodeInput(text[i], down: false);
+            }
+
+            Send(inputs);
+        }
+        finally
         {
-            inputs[i * 2] = UnicodeInput(text[i], down: true);
-            inputs[i * 2 + 1] = UnicodeInput(text[i], down: false);
+            _lastTypedTimestamp = Stopwatch.GetTimestamp();
         }
+    }
 
-        Send(inputs);
+    /// <summary>
+    /// Blocks the playback thread for a few ms with ~0.1 ms accuracy (sleep most of it, spin the rest).
+    /// Only used for the tiny gaps that keep apps from dropping input; normal delays go through the engine's timeline.
+    /// </summary>
+    internal static void PreciseSleep(double milliseconds) => PreciseSleepUntil(Stopwatch.GetTimestamp(), milliseconds);
+
+    private static void PreciseSleepUntil(long startTimestamp, double milliseconds)
+    {
+        if (milliseconds <= 0) return;
+        var target = startTimestamp + (long)(milliseconds * Stopwatch.Frequency / 1000.0);
+        while (true)
+        {
+            var remainingMs = (target - Stopwatch.GetTimestamp()) * 1000.0 / Stopwatch.Frequency;
+            if (remainingMs <= 0) return;
+            if (remainingMs > 2) Thread.Sleep(1);
+            else Thread.SpinWait(50);
+        }
     }
 
     private static INPUT MouseInput(uint flags, uint data) => new()

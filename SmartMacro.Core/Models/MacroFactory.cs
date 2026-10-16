@@ -57,7 +57,7 @@ public static class MacroFactory
         StepKind.MouseClick => new MouseClickStep(),
         StepKind.MouseScroll => new MouseScrollStep(),
         StepKind.KeyPress => new KeyPressStep(),
-        StepKind.TypeText => new TypeTextStep { Text = "Hello" },
+        StepKind.TypeText => new TypeTextStep { Text = "Hello", CharacterDelayMs = TypeTextStep.DefaultCharacterDelayMs },
         StepKind.FindText => new FindTextStep { Text = "OK" },
         StepKind.FindImage => new FindImageStep(),
         StepKind.FindColor => new FindColorStep(),

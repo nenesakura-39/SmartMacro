@@ -33,15 +33,16 @@ public sealed class MacroDocument
     /// 4 = adds visual detection: "Find image" and "Find color" steps, and "wait until it disappears" on Find text.
     /// 5 = adds workflow blocks: If / Else / End If and Repeat / End Repeat steps with conditions.
     /// 6 = adds "Feedback loop" steps (continuous visual feedback).
+    /// 7 = adds "skip the next step" as a Find step's "when the time is up" choice and "ignore the edges" on Find image.
     /// </summary>
-    public const int CurrentSchemaVersion = 6;
+    public const int CurrentSchemaVersion = 7;
 
     public int SchemaVersion { get; set; }
     public Macro? Macro { get; set; }
 
     /// <summary>
     /// The oldest format that can hold this macro without losing anything. Macros that don't use the
-    /// version 2 / 3 / 4 / 5 / 6 features are still written as the older version, so older copies of SmartMacro can keep
+    /// version 2 to 7 features are still written as the older version, so older copies of SmartMacro can keep
     /// opening them. Older files need no migration: the new fields simply default to 0 / off / null, which is
     /// exactly the old behavior (game-mode recordings stay relative-only).
     /// </summary>
@@ -55,6 +56,8 @@ public sealed class MacroDocument
         {
             var needed = step switch
             {
+                ScreenSearchStep { WhenNotFound: TextNotFoundBehavior.SkipNextStep } => 7,
+                FindImageStep { IgnoreEdgesPercent: not 0 } => 7,
                 FeedbackLoopStep => 6,
                 IfStep or ElseStep or EndIfStep or RepeatStep or EndRepeatStep => 5,
                 FindImageStep or FindColorStep => 4,

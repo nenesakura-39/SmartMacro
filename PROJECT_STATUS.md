@@ -1,6 +1,6 @@
 # SmartMacro – Project Status / Handoff
 
-_Last updated: 2026-10-16. Stages 1–3: built, automated tests passed, manually tested by the owner. Stage 4 (feedback
+_Last updated: 2026-10-17 (8-bug fix batch: built, 616/616 tests passed, manual re-test pending). Earlier: Stages 1–3: built, automated tests passed, manually tested by the owner. Stage 4 (feedback
 loops) and the Editor UX task: built, automated tests passed (573/573), **manual tests NOT done yet**. Not released.
 Developer: Riku (リク) · Brand: KuroLogic_
 
@@ -13,6 +13,51 @@ Developer: Riku (リク) · Brand: KuroLogic_
 | Release documents (EULA, LICENSE, notices, README) | – | – | drafts; `release-docs/` not committed yet |
 | Release package | `publish\SmartMacro-1.0.0-win-x64\SmartMacro.exe` is an OLD build (made right after `159d6b3`, before Stage 1) | – | ignored by git |
 
+
+## 8-bug fix batch (2026-10-17) – built + tested on the owner's PC: 0 warnings, 0 errors, **616/616 tests passed**
+Found by the owner's testing (screenshots + logs). Manual re-test of each bug is still to do. Not committed to git yet.
+1. **Unreadable radio buttons** ("New steps go:"): `Themes/Controls.xaml` now has implicit dark styles for `RadioButton`
+   (light text, accent ring/dot, hover/checked/focus/disabled), `ContextMenu`, `MenuItem` (with gesture text) and menu
+   `Separator`. CheckBox / ComboBox / ComboBoxItem / ToolTip already had dark styles.
+2. **OCR "0K" vs "OK"**: `OcrTextMatcher.Find(..., normalizeLookAlikes)` folds 0→O and 1 / l / | →I on both sides
+   (before upper-casing) when the plain score is < 100 %. New `FindTextStep.NormalizeLookAlikes` (default on, also for
+   old files), checkbox "Normalize similar characters (0/O, 1/I/l)". Applies to Find text, conditions and Test now.
+   New "when the time is up" choice **Skip the next step, then continue** (`TextNotFoundBehavior.SkipNextStep`; skips
+   the whole If / Repeat block when one starts there; a block end isn't skipped) + help text under the choice.
+   Validator warnings: a disabled Find step with steps after it; "skip next" with nothing to skip.
+3. **Type text dropped characters**: `TypeTextStep.CharacterDelayMs` defaults to 20 (also when a file doesn't store
+   it). `Win32InputSimulator.TypeCharacters`: ≥ 6 ms key down→up, ≥ 8 ms between characters even at 0 ms;
+   Space / Enter / Tab are sent as real keys (VK_SPACE etc.), not Unicode packets.
+4. **Find image on round game UI**: `TemplateMatchOptions.IgnoreEdgeFraction` + `FindImageStep.IgnoreEdgesPercent`
+   (0–40, checkbox "Ignore the edges (round buttons, game UI)" = 15 %). Shape and colour are compared on the inner
+   part only (15 % removes all corners of a round button); matches still report the full rectangle. Matching was
+   already brightness/contrast-normalized (NCC). Miss text suggests the option. DPI: captures and virtual-screen size
+   now run inside `NativeMethods.PhysicalPixelsScope` (thread set to per-monitor-aware V2), so they are physical
+   pixels on any thread; picker / cursor code already used physical pixels.
+5. **Step flood / slider drags**: new `Core/Recording/MousePathSimplifier` (Douglas–Peucker 3 px + every real
+   direction reversal per axis (jitter ≤ 3 px ignored) + rests ≥ 120 ms + first/last of each stretch). On for smart
+   recordings (`SmartRecordingOptions.SimplifyMousePath`) and the app's desktop recordings; `RecordingOptions` default
+   stays off. Timing kept (dropped moves' time goes into the next Delay). Playback: before a button down / up or wheel
+   that follows a cursor jump, `Win32InputSimulator` nudges 1 px and back (real move events) and waits until the
+   cursor has rested 20 ms at the target (only the missing part; never after relative / camera moves; double-clicks
+   unaffected).
+6. **Scroll wheel**: editor already had Direction + Number of notches. Playback (`PlaybackEngine.ScrollInNotchesAsync`)
+   now sends one 120 event per notch, 15 ms apart on the timeline (remainder of odd amounts last). Recorded wheel
+   events in "Recorded input" steps are sent as recorded. Wheel after a jump settles like a click.
+7. **Game camera drift**: `GameRecordingOptions.MoveCoalesceUs` is capped at 8 ms (`MaxMoveCoalesceUs`). Playback
+   already used one absolute timeline (PrecisePlaybackClock); new tests prove no drift with a timer that overshoots
+   every wait by 1 ms (sequences and Delay steps).
+8. **Alt+Tab recorded as "Press Left Alt"**: the hook already mapped WM_SYSKEYDOWN/UP. Real gap: keys pressed while
+   SmartMacro's window is in front were dropped, so Alt+Tab into SmartMacro lost its Tab / Alt release. Both recorders
+   now keep the rest of a combo that started in another app. Raw Input also treats WM_KEYUP / WM_SYSKEYUP in
+   `RAWKEYBOARD.Message` as a release. Converters keep combos as Down(modifier) → Press(key) → Up(modifier) (tested
+   for Alt+Tab, Ctrl+C, Shift+A, Alt+Tab+Tab, smart recording).
+- Files: `MacroDocument.CurrentSchemaVersion = 7`, written only for "skip next step" or "ignore edges"; others keep 1–6.
+- Tests: new `SmartMacro.Tests/BugFixTests.cs`. Updated on purpose: scroll expectations (one event per notch),
+  `Files_from_a_newer_version_than_the_current_one_are_refused` (no hardcoded 6), v1-file test (20 ms typing default).
+- Manual re-test to do: radio buttons readable; Find text "OK" on a dialog showing "0K"; type "Found Wow" in Notepad
+  at 0 and 20 ms; Roblox Fisch SHAKE with "Ignore the edges"; Roblox volume slider 80 % → 50 % recording; scroll
+  3 notches in Chrome + Roblox zoom; game-mode camera run; record Alt+Tab.
 
 ## Done
 **Phase 1: Foundation**
@@ -422,6 +467,7 @@ no .NET SDK in the AI's environment)
   csproj Company/Authors "Riku", Copyright "© 2026 Riku", README "© 2026 Riku") – change awaits owner approval.
 
 ## Next task
+- Owner: manual re-test of the 8-bug fix batch (list above), then commit it together with the Editor UX changes.
 - Owner: do `docs/STAGE4_MANUAL_TESTS.md` (start with `docs/feedback-test-page.html`) and send the 📏 numbers, then
   `docs/EDITOR_UX_MANUAL_TESTS.md`. Commit the Editor UX changes once they pass.
 - Fix whatever the build / tests / manual tests show; set the default captures-per-second / min-change values from the

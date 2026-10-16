@@ -487,7 +487,7 @@ public sealed class MouseScrollStepViewModel : StepViewModel
             var size = Math.Abs((long)_step.Delta);
             var notches = size / (double)NotchDelta;
             var exact = size % NotchDelta == 0 ? "" : $" Exact amount: {size} (= {notches:0.##} notches; Windows counts 120 per notch).";
-            return $"1 notch = one click of a normal mouse wheel (often about 3 lines of text).{exact}";
+            return $"1 notch = one click of a normal mouse wheel (often about 3 lines of text). Several notches are sent one by one, 15 ms apart, so games and browsers count every one.{exact}";
         }
     }
 
@@ -670,7 +670,8 @@ public abstract class ScreenSearchStepViewModel : StepViewModel
     public static IReadOnlyList<Choice<TextNotFoundBehavior>> NotFoundOptions { get; } = new[]
     {
         new Choice<TextNotFoundBehavior>(TextNotFoundBehavior.StopMacro, "Stop the macro (show an error)"),
-        new Choice<TextNotFoundBehavior>(TextNotFoundBehavior.Continue, "Skip and continue with the next step"),
+        new Choice<TextNotFoundBehavior>(TextNotFoundBehavior.SkipNextStep, "Skip the next step, then continue"),
+        new Choice<TextNotFoundBehavior>(TextNotFoundBehavior.Continue, "Ignore it and run the next step anyway"),
     };
 
     public static IReadOnlyList<Choice<WaitGoal>> Goals { get; } = new[]
@@ -790,8 +791,22 @@ public abstract class ScreenSearchStepViewModel : StepViewModel
     public TextNotFoundBehavior WhenNotFound
     {
         get => _search.WhenNotFound;
-        set { if (_search.WhenNotFound == value) return; _search.WhenNotFound = value; NotifyChanged(); }
+        set
+        {
+            if (_search.WhenNotFound == value) return;
+            _search.WhenNotFound = value;
+            NotifyChanged();
+            OnPropertyChanged(nameof(NotFoundHelp));
+        }
     }
+
+    /// <summary>Plain-English note under the "when the time is up" choice, so it's clear what runs next.</summary>
+    public string NotFoundHelp => _search.WhenNotFound switch
+    {
+        TextNotFoundBehavior.StopMacro => "Nothing below this step runs. The macro stops and the log says what was on screen.",
+        TextNotFoundBehavior.SkipNextStep => "The step right below (or the whole If / Repeat block starting there) is skipped, then the macro goes on. Use this to make a Find step guard the action after it.",
+        _ => "The steps below run as if it had been found. A later click on \"the last found spot\" stops with an error until something is found again.",
+    };
 
     /// <summary>Lets the user drag the search area (each step type uses its own tool).</summary>
     protected abstract Task<ScreenRect?> PickRegionCoreAsync();
@@ -902,6 +917,12 @@ public sealed class FindTextStepViewModel : ScreenSearchStepViewModel
         set { if (_step.CaseSensitive == value) return; _step.CaseSensitive = value; NotifyChanged(); }
     }
 
+    public bool NormalizeLookAlikes
+    {
+        get => _step.NormalizeLookAlikes;
+        set { if (_step.NormalizeLookAlikes == value) return; _step.NormalizeLookAlikes = value; NotifyChanged(); }
+    }
+
     public int MinSimilarityPercent
     {
         get => _step.MinSimilarityPercent;
@@ -972,6 +993,31 @@ public sealed class FindImageStepViewModel : ScreenSearchStepViewModel
     {
         get => _step.IgnoreColor;
         set { if (_step.IgnoreColor == value) return; _step.IgnoreColor = value; NotifyChanged(); }
+    }
+
+    /// <summary>"Ignore the edges (%)": 0 = compare the whole picture.</summary>
+    public int IgnoreEdgesPercent
+    {
+        get => _step.IgnoreEdgesPercent;
+        set
+        {
+            if (_step.IgnoreEdgesPercent == value) return;
+            _step.IgnoreEdgesPercent = value;
+            NotifyChanged();
+            OnPropertyChanged(nameof(IgnoreEdges));
+        }
+    }
+
+    /// <summary>Quick on/off for the recommended 15 % edge margin (round buttons, game UI).</summary>
+    public bool IgnoreEdges
+    {
+        get => _step.IgnoreEdgesPercent > 0;
+        set
+        {
+            if (IgnoreEdges == value) return;
+            IgnoreEdgesPercent = value ? FindImageStep.RecommendedIgnoreEdgesPercent : 0;
+            OnPropertyChanged(nameof(IgnoreEdgesPercent));
+        }
     }
 
     protected override Task<ScreenRect?> PickRegionCoreAsync() =>

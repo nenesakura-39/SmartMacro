@@ -44,6 +44,12 @@ public sealed class SmartRecordingOptions
     /// <summary>Editable parts: keep how long each tap was held (Click / Press HoldMs).</summary>
     public bool KeepHoldTime { get; init; } = true;
 
+    /// <summary>
+    /// Editable parts: keep only the cursor points that matter (path shape, reversals, rests, the spot before every
+    /// press / release) instead of one Move + Delay pair every ~30 ms. See <see cref="MousePathSimplifier"/>.
+    /// </summary>
+    public bool SimplifyMousePath { get; init; } = true;
+
     public int StartX { get; init; }
 
     public int StartY { get; init; }
@@ -402,6 +408,7 @@ public static class SmartRecordingConverter
         {
             RecordMouseMoves = options.RecordMouseMoves,
             KeepHoldTime = options.KeepHoldTime,
+            SimplifyMousePath = options.SimplifyMousePath,
         });
         if (steps.Count == 0) return false;
 

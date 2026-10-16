@@ -91,7 +91,7 @@ public class PlaybackEngineTests
             "move 1,2",
             "move 5,6", "mouse Left down", "mouse Left up",
             "mouse Right down", "mouse Right up", "mouse Right down", "mouse Right up",
-            "scroll -240",
+            "scroll -120", "scroll -120",
             "key 17 down", "key 16 down", "key 65 down", "key 65 up", "key 16 up", "key 17 up",
             "type a", "type \\n", "type b",
         }, input.Calls);

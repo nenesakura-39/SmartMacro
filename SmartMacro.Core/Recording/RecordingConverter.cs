@@ -70,6 +70,22 @@ public sealed class RecordingOptions
     /// </summary>
     public bool KeepHoldTime { get; init; } = true;
 
+    /// <summary>
+    /// Replace the time-based thinning with path simplification: from every stretch of cursor movement only the
+    /// points needed to redraw the path within <see cref="PathTolerancePx"/> are kept, plus the start and end,
+    /// every direction reversal (e.g. a slider dragged to 80 % and back to 50 %), and every spot the cursor rested
+    /// at. A 10 s recording of hovering then gives a handful of Move steps instead of ~300 Delay + Move steps,
+    /// while the exact position before every press / release is still there. Off by default for compatibility;
+    /// smart recordings and the app's desktop recordings turn it on.
+    /// </summary>
+    public bool SimplifyMousePath { get; init; }
+
+    /// <summary>How far (pixels) the simplified path may stray from the recorded one.</summary>
+    public int PathTolerancePx { get; init; } = 3;
+
+    /// <summary>A cursor that stays still at least this long keeps that spot (it may have been hovering on purpose).</summary>
+    public int RestMs { get; init; } = 120;
+
     /// <summary>If the mouse moved more than this between down and up, it's a drag, not a click.</summary>
     public int MaxClickDistance { get; init; } = 4;
 
@@ -95,6 +111,8 @@ public static class RecordingConverter
 
         var events = rawEvents.ToList();
         TrimTrailing(events, options.TrimTrailingKeys);
+        var simplified = options.SimplifyMousePath && options.RecordMouseMoves;
+        if (simplified) events = MousePathSimplifier.Simplify(events, options.PathTolerancePx, options.RestMs);
 
         var steps = new List<MacroStep>();
         var consumed = new bool[events.Count];
@@ -161,7 +179,8 @@ public static class RecordingConverter
                 {
                     if (!options.RecordMouseMoves) break;
                     if (lastMovePosition == (e.X, e.Y)) { pendingMove = null; break; }
-                    if (lastMoveTime is long lastMove && e.TimeMs - lastMove < options.MinMoveIntervalMs)
+                    // (Simplified paths are already reduced to the points that matter; don't thin those again.)
+                    if (!simplified && lastMoveTime is long lastMove && e.TimeMs - lastMove < options.MinMoveIntervalMs)
                     {
                         pendingMove = e; // thinned out for now
                         break;

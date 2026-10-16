@@ -21,6 +21,14 @@ public sealed record TemplateMatchOptions
 
     /// <summary>At most this many matches are returned (best first).</summary>
     public int MaxResults { get; init; } = 10;
+
+    /// <summary>
+    /// Share of the template's width / height to ignore on every side (0 to 0.4). 0.15 ignores the outer 15 %:
+    /// the corners of a round button (or the background showing around any game UI element) then no longer count,
+    /// so a changing 3D scene behind the button doesn't push the score below the threshold. Shape and colour are
+    /// compared on the inner part only; the match still reports the full template's rectangle and centre.
+    /// </summary>
+    public double IgnoreEdgeFraction { get; init; }
 }
 
 /// <summary>
@@ -65,6 +73,14 @@ public static class TemplateMatcher
         options ??= new TemplateMatchOptions();
 
         int width = image.Width, height = image.Height, tw = template.Width, th = template.Height;
+
+        if (options.IgnoreEdgeFraction > 0)
+        {
+            var inner = InnerArea(tw, th, options.IgnoreEdgeFraction);
+            if (inner is { } crop && !IsFlat(template.Crop(crop)))
+                return FindInner(image, template.Crop(crop), crop.X, crop.Y, tw, th, options with { IgnoreEdgeFraction = 0 }, cancellationToken);
+        }
+
         if (tw > width || th > height) return TemplateMatchResult.None;
 
         var fine = new FineTemplate(template);
@@ -108,6 +124,42 @@ public static class TemplateMatcher
         }
 
         return new TemplateMatchResult(kept, Math.Min(1.0, best), rejectedForColor, scale);
+    }
+
+    /// <summary>Smallest inner part (pixels per side) an edge-ignoring search keeps, so the shape still means something.</summary>
+    public const int MinInnerSize = 6;
+
+    /// <summary>
+    /// The part of a tw×th template that is compared when the outer <paramref name="fraction"/> is ignored, or null
+    /// when nothing would be cut off (or the rest would be too small to match reliably).
+    /// </summary>
+    public static ScreenRect? InnerArea(int tw, int th, double fraction)
+    {
+        fraction = Math.Clamp(fraction, 0, 0.4);
+        var bx = (int)Math.Round(tw * fraction);
+        var by = (int)Math.Round(th * fraction);
+        if (bx == 0 && by == 0) return null;
+        // Shrink the border until the inner part is big enough.
+        while (tw - 2 * bx < MinInnerSize && bx > 0) bx--;
+        while (th - 2 * by < MinInnerSize && by > 0) by--;
+        if (bx == 0 && by == 0) return null;
+        return new ScreenRect(bx, by, tw - 2 * bx, th - 2 * by);
+    }
+
+    /// <summary>
+    /// Matches the inner part of the template and reports each match as the full template rectangle (shifted back
+    /// by the ignored border). The rectangle can stick out of the captured area a little when the element sits at
+    /// the edge; its centre is still the element's centre.
+    /// </summary>
+    private static TemplateMatchResult FindInner(BgraImage image, BgraImage inner, int offsetX, int offsetY, int fullWidth, int fullHeight,
+        TemplateMatchOptions options, CancellationToken cancellationToken)
+    {
+        var result = Find(image, inner, options, cancellationToken);
+        if (result.Matches.Count == 0) return result;
+        var matches = result.Matches
+            .Select(m => m with { Bounds = new ScreenRect(m.Bounds.X - offsetX, m.Bounds.Y - offsetY, fullWidth, fullHeight) })
+            .ToList();
+        return result with { Matches = matches };
     }
 
     /// <summary>True when the picture is basically one colour (template matching can't work with it).</summary>

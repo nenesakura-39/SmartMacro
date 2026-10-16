@@ -20,11 +20,16 @@ public sealed class GdiScreenCapture : IScreenCapture
     private const int SM_CXVIRTUALSCREEN = 78;
     private const int SM_CYVIRTUALSCREEN = 79;
 
-    public ScreenRect GetVirtualScreen() => new(
-        NativeMethods.GetSystemMetrics(SM_XVIRTUALSCREEN),
-        NativeMethods.GetSystemMetrics(SM_YVIRTUALSCREEN),
-        NativeMethods.GetSystemMetrics(SM_CXVIRTUALSCREEN),
-        NativeMethods.GetSystemMetrics(SM_CYVIRTUALSCREEN));
+    public ScreenRect GetVirtualScreen()
+    {
+        // The virtual-screen size must be in the same physical pixels as the capture and the mouse steps.
+        using var dpi = NativeMethods.PhysicalPixelsScope.Enter();
+        return new ScreenRect(
+            NativeMethods.GetSystemMetrics(SM_XVIRTUALSCREEN),
+            NativeMethods.GetSystemMetrics(SM_YVIRTUALSCREEN),
+            NativeMethods.GetSystemMetrics(SM_CXVIRTUALSCREEN),
+            NativeMethods.GetSystemMetrics(SM_CYVIRTUALSCREEN));
+    }
 
     public Task<ScreenFrame> CaptureAsync(ScreenRect region, CancellationToken cancellationToken)
     {

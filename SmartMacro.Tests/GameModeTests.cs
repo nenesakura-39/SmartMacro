@@ -459,7 +459,10 @@ public class GameModeTests
         {
             "key 87 down", "key 87 up", "move 10,20", "mouse Left down", "mouse Left up", "move 1,2", "scroll -120", "type h", "type i",
         }, input.Calls);
-        Assert.Equal(TimeSpan.Zero, clock.Elapsed);
+        // Taps and clicks stay instant. The only wait is Type text's "delay between characters", which defaults to
+        // 20 ms when a file doesn't store it (0 ms dropped characters in Notepad and games).
+        Assert.Equal(TypeTextStep.DefaultCharacterDelayMs, Assert.IsType<TypeTextStep>(macro.Steps[4]).CharacterDelayMs);
+        Assert.Equal(TimeSpan.FromMilliseconds(TypeTextStep.DefaultCharacterDelayMs), clock.Elapsed);
     }
 
     [Theory]

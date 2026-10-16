@@ -201,6 +201,8 @@ internal static class ScreenCapture
 {
     public static byte[] CaptureBgra(ScreenRect area)
     {
+        // Physical pixels on every monitor, whatever thread this runs on (see PhysicalPixelsScope).
+        using var dpi = NativeMethods.PhysicalPixelsScope.Enter();
         var screenDc = NativeMethods.GetDC(IntPtr.Zero);
         if (screenDc == IntPtr.Zero) throw new Win32Exception("Could not access the screen.");
 

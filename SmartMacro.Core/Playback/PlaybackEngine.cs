@@ -94,6 +94,7 @@ public sealed class PlaybackEngine
     private TimeSpan _timelineTarget;   // clock time at which the current step / event is due
     private TimeSpan _timelineShift;    // total time the timeline was pushed back (pauses, stalls)
     private TimeSpan _pausedTotal;      // total time spent paused in this run (not counted by timeouts / loop limits)
+    private bool _skipNextStep;         // set by a Find step that timed out with "skip the next step"
 
     private PlaybackState _state = PlaybackState.Idle;
     private CancellationTokenSource? _cts;
@@ -143,6 +144,7 @@ public sealed class PlaybackEngine
             _cts = cts;
             _resumeSignal = null;
             _lastFound = null;
+            _skipNextStep = false;
         }
 
         SetState(PlaybackState.Running);
@@ -535,6 +537,7 @@ public sealed class PlaybackEngine
                     break;
 
                 default:
+                    _skipNextStep = false;
                     if (step.Enabled)
                     {
                         Report(run, pc, loops);
@@ -543,9 +546,31 @@ public sealed class PlaybackEngine
                     }
 
                     pc++;
+                    if (_skipNextStep)
+                    {
+                        _skipNextStep = false;
+                        pc = SkipTarget(steps, blocks, pc);
+                    }
+
                     break;
             }
         }
+    }
+
+    /// <summary>
+    /// Where to continue when a Find step says "skip the next step": past the step at <paramref name="next"/>, or past
+    /// the whole If / Repeat block that starts there. A block end (Else / End If / End Repeat) isn't a step to skip,
+    /// so playback simply carries on there (the block keeps working normally).
+    /// </summary>
+    private static int SkipTarget(List<MacroStep> steps, BlockStructure blocks, int next)
+    {
+        if (next >= steps.Count) return next;
+        return steps[next] switch
+        {
+            IfStep or RepeatStep => blocks.EndOf(next) + 1,
+            ElseStep or EndIfStep or EndRepeatStep => next,
+            _ => next + 1,
+        };
     }
 
     private void Report(RunContext run, int index, List<LoopFrame> loops, string? extra = null)
@@ -909,7 +934,7 @@ public sealed class PlaybackEngine
 
             case MouseScrollStep s:
                 if (!s.UseCurrentPosition) _input.MoveMouse(s.X, s.Y);
-                _input.Scroll(s.Delta, s.Horizontal);
+                await ScrollInNotchesAsync(s.Delta, s.Horizontal, token).ConfigureAwait(false);
                 break;
 
             case KeyPressStep k:
@@ -1191,10 +1216,12 @@ public sealed class PlaybackEngine
 
                 message += Stats();
 
-                if (step.WhenNotFound == TextNotFoundBehavior.Continue)
+                if (step.WhenNotFound is TextNotFoundBehavior.Continue or TextNotFoundBehavior.SkipNextStep)
                 {
                     if (step.Goal == WaitGoal.Appear) _lastFound = null;
-                    Message?.Invoke(this, message + " Continuing.");
+                    var skip = step.WhenNotFound == TextNotFoundBehavior.SkipNextStep;
+                    _skipNextStep = skip;
+                    Message?.Invoke(this, message + (skip ? " Skipping the next step." : " Continuing."));
                     return;
                 }
 
@@ -1244,6 +1271,41 @@ public sealed class PlaybackEngine
 
             if (step.CharacterDelayMs > 0 && i < text.Length - 1)
                 await WaitAsync(step.CharacterDelayMs / speed, token).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>Windows' wheel amount for one notch (WHEEL_DELTA).</summary>
+    public const int WheelNotch = 120;
+
+    /// <summary>Gap between the notches of a multi-notch Scroll step.</summary>
+    public static readonly TimeSpan ScrollNotchSpacing = TimeSpan.FromMilliseconds(15);
+
+    /// <summary>
+    /// Sends a Scroll step's amount as separate one-notch (120) wheel events, 15 ms apart, like a real wheel
+    /// turning. Games (Roblox camera zoom, scrollable shop lists) and some browsers only count one notch per wheel
+    /// message, so a single -360 event scrolled just once. An amount that isn't whole notches (from a touchpad or an
+    /// old recording) sends the rest as one smaller event at the end. The spacing is on the playback timeline, so
+    /// it never shortens the delays that follow.
+    /// </summary>
+    private async Task ScrollInNotchesAsync(int delta, bool horizontal, CancellationToken token)
+    {
+        var sign = Math.Sign(delta);
+        var remaining = Math.Abs((long)delta);
+        var first = true;
+        // Space the notches from "now" (if earlier steps ran late, don't fire the notches as one burst).
+        if (remaining > WheelNotch && _timelineTarget < _clock.Elapsed) _timelineTarget = _clock.Elapsed;
+        while (remaining > 0)
+        {
+            if (!first)
+            {
+                _timelineTarget += ScrollNotchSpacing;
+                await WaitForTimelineAsync(token).ConfigureAwait(false);
+            }
+
+            first = false;
+            var part = (int)Math.Min(remaining, WheelNotch);
+            _input.Scroll(sign * part, horizontal);
+            remaining -= part;
         }
     }
 

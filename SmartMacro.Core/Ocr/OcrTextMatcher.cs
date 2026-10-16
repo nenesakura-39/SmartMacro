@@ -7,15 +7,23 @@ namespace SmartMacro.Core.Ocr;
 /// Finds a piece of text in OCR results. Windows OCR doesn't give a confidence value, so instead
 /// we measure how similar the screen text is to what the user typed (edit distance). That lets a
 /// search for "Login" still match an OCR misread like "Log1n" when the similarity limit allows it.
+/// On top of that, characters Windows OCR often confuses on short UI words (0 / O, 1 / I / l) can be treated as
+/// equal, so a search for "OK" matches a screen read as "0K" even at 100 % accuracy.
 /// </summary>
 public static class OcrTextMatcher
 {
     /// <summary>Returns matches, best first (then top-to-bottom, left-to-right).</summary>
-    public static IReadOnlyList<TextMatch> Find(OcrReadResult result, string query, TextMatchMode mode, bool caseSensitive, double minSimilarity)
+    /// <param name="normalizeLookAlikes">
+    /// When the plain comparison isn't good enough, compare again with look-alike characters folded together
+    /// (0 → O, 1 / l / | → I). The better of the two scores is used.
+    /// </param>
+    public static IReadOnlyList<TextMatch> Find(OcrReadResult result, string query, TextMatchMode mode, bool caseSensitive, double minSimilarity,
+        bool normalizeLookAlikes = false)
     {
         ArgumentNullException.ThrowIfNull(result);
         var target = Normalize(query, caseSensitive);
         if (target.Length == 0) return Array.Empty<TextMatch>();
+        var foldedTarget = normalizeLookAlikes ? Normalize(FoldLookAlikes(query), caseSensitive) : null;
 
         var targetWordCount = target.Split(' ').Length;
         var candidates = new List<TextMatch>();
@@ -29,8 +37,11 @@ public static class OcrTextMatcher
                 for (var length = Math.Max(1, targetWordCount - 1); length <= targetWordCount + 1 && start + length <= words.Count; length++)
                 {
                     var span = words.GetRange(start, length);
-                    var spanText = Normalize(string.Join(" ", span.Select(w => w.Text)), caseSensitive);
+                    var rawSpan = string.Join(" ", span.Select(w => w.Text));
+                    var spanText = Normalize(rawSpan, caseSensitive);
                     var similarity = Score(spanText, target, mode);
+                    if (foldedTarget is not null && similarity < 1)
+                        similarity = Math.Max(similarity, Score(Normalize(FoldLookAlikes(rawSpan), caseSensitive), foldedTarget, mode));
                     if (similarity < minSimilarity) continue;
 
                     var bounds = span.Select(w => w.Bounds).Aggregate((a, b) => a.Union(b));
@@ -66,6 +77,28 @@ public static class OcrTextMatcher
         if (a.Length == 0 && b.Length == 0) return 1;
         var distance = Levenshtein(a, b);
         return 1.0 - (double)distance / Math.Max(a.Length, b.Length);
+    }
+
+    /// <summary>
+    /// Maps characters OCR commonly mixes up onto one representative: zero → O, one / lower-case L / pipe → I.
+    /// Runs on the raw text (before upper-casing), so a lower-case "l" read for a capital "I" is caught too.
+    /// Both the search text and the screen text are folded the same way, so a real "l" still matches itself.
+    /// </summary>
+    public static string FoldLookAlikes(string text)
+    {
+        if (string.IsNullOrEmpty(text)) return string.Empty;
+        var chars = text.ToCharArray();
+        for (var i = 0; i < chars.Length; i++)
+        {
+            chars[i] = chars[i] switch
+            {
+                '0' => 'O',
+                '1' or 'l' or '|' => 'I',
+                _ => chars[i],
+            };
+        }
+
+        return new string(chars);
     }
 
     private static double Score(string spanText, string target, TextMatchMode mode)

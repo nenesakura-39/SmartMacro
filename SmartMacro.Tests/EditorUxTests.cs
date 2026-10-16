@@ -269,15 +269,17 @@ public class MouseStepPlaybackTests
     }
 
     [Theory]
-    [InlineData(-360, false, "scroll -360")]  // 3 notches down
-    [InlineData(120, false, "scroll 120")]    // 1 notch up
-    [InlineData(-240, true, "scroll -240 h")] // 2 notches left
-    [InlineData(240, true, "scroll 240 h")]   // 2 notches right
-    public async Task Scroll_direction_and_amount_are_sent_as_stored(int delta, bool horizontal, string expected)
+    [InlineData(-360, false, "scroll -120|scroll -120|scroll -120")] // 3 notches down, one wheel event each
+    [InlineData(120, false, "scroll 120")]                           // 1 notch up
+    [InlineData(-240, true, "scroll -120 h|scroll -120 h")]          // 2 notches left
+    [InlineData(240, true, "scroll 120 h|scroll 120 h")]             // 2 notches right
+    [InlineData(-300, false, "scroll -120|scroll -120|scroll -60")]  // odd amount: the rest is sent last
+    [InlineData(-60, false, "scroll -60")]                           // less than a notch stays one event
+    public async Task Scroll_direction_and_amount_are_sent_as_one_event_per_notch(int delta, bool horizontal, string expected)
     {
         var calls = await Play(new MouseScrollStep { Delta = delta, Horizontal = horizontal });
 
-        Assert.Equal(new[] { expected }, calls);
+        Assert.Equal(expected.Split('|'), calls);
     }
 
     [Fact]

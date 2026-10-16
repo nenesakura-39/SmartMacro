@@ -240,6 +240,44 @@ internal static class NativeMethods
     [DllImport("user32.dll")]
     public static extern IntPtr GetDC(IntPtr hWnd);
 
+    /// <summary>DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2.</summary>
+    public static readonly IntPtr DpiAwarenessPerMonitorV2 = new(-4);
+
+    [DllImport("user32.dll")]
+    public static extern IntPtr SetThreadDpiAwarenessContext(IntPtr dpiContext);
+
+    /// <summary>
+    /// Makes the current thread per-monitor DPI aware (V2) until disposed, so screen sizes, captures and cursor
+    /// positions are physical pixels even on a thread-pool / background thread. The app manifest already asks for
+    /// this process-wide; this guards against any thread that ended up with a different (virtualized) context,
+    /// which would scale captures on monitors that aren't at 100 %.
+    /// </summary>
+    public readonly struct PhysicalPixelsScope : IDisposable
+    {
+        private readonly IntPtr _previous;
+
+        private PhysicalPixelsScope(IntPtr previous) => _previous = previous;
+
+        public static PhysicalPixelsScope Enter()
+        {
+            try
+            {
+                return new PhysicalPixelsScope(SetThreadDpiAwarenessContext(DpiAwarenessPerMonitorV2));
+            }
+            catch (EntryPointNotFoundException)
+            {
+                return default; // Windows older than 10 1607: the manifest setting applies
+            }
+        }
+
+        public void Dispose()
+        {
+            if (_previous == IntPtr.Zero) return;
+            try { SetThreadDpiAwarenessContext(_previous); }
+            catch (EntryPointNotFoundException) { }
+        }
+    }
+
     [DllImport("user32.dll")]
     public static extern int ReleaseDC(IntPtr hWnd, IntPtr hDC);
 

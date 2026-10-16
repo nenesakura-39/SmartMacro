@@ -65,6 +65,8 @@ public sealed class GameRecordingOptions
     /// 0 (default) keeps every mouse sample exactly as recorded. A value above 0 merges consecutive mouse
     /// samples that arrive within this many microseconds of the first one into a single event with the summed
     /// movement — no movement is lost, only sub-window timing. Useful for very high polling-rate mice.
+    /// Capped at <see cref="GameRecordingConverter.MaxMoveCoalesceUs"/> (8 ms): wider slices bunch camera turns
+    /// into a few big jumps, which 3D games integrate differently (missed turns, drift over long runs).
     /// </summary>
     public int MoveCoalesceUs { get; init; }
 
@@ -91,6 +93,12 @@ public sealed class GameRecordingOptions
 /// </summary>
 public static class GameRecordingConverter
 {
+    /// <summary>
+    /// Widest window (µs) in which relative mouse samples may be merged into one event. Keeps camera movement in
+    /// fine-grained slices (≤ 8 ms, about one frame at 120 fps) so turns in 3D games play back like they were made.
+    /// </summary>
+    public const int MaxMoveCoalesceUs = 8_000;
+
     /// <summary>Recorder cap, leaving room under the validator limit for the releases added at the end.</summary>
     public const int MaxRecordedEvents = MacroValidator.MaxSequenceEvents - 1_000;
 
@@ -108,6 +116,7 @@ public static class GameRecordingConverter
         long? origin = null;
         long lastTime = 0;
         long moveGroupStart = long.MinValue;
+        var coalesceUs = Math.Clamp(options.MoveCoalesceUs, 0, MaxMoveCoalesceUs);
 
         for (var i = 0; i < count; i++)
         {
@@ -124,9 +133,9 @@ public static class GameRecordingConverter
                 {
                     if (e.Dx == 0 && e.Dy == 0) break;
 
-                    // Optional lossless merge with the previous move (sum, never drop).
-                    if (options.MoveCoalesceUs > 0 && output.Count > 0 && output[^1].Kind == InputEventKind.MouseMove
-                        && time - moveGroupStart <= options.MoveCoalesceUs)
+                    // Optional lossless merge with the previous move (sum, never drop), in slices of at most 8 ms.
+                    if (coalesceUs > 0 && output.Count > 0 && output[^1].Kind == InputEventKind.MouseMove
+                        && time - moveGroupStart <= coalesceUs)
                     {
                         var prev = output[^1];
                         long sx = (long)prev.Dx + e.Dx, sy = (long)prev.Dy + e.Dy;
