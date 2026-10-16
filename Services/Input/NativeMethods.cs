@@ -15,6 +15,8 @@ internal static class NativeMethods
     public const uint INPUT_KEYBOARD = 1;
 
     public const uint MOUSEEVENTF_MOVE = 0x0001;
+    public const uint MOUSEEVENTF_VIRTUALDESK = 0x4000;
+    public const uint MOUSEEVENTF_ABSOLUTE = 0x8000;
     public const uint MOUSEEVENTF_LEFTDOWN = 0x0002;
     public const uint MOUSEEVENTF_LEFTUP = 0x0004;
     public const uint MOUSEEVENTF_RIGHTDOWN = 0x0008;
@@ -163,6 +165,15 @@ internal static class NativeMethods
 
     [DllImport("user32.dll")]
     public static extern IntPtr GetForegroundWindow();
+
+    public const uint GA_ROOT = 2;
+
+    [DllImport("user32.dll")]
+    public static extern IntPtr GetAncestor(IntPtr hwnd, uint gaFlags);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool GetClipCursor(out RECT lpRect);
 
     [DllImport("user32.dll")]
     public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);

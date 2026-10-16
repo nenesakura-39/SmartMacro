@@ -74,7 +74,7 @@ public partial class App : Application
         if (!_playbackClock.HasHighResolutionTimer)
             _log.Warning("High-resolution timer isn't available on this Windows version; playback timing falls back to 1 ms steps.");
         var automation = new AutomationServices(
-            new PlaybackEngine(new Win32InputSimulator(), _playbackClock, ocr),
+            new PlaybackEngine(new Win32InputSimulator(_log), _playbackClock, ocr),
             new WindowsInputRecorder(),
             new RawInputRecorder(),
             new EmergencyStopWatcher(),

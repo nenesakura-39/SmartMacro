@@ -97,6 +97,15 @@ _Last updated: 2026-10-16 (v1.0.0 + game-input fidelity work). Owner & developer
 - Recorder: E1 keys (Pause) recorded without a scan code (sent by virtual key); keyboard overrun code ignored; handler errors are logged after recording.
 - `tools\verify.cmd`: stops when the build fails (tests not run), deletes old logs first, writes a .trx, returns a non-zero exit code on failure.
 
+**Roblox UI click fix** (2026-10-16; written, not yet rebuilt)
+- Owner's run after the Phase 6 audit: build 0 warnings / 0 errors, 225/225 tests passed (`artifacts\test-results.trx`).
+- Symptom: in windowed Roblox the cursor reaches the button and title-bar clicks work, but Roblox's own UI buttons don't react reliably.
+- Cause (most likely, from the code path): `MoveMouse` only called `SetCursorPos`. That teleports the cursor without creating a mouse-input event, and button presses are sent without a position, so an app that tracks the pointer from the input stream (Raw Input) still has the old position when the click arrives. Windows' own title-bar handling uses the real cursor position, which is why that worked.
+- Fix: `MoveMouse` now sends a SendInput absolute move (MOUSEEVENTF_MOVE | ABSOLUTE | VIRTUALDESK) to the target, then `SetCursorPos` for the exact pixel. Applies to every step that moves the mouse (Move, Click/Scroll at a position, Find text clicks, game-mode "move cursor to start"). Pixel math in `Core/Input/AbsoluteMouseMath`.
+- Diagnostics: `Win32InputSimulator` logs "Input check:" lines (max one per 2 s) when the window under the cursor isn't active, the cursor is confined (ClipCursor, games locking the mouse), or the cursor didn't end up where it was sent.
+- Right-button camera turning: a Desktop recording can't reproduce it (the game recentres the locked cursor, so absolute positions barely change). Use Game mode, which records relative movement.
+- Not verified in Roblox yet.
+
 ## Architecture
 - `SmartMacro.Core` (net10.0, no WPF): models, validation, storage, logging. All unit tested.
 - `SmartMacro` (net10.0-windows, WPF, MVVM): `Mvvm/`, `ViewModels/`, `Views/`, `Themes/`, `Services/`, `Converters/`.

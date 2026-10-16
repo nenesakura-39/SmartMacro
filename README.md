@@ -74,6 +74,9 @@ Game mode never tries to get around anti-cheat.
 - **Settings → Copy diagnostics** copies version, Windows, screen and OCR info plus the recent log, for bug reports.
 - Daily log files: `%LOCALAPPDATA%\SmartMacro\Logs`.
 - **Find text → Test now** saves `Logs\last-ocr-test.png`, which shows exactly what was captured.
+- **Clicks in a game's menus don't register:** check the log for lines starting with "Input check:". They say if the
+  game window wasn't active (the click only switched to it) or if the game had locked the mouse. Use Desktop mode for
+  menu clicks, and Game mode for camera movement (including holding the right mouse button to turn the camera).
 
 ---
 
