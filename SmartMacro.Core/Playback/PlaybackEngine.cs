@@ -2,6 +2,7 @@ using SmartMacro.Core.Models;
 using SmartMacro.Core.Ocr;
 using SmartMacro.Core.Validation;
 using SmartMacro.Core.Vision;
+using SmartMacro.Core.Workflow;
 
 namespace SmartMacro.Core.Playback;
 
@@ -25,8 +26,17 @@ public sealed record PlaybackResult(PlaybackOutcome Outcome, int IterationsCompl
 /// <summary>
 /// Where playback currently is. StepNumber is the 1-based position in the macro (including disabled steps),
 /// so it matches the numbers shown in the editor. TotalIterations is null when repeating until stopped.
+/// LoopText describes the innermost Repeat block the step is in (e.g. "loop turn 2 of 5"), or null.
 /// </summary>
-public sealed record PlaybackProgress(int Iteration, int? TotalIterations, int StepNumber, int StepCount, MacroStep Step);
+public sealed record PlaybackProgress(int Iteration, int? TotalIterations, int StepNumber, int StepCount, MacroStep Step, string? LoopText = null);
+
+/// <summary>Thrown when a Repeat block reaches its safety limit (max turns / max time) and is set to stop the macro.</summary>
+public sealed class LoopLimitException : Exception
+{
+    public LoopLimitException(string message) : base(message)
+    {
+    }
+}
 
 /// <summary>
 /// Runs a macro's steps on a background thread.
@@ -42,6 +52,12 @@ public sealed record PlaybackProgress(int Iteration, int? TotalIterations, int S
 /// sending input and timer overshoot don't add up over thousands of steps, and simultaneous keyboard and mouse
 /// events keep their original order and spacing. If playback falls far behind (the PC stalled), the timeline
 /// is moved forward instead of firing a burst of late input.
+///
+/// Blocks (Stage 3): steps run with a program counter (an index into the step list) instead of a foreach, so
+/// If / Else / End If and Repeat / End Repeat can jump. The jumps come from <see cref="BlockStructure"/>, which the
+/// validator has already checked before anything runs. Every Repeat has a limit (count, max turns and/or max time),
+/// every condition check honours Pause / Stop / Esc, and loop state lives in a small per-run stack, so pausing
+/// can't lose or corrupt it.
 /// </summary>
 public sealed class PlaybackEngine
 {
@@ -59,6 +75,9 @@ public sealed class PlaybackEngine
     private readonly IScreenCapture? _capture;
     private readonly object _gate = new();
 
+    // The detection code shared by Find steps and conditions (created per run).
+    private ScreenProbes? _probes;
+
     // Where the most recent Find text / image / color step found something, in screen pixels
     // (only one run at a time, so a field is fine). Mouse click steps can click it.
     private (int X, int Y)? _lastFound;
@@ -67,6 +86,7 @@ public sealed class PlaybackEngine
     private HeldInput? _held;
     private TimeSpan _timelineTarget;   // clock time at which the current step / event is due
     private TimeSpan _timelineShift;    // total time the timeline was pushed back (pauses, stalls)
+    private TimeSpan _pausedTotal;      // total time spent paused in this run (not counted by timeouts / loop limits)
 
     private PlaybackState _state = PlaybackState.Idle;
     private CancellationTokenSource? _cts;
@@ -122,18 +142,15 @@ public sealed class PlaybackEngine
 
         var held = new HeldInput();
         _held = held;
+        _probes = new ScreenProbes(_ocr, _capture, _clock);
         var iterationsCompleted = 0;
-        var stepsExecuted = 0;
         var token = cts.Token;
 
-        // Keep the original positions so progress numbers match the editor.
-        var plan = macro.Steps
-            .Select((step, index) => (Step: step, Number: index + 1))
-            .Where(x => x.Step.Enabled)
-            .ToList();
-        var speed = macro.Speed;
+        // The validator above already refused unbalanced blocks, so this structure is always valid here.
+        var blocks = BlockStructure.Analyze(macro.Steps);
+        var run = new RunContext(macro.Steps, blocks, macro.Speed, held, new ScreenConditionEvaluator(_probes),
+            macro.RepeatCount == 0 ? null : macro.RepeatCount);
         var repeatDelayMs = macro.RepeatDelayMs;
-        int? totalIterations = macro.RepeatCount == 0 ? null : macro.RepeatCount;
 
         PlaybackResult result;
         string? releaseError;
@@ -141,47 +158,44 @@ public sealed class PlaybackEngine
         {
             await Task.Run(async () =>
             {
+                if (!blocks.IsValid) // can't happen after validation; checked anyway so a bug can't run a broken list
+                    throw new InvalidOperationException("The If / Repeat blocks of this macro don't match up.");
+
                 ResetTimeline();
                 _timelineShift = TimeSpan.Zero;
+                _pausedTotal = TimeSpan.Zero;
 
-                for (var iteration = 1; totalIterations is null || iteration <= totalIterations; iteration++)
+                for (var iteration = 1; run.TotalIterations is null || iteration <= run.TotalIterations; iteration++)
                 {
                     // Pause between loops (never before the first run or after the last one).
                     if (iteration > 1 && repeatDelayMs > 0)
                     {
-                        AdvanceTimeline(repeatDelayMs / speed);
+                        AdvanceTimeline(repeatDelayMs / run.Speed);
                         await WaitForTimelineAsync(token).ConfigureAwait(false);
                     }
 
-                    foreach (var (step, number) in plan)
-                    {
-                        await WaitIfPausedAsync(token).ConfigureAwait(false);
-                        token.ThrowIfCancellationRequested();
-
-                        ProgressChanged?.Invoke(this, new PlaybackProgress(iteration, totalIterations, number, macro.Steps.Count, step));
-                        await ExecuteStepAsync(step, speed, held, token).ConfigureAwait(false);
-                        stepsExecuted++;
-                    }
-
+                    run.Iteration = iteration;
+                    await RunStepsAsync(run, token).ConfigureAwait(false);
                     iterationsCompleted++;
                 }
             }, token).ConfigureAwait(false);
 
-            result = new PlaybackResult(PlaybackOutcome.Completed, iterationsCompleted, stepsExecuted);
+            result = new PlaybackResult(PlaybackOutcome.Completed, iterationsCompleted, run.StepsExecuted);
         }
         catch (OperationCanceledException) when (token.IsCancellationRequested)
         {
-            result = new PlaybackResult(PlaybackOutcome.Stopped, iterationsCompleted, stepsExecuted);
+            result = new PlaybackResult(PlaybackOutcome.Stopped, iterationsCompleted, run.StepsExecuted);
         }
         catch (Exception ex)
         {
-            result = new PlaybackResult(PlaybackOutcome.Failed, iterationsCompleted, stepsExecuted, ex.Message);
+            result = new PlaybackResult(PlaybackOutcome.Failed, iterationsCompleted, run.StepsExecuted, ex.Message);
         }
         finally
         {
-            // Never leave keys or mouse buttons stuck down.
+            // Never leave keys or mouse buttons stuck down (also when stopped inside a loop or a condition check).
             releaseError = held.ReleaseAll(_input);
             _held = null;
+            _probes = null;
 
             lock (_gate)
             {
@@ -292,8 +306,12 @@ public sealed class PlaybackEngine
         {
             _timelineTarget += paused;
             _timelineShift += paused;
+            _pausedTotal += paused;
         }
     }
+
+    /// <summary>Clock time minus the time spent paused: what condition timeouts and loop time limits measure.</summary>
+    private TimeSpan ActiveTime => _clock.Elapsed - _pausedTotal;
 
     // ---------------- Timeline ----------------
 
@@ -353,6 +371,284 @@ public sealed class PlaybackEngine
             var waited = _clock.Elapsed - before;
             remaining -= waited > TimeSpan.Zero ? waited : chunk;
         }
+    }
+
+    // ---------------- Blocks: If / Else / End If, Repeat / End Repeat ----------------
+
+    /// <summary>Everything one run needs, so the block runner doesn't depend on loose locals.</summary>
+    private sealed class RunContext
+    {
+        public RunContext(List<MacroStep> steps, BlockStructure blocks, double speed, HeldInput held,
+            IConditionEvaluator conditions, int? totalIterations)
+        {
+            Steps = steps;
+            Blocks = blocks;
+            Speed = speed;
+            Held = held;
+            Conditions = conditions;
+            TotalIterations = totalIterations;
+        }
+
+        public List<MacroStep> Steps { get; }
+        public BlockStructure Blocks { get; }
+        public double Speed { get; }
+        public HeldInput Held { get; }
+        public IConditionEvaluator Conditions { get; }
+        public int? TotalIterations { get; }
+        public int Iteration { get; set; }
+        public int StepsExecuted { get; set; }
+
+        /// <summary>Last answer of each If (by step index), so a loop doesn't log the same answer every turn.</summary>
+        public Dictionary<int, bool> LastIfAnswer { get; } = new();
+    }
+
+    /// <summary>State of one running Repeat block. Lives on a stack, innermost last.</summary>
+    private sealed class LoopFrame
+    {
+        public LoopFrame(int start, TimeSpan startedAt)
+        {
+            Start = start;
+            StartedAt = startedAt;
+        }
+
+        /// <summary>Index of the Repeat step.</summary>
+        public int Start { get; }
+
+        /// <summary>Active time (paused time not counted) when the loop started.</summary>
+        public TimeSpan StartedAt { get; }
+
+        /// <summary>Completed turns.</summary>
+        public int Turns { get; set; }
+
+        /// <summary>Active time of the last condition check (While / Until), to space the checks.</summary>
+        public TimeSpan? LastCheckAt { get; set; }
+    }
+
+    /// <summary>
+    /// Runs the step list once, from top to bottom, following the block jumps.
+    /// pc ("program counter") is the index of the step to run next.
+    /// </summary>
+    private async Task RunStepsAsync(RunContext run, CancellationToken token)
+    {
+        var steps = run.Steps;
+        var blocks = run.Blocks;
+        var loops = new List<LoopFrame>();
+        var pc = 0;
+
+        while (pc < steps.Count)
+        {
+            await WaitIfPausedAsync(token).ConfigureAwait(false);
+            token.ThrowIfCancellationRequested();
+
+            var step = steps[pc];
+            switch (step)
+            {
+                case IfStep ifStep:
+                {
+                    // A disabled If skips its whole block (both branches).
+                    if (!ifStep.Enabled)
+                    {
+                        pc = blocks.EndOf(pc) + 1;
+                        break;
+                    }
+
+                    Report(run, pc, loops);
+                    var answer = await EvaluateConditionAsync(run, ifStep.Condition, token).ConfigureAwait(false);
+                    run.StepsExecuted++;
+                    LogIfAnswer(run, pc, answer.IsTrue, answer.Text);
+
+                    var elseIndex = blocks.ElseOf(pc);
+                    pc = answer.IsTrue ? pc + 1 : (elseIndex >= 0 ? elseIndex + 1 : blocks.EndOf(pc) + 1);
+                    break;
+                }
+
+                case ElseStep:
+                    // Only reached at the end of the "true" part: skip the Else part.
+                    pc = blocks.EndOf(pc) + 1;
+                    break;
+
+                case EndIfStep:
+                    pc++;
+                    break;
+
+                case RepeatStep repeat:
+                {
+                    // A disabled Repeat skips its whole block.
+                    if (!repeat.Enabled)
+                    {
+                        pc = blocks.EndOf(pc) + 1;
+                        break;
+                    }
+
+                    var frame = new LoopFrame(pc, ActiveTime);
+                    loops.Add(frame);
+                    Report(run, pc, loops);
+                    run.StepsExecuted++;
+                    if (await StartNextTurnAsync(run, repeat, frame, token).ConfigureAwait(false))
+                    {
+                        pc++;
+                    }
+                    else
+                    {
+                        loops.RemoveAt(loops.Count - 1);
+                        pc = blocks.EndOf(pc) + 1;
+                    }
+
+                    break;
+                }
+
+                case EndRepeatStep:
+                {
+                    var start = blocks.StartOf(pc);
+                    if (loops.Count == 0 || loops[^1].Start != start || steps[start] is not RepeatStep repeat)
+                        throw new InvalidOperationException($"End Repeat at step {pc + 1} doesn't belong to the running loop."); // can't happen after validation
+
+                    var frame = loops[^1];
+                    frame.Turns++;
+                    if (await StartNextTurnAsync(run, repeat, frame, token).ConfigureAwait(false))
+                    {
+                        pc = start + 1;
+                    }
+                    else
+                    {
+                        loops.RemoveAt(loops.Count - 1);
+                        pc++;
+                    }
+
+                    break;
+                }
+
+                default:
+                    if (step.Enabled)
+                    {
+                        Report(run, pc, loops);
+                        await ExecuteStepAsync(step, run.Speed, run.Held, token).ConfigureAwait(false);
+                        run.StepsExecuted++;
+                    }
+
+                    pc++;
+                    break;
+            }
+        }
+    }
+
+    private void Report(RunContext run, int index, List<LoopFrame> loops)
+    {
+        string? loopText = null;
+        if (loops.Count > 0 && run.Steps[loops[^1].Start] is RepeatStep repeat)
+        {
+            var turn = loops[^1].Turns + 1;
+            loopText = repeat.Mode == RepeatMode.Times ? $"loop turn {turn} of {repeat.Count}" : $"loop turn {turn}";
+        }
+
+        ProgressChanged?.Invoke(this, new PlaybackProgress(run.Iteration, run.TotalIterations, index + 1, run.Steps.Count, run.Steps[index], loopText));
+    }
+
+    private void LogIfAnswer(RunContext run, int index, bool isTrue, string text)
+    {
+        // Inside loops the same If can run thousands of times: only log the first answer and changes.
+        if (run.LastIfAnswer.TryGetValue(index, out var previous) && previous == isTrue) return;
+        run.LastIfAnswer[index] = isTrue;
+        Message?.Invoke(this, $"If (step {index + 1}): {(isTrue ? "yes" : "no")}. {text}");
+    }
+
+    /// <summary>
+    /// Decides whether a Repeat block runs another turn: count reached, safety limits, then (While / Until) the
+    /// condition. Returns false to leave the loop normally; throws <see cref="LoopLimitException"/> when a limit is
+    /// reached and the loop is set to stop the macro.
+    /// </summary>
+    private async Task<bool> StartNextTurnAsync(RunContext run, RepeatStep repeat, LoopFrame frame, CancellationToken token)
+    {
+        token.ThrowIfCancellationRequested();
+        var number = frame.Start + 1;
+        var turns = frame.Turns;
+        string Turns(int n) => n == 1 ? "1 turn" : $"{n:N0} turns";
+
+        if (repeat.Mode == RepeatMode.Times && turns >= repeat.Count)
+        {
+            Message?.Invoke(this, $"Repeat (step {number}) finished: {Turns(turns)}.");
+            return false;
+        }
+
+        if (repeat.Mode != RepeatMode.Times && repeat.MaxIterations > 0 && turns >= repeat.MaxIterations)
+            return LimitReached(repeat, number, $"reached its limit of {Turns(repeat.MaxIterations)}");
+
+        Condition? condition = null;
+        if (repeat.Mode != RepeatMode.Times)
+        {
+            condition = repeat.Condition ?? throw new InvalidOperationException($"The Repeat at step {number} has no condition.");
+            var search = condition.Search ?? throw new InvalidOperationException($"The condition of the Repeat at step {number} is damaged.");
+
+            // Keep condition checks at least "check every" apart, so a short (or empty) loop can't hammer the CPU.
+            if (frame.LastCheckAt is { } lastCheck)
+            {
+                var wait = TimeSpan.FromMilliseconds(search.CheckIntervalMs) - (ActiveTime - lastCheck);
+                if (wait > TimeSpan.Zero) await WaitAsync(wait.TotalMilliseconds, token).ConfigureAwait(false);
+            }
+        }
+
+        if (repeat.MaxDurationMs > 0 && ActiveTime - frame.StartedAt >= TimeSpan.FromMilliseconds(repeat.MaxDurationMs))
+            return LimitReached(repeat, number, $"reached its time limit of {repeat.MaxDurationMs / 1000.0:0.#} s after {Turns(turns)}");
+
+        if (condition is null) return true; // Times: no condition to check
+
+        var answer = await EvaluateConditionAsync(run, condition, token).ConfigureAwait(false);
+        frame.LastCheckAt = ActiveTime;
+
+        var keepGoing = repeat.Mode == RepeatMode.While ? answer.IsTrue : !answer.IsTrue;
+        if (!keepGoing)
+        {
+            var reason = repeat.Mode == RepeatMode.While ? "its condition is false" : "its condition is true";
+            Message?.Invoke(this, $"Repeat (step {number}) finished after {Turns(turns)}: {reason}. {answer.Text}");
+        }
+
+        return keepGoing;
+    }
+
+    private bool LimitReached(RepeatStep repeat, int number, string what)
+    {
+        var text = $"Repeat (step {number}) {what}.";
+        if (repeat.WhenLimitReached == LoopLimitBehavior.ExitLoop)
+        {
+            Message?.Invoke(this, text + " Leaving the loop and continuing after its End Repeat.");
+            return false;
+        }
+
+        throw new LoopLimitException(text + " The macro was stopped to be safe. If that many turns are expected, raise the limit, or set the loop to continue when the limit is reached.");
+    }
+
+    /// <summary>The answer to a condition plus a sentence for the log.</summary>
+    private readonly record struct ConditionAnswer(bool IsTrue, string Text);
+
+    /// <summary>
+    /// Checks a condition, waiting up to its "keep checking for" time for it to become true (0 = look once).
+    /// Uses the same detection as the Find steps; paused time doesn't count; Pause / Stop / Esc work between and during
+    /// checks. When the condition sees its text / image / colour, that spot becomes the "last found" spot for clicks.
+    /// </summary>
+    private async Task<ConditionAnswer> EvaluateConditionAsync(RunContext run, Condition condition, CancellationToken token)
+    {
+        var conditions = run.Conditions;
+        var search = condition.Search ?? throw new InvalidOperationException("This condition has no valid search settings. The macro may be damaged.");
+        var timeout = TimeSpan.FromMilliseconds(search.TimeoutMs);
+        var timer = conditions.NewTimer(condition);
+        var started = ActiveTime;
+
+        ConditionCheck check;
+        while (true)
+        {
+            await WaitIfPausedAsync(token).ConfigureAwait(false);
+            token.ThrowIfCancellationRequested();
+
+            check = await conditions.CheckAsync(condition, timer, token).ConfigureAwait(false);
+            if (check.Seen) _lastFound = (check.X, check.Y);
+            if (check.IsTrue || ActiveTime - started >= timeout) break;
+
+            await WaitAsync(search.CheckIntervalMs, token).ConfigureAwait(false);
+        }
+
+        ResetTimeline(); // checking takes as long as it takes; start timing again from here
+        var stats = timer is null ? string.Empty : " " + timer.Describe(ActiveTime - started);
+        return new ConditionAnswer(check.IsTrue, $"({conditions.Describe(condition)}: {(check.IsTrue ? "true" : "false")}) {check.Details}{stats}");
     }
 
     // ---------------- Steps ----------------
@@ -468,19 +764,9 @@ public sealed class PlaybackEngine
                 ResetTimeline(); // typing takes as long as it takes; start timing again from here
                 break;
 
-            case FindTextStep f:
-                await FindTextAsync(f, token).ConfigureAwait(false);
+            case FindTextStep or FindImageStep or FindColorStep:
+                await SearchAsync((ScreenSearchStep)step, token).ConfigureAwait(false);
                 ResetTimeline(); // the search takes as long as it takes; start timing again from here
-                break;
-
-            case FindImageStep i:
-                await FindImageAsync(i, token).ConfigureAwait(false);
-                ResetTimeline();
-                break;
-
-            case FindColorStep c:
-                await FindColorAsync(c, token).ConfigureAwait(false);
-                ResetTimeline();
                 break;
 
             case InputSequenceStep q:
@@ -644,22 +930,17 @@ public sealed class PlaybackEngine
     // ---------------- Screen search (Find text / image / color) ----------------
 
     /// <summary>
-    /// Result of one look at the screen. X / Y is the spot to act on (screen pixels). FoundText describes the
-    /// find for the log; MissText (starting with a space) explains a miss, e.g. what OCR read instead.
-    /// </summary>
-    private readonly record struct Probe(bool Found, int X, int Y, string FoundText, string MissText)
-    {
-        public static Probe Miss(string missText) => new(false, 0, 0, string.Empty, missText);
-    }
-
-    /// <summary>
-    /// The shared waiting loop: looks at the screen until the goal is met (it appeared / it's gone) or the
-    /// timeout passes. Timeouts and check intervals are real time (not affected by the Speed setting), and time
+    /// The shared waiting loop of the Find steps: looks at the screen until the goal is met (it appeared / it's gone)
+    /// or the timeout passes. Timeouts and check intervals are real time (not affected by the Speed setting), and time
     /// spent paused doesn't count. Pause / Stop / Esc are honoured between and during checks.
+    /// The looking itself is done by <see cref="ScreenProbes"/>, which conditions use too.
     /// </summary>
-    private async Task SearchAsync(ScreenSearchStep step, string what, Func<CancellationToken, Task<Probe>> probe,
-        DetectionTimer? timer, CancellationToken token)
+    private async Task SearchAsync(ScreenSearchStep step, CancellationToken token)
     {
+        var search = (_probes ?? throw new InvalidOperationException("Playback isn't running.")).Prepare(step);
+        var what = search.What;
+        var timer = search.NewTimer();
+
         var started = _clock.Elapsed;
         var shiftAtStart = _timelineShift;
         var timeout = TimeSpan.FromMilliseconds(step.TimeoutMs);
@@ -671,7 +952,7 @@ public sealed class PlaybackEngine
             await WaitIfPausedAsync(token).ConfigureAwait(false);
             token.ThrowIfCancellationRequested();
 
-            var result = await probe(token).ConfigureAwait(false);
+            var result = await search.LookAsync(timer, token).ConfigureAwait(false);
 
             if (step.Goal == WaitGoal.Appear && result.Found)
             {
@@ -722,108 +1003,6 @@ public sealed class PlaybackEngine
 
             await WaitAsync(step.CheckIntervalMs, token).ConfigureAwait(false);
         }
-    }
-
-    /// <summary>Reads the screen with OCR until the text shows up (or goes away) or the timeout passes.</summary>
-    private Task FindTextAsync(FindTextStep step, CancellationToken token)
-    {
-        var ocr = _ocr;
-        if (ocr is null || !ocr.IsAvailable)
-            throw new OcrUnavailableException(ocr?.StatusText ?? "Text recognition (OCR) isn't available.");
-
-        var region = step.SearchFullScreen ? ocr.GetVirtualScreen() : step.Region;
-        return SearchAsync(step, $"\"{step.Text}\"", async t =>
-        {
-            var read = await ocr.ReadAsync(region, t).ConfigureAwait(false);
-            var match = OcrTextMatcher.Find(read, step.Text, step.MatchMode, step.CaseSensitive, step.MinSimilarityPercent / 100.0)
-                .FirstOrDefault();
-            return match is null
-                ? Probe.Miss(DescribeLastRead(read.FullText))
-                : new Probe(true, match.Bounds.CenterX, match.Bounds.CenterY,
-                    $"Found \"{match.Text}\" at ({match.Bounds.CenterX}, {match.Bounds.CenterY}), {match.Similarity:P0} match.", string.Empty);
-        }, timer: null, token);
-    }
-
-    /// <summary>Captures the screen and looks for the step's picture until it shows up (or goes away).</summary>
-    private Task FindImageAsync(FindImageStep step, CancellationToken token)
-    {
-        var capture = RequireCapture();
-        if (!TemplateCodec.TryDecode(step.TemplateData, step.TemplateWidth, step.TemplateHeight, out var decoded, out var error))
-            throw new InvalidOperationException($"The image of this step can't be used: {error}");
-        var template = decoded!;
-
-        var region = step.SearchFullScreen ? capture.GetVirtualScreen() : step.Region;
-        var options = new TemplateMatchOptions { MinScore = step.MinSimilarityPercent / 100.0, IgnoreColor = step.IgnoreColor };
-        var timer = new DetectionTimer();
-
-        return SearchAsync(step, "The image", async t =>
-        {
-            var t0 = _clock.Elapsed;
-            var frame = await capture.CaptureAsync(region, t).ConfigureAwait(false);
-            var t1 = _clock.Elapsed;
-            var result = TemplateMatcher.Find(frame.Image, template, options, t);
-            timer.Add(t1 - t0, _clock.Elapsed - t1);
-
-            if (frame.Image.Width < template.Width || frame.Image.Height < template.Height)
-                return Probe.Miss(" The search area (on screen) is smaller than the image.");
-
-            if (result.Best is not { } best)
-            {
-                var miss = $" The best similarity was {result.BestScore:P0} (needs {step.MinSimilarityPercent}%).";
-                if (result.RejectedForColor > 0)
-                    miss += $" {result.RejectedForColor} spot(s) had the right shape but a different color (turn on \"Ignore color\" if the color changes).";
-                return Probe.Miss(miss);
-            }
-
-            var bounds = frame.ToScreen(best.Bounds);
-            var more = result.Matches.Count > 1 ? $" ({result.Matches.Count} matches; the best one is used)" : "";
-            return new Probe(true, bounds.CenterX, bounds.CenterY,
-                $"Found the image at ({bounds.CenterX}, {bounds.CenterY}), {best.Score:P0} match{more}.", string.Empty);
-        }, timer, token);
-    }
-
-    /// <summary>Captures the screen and looks for the step's colour until it shows up (or goes away).</summary>
-    private Task FindColorAsync(FindColorStep step, CancellationToken token)
-    {
-        var capture = RequireCapture();
-        if (!RgbColor.TryParse(step.Color, out var color))
-            throw new InvalidOperationException($"\"{step.Color}\" is not a valid color. Use #RRGGBB.");
-
-        var region = step.SearchFullScreen ? capture.GetVirtualScreen() : step.Region;
-        var timer = new DetectionTimer();
-
-        return SearchAsync(step, $"Color {color}", async t =>
-        {
-            var t0 = _clock.Elapsed;
-            var frame = await capture.CaptureAsync(region, t).ConfigureAwait(false);
-            var t1 = _clock.Elapsed;
-            var result = ColorFinder.Find(frame.Image, color, step.Tolerance, step.MinPixels, maxResults: 20, t);
-            timer.Add(t1 - t0, _clock.Elapsed - t1);
-
-            if (result.Largest is not { } blob)
-            {
-                return Probe.Miss(result.MatchingPixels > 0
-                    ? $" {result.MatchingPixels:N0} pixel(s) of that color were found, but no patch had at least {step.MinPixels} pixels."
-                    : " No pixels of that color were found in the search area.");
-            }
-
-            var x = frame.Bounds.X + (int)Math.Round(blob.CenterX);
-            var y = frame.Bounds.Y + (int)Math.Round(blob.CenterY);
-            var more = result.Blobs.Count > 1 ? $", {result.Blobs.Count} patches; the biggest is used" : "";
-            return new Probe(true, x, y, $"Found color {color} at ({x}, {y}): {blob.PixelCount:N0} pixels{more}.", string.Empty);
-        }, timer, token);
-    }
-
-    private IScreenCapture RequireCapture() =>
-        _capture ?? throw new ScreenCaptureUnavailableException("Screen capture isn't available, so Find image / Find color steps can't run.");
-
-    /// <summary>Adds what OCR actually saw, which makes "not found" problems much easier to fix.</summary>
-    private static string DescribeLastRead(string text)
-    {
-        var oneLine = string.Join("  |  ", text.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries));
-        if (oneLine.Length == 0) return " No text could be read in the search area.";
-        if (oneLine.Length > 160) oneLine = oneLine[..160] + "…";
-        return $" Text read in the search area: \"{oneLine}\"";
     }
 
     private void DoFoundAction(ScreenSearchStep step, int x, int y)

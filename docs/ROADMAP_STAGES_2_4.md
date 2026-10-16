@@ -1,7 +1,7 @@
 # Roadmap – Stages 2, 3 and 4
 
-> **Status (2026-10-16):** Stage 2 is **written** (see "Stage 2 as built" below and `PROJECT_STATUS.md`) but not yet
-> built or tested on Windows. Stages 3 and 4 are still a plan only.
+> **Status (2026-10-16):** Stage 2 is built, tested and manually verified. Stage 3 is **written** (see "Stage 3 as
+> built" below and `PROJECT_STATUS.md`) but not yet built or tested on Windows. Stage 4 is still a plan only.
 
 Each stage starts only after the previous one has passed its automated **and** manual tests.
 Nothing here is game-specific: Fisch, Grow a Garden, etc. are examples a user would *configure*, never code paths.
@@ -99,6 +99,17 @@ corrupted/unbalanced files, deeply nested blocks.
    max duration required); pause/stop checks in every condition check.
 4. Editor: indentation in the step list, "Add If", "Wrap selection in Repeat", Problems for unbalanced blocks.
 5. Schema 5 only when block steps are used.
+
+**Stage 3 as built (differences from the plan above)**
+- One `RepeatStep` with Mode Times / While / Until instead of separate RepeatWhile / RepeatUntil steps (one editor,
+  one engine path). The condition is checked **before** every turn for both While and Until.
+- No separate `WaitUntilStep` / `WaitForChangeStep`: "wait until visible / gone" is already the Find steps (Goal
+  Appear / Disappear), and "wait, otherwise do something else" is an If whose condition has a wait time plus Else.
+  A "wait for any change" detector is left for later (it needs a new probe type, not new block logic).
+- `Condition.Check` stores a whole Find text / image / color step, so conditions reuse its validation, editor tools
+  and the shared `ScreenProbes` code; `Kind` is derived from it. Kinds MarkerInZone / LastFound are not added yet.
+- Loop condition checks are spaced at least "check every" apart (CPU guard for short / empty loops).
+- Timeout when a condition doesn't become true = the If simply answers false (use Else for "otherwise").
 
 ---
 

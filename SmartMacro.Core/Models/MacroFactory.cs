@@ -61,6 +61,11 @@ public static class MacroFactory
         StepKind.FindText => new FindTextStep { Text = "OK" },
         StepKind.FindImage => new FindImageStep(),
         StepKind.FindColor => new FindColorStep(),
+        StepKind.If => new IfStep(),
+        StepKind.Else => new ElseStep(),
+        StepKind.EndIf => new EndIfStep(),
+        StepKind.Repeat => new RepeatStep(),
+        StepKind.EndRepeat => new EndRepeatStep(),
         StepKind.InputSequence => throw new ArgumentException("Recorded input steps are created by recording in game mode, not added by hand.", nameof(kind)),
         _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unknown step type."),
     };

@@ -15,6 +15,13 @@ public enum StepKind
     InputSequence,
     FindImage,
     FindColor,
+
+    // Stage 3: workflow blocks (see WorkflowSteps.cs).
+    If,
+    Else,
+    EndIf,
+    Repeat,
+    EndRepeat,
 }
 
 public enum MacroMouseButton
@@ -66,6 +73,11 @@ public enum KeyModifiers
 [JsonDerivedType(typeof(InputSequenceStep), "inputSequence")]
 [JsonDerivedType(typeof(FindImageStep), "findImage")]
 [JsonDerivedType(typeof(FindColorStep), "findColor")]
+[JsonDerivedType(typeof(IfStep), "if")]
+[JsonDerivedType(typeof(ElseStep), "else")]
+[JsonDerivedType(typeof(EndIfStep), "endIf")]
+[JsonDerivedType(typeof(RepeatStep), "repeat")]
+[JsonDerivedType(typeof(EndRepeatStep), "endRepeat")]
 public abstract class MacroStep
 {
     public Guid Id { get; set; } = Guid.NewGuid();

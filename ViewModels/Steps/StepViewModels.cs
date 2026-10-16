@@ -27,10 +27,20 @@ public static class StepTypeCatalog
         new StepTypeInfo(StepKind.FindImage, StepDescriber.DisplayName(StepKind.FindImage), "\uE8B9", "Wait for a picture (button, icon…) to appear on screen or disappear, and optionally click it."),
         new StepTypeInfo(StepKind.FindColor, StepDescriber.DisplayName(StepKind.FindColor), "\uE790", "Wait for a color to appear in an area (or disappear), and optionally click it. Simple color matching, not object recognition."),
         new StepTypeInfo(StepKind.InputSequence, StepDescriber.DisplayName(StepKind.InputSequence), "\uE7FC", "Mouse and keyboard input recorded on one timeline and played back with its original timing: exact key and button down/up, plus cursor positions or relative (camera) mouse movement."),
+        new StepTypeInfo(StepKind.If, StepDescriber.DisplayName(StepKind.If), "\uE8AB", "Runs the steps inside only when a condition is true: some text, an image or a color is (or is not) on screen. Adding it from the toolbox adds the If and its End If."),
+        new StepTypeInfo(StepKind.Else, StepDescriber.DisplayName(StepKind.Else), "\uE76C", "Optional, inside an If block: the steps after Else run when the If's condition is false."),
+        new StepTypeInfo(StepKind.EndIf, StepDescriber.DisplayName(StepKind.EndIf), "\uE70E", "Closes an If block."),
+        new StepTypeInfo(StepKind.Repeat, StepDescriber.DisplayName(StepKind.Repeat), "\uE8EE", "Runs the steps inside several times, or while / until a condition is true. Loops always have a safety limit. Adding it from the toolbox adds the Repeat and its End Repeat."),
+        new StepTypeInfo(StepKind.EndRepeat, StepDescriber.DisplayName(StepKind.EndRepeat), "\uE70E", "Closes a Repeat block: playback goes back to the Repeat for the next turn."),
     };
 
-    /// <summary>Step types offered in the editor's "Add step" toolbox (recorded input only comes from recording).</summary>
-    public static IReadOnlyList<StepTypeInfo> Addable { get; } = All.Where(t => t.Kind != StepKind.InputSequence).ToList();
+    private static readonly HashSet<StepKind> LogicKinds = new() { StepKind.If, StepKind.Else, StepKind.EndIf, StepKind.Repeat, StepKind.EndRepeat };
+
+    /// <summary>Action step types offered in the editor's "Add step" toolbox (recorded input only comes from recording).</summary>
+    public static IReadOnlyList<StepTypeInfo> Addable { get; } = All.Where(t => t.Kind != StepKind.InputSequence && !LogicKinds.Contains(t.Kind)).ToList();
+
+    /// <summary>Block steps offered in the toolbox's "Logic" section.</summary>
+    public static IReadOnlyList<StepTypeInfo> Logic { get; } = All.Where(t => LogicKinds.Contains(t.Kind)).ToList();
 
     public static StepTypeInfo Get(StepKind kind) => All.First(t => t.Kind == kind);
 }
@@ -42,6 +52,7 @@ public static class StepTypeCatalog
 public abstract class StepViewModel : ObservableObject
 {
     private int _number;
+    private int _indentLevel;
     private string? _issueText;
     private bool _hasError;
     private bool _hasWarning;
@@ -73,6 +84,28 @@ public abstract class StepViewModel : ObservableObject
         get => _number;
         set => SetProperty(ref _number, value);
     }
+
+    /// <summary>How many If / Repeat blocks this step is inside (set by the editor; used for indentation).</summary>
+    public int IndentLevel
+    {
+        get => _indentLevel;
+        set
+        {
+            if (SetProperty(ref _indentLevel, value)) OnPropertyChanged(nameof(IndentMargin));
+        }
+    }
+
+    /// <summary>Left indentation of the row in the step list.</summary>
+    public System.Windows.Thickness IndentMargin => new(_indentLevel * 22, 0, 0, 0);
+
+    /// <summary>True for If / Else / End If / Repeat / End Repeat.</summary>
+    public bool IsBlockStep => WorkflowSteps.IsBlockStep(Model);
+
+    /// <summary>
+    /// False when this editor is shown inside an If / Repeat condition. Then the parts that conditions don't use
+    /// (title, enabled switch, "when found" action, comment) are hidden.
+    /// </summary>
+    public bool IsStandalone { get; internal set; } = true;
 
     public bool Enabled
     {
@@ -146,6 +179,9 @@ public abstract class StepViewModel : ObservableObject
         FindImageStep i => new FindImageStepViewModel(i),
         FindColorStep c => new FindColorStepViewModel(c),
         InputSequenceStep q => new InputSequenceStepViewModel(q),
+        IfStep i => new IfStepViewModel(i),
+        RepeatStep r => new RepeatStepViewModel(r),
+        ElseStep or EndIfStep or EndRepeatStep => new BlockMarkerStepViewModel(step),
         _ => throw new NotSupportedException($"No editor for step type {step.GetType().Name}."),
     };
 }

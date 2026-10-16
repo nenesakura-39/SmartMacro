@@ -17,6 +17,11 @@ public static class StepDescriber
         StepKind.InputSequence => "Recorded input",
         StepKind.FindImage => "Find image",
         StepKind.FindColor => "Find color",
+        StepKind.If => "If",
+        StepKind.Else => "Else",
+        StepKind.EndIf => "End If",
+        StepKind.Repeat => "Repeat",
+        StepKind.EndRepeat => "End Repeat",
         _ => kind.ToString(),
     };
 
@@ -34,8 +39,47 @@ public static class StepDescriber
         FindImageStep i => DescribeSearch(i, i.TemplateWidth > 0 ? $"image ({i.TemplateWidth}×{i.TemplateHeight})" : "image (not captured yet)"),
         FindColorStep c => DescribeSearch(c, $"color {c.Color} (±{c.Tolerance})"),
         InputSequenceStep q => DescribeSequence(q),
+        IfStep i => $"If {DescribeCondition(i.Condition)}",
+        ElseStep => "Otherwise (when the If's condition is false)",
+        EndIfStep => "End of the If block",
+        RepeatStep r => DescribeRepeat(r),
+        EndRepeatStep => "End of the Repeat block (go back for the next turn)",
         _ => step.GetType().Name,
     };
+
+    /// <summary>E.g. "\"OK\" is on screen", "the image (40×30) is not in area (…)", plus the wait time if any.</summary>
+    public static string DescribeCondition(Condition? condition)
+    {
+        if (condition?.Search is not { } search) return "(no condition yet)";
+
+        var what = search switch
+        {
+            FindTextStep t => $"\"{Preview(t.Text)}\"",
+            FindImageStep i => i.TemplateWidth > 0 ? $"the image ({i.TemplateWidth}×{i.TemplateHeight})" : "the image (not captured yet)",
+            FindColorStep c => $"color {c.Color} (±{c.Tolerance})",
+            _ => "it",
+        };
+        var where = search.SearchFullScreen ? "on screen" : $"in area ({search.RegionX}, {search.RegionY}, {search.RegionWidth}×{search.RegionHeight})";
+        var verb = condition.Negate ? "is not" : "is";
+        var wait = search.TimeoutMs > 0 ? $" (wait up to {search.TimeoutMs / 1000.0:0.#} s)" : "";
+        return $"{what} {verb} {where}{wait}";
+    }
+
+    private static string DescribeRepeat(RepeatStep r)
+    {
+        var text = r.Mode switch
+        {
+            RepeatMode.Times => r.Count == 1 ? "Repeat 1 time" : $"Repeat {r.Count:N0} times",
+            RepeatMode.While => $"Repeat while {DescribeCondition(r.Condition)}",
+            RepeatMode.Until => $"Repeat until {DescribeCondition(r.Condition)}",
+            _ => "Repeat",
+        };
+
+        var limits = new List<string>();
+        if (r.Mode != RepeatMode.Times && r.MaxIterations > 0) limits.Add($"max {r.MaxIterations:N0} turns");
+        if (r.MaxDurationMs > 0) limits.Add($"max {r.MaxDurationMs / 1000.0:0.#} s");
+        return limits.Count == 0 ? text : $"{text} ({string.Join(", ", limits)})";
+    }
 
     /// <summary>Counts for the recorded-input editor and the step list.</summary>
     public static InputSequenceSummary Summarize(InputSequenceStep step)

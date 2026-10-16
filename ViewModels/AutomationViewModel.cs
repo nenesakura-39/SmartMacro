@@ -468,9 +468,9 @@ public sealed class AutomationViewModel : ObservableObject, IDisposable
             return;
         }
 
-        if (!_ocr.IsAvailable && macro.Steps.Any(s => s is FindTextStep { Enabled: true }))
+        if (!_ocr.IsAvailable && WorkflowSteps.UsesTextRecognition(macro))
         {
-            _dialogs.ShowWarning("Text recognition isn't available", $"This macro has \"Find text\" steps, but:\n\n{_ocr.StatusText}");
+            _dialogs.ShowWarning("Text recognition isn't available", $"This macro has \"Find text\" steps or text conditions, but:\n\n{_ocr.StatusText}");
             _hooks.SetStatus("Can't play: text recognition (OCR) isn't available on this PC.", StatusKind.Error);
             return;
         }
@@ -638,7 +638,9 @@ public sealed class AutomationViewModel : ObservableObject, IDisposable
         if (_latestProgress is { } p && p.StepCount > 0)
         {
             var run = p.TotalIterations is int total ? $"run {p.Iteration} of {total}" : $"run {p.Iteration} (until stopped)";
-            ProgressText = $"Step {p.StepNumber} of {p.StepCount} · {run}";
+            ProgressText = p.LoopText is null
+                ? $"Step {p.StepNumber} of {p.StepCount} · {run}"
+                : $"Step {p.StepNumber} of {p.StepCount} · {p.LoopText} · {run}";
             ProgressValue = p.TotalIterations is int t && t > 0
                 ? ((p.Iteration - 1) + (double)p.StepNumber / p.StepCount) / t
                 : (double)p.StepNumber / p.StepCount;

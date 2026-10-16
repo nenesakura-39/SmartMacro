@@ -117,20 +117,40 @@
                             <TextBlock Text="Inserted after the selected step." Style="{StaticResource MutedText}" FontSize="11" Margin="0,3,0,0" />
                         </StackPanel>
                         <ScrollViewer VerticalScrollBarVisibility="Auto">
-                            <ItemsControl ItemsSource="{Binding StepTypes}" Focusable="False">
-                                <ItemsControl.ItemTemplate>
-                                    <DataTemplate DataType="{x:Type steps:StepTypeInfo}">
-                                        <Button Style="{StaticResource ToolboxButton}" ToolTip="{Binding Description}"
-                                                Command="{Binding DataContext.AddStepCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
-                                                CommandParameter="{Binding Kind}" AutomationProperties.Name="{Binding DisplayName}">
-                                            <StackPanel Orientation="Horizontal">
-                                                <TextBlock Text="{Binding Glyph}" Style="{StaticResource IconText}" Foreground="{StaticResource AccentBrush}" Width="20" />
-                                                <TextBlock Text="{Binding DisplayName}" Margin="8,0,0,0" />
-                                            </StackPanel>
-                                        </Button>
-                                    </DataTemplate>
-                                </ItemsControl.ItemTemplate>
-                            </ItemsControl>
+                            <StackPanel>
+                                <ItemsControl ItemsSource="{Binding StepTypes}" Focusable="False">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate DataType="{x:Type steps:StepTypeInfo}">
+                                            <Button Style="{StaticResource ToolboxButton}" ToolTip="{Binding Description}"
+                                                    Command="{Binding DataContext.AddStepCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                                    CommandParameter="{Binding Kind}" AutomationProperties.Name="{Binding DisplayName}">
+                                                <StackPanel Orientation="Horizontal">
+                                                    <TextBlock Text="{Binding Glyph}" Style="{StaticResource IconText}" Foreground="{StaticResource AccentBrush}" Width="20" />
+                                                    <TextBlock Text="{Binding DisplayName}" Margin="8,0,0,0" />
+                                                </StackPanel>
+                                            </Button>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+
+                                <!-- Stage 3: blocks (If / Else / End If, Repeat / End Repeat) -->
+                                <TextBlock Text="Logic" Style="{StaticResource SectionTitle}" Margin="2,14,0,0" />
+                                <TextBlock Text="If and Repeat are added together with their End." Style="{StaticResource MutedText}" FontSize="11" TextWrapping="Wrap" Margin="2,3,0,8" />
+                                <ItemsControl ItemsSource="{Binding LogicStepTypes}" Focusable="False">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate DataType="{x:Type steps:StepTypeInfo}">
+                                            <Button Style="{StaticResource ToolboxButton}" ToolTip="{Binding Description}"
+                                                    Command="{Binding DataContext.AddStepCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                                    CommandParameter="{Binding Kind}" AutomationProperties.Name="{Binding DisplayName}">
+                                                <StackPanel Orientation="Horizontal">
+                                                    <TextBlock Text="{Binding Glyph}" Style="{StaticResource IconText}" Foreground="{StaticResource AccentBrush}" Width="20" />
+                                                    <TextBlock Text="{Binding DisplayName}" Margin="8,0,0,0" />
+                                                </StackPanel>
+                                            </Button>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </StackPanel>
                         </ScrollViewer>
                     </DockPanel>
                 </Border>
@@ -140,6 +160,22 @@
                     <DockPanel>
                         <DockPanel DockPanel.Dock="Top" Margin="8,4,4,8">
                             <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                                <Button Command="{Binding WrapInIfCommand}" Padding="8,4" FontSize="12" Margin="0,0,6,0"
+                                        ToolTip="Put an If … End If around the selected steps (select several with Shift+click)."
+                                        AutomationProperties.Name="Wrap selected steps in If">
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock Text="&#xE8AB;" Style="{StaticResource IconText}" FontSize="12" />
+                                        <TextBlock Text="Wrap in If" Margin="6,0,0,0" />
+                                    </StackPanel>
+                                </Button>
+                                <Button Command="{Binding WrapInRepeatCommand}" Padding="8,4" FontSize="12" Margin="0,0,10,0"
+                                        ToolTip="Put a Repeat … End Repeat around the selected steps (select several with Shift+click)."
+                                        AutomationProperties.Name="Wrap selected steps in Repeat">
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock Text="&#xE8EE;" Style="{StaticResource IconText}" FontSize="12" />
+                                        <TextBlock Text="Wrap in Repeat" Margin="6,0,0,0" />
+                                    </StackPanel>
+                                </Button>
                                 <Button Style="{StaticResource IconButton}" Content="&#xE74A;" Command="{Binding MoveUpCommand}" ToolTip="Move up (Alt+Up)" AutomationProperties.Name="Move step up" />
                                 <Button Style="{StaticResource IconButton}" Content="&#xE74B;" Command="{Binding MoveDownCommand}" ToolTip="Move down (Alt+Down)" AutomationProperties.Name="Move step down" />
                                 <Button Style="{StaticResource IconButton}" Content="&#xE8C8;" Command="{Binding DuplicateStepCommand}" ToolTip="Duplicate step (Ctrl+D)" AutomationProperties.Name="Duplicate step" />
@@ -153,19 +189,22 @@
 
                         <Grid>
                             <ListBox x:Name="StepList" ItemsSource="{Binding Steps}" SelectedItem="{Binding SelectedStep}"
+                                     SelectionMode="Extended"
                                      VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling"
                                      AutomationProperties.Name="Workflow steps"
                                      SelectionChanged="StepList_SelectionChanged"
                                      Visibility="{Binding HasSteps, Converter={StaticResource BoolToVisibility}}">
                                 <ListBox.InputBindings>
                                     <KeyBinding Key="Delete" Command="{Binding DeleteStepCommand}" />
+                                    <KeyBinding Key="R" Modifiers="Control+Shift" Command="{Binding WrapInRepeatCommand}" />
+                                    <KeyBinding Key="I" Modifiers="Control+Shift" Command="{Binding WrapInIfCommand}" />
                                     <KeyBinding Key="D" Modifiers="Control" Command="{Binding DuplicateStepCommand}" />
                                     <KeyBinding Key="Up" Modifiers="Alt" Command="{Binding MoveUpCommand}" />
                                     <KeyBinding Key="Down" Modifiers="Alt" Command="{Binding MoveDownCommand}" />
                                 </ListBox.InputBindings>
                                 <ListBox.ItemTemplate>
                                     <DataTemplate DataType="{x:Type steps:StepViewModel}">
-                                        <Grid x:Name="Row">
+                                        <Grid x:Name="Row" Margin="{Binding IndentMargin}">
                                             <Grid.ColumnDefinitions>
                                                 <ColumnDefinition Width="34" />
                                                 <ColumnDefinition Width="Auto" />

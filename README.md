@@ -80,6 +80,26 @@ Everything stays on your PC; no screenshots are uploaded.
 - A **Mouse click** step can click "what the last Find text / image / color step found".
 - Games in exclusive full-screen mode may look black to screen capture; use windowed or borderless mode.
 
+## If / Else and Repeat (conditions and loops)
+
+The toolbox has a **Logic** section. Blocks are marked by pairs of steps, and the steps between them are indented:
+
+- **If … Else … End If:** the If checks a **condition** — some text, an image or a color **is** (or **is NOT**) on
+  screen, using the same settings and **Test now** as Find text / image / color. True → the steps up to Else run;
+  false → the steps after Else run (Else is optional). "Keep checking for" lets the If wait for the condition to
+  become true (0 = look once). That also covers "wait until visible, otherwise do something else".
+- **Repeat … End Repeat:** a number of times, **while** a condition is true, or **until** it becomes true. The
+  condition is checked before every turn. While / Until loops **must** have a safety limit (Max turns and/or Max
+  time), and you choose whether reaching it stops the macro or just leaves the loop.
+- Adding If or Repeat from the toolbox also adds its End. **Wrap in If / Wrap in Repeat** (above the step list) puts
+  a block around the selected steps (Shift+click to select several). Deleting an If or Repeat removes its markers
+  but keeps the steps inside.
+- The Problems list shows blocks that don't match up (an End If without an If, blocks closed in the wrong order,
+  more than 8 levels deep). Such macros can't be saved or played.
+- Esc / Stop / Pause work inside loops and while a condition waits; held keys and buttons are always released.
+- Macros with blocks are saved as file format 5 (older SmartMacro builds will say the file is from a newer version).
+  Macros without blocks keep their old format. Conditions are plain settings, never scripts or code.
+
 ## Safety
 
 - **Esc** on your keyboard stops playback immediately.

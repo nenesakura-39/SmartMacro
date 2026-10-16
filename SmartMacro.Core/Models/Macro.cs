@@ -31,15 +31,16 @@ public sealed class MacroDocument
     /// 1 = original format. 2 = adds hold times on Press / Click steps and "Recorded input (game mode)" steps.
     /// 3 = adds smart recordings: recorded input with cursor positions ("u1" event text) and mouse segments.
     /// 4 = adds visual detection: "Find image" and "Find color" steps, and "wait until it disappears" on Find text.
+    /// 5 = adds workflow blocks: If / Else / End If and Repeat / End Repeat steps with conditions.
     /// </summary>
-    public const int CurrentSchemaVersion = 4;
+    public const int CurrentSchemaVersion = 5;
 
     public int SchemaVersion { get; set; }
     public Macro? Macro { get; set; }
 
     /// <summary>
     /// The oldest format that can hold this macro without losing anything. Macros that don't use the
-    /// version 2 / 3 / 4 features are still written as the older version, so older copies of SmartMacro can keep
+    /// version 2 / 3 / 4 / 5 features are still written as the older version, so older copies of SmartMacro can keep
     /// opening them. Older files need no migration: the new fields simply default to 0 / off / null, which is
     /// exactly the old behavior (game-mode recordings stay relative-only).
     /// </summary>
@@ -53,6 +54,7 @@ public sealed class MacroDocument
         {
             var needed = step switch
             {
+                IfStep or ElseStep or EndIfStep or RepeatStep or EndRepeatStep => 5,
                 FindImageStep or FindColorStep => 4,
                 FindTextStep { Goal: not WaitGoal.Appear } => 4,
                 InputSequenceStep q when UsesSmartRecordingFeatures(q) => 3,

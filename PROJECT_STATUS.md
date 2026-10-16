@@ -1,6 +1,6 @@
 # SmartMacro – Project Status / Handoff
 
-_Last updated: 2026-10-16 (v1.0.0 + game-input fidelity work + Stage 1 smart recording + Stage 2 visual detection). Owner & developer: Riku_
+_Last updated: 2026-10-16 (v1.0.0 + game-input fidelity work + Stage 1 smart recording + Stage 2 visual detection + Stage 3 conditions and loops — written, not yet built). Owner & developer: Riku_
 
 ## Done
 **Phase 1: Foundation**
@@ -197,7 +197,50 @@ _Last updated: 2026-10-16 (v1.0.0 + game-input fidelity work + Stage 1 smart rec
   disappear, stop, validation, schema 4 round trip, old-file loading, descriptions). The matcher maths was also
   sanity-checked with a NumPy port of the same algorithm (not a substitute for running the C# tests).
 - Docs: `docs/STAGE2_MANUAL_TESTS.md`, README section "Find image and Find color", roadmap updated with Stage 3/4 breakdown.
-- Not verified: build, test run, real capture speed, real games.
+- Owner build (2026-10-16): 0 warnings, 0 errors. Tests: 317/318 — the one failure was the Stage 1 test
+  `Files_from_a_newer_version_are_refused`, which hardcoded format 4 as "newer". Fixed to use CurrentSchemaVersion + 1;
+  re-run pending.
+- **Update:** owner re-ran verify (all green) and did the STAGE2 manual tests: all passed ("100/100"). Owner noted some
+  improvements are wanted; they are deferred to a polish pass at the end of the roadmap (not listed yet — ask the owner).
+
+**Stage 3: Conditional workflows and loops** (2026-10-16; written, NOT built or tested yet — the AI's environment had no .NET SDK)
+- Models (`Core/Models/WorkflowSteps.cs`): `Condition` { `Check` = a FindTextStep / FindImageStep / FindColorStep
+  (stored with the normal step discriminators, so only known types load), `Negate` } with derived `Kind`
+  (TextVisible / ImageVisible / ColorVisible). Conditions use the search's what / area / TimeoutMs ("keep checking
+  for", 0 = look once) / CheckIntervalMs; its Goal / Action / Offset / WhenNotFound are ignored.
+  Block steps in the flat list: `IfStep` (Condition), `ElseStep`, `EndIfStep`, `RepeatStep` (Mode Times / While /
+  Until, Count, Condition, MaxIterations default 100, MaxDurationMs, WhenLimitReached StopMacro / ExitLoop),
+  `EndRepeatStep`. JSON types "if", "else", "endIf", "repeat", "endRepeat". Helpers `WorkflowSteps.*`.
+- `Core/Workflow/BlockStructure`: one pass with a stack → indentation depth per step, jump table (If → Else / End If,
+  Else → End If, Repeat ↔ End Repeat) and plain-English problems (missing End, End without start, Else outside an If /
+  inside a Repeat, two Elses, overlapping blocks, more than 8 levels). Disabled steps count for structure.
+- Detection reuse: the per-type probe code moved out of the engine into `Core/Playback/ScreenProbes` (`PreparedSearch`
+  = decoded template + area, `LookAsync` looks once). `SearchAsync` (Find steps) and the new
+  `IConditionEvaluator` / `ScreenConditionEvaluator` (one look, cached per condition per run) both use it.
+- Engine: index-based program counter (`RunStepsAsync`), loop frames on a per-run stack (turns, start time, last check).
+  If: condition waits up to its timeout (paused time excluded via `_pausedTotal` / `ActiveTime`), true → next step,
+  false → after Else or End If. Disabled If / Repeat skip their whole block; disabled markers are ignored (warning).
+  Repeat: checked before every turn — count, max turns, spacing (checks ≥ "check every" apart, so empty loops can't
+  spin), max time, then the condition. Limit → `LoopLimitException` (Failed) or leave the loop. A condition that sees
+  its target sets the "last found" spot. Logging: If answers only when they change; one line when a loop ends.
+  `PlaybackProgress.LoopText` ("loop turn 2 of 5") is shown in the progress text. Held input released on every exit.
+- Validation: block problems are errors (Save + Play refused); Repeat count 1–1,000,000; Max turns 0–1,000,000;
+  Max time 0–24 h; While / Until need a condition and a limit (not both 0); condition search validated with the Find
+  step rules (messages "Condition: …"); warnings for empty blocks and disabled markers; conditions count as "find
+  before" for last-found clicks.
+- Files: `MacroDocument.CurrentSchemaVersion = 5`, written only when a block step exists (others stay 1–4).
+- App: toolbox "Logic" section; If / Repeat add their End; list allows Shift/Ctrl multi-select; "Wrap in If" /
+  "Wrap in Repeat" (Ctrl+Shift+I / R) wrap a contiguous, self-contained selection; deleting a lone If / Repeat / End
+  removes the block's markers but keeps the inner steps; rows indented 22 px per level. Property editors: `IfStepViewModel`,
+  `RepeatStepViewModel`, `BlockMarkerStepViewModel`, `ConditionViewModel` (kind + is / is NOT + the normal Find editor
+  embedded with `IsStandalone = false`, which hides header, goal, action and comment). OCR availability check also covers
+  text conditions.
+- Tests: `SmartMacro.Tests/ConditionalWorkflowTests.cs` (block analyser incl. every broken shape and depth 8/9; true /
+  false / NOT / timeout / pause-inside-wait; nested; Times / While / Until; max turns stop & continue; max time; check
+  spacing; stop inside a loop and during a condition wait with release; pause in a loop; progress text; evaluator;
+  validation; format 5 round trip, old v4 file, damaged / script-like files, broken structure, import).
+- Docs: `docs/STAGE3_MANUAL_TESTS.md`, README "If / Else and Repeat", roadmap status.
+- Not verified: build, test run, any real app or game.
 
 ## Architecture
 - `SmartMacro.Core` (net10.0, no WPF): models, validation, storage, logging. All unit tested.
@@ -235,9 +278,6 @@ _Last updated: 2026-10-16 (v1.0.0 + game-input fidelity work + Stage 1 smart rec
 - Full-screen image search costs tens of ms per check on a big screen (estimate; to be measured with STAGE2 test E).
 
 ## Next task
-- Owner: run `tools\verify.cmd` (Stage 2 is not built yet) and send `artifacts\build.log` / `artifacts\test.log` if
-  anything fails. Fix compile errors / failing tests first.
-- Then `docs/STAGE2_MANUAL_TESTS.md` (A: Find image in Notepad/Paint, B: Find color + Track, C: Find text disappear,
-  D: games where allowed, E: CPU / responsiveness). Report the "Found…/Checked N times…" log lines and tracking fps.
-- Tune defaults (similarity 90 %, colour check 48, check interval 250 ms) from the results.
-- Only after Stage 2 passes: Stage 3 (conditions and loops) per `docs/ROADMAP_STAGES_2_4.md`.
+- Owner: run `tools\verify.cmd`, send `artifacts\build.log` + `artifacts\test.log`, then do `docs/STAGE3_MANUAL_TESTS.md`.
+- Fix whatever the build / tests / manual tests show. Only then Stage 4 (continuous visual feedback).
+- Later: the polish pass (Stage 2 improvements the owner mentioned + Stage 3 editor wording), then `tools\publish.cmd`.

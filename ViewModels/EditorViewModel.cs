@@ -4,6 +4,7 @@ using SmartMacro.Core.Logging;
 using SmartMacro.Core.Models;
 using SmartMacro.Core.Storage;
 using SmartMacro.Core.Validation;
+using SmartMacro.Core.Workflow;
 using SmartMacro.Mvvm;
 using SmartMacro.Services;
 using SmartMacro.Services.Ocr;
@@ -25,8 +26,7 @@ public sealed class EditorViewModel : ObservableObject
     private readonly Func<int> _defaultDelayMs;
     private readonly Action<Macro> _onSaved;
     private readonly Action<string, StatusKind> _setStatus;
-    private readonly IFindTextTools? _findTextTools;
-    private readonly IVisionTools? _visionTools;
+    private readonly ScreenTools _screenTools;
 
     private Macro? _saved;          // last saved version (copy)
     private Guid _id;
@@ -42,6 +42,7 @@ public sealed class EditorViewModel : ObservableObject
     private int _errorCount;
     private int _warningCount;
     private ScreenBounds? _screenBounds;
+    private List<StepViewModel> _selection = new(); // all selected steps (the list allows Ctrl / Shift selection)
 
     public EditorViewModel(
         IMacroRepository repository,
@@ -55,8 +56,7 @@ public sealed class EditorViewModel : ObservableObject
         IFindTextTools? findTextTools = null,
         IVisionTools? visionTools = null)
     {
-        _findTextTools = findTextTools;
-        _visionTools = visionTools;
+        _screenTools = new ScreenTools(findTextTools, visionTools);
         _repository = repository;
         _log = log;
         _dialogs = dialogs;
@@ -68,7 +68,7 @@ public sealed class EditorViewModel : ObservableObject
         Steps.CollectionChanged += OnStepsChanged;
 
         AddStepCommand = new RelayCommand(p => AddStep(p), p => HasMacro && p is StepKind);
-        DeleteStepCommand = new RelayCommand(DeleteSelectedStep, () => SelectedStep is not null);
+        DeleteStepCommand = new RelayCommand(DeleteSelectedSteps, () => SelectedStep is not null);
         DuplicateStepCommand = new RelayCommand(DuplicateSelectedStep, () => SelectedStep is not null);
         MoveUpCommand = new RelayCommand(() => MoveSelected(-1), () => SelectedStep is not null && Steps.IndexOf(SelectedStep) > 0);
         MoveDownCommand = new RelayCommand(() => MoveSelected(+1),
@@ -76,6 +76,8 @@ public sealed class EditorViewModel : ObservableObject
         SaveCommand = new AsyncRelayCommand(async () => await SaveAsync(), HandleUnexpectedError, () => HasMacro && !_isSaving);
         RevertCommand = new RelayCommand(Revert, () => HasMacro && IsDirty);
         GoToLibraryCommand = new RelayCommand(goToLibrary);
+        WrapInIfCommand = new RelayCommand(() => WrapSelection(StepKind.If), () => HasMacro && SelectedStep is not null);
+        WrapInRepeatCommand = new RelayCommand(() => WrapSelection(StepKind.Repeat), () => HasMacro && SelectedStep is not null);
     }
 
     public ObservableCollection<StepViewModel> Steps { get; } = new();
@@ -83,6 +85,9 @@ public sealed class EditorViewModel : ObservableObject
     public ObservableCollection<ValidationIssue> Issues { get; } = new();
 
     public IReadOnlyList<StepTypeInfo> StepTypes => StepTypeCatalog.Addable;
+
+    /// <summary>If / Else / End If / Repeat / End Repeat, shown in the toolbox's "Logic" section.</summary>
+    public IReadOnlyList<StepTypeInfo> LogicStepTypes => StepTypeCatalog.Logic;
 
     public RelayCommand AddStepCommand { get; }
     public RelayCommand DeleteStepCommand { get; }
@@ -92,6 +97,8 @@ public sealed class EditorViewModel : ObservableObject
     public AsyncRelayCommand SaveCommand { get; }
     public RelayCommand RevertCommand { get; }
     public RelayCommand GoToLibraryCommand { get; }
+    public RelayCommand WrapInIfCommand { get; }
+    public RelayCommand WrapInRepeatCommand { get; }
 
     public bool HasMacro => _saved is not null;
 
@@ -158,6 +165,19 @@ public sealed class EditorViewModel : ObservableObject
     }
 
     public bool HasSelection => _selectedStep is not null;
+
+    /// <summary>Called by the view when the list's selection changes (several steps can be selected).</summary>
+    public void SetSelection(IEnumerable<StepViewModel> selected)
+    {
+        _selection = selected.Where(s => Steps.Contains(s)).ToList();
+    }
+
+    /// <summary>The selected steps in list order (falls back to the single selected step).</summary>
+    private List<StepViewModel> SelectedInOrder()
+    {
+        var selected = _selection.Count > 0 ? _selection : (SelectedStep is { } one ? new List<StepViewModel> { one } : new List<StepViewModel>());
+        return selected.Where(s => Steps.Contains(s)).Distinct().OrderBy(s => Steps.IndexOf(s)).ToList();
+    }
 
     public bool IsDirty
     {
@@ -340,18 +360,91 @@ public sealed class EditorViewModel : ObservableObject
         var step = CreateStepViewModel(MacroFactory.CreateStep(kind, _defaultDelayMs()));
         var index = SelectedStep is null ? Steps.Count : Steps.IndexOf(SelectedStep) + 1;
         Steps.Insert(index, step);
+
+        // If and Repeat come with their End, so the new block is complete straight away.
+        var closer = kind switch
+        {
+            StepKind.If => MacroFactory.CreateStep(StepKind.EndIf),
+            StepKind.Repeat => MacroFactory.CreateStep(StepKind.EndRepeat),
+            _ => null,
+        };
+        if (closer is not null) Steps.Insert(index + 1, CreateStepViewModel(closer));
+
         SelectedStep = step;
         Touch();
+        if (closer is not null)
+            _setStatus($"Added {StepDescriber.DisplayName(kind)} and {StepDescriber.DisplayName(closer.Kind)}. Add steps between them, or select steps and use \"Wrap in\".", StatusKind.Info);
     }
 
-    private void DeleteSelectedStep()
+    /// <summary>
+    /// Puts an If … End If or Repeat … End Repeat around the selected steps. The selection must be steps next to
+    /// each other and must contain whole blocks (not just the If of a block).
+    /// </summary>
+    private void WrapSelection(StepKind kind)
     {
-        if (SelectedStep is not { } step) return;
+        if (!HasMacro) return;
+        var selected = SelectedInOrder();
+        if (selected.Count == 0) return;
 
-        var index = Steps.IndexOf(step);
-        Steps.Remove(step);
-        SelectedStep = Steps.Count == 0 ? null : Steps[Math.Min(index, Steps.Count - 1)];
+        var first = Steps.IndexOf(selected[0]);
+        var last = Steps.IndexOf(selected[^1]);
+        if (last - first + 1 != selected.Count)
+        {
+            _setStatus("Select steps that are next to each other (click the first, then Shift+click the last), then wrap them.", StatusKind.Warning);
+            return;
+        }
+
+        var inner = BlockStructure.Analyze(Steps.Skip(first).Take(selected.Count).Select(s => s.Model).ToList());
+        if (!inner.IsValid)
+        {
+            _setStatus("The selection contains only part of a block. Select whole blocks (from If to End If, or Repeat to End Repeat) to wrap them.", StatusKind.Warning);
+            return;
+        }
+
+        var opener = CreateStepViewModel(MacroFactory.CreateStep(kind));
+        var closer = CreateStepViewModel(MacroFactory.CreateStep(kind == StepKind.If ? StepKind.EndIf : StepKind.EndRepeat));
+        Steps.Insert(last + 1, closer);
+        Steps.Insert(first, opener);
+        SelectedStep = opener;
         Touch();
+        _setStatus($"Wrapped {selected.Count} step{(selected.Count == 1 ? "" : "s")} in {StepDescriber.DisplayName(kind)}. Set it up in Properties.", StatusKind.Success);
+    }
+
+    /// <summary>
+    /// Deletes the selected steps. Deleting just the If / Repeat (or its End) of a complete block removes the whole
+    /// set of markers (If, Else, End If / Repeat, End Repeat) but keeps the steps that were inside.
+    /// </summary>
+    private void DeleteSelectedSteps()
+    {
+        var selected = SelectedInOrder();
+        if (selected.Count == 0) return;
+
+        var toRemove = new HashSet<StepViewModel>(selected);
+        string? note = null;
+        if (selected.Count == 1 && selected[0].Model is IfStep or EndIfStep or RepeatStep or EndRepeatStep)
+        {
+            var blocks = BlockStructure.Analyze(Steps.Select(s => s.Model).ToList());
+            var index = Steps.IndexOf(selected[0]);
+            var start = selected[0].Model is IfStep or RepeatStep ? index : blocks.StartOf(index);
+            var end = start >= 0 ? blocks.EndOf(start) : -1;
+            if (start >= 0 && end >= 0)
+            {
+                toRemove.Add(Steps[start]);
+                toRemove.Add(Steps[end]);
+                var elseIndex = blocks.ElseOf(start);
+                if (elseIndex >= 0) toRemove.Add(Steps[elseIndex]);
+                note = $"Removed the {StepDescriber.DisplayName(Steps[start].Kind)} block markers. The steps inside were kept.";
+            }
+        }
+
+        var firstIndex = Steps.IndexOf(selected[0]);
+        foreach (var step in toRemove.OrderByDescending(s => Steps.IndexOf(s)).ToList())
+            Steps.Remove(step);
+
+        _selection.Clear();
+        SelectedStep = Steps.Count == 0 ? null : Steps[Math.Clamp(firstIndex, 0, Steps.Count - 1)];
+        Touch();
+        if (note is not null) _setStatus(note, StatusKind.Info);
     }
 
     private void DuplicateSelectedStep()
@@ -380,19 +473,7 @@ public sealed class EditorViewModel : ObservableObject
     private StepViewModel CreateStepViewModel(MacroStep step)
     {
         var vm = StepViewModel.Create(step);
-        switch (vm)
-        {
-            case FindTextStepViewModel findText:
-                findText.Tools = _findTextTools;
-                break;
-            case FindImageStepViewModel findImage:
-                findImage.Tools = _visionTools;
-                break;
-            case FindColorStepViewModel findColor:
-                findColor.Tools = _visionTools;
-                break;
-        }
-
+        _screenTools.ApplyTo(vm);
         return vm;
     }
 
@@ -439,6 +520,10 @@ public sealed class EditorViewModel : ObservableObject
 
         var byStep = issues.Where(i => i.StepId is not null).ToLookup(i => i.StepId!.Value);
         foreach (var step in Steps) step.SetIssues(byStep[step.Id]);
+
+        // Indent the steps inside If / Repeat blocks (also when the blocks don't match up yet).
+        var blocks = BlockStructure.Analyze(Steps.Select(s => s.Model).ToList());
+        for (var i = 0; i < Steps.Count; i++) Steps[i].IndentLevel = blocks.Depth[i];
 
         ErrorCount = issues.Count(i => i.Severity == IssueSeverity.Error);
         WarningCount = issues.Count(i => i.Severity == IssueSeverity.Warning);

@@ -1,6 +1,7 @@
 using SmartMacro.Core.Input;
 using SmartMacro.Core.Models;
 using SmartMacro.Core.Vision;
+using SmartMacro.Core.Workflow;
 
 namespace SmartMacro.Core.Validation;
 
@@ -81,6 +82,8 @@ public static class MacroValidator
     public const int MaxMouseSegments = 10_000;
     public const double MinSpeed = 0.1;
     public const double MaxSpeed = 10.0;
+    public const int MaxLoopCount = 1_000_000;       // turns of one Repeat block
+    public const int MaxLoopDurationMs = 86_400_000; // 24 hours
 
     public static bool HasErrors(this IEnumerable<ValidationIssue> issues) =>
         issues.Any(i => i.Severity == IssueSeverity.Error);
@@ -139,8 +142,9 @@ public static class MacroValidator
 
             if (step is MouseClickStep { UseLastFoundText: true } && !hasFindTextBefore)
                 issues.Add(new ValidationIssue(IssueSeverity.Warning,
-                    "This click uses the last found spot, but there's no \"Find text\", \"Find image\" or \"Find color\" step before it.", i, step.Id, nameof(MouseClickStep.UseLastFoundText)));
+                    "This click uses the last found spot, but there's no \"Find text\", \"Find image\" or \"Find color\" step (or If / Repeat condition) before it.", i, step.Id, nameof(MouseClickStep.UseLastFoundText)));
             if (step is ScreenSearchStep { Enabled: true, Goal: WaitGoal.Appear }) hasFindTextBefore = true;
+            if (step.Enabled && WorkflowSteps.ConditionOf(step) is not null) hasFindTextBefore = true; // conditions remember what they saw
 
             if (step.Id == Guid.Empty || !seenIds.Add(step.Id))
                 issues.Add(new ValidationIssue(IssueSeverity.Error, "This step has a missing or duplicate ID.", i, step.Id));
@@ -149,7 +153,55 @@ public static class MacroValidator
                 issues.Add(issue with { StepIndex = i, StepId = step.Id });
         }
 
+        ValidateBlocks(issues, macro.Steps);
         return issues;
+    }
+
+    /// <summary>
+    /// If / Else / End If and Repeat / End Repeat must match up and nest properly (at most
+    /// <see cref="BlockStructure.MaxDepth"/> levels). Also hints about empty blocks and disabled markers.
+    /// </summary>
+    private static void ValidateBlocks(List<ValidationIssue> issues, List<MacroStep> steps)
+    {
+        if (!steps.Any(WorkflowSteps.IsBlockStep)) return;
+
+        var blocks = BlockStructure.Analyze(steps);
+        foreach (var problem in blocks.Problems)
+            issues.Add(new ValidationIssue(IssueSeverity.Error, problem.Message, problem.StepIndex, steps[problem.StepIndex]?.Id, "Block"));
+        if (!blocks.IsValid) return;
+
+        for (var i = 0; i < steps.Count; i++)
+        {
+            var step = steps[i];
+            switch (step)
+            {
+                case ElseStep or EndIfStep or EndRepeatStep when !step.Enabled:
+                    issues.Add(new ValidationIssue(IssueSeverity.Warning,
+                        "Turning off an Else / End step has no effect. To skip a whole block, turn off its If or Repeat step.", i, step.Id, nameof(MacroStep.Enabled)));
+                    break;
+
+                case RepeatStep { Enabled: true } when !HasEnabledStepBetween(steps, i, blocks.EndOf(i)):
+                    issues.Add(new ValidationIssue(IssueSeverity.Warning,
+                        "This Repeat block has no enabled steps inside, so it only waits.", i, step.Id, "Block"));
+                    break;
+
+                case IfStep { Enabled: true } when !HasEnabledStepBetween(steps, i, blocks.EndOf(i)):
+                    issues.Add(new ValidationIssue(IssueSeverity.Warning,
+                        "This If block has no enabled steps inside, so it does nothing.", i, step.Id, "Block"));
+                    break;
+            }
+        }
+    }
+
+    /// <summary>True if a normal (non-marker) enabled step sits between the two indexes.</summary>
+    private static bool HasEnabledStepBetween(List<MacroStep> steps, int start, int end)
+    {
+        for (var i = start + 1; i < end; i++)
+        {
+            if (steps[i] is { Enabled: true } s && !WorkflowSteps.IsBlockStep(s)) return true;
+        }
+
+        return false;
     }
 
     /// <summary>
@@ -254,6 +306,17 @@ public static class MacroValidator
                     issues.Add(Error("The search area is smaller than the image to find. Make the area bigger.", "Region"));
                 break;
 
+            case IfStep ifStep:
+                ValidateCondition(issues, ifStep.Condition, screen);
+                break;
+
+            case ElseStep or EndIfStep or EndRepeatStep:
+                break; // nothing to set; their place in the list is checked by ValidateBlocks
+
+            case RepeatStep r:
+                ValidateRepeat(issues, r, screen);
+                break;
+
             case FindColorStep c:
                 if (!RgbColor.TryParse(c.Color, out _))
                     issues.Add(Error("Enter the color as #RRGGBB (for example #FF0000 for red), or pick it from the screen.", nameof(FindColorStep.Color)));
@@ -274,6 +337,66 @@ public static class MacroValidator
         }
 
         return issues;
+    }
+
+    /// <summary>
+    /// Repeat: known mode; a count for Times; a condition plus a required safety limit (max turns and/or max time)
+    /// for While / Until; limits in range.
+    /// </summary>
+    private static void ValidateRepeat(List<ValidationIssue> issues, RepeatStep r, ScreenBounds? screen)
+    {
+        if (!Enum.IsDefined(r.Mode) || !Enum.IsDefined(r.WhenLimitReached))
+        {
+            issues.Add(Error("This Repeat step has an unknown option value. The macro may be damaged."));
+            return;
+        }
+
+        if (r.MaxDurationMs < 0 || r.MaxDurationMs > MaxLoopDurationMs)
+            issues.Add(Error($"Max time must be 0 (no time limit) to {MaxLoopDurationMs:N0} ms (24 hours).", nameof(RepeatStep.MaxDurationMs)));
+
+        if (r.Mode == RepeatMode.Times)
+        {
+            if (r.Count < 1 || r.Count > MaxLoopCount)
+                issues.Add(Error($"Repeat count must be 1 to {MaxLoopCount:N0}.", nameof(RepeatStep.Count)));
+            return;
+        }
+
+        if (r.MaxIterations < 0 || r.MaxIterations > MaxLoopCount)
+            issues.Add(Error($"Max turns must be 0 (no turn limit) to {MaxLoopCount:N0}.", nameof(RepeatStep.MaxIterations)));
+        else if (r.MaxIterations == 0 && r.MaxDurationMs == 0)
+            issues.Add(Error("A Repeat while / until loop needs a safety limit: set Max turns and/or Max time, so it can't run forever.", nameof(RepeatStep.MaxIterations)));
+
+        if (r.Condition is null)
+            issues.Add(Error("Choose the condition for this loop.", nameof(RepeatStep.Condition)));
+        else
+            ValidateCondition(issues, r.Condition, screen);
+    }
+
+    /// <summary>
+    /// A condition needs search settings of a supported kind; those are checked with the same rules as the
+    /// Find text / image / color step (messages start with "Condition:").
+    /// </summary>
+    private static void ValidateCondition(List<ValidationIssue> issues, Condition? condition, ScreenBounds? screen)
+    {
+        const string property = "Condition";
+        if (condition?.Check is null)
+        {
+            issues.Add(Error("Choose what the condition looks for (text, image or color).", property));
+            return;
+        }
+
+        if (condition.Search is not { } search)
+        {
+            issues.Add(Error($"A condition can't use a \"{condition.Check.GetType().Name}\" step. Use text, image or color. The macro may be damaged.", property));
+            return;
+        }
+
+        foreach (var issue in ValidateStep(search, screen))
+        {
+            // The "when found" action, wait goal and "when not found" choice aren't used by conditions.
+            if (issue.Property is nameof(ScreenSearchStep.Action) or nameof(ScreenSearchStep.WhenNotFound) or nameof(ScreenSearchStep.Goal)) continue;
+            issues.Add(issue with { Message = "Condition: " + issue.Message, Property = property + "." + (issue.Property ?? "") });
+        }
     }
 
     private static void CheckHold(List<ValidationIssue> issues, int holdMs, bool applies, string property, string actionName)
