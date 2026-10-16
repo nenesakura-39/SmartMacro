@@ -1,0 +1,42 @@
+KuroLogic SmartMacro
+Copyright (c) 2026 KuroLogic. All rights reserved.
+Developer: Riku (リク)
+
+DRAFT – NOT YET REVIEWED. See "Open points" at the end before publishing.
+
+PROPRIETARY SOFTWARE NOTICE
+
+1. KuroLogic SmartMacro (the "Software") is proprietary software. It is NOT open-source
+   software, and no open-source license applies to the Software as a whole.
+
+2. The Software, including its original source code, object code, user interface,
+   design, documentation and the "KuroLogic" and "SmartMacro" names and logos, is owned
+   by the rights holder identified in the End-User License Agreement (the "Licensor")
+   and is protected by copyright and other laws. "KuroLogic" is the public brand under
+   which the Software is published.
+
+3. The Software is licensed, not sold. Downloading, installing or using the Software,
+   and any voluntary support payment (for example through Ko-fi), does not transfer
+   ownership of the Software or of any copy of it.
+
+4. Your right to install and use the Software is governed by the separate End-User
+   License Agreement in EULA.txt, which is distributed with the Software. All rights
+   not expressly granted in EULA.txt are reserved by the Licensor.
+
+5. The Software includes or uses third-party components (for example the Microsoft .NET
+   runtime and Windows Presentation Foundation). Those components are NOT owned by the
+   Licensor. They remain subject to their own licenses and notices, listed in
+   THIRD-PARTY-NOTICES.txt. Nothing in this notice or in EULA.txt limits any right you
+   have under those third-party licenses.
+
+6. The C# source code of the Software is not published. Access to a compiled copy does
+   not grant any right to the source code.
+
+---------------------------------------------------------------------------------------
+Open points for the owner (delete this section before release):
+- Who is the legal rights holder / Licensor? "KuroLogic" is a brand, not (as far as is
+  known) a registered company. See EULA.txt section 2 and LEGAL_AND_RELEASE_AUDIT.md.
+- Review the year in the copyright line for each release (keep the first-publication
+  year; you may add a range such as "2026-2027" for later versions).
+- Parts of the code were written with an AI coding assistant. See the audit document,
+  "Ownership questions", before relying on this notice.
