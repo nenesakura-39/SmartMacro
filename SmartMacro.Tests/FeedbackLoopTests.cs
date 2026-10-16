@@ -762,7 +762,8 @@ public class FeedbackLoopEngineTests
 
         await engine.RunAsync(Flow.Macro(Feedback.Loop(s => s.MinInputChangeMs = 200))).WaitAsync(TestTimeout);
 
-        var times = input.Times.Take(input.Times.Count - 1).ToList(); // the last one is the final release
+        // Changes made by the rules happen while frames run (before 1 s); a final release, if any, happens at 1 s.
+        var times = input.Times.Where(t => t < TimeSpan.FromMilliseconds(1000)).ToList();
         Assert.True(times.Count is >= 4 and <= 6, $"{times.Count} changes");
         for (var i = 1; i < times.Count; i++)
             Assert.True(times[i] - times[i - 1] >= TimeSpan.FromMilliseconds(200), $"changes {i - 1} and {i} were {(times[i] - times[i - 1]).TotalMilliseconds} ms apart");
