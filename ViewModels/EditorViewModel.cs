@@ -78,7 +78,7 @@ public sealed class EditorViewModel : ObservableObject
 
     public ObservableCollection<ValidationIssue> Issues { get; } = new();
 
-    public IReadOnlyList<StepTypeInfo> StepTypes => StepTypeCatalog.All;
+    public IReadOnlyList<StepTypeInfo> StepTypes => StepTypeCatalog.Addable;
 
     public RelayCommand AddStepCommand { get; }
     public RelayCommand DeleteStepCommand { get; }

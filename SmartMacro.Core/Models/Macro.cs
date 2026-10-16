@@ -26,8 +26,36 @@ public sealed class Macro
 /// </summary>
 public sealed class MacroDocument
 {
-    public const int CurrentSchemaVersion = 1;
+    /// <summary>
+    /// Newest format this version understands.
+    /// 1 = original format. 2 = adds hold times on Press / Click steps and "Recorded input (game mode)" steps.
+    /// </summary>
+    public const int CurrentSchemaVersion = 2;
 
     public int SchemaVersion { get; set; }
     public Macro? Macro { get; set; }
+
+    /// <summary>
+    /// The oldest format that can hold this macro without losing anything. Macros that don't use the
+    /// version 2 features are still written as version 1, so older copies of SmartMacro can keep opening them.
+    /// Version 1 files need no migration: the new fields simply default to 0 / off, which is the old behavior.
+    /// </summary>
+    public static int RequiredSchemaVersion(Macro macro)
+    {
+        ArgumentNullException.ThrowIfNull(macro);
+        if (macro.Steps is null) return 1;
+
+        foreach (var step in macro.Steps)
+        {
+            switch (step)
+            {
+                case InputSequenceStep:
+                case KeyPressStep { HoldMs: not 0 }:
+                case MouseClickStep { HoldMs: not 0 }:
+                    return 2;
+            }
+        }
+
+        return 1;
+    }
 }

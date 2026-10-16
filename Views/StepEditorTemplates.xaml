@@ -114,6 +114,12 @@
                 </StackPanel>
             </Grid>
 
+            <TextBlock Text="Hold the button for (ms, Click only)" Style="{StaticResource FieldLabel}" />
+            <TextBox Text="{Binding HoldMs, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}" IsEnabled="{Binding IsClick}"
+                     AutomationProperties.Name="Hold time in milliseconds" />
+            <TextBlock Style="{StaticResource MutedText}" FontSize="11" Margin="0,4,0,0"
+                       Text="0 = instant click. Recordings fill in how long you actually held the button." />
+
             <CheckBox Content="Click where the cursor already is" IsChecked="{Binding UseCurrentPosition}" Margin="0,16,0,0" />
             <CheckBox Content="Click on the text found by the last &quot;Find text&quot; step" IsChecked="{Binding UseLastFoundText}" Margin="0,10,0,0" />
             <ContentControl Content="{Binding}" ContentTemplate="{StaticResource PositionFieldsTemplate}" Focusable="False" Margin="0,4,0,0"
@@ -156,6 +162,12 @@
             <ComboBox ItemsSource="{x:Static steps:KeyPressStepViewModel.Actions}" SelectedItem="{Binding Action}" AutomationProperties.Name="Key action" />
             <TextBlock Style="{StaticResource MutedText}" FontSize="11" Margin="0,4,0,0"
                        Text="Press = down and up. Down / Up let you hold a key across several steps." />
+
+            <TextBlock Text="Hold the key for (ms, Press only)" Style="{StaticResource FieldLabel}" />
+            <TextBox Text="{Binding HoldMs, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}" IsEnabled="{Binding IsPress}"
+                     AutomationProperties.Name="Hold time in milliseconds" />
+            <TextBlock Style="{StaticResource MutedText}" FontSize="11" Margin="0,4,0,0"
+                       Text="0 = instant tap. Recordings fill in how long you actually held the key (e.g. a short W tap in a game)." />
 
             <TextBlock Text="With modifier keys (Press only)" Style="{StaticResource FieldLabel}" />
             <WrapPanel IsEnabled="{Binding IsPress}">
@@ -302,6 +314,69 @@
                     Visibility="{Binding TestResult, Converter={StaticResource NullToVisibility}}">
                 <TextBlock Text="{Binding TestResult}" TextWrapping="Wrap" FontSize="12" />
             </Border>
+
+            <ContentControl Content="{Binding}" ContentTemplate="{StaticResource StepFooterTemplate}" Focusable="False" />
+        </StackPanel>
+    </DataTemplate>
+
+    <DataTemplate DataType="{x:Type steps:InputSequenceStepViewModel}">
+        <StackPanel>
+            <ContentControl Content="{Binding}" ContentTemplate="{StaticResource StepHeaderTemplate}" Focusable="False" />
+
+            <Border Margin="0,18,0,0" Padding="12,10" CornerRadius="6" Background="{StaticResource SurfaceAltBrush}">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="12" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+                    <TextBlock Grid.Row="0" Text="Length" Style="{StaticResource MutedText}" FontSize="12" />
+                    <TextBlock Grid.Row="0" Grid.Column="2" Text="{Binding DurationText}" FontSize="12" />
+                    <TextBlock Grid.Row="1" Text="Events" Style="{StaticResource MutedText}" FontSize="12" Margin="0,4,0,0" />
+                    <TextBlock Grid.Row="1" Grid.Column="2" Text="{Binding EventCountText}" FontSize="12" Margin="0,4,0,0" />
+                    <TextBlock Grid.Row="2" Text="Mouse" Style="{StaticResource MutedText}" FontSize="12" Margin="0,4,0,0" />
+                    <TextBlock Grid.Row="2" Grid.Column="2" Text="{Binding MouseText}" FontSize="12" TextWrapping="Wrap" Margin="0,4,0,0" />
+                    <TextBlock Grid.Row="3" Text="Keys" Style="{StaticResource MutedText}" FontSize="12" Margin="0,4,0,0" />
+                    <TextBlock Grid.Row="3" Grid.Column="2" Text="{Binding KeysText}" FontSize="12" TextWrapping="Wrap" Margin="0,4,0,0" />
+                    <TextBlock Grid.Row="4" Text="Buttons" Style="{StaticResource MutedText}" FontSize="12" Margin="0,4,0,0" />
+                    <TextBlock Grid.Row="4" Grid.Column="2" Text="{Binding ButtonsText}" FontSize="12" TextWrapping="Wrap" Margin="0,4,0,0" />
+                </Grid>
+            </Border>
+
+            <TextBlock Style="{StaticResource MutedText}" FontSize="11" Margin="0,8,0,0" TextWrapping="Wrap"
+                       Text="Played back with the original timing, as relative mouse movement and exact key down/up. Start from the same spot and camera direction you recorded from. The macro's Speed setting also applies here." />
+
+            <CheckBox Content="Move the cursor to where recording started, before playing" IsChecked="{Binding MoveCursorToStart}" Margin="0,16,0,0" />
+            <TextBlock Style="{StaticResource MutedText}" FontSize="11" Margin="0,4,0,0" TextWrapping="Wrap"
+                       Text="Useful when the game shows a free cursor (menus). Leave it off while the game locks the cursor for the camera." />
+            <ContentControl Content="{Binding}" Focusable="False" Margin="0,4,0,0" IsEnabled="{Binding MoveCursorToStart}">
+                <ContentControl.ContentTemplate>
+                    <DataTemplate>
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="10" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Grid.Column="0">
+                                <TextBlock Text="Start X (pixels)" Style="{StaticResource FieldLabel}" />
+                                <TextBox Text="{Binding StartX, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}" AutomationProperties.Name="Start X position" />
+                            </StackPanel>
+                            <StackPanel Grid.Column="2">
+                                <TextBlock Text="Start Y (pixels)" Style="{StaticResource FieldLabel}" />
+                                <TextBox Text="{Binding StartY, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}" AutomationProperties.Name="Start Y position" />
+                            </StackPanel>
+                        </Grid>
+                    </DataTemplate>
+                </ContentControl.ContentTemplate>
+            </ContentControl>
 
             <ContentControl Content="{Binding}" ContentTemplate="{StaticResource StepFooterTemplate}" Focusable="False" />
         </StackPanel>

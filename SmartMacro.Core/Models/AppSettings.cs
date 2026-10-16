@@ -1,3 +1,5 @@
+using SmartMacro.Core.Recording;
+
 namespace SmartMacro.Core.Models;
 
 /// <summary>User preferences, stored in settings.json.</summary>
@@ -26,6 +28,18 @@ public sealed class AppSettings
     /// <summary>Record mouse movement (not just clicks) while recording.</summary>
     public bool RecordMouseMovement { get; set; } = true;
 
+    /// <summary>
+    /// Desktop = editable steps with screen positions (default). Game = raw relative mouse movement and exact
+    /// key timing, for games that use the mouse for camera control.
+    /// </summary>
+    public RecordingMode RecordingMode { get; set; } = RecordingMode.Desktop;
+
+    /// <summary>
+    /// Desktop recordings: keep how long each key / click was held (a short W tap stays as long as it was).
+    /// Turn off for the older "instant tap" behavior.
+    /// </summary>
+    public bool KeepTapHoldTime { get; set; } = true;
+
     /// <summary>Global shortcut to start/stop recording.</summary>
     public HotkeyBinding RecordHotkey { get; set; } = HotkeyBinding.DefaultRecord;
 
@@ -42,6 +56,7 @@ public sealed class AppSettings
     {
         if (DefaultDelayMs < 0) DefaultDelayMs = 0;
         if (DefaultDelayMs > MaxDefaultDelayMs) DefaultDelayMs = MaxDefaultDelayMs;
+        if (!Enum.IsDefined(RecordingMode)) RecordingMode = RecordingMode.Desktop;
 
         // Broken or clashing shortcuts (e.g. from a hand-edited file) fall back to the defaults.
         if (RecordHotkey is null || PlayHotkey is null || PauseHotkey is null

@@ -59,6 +59,7 @@ public static class MacroFactory
         StepKind.KeyPress => new KeyPressStep(),
         StepKind.TypeText => new TypeTextStep { Text = "Hello" },
         StepKind.FindText => new FindTextStep { Text = "OK" },
+        StepKind.InputSequence => throw new ArgumentException("Recorded input steps are created by recording in game mode, not added by hand.", nameof(kind)),
         _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unknown step type."),
     };
 

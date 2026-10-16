@@ -21,6 +21,7 @@ public partial class App : Application
     private MainViewModel? _mainViewModel;
     private HotkeyService? _hotkeys;
     private RunModeHost? _runHost;
+    private PrecisePlaybackClock? _playbackClock;
 
     // Only one SmartMacro may run at a time (two copies would fight over shortcuts and input hooks).
     private const string SingleInstanceName = @"Local\SmartMacro.SingleInstance";
@@ -69,9 +70,13 @@ public partial class App : Application
         _runHost = new RunModeHost(window, () => viewModel?.CurrentSettings ?? new AppSettings());
         var ocr = new WindowsOcrService();
         _log.Info(ocr.StatusText);
+        _playbackClock = new PrecisePlaybackClock();
+        if (!_playbackClock.HasHighResolutionTimer)
+            _log.Warning("High-resolution timer isn't available on this Windows version; playback timing falls back to 1 ms steps.");
         var automation = new AutomationServices(
-            new PlaybackEngine(new Win32InputSimulator(), clock: null, ocr),
+            new PlaybackEngine(new Win32InputSimulator(), _playbackClock, ocr),
             new WindowsInputRecorder(),
+            new RawInputRecorder(),
             new EmergencyStopWatcher(),
             _runHost,
             ocr,
@@ -121,6 +126,7 @@ public partial class App : Application
         _hotkeys?.Dispose();
         _runHost?.Dispose();
         _mainViewModel?.Dispose();
+        _playbackClock?.Dispose();
         DispatcherUnhandledException -= OnDispatcherUnhandledException;
         AppDomain.CurrentDomain.UnhandledException -= OnDomainUnhandledException;
         TaskScheduler.UnobservedTaskException -= OnUnobservedTaskException;

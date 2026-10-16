@@ -15,7 +15,7 @@ public static class MacroFileFormat
     public const long MaxFileSizeBytes = 20 * 1024 * 1024;
 
     public static string Serialize(Macro macro) =>
-        MacroJson.Serialize(new MacroDocument { SchemaVersion = MacroDocument.CurrentSchemaVersion, Macro = macro });
+        MacroJson.Serialize(new MacroDocument { SchemaVersion = MacroDocument.RequiredSchemaVersion(macro), Macro = macro });
 
     /// <summary>Parses a macro file. Returns false with a plain-English error if it can't be used.</summary>
     public static bool TryParse(string json, out Macro? macro, out string? error)

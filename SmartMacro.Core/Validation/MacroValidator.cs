@@ -67,6 +67,10 @@ public static class MacroValidator
     public const int MaxCheckIntervalMs = 60_000;
     public const int MaxOffset = 5_000;
     public const int MaxRegionSize = 20_000;
+    public const int MaxHoldMs = 60_000;           // 1 minute
+    public const int MaxSequenceEvents = 1_000_000;
+    public const long MaxSequenceDurationUs = 3_600_000_000L; // 1 hour
+    public const int MaxRelativeMove = 100_000;    // per event, in mouse counts
     public const double MinSpeed = 0.1;
     public const double MaxSpeed = 10.0;
 
@@ -180,6 +184,7 @@ public static class MacroValidator
                     issues.Add(Error("Unknown click action.", nameof(MouseClickStep.Action)));
                 if (!c.UseCurrentPosition && !c.UseLastFoundText)
                     CheckPosition(issues, c.X, c.Y, screen);
+                CheckHold(issues, c.HoldMs, c.Action == MouseClickAction.Click, nameof(MouseClickStep.HoldMs), "Click");
                 break;
 
             case MouseScrollStep s:
@@ -201,6 +206,11 @@ public static class MacroValidator
                     issues.Add(Error("Unknown modifier key.", nameof(KeyPressStep.Modifiers)));
                 else if (k.Modifiers != KeyModifiers.None && k.Action != KeyAction.Press)
                     issues.Add(Warning("Modifier keys are only used with the Press action.", nameof(KeyPressStep.Modifiers)));
+                CheckHold(issues, k.HoldMs, k.Action == KeyAction.Press, nameof(KeyPressStep.HoldMs), "Press");
+                break;
+
+            case InputSequenceStep q:
+                ValidateSequence(issues, q);
                 break;
 
             case TypeTextStep t:
@@ -247,6 +257,90 @@ public static class MacroValidator
         }
 
         return issues;
+    }
+
+    private static void CheckHold(List<ValidationIssue> issues, int holdMs, bool applies, string property, string actionName)
+    {
+        if (holdMs < 0 || holdMs > MaxHoldMs)
+            issues.Add(Error($"The hold time must be 0 to {MaxHoldMs:N0} ms.", property));
+        else if (holdMs > 0 && !applies)
+            issues.Add(Warning($"The hold time is only used with the {actionName} action.", property));
+    }
+
+    /// <summary>
+    /// Checks every recorded event. A damaged event (out-of-order time, unknown key, huge movement) is an error,
+    /// so a broken or hand-edited file can't make playback do something wild.
+    /// </summary>
+    private static void ValidateSequence(List<ValidationIssue> issues, InputSequenceStep step)
+    {
+        const string property = nameof(InputSequenceStep.Events);
+        var events = step.Events;
+        if (events is null || events.Count == 0)
+        {
+            issues.Add(Error("This step has no recorded input.", property));
+            return;
+        }
+
+        if (events.Count > MaxSequenceEvents)
+        {
+            issues.Add(Error($"A recorded input step can have at most {MaxSequenceEvents:N0} events.", property));
+            return;
+        }
+
+        long previous = 0;
+        var keysDown = new HashSet<int>();
+        var buttonsDown = new HashSet<MacroMouseButton>();
+        for (var i = 0; i < events.Count; i++)
+        {
+            var e = events[i];
+            string? problem = null;
+
+            if (e.TimeUs < previous)
+                problem = "is earlier than the event before it";
+            else if (e.TimeUs > MaxSequenceDurationUs)
+                problem = "is more than 1 hour after the start";
+            else
+            {
+                switch (e.Kind)
+                {
+                    case InputEventKind.MouseMove:
+                        if (Math.Abs((long)e.Dx) > MaxRelativeMove || Math.Abs((long)e.Dy) > MaxRelativeMove)
+                            problem = "moves the mouse too far in one go";
+                        break;
+                    case InputEventKind.MouseDown:
+                    case InputEventKind.MouseUp:
+                        if (!Enum.IsDefined(e.Button)) problem = "uses an unknown mouse button";
+                        else if (e.Kind == InputEventKind.MouseDown) buttonsDown.Add(e.Button);
+                        else buttonsDown.Remove(e.Button);
+                        break;
+                    case InputEventKind.Wheel:
+                    case InputEventKind.HorizontalWheel:
+                        if (e.Delta == 0 || Math.Abs((long)e.Delta) > MaxScrollDelta) problem = "has an invalid scroll amount";
+                        break;
+                    case InputEventKind.KeyDown:
+                    case InputEventKind.KeyUp:
+                        if (!VirtualKeys.IsValid(e.VirtualKey)) problem = "uses an invalid key";
+                        else if (e.ScanCode is < 0 or > 0xFF) problem = "has an invalid scan code";
+                        else if (e.Kind == InputEventKind.KeyDown) keysDown.Add(e.VirtualKey);
+                        else keysDown.Remove(e.VirtualKey);
+                        break;
+                    default:
+                        problem = "has an unknown type";
+                        break;
+                }
+            }
+
+            if (problem is not null)
+            {
+                issues.Add(Error($"Recorded event {i + 1:N0} {problem}. The recording may be damaged.", property));
+                return; // one message is enough; a damaged list usually has many bad events
+            }
+
+            previous = e.TimeUs;
+        }
+
+        if (keysDown.Count > 0 || buttonsDown.Count > 0)
+            issues.Add(Warning("Some keys or buttons are still held at the end of the recording; they'll be released when this step finishes.", property));
     }
 
     private static void CheckPosition(List<ValidationIssue> issues, int x, int y, ScreenBounds? screen)

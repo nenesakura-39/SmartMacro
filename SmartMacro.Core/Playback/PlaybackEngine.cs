@@ -30,14 +30,24 @@ public sealed record PlaybackProgress(int Iteration, int? TotalIterations, int S
 /// <summary>
 /// Runs a macro's steps on a background thread.
 /// - Only one run at a time (a second RunAsync throws).
-/// - Pause / Resume take effect between steps and inside delays.
+/// - Pause / Resume take effect between steps and inside delays. While paused, keys and buttons the macro is
+///   holding are released, and pressed again on resume (so a held W doesn't keep a game character running).
 /// - Stop cancels right away, even in the middle of a long delay.
 /// - Keys and mouse buttons that a macro left pressed are always released at the end,
 ///   whether it finished, was stopped, or crashed.
+///
+/// Timing: delays, hold times and recorded-input events are scheduled on one running timeline
+/// (deadline = start + sum of the recorded gaps), not "sleep N ms after the previous step". So the time spent
+/// sending input and timer overshoot don't add up over thousands of steps, and simultaneous keyboard and mouse
+/// events keep their original order and spacing. If playback falls far behind (the PC stalled), the timeline
+/// is moved forward instead of firing a burst of late input.
 /// </summary>
 public sealed class PlaybackEngine
 {
     private static readonly TimeSpan MaxDelayChunk = TimeSpan.FromMilliseconds(50);
+
+    /// <summary>If playback is more than this far behind schedule, it skips ahead instead of catching up.</summary>
+    public static readonly TimeSpan MaxTimelineLag = TimeSpan.FromMilliseconds(250);
 
     /// <summary>Short pause after clicking found text so the clicked window can take focus before the next step.</summary>
     public const int ClickSettleMs = 100;
@@ -50,6 +60,11 @@ public sealed class PlaybackEngine
     // Where the most recent "Find text" step found its text (only one run at a time, so a field is fine).
     private TextMatch? _lastFound;
 
+    // Per-run playback state. Only touched by the playback flow itself (never by Pause/Stop callers).
+    private HeldInput? _held;
+    private TimeSpan _timelineTarget;   // clock time at which the current step / event is due
+    private TimeSpan _timelineShift;    // total time the timeline was pushed back (pauses, stalls)
+
     private PlaybackState _state = PlaybackState.Idle;
     private CancellationTokenSource? _cts;
     private TaskCompletionSource? _resumeSignal;
@@ -60,6 +75,11 @@ public sealed class PlaybackEngine
         _clock = clock ?? new SystemPlaybackClock();
         _ocr = ocr;
     }
+
+    /// <summary>
+    /// Release held keys and buttons while paused, and press them again on resume. On by default.
+    /// </summary>
+    public bool ReleaseHeldInputWhilePaused { get; set; } = true;
 
     /// <summary>Human-readable notes from the playback thread (e.g. where text was found), for the log.</summary>
     public event EventHandler<string>? Message;
@@ -97,6 +117,7 @@ public sealed class PlaybackEngine
         SetState(PlaybackState.Running);
 
         var held = new HeldInput();
+        _held = held;
         var iterationsCompleted = 0;
         var stepsExecuted = 0;
         var token = cts.Token;
@@ -116,11 +137,17 @@ public sealed class PlaybackEngine
         {
             await Task.Run(async () =>
             {
+                ResetTimeline();
+                _timelineShift = TimeSpan.Zero;
+
                 for (var iteration = 1; totalIterations is null || iteration <= totalIterations; iteration++)
                 {
                     // Pause between loops (never before the first run or after the last one).
                     if (iteration > 1 && repeatDelayMs > 0)
-                        await WaitAsync(repeatDelayMs / speed, token).ConfigureAwait(false);
+                    {
+                        AdvanceTimeline(repeatDelayMs / speed);
+                        await WaitForTimelineAsync(token).ConfigureAwait(false);
+                    }
 
                     foreach (var (step, number) in plan)
                     {
@@ -150,6 +177,7 @@ public sealed class PlaybackEngine
         {
             // Never leave keys or mouse buttons stuck down.
             releaseError = held.ReleaseAll(_input);
+            _held = null;
 
             lock (_gate)
             {
@@ -215,17 +243,95 @@ public sealed class PlaybackEngine
         StateChanged?.Invoke(this, state);
     }
 
+    /// <summary>
+    /// Waits while paused. Held input is released for the pause and pressed again afterwards, and the
+    /// timeline is pushed back by the paused time so playback continues with the same spacing.
+    /// </summary>
     private async Task WaitIfPausedAsync(CancellationToken token)
     {
         Task? wait;
         lock (_gate) wait = _resumeSignal?.Task;
-        if (wait is not null)
-            await wait.WaitAsync(token).ConfigureAwait(false);
+        if (wait is null) return;
+
+        var pausedAt = _clock.Elapsed;
+        var held = _held;
+        List<HeldKey>? keys = null;
+        List<MacroMouseButton>? buttons = null;
+        if (ReleaseHeldInputWhilePaused && held is { IsEmpty: false })
+        {
+            keys = held.Keys.ToList();
+            buttons = held.Buttons.ToList();
+            var error = held.ReleaseAll(_input);
+            if (error is not null) Message?.Invoke(this, error);
+        }
+
+        await wait.WaitAsync(token).ConfigureAwait(false);
+        token.ThrowIfCancellationRequested(); // Stop while paused: don't press anything again
+
+        if (held is not null)
+        {
+            foreach (var key in keys ?? Enumerable.Empty<HeldKey>())
+            {
+                SendKey(key, down: true);
+                held.Keys.Add(key);
+            }
+
+            foreach (var button in buttons ?? Enumerable.Empty<MacroMouseButton>())
+            {
+                _input.MouseButton(button, true);
+                held.Buttons.Add(button);
+            }
+        }
+
+        var paused = _clock.Elapsed - pausedAt;
+        if (paused > TimeSpan.Zero)
+        {
+            _timelineTarget += paused;
+            _timelineShift += paused;
+        }
+    }
+
+    // ---------------- Timeline ----------------
+
+    private void ResetTimeline() => _timelineTarget = _clock.Elapsed;
+
+    private void AdvanceTimeline(double milliseconds)
+    {
+        if (milliseconds > 0) _timelineTarget += TimeSpan.FromTicks((long)Math.Round(milliseconds * TimeSpan.TicksPerMillisecond));
     }
 
     /// <summary>
-    /// Waits in small chunks so pause and stop respond quickly. Uses the real elapsed time,
-    /// so timer inaccuracy doesn't add up over long delays.
+    /// Waits until the timeline's current deadline. Waits in small chunks so pause and stop respond quickly.
+    /// Arriving late (timer overshoot, time spent sending input) is made up by the next wait, so it doesn't add up.
+    /// </summary>
+    private async Task WaitForTimelineAsync(CancellationToken token)
+    {
+        while (true)
+        {
+            await WaitIfPausedAsync(token).ConfigureAwait(false);
+            token.ThrowIfCancellationRequested();
+
+            var now = _clock.Elapsed;
+            var remaining = _timelineTarget - now;
+            if (remaining <= TimeSpan.Zero)
+            {
+                // Far behind (the PC stalled)? Skip ahead rather than firing a burst of late input.
+                if (-remaining > MaxTimelineLag)
+                {
+                    _timelineShift += now - _timelineTarget;
+                    _timelineTarget = now;
+                }
+
+                return;
+            }
+
+            await _clock.DelayAsync(remaining < MaxDelayChunk ? remaining : MaxDelayChunk, token).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// A plain relative wait (used inside Type text and Find text, whose own duration isn't part of a recording).
+    /// Uses the real elapsed time, so timer inaccuracy doesn't add up over long delays.
     /// </summary>
     private async Task WaitAsync(double milliseconds, CancellationToken token)
     {
@@ -245,12 +351,15 @@ public sealed class PlaybackEngine
         }
     }
 
+    // ---------------- Steps ----------------
+
     private async Task ExecuteStepAsync(MacroStep step, double speed, HeldInput held, CancellationToken token)
     {
         switch (step)
         {
             case DelayStep d:
-                await WaitAsync(d.DurationMs / speed, token).ConfigureAwait(false);
+                AdvanceTimeline(d.DurationMs / speed);
+                await WaitForTimelineAsync(token).ConfigureAwait(false);
                 break;
 
             case MouseMoveStep m:
@@ -271,6 +380,15 @@ public sealed class PlaybackEngine
 
                 switch (c.Action)
                 {
+                    case MouseClickAction.Click when c.HoldMs > 0:
+                        // Keep the button down for the recorded time (tracked, so Stop still releases it).
+                        _input.MouseButton(c.Button, true);
+                        held.Buttons.Add(c.Button);
+                        AdvanceTimeline(c.HoldMs / speed);
+                        await WaitForTimelineAsync(token).ConfigureAwait(false);
+                        _input.MouseButton(c.Button, false);
+                        held.Buttons.Remove(c.Button);
+                        break;
                     case MouseClickAction.Click:
                         Click(c.Button);
                         break;
@@ -297,35 +415,161 @@ public sealed class PlaybackEngine
             case KeyPressStep k:
                 switch (k.Action)
                 {
+                    case KeyAction.Press when k.HoldMs > 0:
+                    {
+                        // Keep the key down for the recorded time, e.g. a 120 ms W tap in a game.
+                        var modifiers = ModifierKeys(k.Modifiers);
+                        foreach (var vk in modifiers)
+                        {
+                            _input.Key(vk, true);
+                            held.Keys.Add(new HeldKey(vk));
+                        }
+
+                        _input.Key(k.VirtualKey, true);
+                        held.Keys.Add(new HeldKey(k.VirtualKey));
+                        AdvanceTimeline(k.HoldMs / speed);
+                        await WaitForTimelineAsync(token).ConfigureAwait(false);
+                        _input.Key(k.VirtualKey, false);
+                        held.Keys.Remove(new HeldKey(k.VirtualKey));
+                        for (var i = modifiers.Count - 1; i >= 0; i--)
+                        {
+                            _input.Key(modifiers[i], false);
+                            held.Keys.Remove(new HeldKey(modifiers[i]));
+                        }
+
+                        break;
+                    }
                     case KeyAction.Press:
+                    {
                         var modifiers = ModifierKeys(k.Modifiers);
                         foreach (var vk in modifiers) _input.Key(vk, true);
                         _input.Key(k.VirtualKey, true);
                         _input.Key(k.VirtualKey, false);
                         for (var i = modifiers.Count - 1; i >= 0; i--) _input.Key(modifiers[i], false);
                         break;
+                    }
                     case KeyAction.Down:
                         _input.Key(k.VirtualKey, true);
-                        held.Keys.Add(k.VirtualKey);
+                        held.Keys.Add(new HeldKey(k.VirtualKey));
                         break;
                     case KeyAction.Up:
                         _input.Key(k.VirtualKey, false);
-                        held.Keys.Remove(k.VirtualKey);
+                        held.Keys.Remove(new HeldKey(k.VirtualKey));
                         break;
                 }
                 break;
 
             case TypeTextStep t:
                 await TypeTextAsync(t, speed, token).ConfigureAwait(false);
+                ResetTimeline(); // typing takes as long as it takes; start timing again from here
                 break;
 
             case FindTextStep f:
                 await FindTextAsync(f, token).ConfigureAwait(false);
+                ResetTimeline(); // the search takes as long as it takes; start timing again from here
+                break;
+
+            case InputSequenceStep q:
+                await PlaySequenceAsync(q, speed, held, token).ConfigureAwait(false);
                 break;
 
             default:
                 throw new NotSupportedException($"Step type {step.GetType().Name} can't be played.");
         }
+    }
+
+    /// <summary>
+    /// Plays a game-mode recording: every event is sent at (step start + its recorded time ÷ speed), in the
+    /// recorded order. Mouse movement is relative. Anything the step pressed and didn't release is released
+    /// at the end of the step.
+    /// </summary>
+    private async Task PlaySequenceAsync(InputSequenceStep step, double speed, HeldInput held, CancellationToken token)
+    {
+        var events = step.Events;
+        if (step.MoveCursorToStart) _input.MoveMouse(step.StartX, step.StartY);
+
+        // If the previous steps left us far behind schedule, start this recording from "now".
+        if (_clock.Elapsed - _timelineTarget > MaxTimelineLag) ResetTimeline();
+
+        var stepStart = _timelineTarget;
+        var shiftAtStart = _timelineShift;
+        var keysBefore = held.Keys.ToHashSet();
+        var buttonsBefore = held.Buttons.ToHashSet();
+
+        try
+        {
+            foreach (var e in events)
+            {
+                // Absolute deadline from the step start (plus any pause / stall shift since then), so rounding
+                // never accumulates across thousands of events.
+                var offset = TimeSpan.FromTicks((long)Math.Round(e.TimeUs * 10.0 / speed));
+                _timelineTarget = stepStart + offset + (_timelineShift - shiftAtStart);
+                await WaitForTimelineAsync(token).ConfigureAwait(false);
+
+                switch (e.Kind)
+                {
+                    case InputEventKind.MouseMove:
+                        if (e.Dx != 0 || e.Dy != 0) _input.MoveMouseRelative(e.Dx, e.Dy);
+                        break;
+                    case InputEventKind.MouseDown:
+                        _input.MouseButton(e.Button, true);
+                        held.Buttons.Add(e.Button);
+                        break;
+                    case InputEventKind.MouseUp:
+                        _input.MouseButton(e.Button, false);
+                        held.Buttons.Remove(e.Button);
+                        break;
+                    case InputEventKind.Wheel:
+                    case InputEventKind.HorizontalWheel:
+                        _input.Scroll(e.Delta, e.Kind == InputEventKind.HorizontalWheel);
+                        break;
+                    case InputEventKind.KeyDown:
+                    {
+                        var key = new HeldKey(e.VirtualKey, e.ScanCode, e.Extended);
+                        SendKey(key, down: true);
+                        held.Keys.Add(key);
+                        break;
+                    }
+                    case InputEventKind.KeyUp:
+                    {
+                        var key = new HeldKey(e.VirtualKey, e.ScanCode, e.Extended);
+                        SendKey(key, down: false);
+                        held.Keys.Remove(key);
+                        break;
+                    }
+                }
+            }
+        }
+        finally
+        {
+            // Normal end only: on stop/failure the engine releases everything anyway.
+            if (!token.IsCancellationRequested)
+            {
+                foreach (var key in held.Keys.Where(k => !keysBefore.Contains(k)).ToList())
+                {
+                    TryRelease(() => SendKey(key, down: false));
+                    held.Keys.Remove(key);
+                }
+
+                foreach (var button in held.Buttons.Where(b => !buttonsBefore.Contains(b)).ToList())
+                {
+                    TryRelease(() => _input.MouseButton(button, false));
+                    held.Buttons.Remove(button);
+                }
+            }
+        }
+    }
+
+    private void TryRelease(Action release)
+    {
+        try { release(); }
+        catch (Exception ex) { Message?.Invoke(this, $"Could not release held input: {ex.Message}"); }
+    }
+
+    private void SendKey(HeldKey key, bool down)
+    {
+        if (key.ScanCode == 0 && !key.Extended) _input.Key(key.VirtualKey, down);
+        else _input.KeyWithScanCode(key.VirtualKey, key.ScanCode, key.Extended, down);
     }
 
     /// <summary>
@@ -447,11 +691,16 @@ public sealed class PlaybackEngine
         return keys;
     }
 
+    /// <summary>A key the macro is holding. ScanCode 0 = "look it up from the virtual-key code".</summary>
+    private readonly record struct HeldKey(int VirtualKey, int ScanCode = 0, bool Extended = false);
+
     /// <summary>Tracks what the macro is currently holding down so it can always be released.</summary>
     private sealed class HeldInput
     {
-        public HashSet<int> Keys { get; } = new();
+        public HashSet<HeldKey> Keys { get; } = new();
         public HashSet<MacroMouseButton> Buttons { get; } = new();
+
+        public bool IsEmpty => Keys.Count == 0 && Buttons.Count == 0;
 
         /// <summary>Releases everything. Returns an error message if Windows refused, otherwise null.</summary>
         public string? ReleaseAll(IInputSimulator input)
@@ -459,7 +708,11 @@ public sealed class PlaybackEngine
             string? error = null;
             foreach (var key in Keys)
             {
-                try { input.Key(key, false); }
+                try
+                {
+                    if (key.ScanCode == 0 && !key.Extended) input.Key(key.VirtualKey, false);
+                    else input.KeyWithScanCode(key.VirtualKey, key.ScanCode, key.Extended, false);
+                }
                 catch (Exception ex) { error ??= $"Could not release a held key: {ex.Message}"; }
             }
 

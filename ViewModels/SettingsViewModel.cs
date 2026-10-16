@@ -1,9 +1,11 @@
 using System.Diagnostics;
 using SmartMacro.Core.Logging;
 using SmartMacro.Core.Models;
+using SmartMacro.Core.Recording;
 using SmartMacro.Core.Storage;
 using SmartMacro.Mvvm;
 using SmartMacro.Services;
+using SmartMacro.ViewModels.Steps;
 
 namespace SmartMacro.ViewModels;
 
@@ -23,6 +25,8 @@ public sealed class SettingsViewModel : ObservableObject
     private bool _minimizeDuringRun;
     private bool _showRunOverlay;
     private bool _recordMouseMovement;
+    private RecordingMode _recordingMode;
+    private bool _keepTapHoldTime;
     private HotkeyBinding _recordHotkey = HotkeyBinding.DefaultRecord;
     private HotkeyBinding _playHotkey = HotkeyBinding.DefaultPlay;
     private HotkeyBinding _pauseHotkey = HotkeyBinding.DefaultPause;
@@ -183,6 +187,33 @@ public sealed class SettingsViewModel : ObservableObject
         set { if (SetProperty(ref _recordMouseMovement, value)) IsDirty = true; }
     }
 
+    public IReadOnlyList<Choice<RecordingMode>> RecordingModes => RecordingModeChoices;
+
+    private static readonly Choice<RecordingMode>[] RecordingModeChoices =
+    {
+        new Choice<RecordingMode>(RecordingMode.Desktop, "Desktop: editable steps with screen positions (apps, menus)"),
+        new Choice<RecordingMode>(RecordingMode.Game, "Game: relative mouse + exact key timing (camera / movement)"),
+    };
+
+    public RecordingMode RecordingMode
+    {
+        get => _recordingMode;
+        set
+        {
+            if (!SetProperty(ref _recordingMode, value)) return;
+            IsDirty = true;
+            OnPropertyChanged(nameof(IsDesktopRecording));
+        }
+    }
+
+    public bool IsDesktopRecording => _recordingMode == RecordingMode.Desktop;
+
+    public bool KeepTapHoldTime
+    {
+        get => _keepTapHoldTime;
+        set { if (SetProperty(ref _keepTapHoldTime, value)) IsDirty = true; }
+    }
+
     public bool IsDirty
     {
         get => _isDirty;
@@ -215,6 +246,8 @@ public sealed class SettingsViewModel : ObservableObject
         _minimizeDuringRun = settings.MinimizeDuringRun;
         _showRunOverlay = settings.ShowRunOverlay;
         _recordMouseMovement = settings.RecordMouseMovement;
+        _recordingMode = settings.RecordingMode;
+        _keepTapHoldTime = settings.KeepTapHoldTime;
         _recordHotkey = settings.RecordHotkey;
         _playHotkey = settings.PlayHotkey;
         _pauseHotkey = settings.PauseHotkey;
@@ -234,6 +267,8 @@ public sealed class SettingsViewModel : ObservableObject
             MinimizeDuringRun = MinimizeDuringRun,
             ShowRunOverlay = ShowRunOverlay,
             RecordMouseMovement = RecordMouseMovement,
+            RecordingMode = RecordingMode,
+            KeepTapHoldTime = KeepTapHoldTime,
             RecordHotkey = RecordHotkey,
             PlayHotkey = PlayHotkey,
             PauseHotkey = PauseHotkey,

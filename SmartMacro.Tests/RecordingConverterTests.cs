@@ -23,7 +23,8 @@ public class RecordingConverterTests
             Down(1580, 30, 40), Up(1650, 31, 41),
         });
 
-        Assert.Equal("Click left button at (10, 20) | Wait 500 ms | Click left button at (30, 40)", Describe(steps));
+        // Each click keeps how long it was held; the gap between them is still 500 ms.
+        Assert.Equal("Click left button at (10, 20) (hold 80 ms) | Wait 500 ms | Click left button at (30, 40) (hold 70 ms)", Describe(steps));
     }
 
     [Fact]
@@ -74,7 +75,7 @@ public class RecordingConverterTests
             KeyDown(0, 0xA2), KeyDown(100, 0x43), KeyUp(150, 0x43), KeyUp(200, 0xA2),
         }, new RecordingOptions { MinDelayMs = 1000 });
 
-        Assert.Equal("Hold down Left Ctrl | Press C | Release Left Ctrl", Describe(steps));
+        Assert.Equal("Hold down Left Ctrl | Press C (hold 50 ms) | Release Left Ctrl", Describe(steps));
     }
 
     [Fact]
@@ -101,7 +102,7 @@ public class RecordingConverterTests
             KeyDown(1000, 0xA2), KeyDown(1050, 0xA0), Move(1060, 3, 3), KeyDown(1100, 0x78),
         }, new RecordingOptions { TrimTrailingKeys = hotkey });
 
-        Assert.Equal("Click left button at (1, 1)", Describe(steps));
+        Assert.Equal("Click left button at (1, 1) (hold 50 ms)", Describe(steps));
     }
 
     [Fact]

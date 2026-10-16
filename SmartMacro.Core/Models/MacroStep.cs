@@ -12,6 +12,7 @@ public enum StepKind
     KeyPress,
     TypeText,
     FindText,
+    InputSequence,
 }
 
 public enum MacroMouseButton
@@ -60,6 +61,7 @@ public enum KeyModifiers
 [JsonDerivedType(typeof(KeyPressStep), "keyPress")]
 [JsonDerivedType(typeof(TypeTextStep), "typeText")]
 [JsonDerivedType(typeof(FindTextStep), "findText")]
+[JsonDerivedType(typeof(InputSequenceStep), "inputSequence")]
 public abstract class MacroStep
 {
     public Guid Id { get; set; } = Guid.NewGuid();
@@ -105,6 +107,12 @@ public sealed class MouseClickStep : MacroStep
     /// <summary>Click the center of the text found by the most recent "Find text" step (overrides X/Y).</summary>
     public bool UseLastFoundText { get; set; }
 
+    /// <summary>
+    /// How long the button stays down for a Click, in ms. 0 = instant (down and up back to back),
+    /// which is what macros made before this option existed do. Recordings fill in the real hold time.
+    /// </summary>
+    public int HoldMs { get; set; }
+
     [JsonIgnore]
     public override StepKind Kind => StepKind.MouseClick;
 }
@@ -130,6 +138,13 @@ public sealed class KeyPressStep : MacroStep
     public int VirtualKey { get; set; } = 0x0D; // Enter
     public KeyAction Action { get; set; } = KeyAction.Press;
     public KeyModifiers Modifiers { get; set; } = KeyModifiers.None;
+
+    /// <summary>
+    /// How long the key stays down for a Press, in ms. 0 = instant (down and up back to back),
+    /// which is what macros made before this option existed do. Recordings fill in the real hold time,
+    /// so a short W tap that moved a game character for 120 ms still lasts 120 ms when played back.
+    /// </summary>
+    public int HoldMs { get; set; }
 
     [JsonIgnore]
     public override StepKind Kind => StepKind.KeyPress;
@@ -207,4 +222,31 @@ public sealed class FindTextStep : MacroStep
 
     [JsonIgnore]
     public override StepKind Kind => StepKind.FindText;
+}
+
+/// <summary>
+/// A recorded stream of raw input (game mode): relative mouse movement, key and button down/up and wheel
+/// events, each with its own timestamp. Played back on one timeline so the original order and spacing of
+/// simultaneous keyboard and mouse input is kept. Mouse movement is relative (like a real mouse), not
+/// "go to X/Y", which is what first-person games read for camera rotation.
+/// Created by recording in game mode; not added by hand from the toolbox.
+/// </summary>
+public sealed class InputSequenceStep : MacroStep
+{
+    /// <summary>The recorded events, oldest first. Times are microseconds from the start of the step.</summary>
+    [JsonConverter(typeof(InputEventListJsonConverter))]
+    public List<InputEvent> Events { get; set; } = new();
+
+    /// <summary>Where the cursor was when recording started (physical pixels).</summary>
+    public int StartX { get; set; }
+    public int StartY { get; set; }
+
+    /// <summary>
+    /// Put the cursor back at StartX/StartY before playing. Useful when the game shows a free cursor
+    /// (menus). Leave off when the game locks the cursor for camera control.
+    /// </summary>
+    public bool MoveCursorToStart { get; set; }
+
+    [JsonIgnore]
+    public override StepKind Kind => StepKind.InputSequence;
 }

@@ -33,12 +33,28 @@ Your macros and settings live in `%LOCALAPPDATA%\SmartMacro`, separate from the 
    - In the editor header, set how many times to repeat (0 = until stopped), the speed, and a wait between repeats.
 4. **Find text:** add a **Find text (OCR)** step. Type the text, optionally click **Pick area on screen**, press **Test now**, and choose what happens when it's found (for example, "Click it").
 
+## Recording games (game mode)
+
+Normal recording saves cursor **positions** ("move to X/Y"). First-person games lock the cursor and turn the camera from the
+mouse's **relative movement**, so position-based playback can't turn the camera. For those, use game mode:
+
+1. **Settings → Recording and playback → Recording mode → Game**, then **Save**.
+2. Stand in your starting spot and face your starting direction. Press the record shortcut, play, press it again.
+3. The recording becomes one **Recorded input (game mode)** step. It keeps every mouse movement sample and the exact
+   down/up time of every key and button, and plays them back on the original timeline.
+4. Before playing, put your character in the **same spot facing the same way**, then press Play.
+
+Even with a perfect recording, a game can play it back a little differently: frame rate, physics, network lag and game
+updates all change results, and some games ignore simulated input. Small differences can add up over a long recording.
+Short recordings, a fixed starting point, and game sensitivity/frame-rate settings that match the recording help most.
+Game mode never tries to get around anti-cheat.
+
 ## Safety
 
 - **Esc** on your keyboard stops playback immediately.
 - Ctrl+Shift+F10 also stops playback. You can change all shortcuts in **Settings → Keyboard shortcuts**.
 - While recording or playing, a small banner at the top of the screen shows what SmartMacro is doing.
-- Keys or mouse buttons held by a macro are always released when it stops.
+- Keys or mouse buttons held by a macro are always released when it stops, and while it's paused (they're pressed again when you resume).
 
 ## Library
 

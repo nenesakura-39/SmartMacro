@@ -14,6 +14,7 @@ internal static class NativeMethods
     public const uint INPUT_MOUSE = 0;
     public const uint INPUT_KEYBOARD = 1;
 
+    public const uint MOUSEEVENTF_MOVE = 0x0001;
     public const uint MOUSEEVENTF_LEFTDOWN = 0x0002;
     public const uint MOUSEEVENTF_LEFTUP = 0x0004;
     public const uint MOUSEEVENTF_RIGHTDOWN = 0x0008;
@@ -314,6 +315,171 @@ internal static class NativeMethods
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     [return: MarshalAs(UnmanagedType.Bool)]
     public static extern bool GetMonitorInfo(IntPtr hMonitor, ref MONITORINFO lpmi);
+
+    // ---- Raw Input (game-mode recording) ----
+    public const int WM_INPUT = 0x00FF;
+    public const int WM_CLOSE = 0x0010;
+    public const int WM_DESTROY = 0x0002;
+    public static readonly IntPtr HWND_MESSAGE = new(-3);
+
+    public const uint RID_INPUT = 0x10000003;
+    public const uint RIM_TYPEMOUSE = 0;
+    public const uint RIM_TYPEKEYBOARD = 1;
+    public const uint RIDEV_REMOVE = 0x00000001;
+    public const uint RIDEV_INPUTSINK = 0x00000100;
+    public const ushort HID_USAGE_PAGE_GENERIC = 0x01;
+    public const ushort HID_USAGE_GENERIC_MOUSE = 0x02;
+    public const ushort HID_USAGE_GENERIC_KEYBOARD = 0x06;
+
+    public const ushort MOUSE_MOVE_ABSOLUTE = 0x01;
+    public const ushort MOUSE_VIRTUAL_DESKTOP = 0x02;
+    public const ushort RI_MOUSE_LEFT_BUTTON_DOWN = 0x0001;
+    public const ushort RI_MOUSE_LEFT_BUTTON_UP = 0x0002;
+    public const ushort RI_MOUSE_RIGHT_BUTTON_DOWN = 0x0004;
+    public const ushort RI_MOUSE_RIGHT_BUTTON_UP = 0x0008;
+    public const ushort RI_MOUSE_MIDDLE_BUTTON_DOWN = 0x0010;
+    public const ushort RI_MOUSE_MIDDLE_BUTTON_UP = 0x0020;
+    public const ushort RI_MOUSE_WHEEL = 0x0400;
+    public const ushort RI_MOUSE_HWHEEL = 0x0800;
+    public const ushort RI_KEY_BREAK = 0x01;
+    public const ushort RI_KEY_E0 = 0x02;
+
+    public const int SM_CXSCREEN = 0;
+    public const int SM_CYSCREEN = 1;
+    public const int SM_XVIRTUALSCREEN = 76;
+    public const int SM_YVIRTUALSCREEN = 77;
+    public const int SM_CXVIRTUALSCREEN = 78;
+    public const int SM_CYVIRTUALSCREEN = 79;
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct RAWINPUTDEVICE
+    {
+        public ushort usUsagePage;
+        public ushort usUsage;
+        public uint dwFlags;
+        public IntPtr hwndTarget;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct RAWINPUTHEADER
+    {
+        public uint dwType;
+        public uint dwSize;
+        public IntPtr hDevice;
+        public IntPtr wParam;
+    }
+
+    /// <summary>RAWMOUSE with the button union laid out explicitly (usButtonFlags / usButtonData).</summary>
+    [StructLayout(LayoutKind.Explicit)]
+    public struct RAWMOUSE
+    {
+        [FieldOffset(0)] public ushort usFlags;
+        [FieldOffset(4)] public ushort usButtonFlags;
+        [FieldOffset(6)] public ushort usButtonData;
+        [FieldOffset(8)] public uint ulRawButtons;
+        [FieldOffset(12)] public int lLastX;
+        [FieldOffset(16)] public int lLastY;
+        [FieldOffset(20)] public uint ulExtraInformation;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct RAWKEYBOARD
+    {
+        public ushort MakeCode;
+        public ushort Flags;
+        public ushort Reserved;
+        public ushort VKey;
+        public uint Message;
+        public uint ExtraInformation;
+    }
+
+    public delegate IntPtr WndProc(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
+
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    public struct WNDCLASSEX
+    {
+        public uint cbSize;
+        public uint style;
+        public IntPtr lpfnWndProc;
+        public int cbClsExtra;
+        public int cbWndExtra;
+        public IntPtr hInstance;
+        public IntPtr hIcon;
+        public IntPtr hCursor;
+        public IntPtr hbrBackground;
+        public string? lpszMenuName;
+        public string lpszClassName;
+        public IntPtr hIconSm;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct MSG
+    {
+        public IntPtr hwnd;
+        public uint message;
+        public IntPtr wParam;
+        public IntPtr lParam;
+        public uint time;
+        public POINT pt;
+        public uint lPrivate;
+    }
+
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool RegisterRawInputDevices([In] RAWINPUTDEVICE[] pRawInputDevices, uint uiNumDevices, uint cbSize);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    public static extern uint GetRawInputData(IntPtr hRawInput, uint uiCommand, IntPtr pData, ref uint pcbSize, uint cbSizeHeader);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    public static extern ushort RegisterClassEx([In] ref WNDCLASSEX lpwcx);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool UnregisterClass(string lpClassName, IntPtr hInstance);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    public static extern IntPtr CreateWindowEx(uint dwExStyle, string lpClassName, string lpWindowName, uint dwStyle,
+        int x, int y, int nWidth, int nHeight, IntPtr hWndParent, IntPtr hMenu, IntPtr hInstance, IntPtr lpParam);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool DestroyWindow(IntPtr hWnd);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    public static extern IntPtr DefWindowProc(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    public static extern int GetMessage(out MSG lpMsg, IntPtr hWnd, uint wMsgFilterMin, uint wMsgFilterMax);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    public static extern IntPtr DispatchMessage([In] ref MSG lpMsg);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool PostMessage(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
+
+    [DllImport("user32.dll")]
+    public static extern void PostQuitMessage(int nExitCode);
+
+    // ---- High-resolution waitable timer (precise playback timing) ----
+    public const uint CREATE_WAITABLE_TIMER_HIGH_RESOLUTION = 0x00000002;
+    public const uint TIMER_ALL_ACCESS = 0x001F0003;
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    public static extern IntPtr CreateWaitableTimerExW(IntPtr lpTimerAttributes, string? lpTimerName, uint dwFlags, uint dwDesiredAccess);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool SetWaitableTimer(IntPtr hTimer, ref long pDueTime, int lPeriod, IntPtr pfnCompletionRoutine,
+        IntPtr lpArgToCompletionRoutine, [MarshalAs(UnmanagedType.Bool)] bool fResume);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    public static extern uint WaitForSingleObject(IntPtr hHandle, uint dwMilliseconds);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool CloseHandle(IntPtr hObject);
 
     [DllImport("winmm.dll")]
     public static extern uint timeBeginPeriod(uint uPeriod);

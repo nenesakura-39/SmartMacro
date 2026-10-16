@@ -34,6 +34,24 @@ public sealed class Win32InputSimulator : IInputSimulator
                 $"Windows refused to move the mouse (error {Marshal.GetLastWin32Error()}). This can happen when the screen is locked or a secure window is open.");
     }
 
+    /// <summary>
+    /// Relative movement through SendInput (MOUSEEVENTF_MOVE without ABSOLUTE). Games that read raw mouse input
+    /// receive these counts unchanged. Note: Windows applies the pointer speed / "Enhance pointer precision"
+    /// settings to the visible cursor, exactly like it does for a physical mouse.
+    /// </summary>
+    public void MoveMouseRelative(int dx, int dy)
+    {
+        if (dx == 0 && dy == 0) return;
+        Send(new INPUT
+        {
+            type = INPUT_MOUSE,
+            U = new InputUnion
+            {
+                mi = new MOUSEINPUT { dx = dx, dy = dy, dwFlags = MOUSEEVENTF_MOVE, dwExtraInfo = SmartMacroInputTag },
+            },
+        });
+    }
+
     public void MouseButton(MacroMouseButton button, bool down)
     {
         var flags = (button, down) switch
@@ -53,6 +71,34 @@ public sealed class Win32InputSimulator : IInputSimulator
         Send(MouseInput(horizontal ? MOUSEEVENTF_HWHEEL : MOUSEEVENTF_WHEEL, unchecked((uint)delta)));
 
     public void Key(int virtualKey, bool down) => Send(KeyInput(virtualKey, down));
+
+    public void KeyWithScanCode(int virtualKey, int scanCode, bool extended, bool down)
+    {
+        if (scanCode <= 0)
+        {
+            Send(KeyInput(virtualKey, down));
+            return;
+        }
+
+        // Same virtual key + the recorded hardware scan code and extended bit, so games that read either
+        // (window messages or raw input / DirectInput) see the same key, e.g. right Shift instead of left Shift.
+        var flags = down ? 0u : KEYEVENTF_KEYUP;
+        if (extended) flags |= KEYEVENTF_EXTENDEDKEY;
+        Send(new INPUT
+        {
+            type = INPUT_KEYBOARD,
+            U = new InputUnion
+            {
+                ki = new KEYBDINPUT
+                {
+                    wVk = (ushort)virtualKey,
+                    wScan = (ushort)scanCode,
+                    dwFlags = flags,
+                    dwExtraInfo = SmartMacroInputTag,
+                },
+            },
+        });
+    }
 
     public void TypeCharacters(string text)
     {

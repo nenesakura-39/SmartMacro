@@ -51,6 +51,7 @@ public sealed class AutomationViewModel : ObservableObject, IDisposable
 {
     private readonly PlaybackEngine _engine;
     private readonly IInputRecorder _recorder;
+    private readonly IRelativeInputRecorder _gameRecorder;
     private readonly EmergencyStopWatcher _emergency;
     private readonly IRunModeHost _host;
     private readonly IOcrService _ocr;
@@ -71,10 +72,12 @@ public sealed class AutomationViewModel : ObservableObject, IDisposable
     private Task? _runTask;
     private volatile PlaybackProgress? _latestProgress;
     private DateTime _runStartedUtc;
+    private RecordingMode _recordingMode = RecordingMode.Desktop;
 
     public AutomationViewModel(
         PlaybackEngine engine,
         IInputRecorder recorder,
+        IRelativeInputRecorder gameRecorder,
         EmergencyStopWatcher emergency,
         IRunModeHost host,
         IOcrService ocr,
@@ -85,6 +88,7 @@ public sealed class AutomationViewModel : ObservableObject, IDisposable
     {
         _engine = engine;
         _recorder = recorder;
+        _gameRecorder = gameRecorder;
         _emergency = emergency;
         _host = host;
         _ocr = ocr;
@@ -227,7 +231,8 @@ public sealed class AutomationViewModel : ObservableObject, IDisposable
     {
         if (IsRecording)
         {
-            _recorder.Stop();
+            if (_recordingMode == RecordingMode.Game) _gameRecorder.Stop();
+            else _recorder.Stop();
             _host.Exit();
             Mode = AutomationMode.Idle;
             _log.Warning("Recording was discarded because SmartMacro is closing.");
@@ -249,6 +254,7 @@ public sealed class AutomationViewModel : ObservableObject, IDisposable
         _emergency.EmergencyStopRequested -= OnEmergencyStop;
         _emergency.Dispose();
         if (_recorder is IDisposable disposable) disposable.Dispose();
+        if (_gameRecorder is IDisposable gameDisposable) gameDisposable.Dispose();
     }
 
     // ---------------- Recording ----------------
@@ -258,8 +264,12 @@ public sealed class AutomationViewModel : ObservableObject, IDisposable
         if (!IsIdle) return;
         if (!await _hooks.BeforeRecording()) return;
 
+        _recordingMode = _hooks.Settings().RecordingMode;
+        var isGame = _recordingMode == RecordingMode.Game;
         Mode = AutomationMode.Recording;
-        _host.Enter(OverlayKind.Recording, $"Recording…   {RecordShortcut} to stop");
+        _host.Enter(OverlayKind.Recording, isGame
+            ? $"Recording (game mode)…   {RecordShortcut} to stop"
+            : $"Recording…   {RecordShortcut} to stop");
 
         // Give the window a moment to minimize so that isn't recorded.
         await Task.Delay(300);
@@ -267,7 +277,8 @@ public sealed class AutomationViewModel : ObservableObject, IDisposable
 
         try
         {
-            _recorder.Start();
+            if (isGame) _gameRecorder.Start();
+            else _recorder.Start();
         }
         catch (Exception ex)
         {
@@ -280,12 +291,20 @@ public sealed class AutomationViewModel : ObservableObject, IDisposable
 
         _runStartedUtc = DateTime.UtcNow;
         _progressTimer.Start();
-        _hooks.SetStatus($"Recording… press {RecordShortcut} (or the Stop button) to finish.", StatusKind.Info);
+        _hooks.SetStatus(isGame
+            ? $"Recording in game mode (relative mouse + exact key timing)… press {RecordShortcut} to finish."
+            : $"Recording… press {RecordShortcut} (or the Stop button) to finish.", StatusKind.Info);
     }
 
     private async Task StopRecordingAsync()
     {
         if (!IsRecording) return;
+
+        if (_recordingMode == RecordingMode.Game)
+        {
+            await StopGameRecordingAsync();
+            return;
+        }
 
         var raw = _recorder.Stop();
         var limitReached = _recorder.LimitReached;
@@ -297,6 +316,7 @@ public sealed class AutomationViewModel : ObservableObject, IDisposable
         var options = new RecordingOptions
         {
             RecordMouseMoves = _hooks.Settings().RecordMouseMovement,
+            KeepHoldTime = _hooks.Settings().KeepTapHoldTime,
             TrimTrailingKeys = _hooks.Settings().RecordHotkey.AllKeys(),
         };
         var steps = RecordingConverter.Convert(raw, options);
@@ -313,6 +333,40 @@ public sealed class AutomationViewModel : ObservableObject, IDisposable
 
         _log.Info($"Recorded {raw.Count:N0} input events → {steps.Count:N0} steps.");
         await _hooks.RecordingFinished(steps);
+        RefreshTarget();
+    }
+
+    /// <summary>Game mode: the whole recording becomes one "Recorded input (game mode)" step.</summary>
+    private async Task StopGameRecordingAsync()
+    {
+        var raw = _gameRecorder.Stop();
+        var limitReached = _gameRecorder.LimitReached;
+        _progressTimer.Stop();
+        _host.Exit();
+        Mode = AutomationMode.Idle;
+        ProgressText = string.Empty;
+
+        var step = GameRecordingConverter.Convert(raw, new GameRecordingOptions
+        {
+            TrimTrailingKeys = _hooks.Settings().RecordHotkey.AllKeys(),
+            StartX = _gameRecorder.StartX,
+            StartY = _gameRecorder.StartY,
+        });
+
+        if (limitReached)
+            _log.Warning($"The recording hit the limit of {GameRecordingConverter.MaxRecordedEvents:N0} events; input after that was not recorded.");
+
+        if (step is null)
+        {
+            _hooks.SetStatus("Nothing was recorded. (In game mode, input made while SmartMacro is in front isn't recorded.)", StatusKind.Warning);
+            RefreshTarget();
+            return;
+        }
+
+        var summary = StepDescriber.Summarize(step);
+        _log.Info($"Recorded {raw.Count:N0} raw input events in game mode → {summary.EventCount:N0} events over {summary.DurationMs / 1000.0:0.0} s " +
+                  $"({summary.MouseMoves:N0} mouse moves, {summary.KeyPresses:N0} key presses).");
+        await _hooks.RecordingFinished(new List<MacroStep> { step });
         RefreshTarget();
     }
 
@@ -495,7 +549,8 @@ public sealed class AutomationViewModel : ObservableObject, IDisposable
         if (IsRecording)
         {
             var seconds = (DateTime.UtcNow - _runStartedUtc).TotalSeconds;
-            ProgressText = $"{_recorder.EventCount:N0} input events · {seconds:0} s";
+            var count = _recordingMode == RecordingMode.Game ? _gameRecorder.EventCount : _recorder.EventCount;
+            ProgressText = $"{count:N0} input events · {seconds:0} s";
             return;
         }
 

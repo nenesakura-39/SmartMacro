@@ -21,7 +21,11 @@ public static class StepTypeCatalog
         new StepTypeInfo(StepKind.KeyPress, StepDescriber.DisplayName(StepKind.KeyPress), "", "Press a key or shortcut, or hold/release a key."),
         new StepTypeInfo(StepKind.TypeText, StepDescriber.DisplayName(StepKind.TypeText), "", "Type a piece of text."),
         new StepTypeInfo(StepKind.FindText, StepDescriber.DisplayName(StepKind.FindText), "\uE721", "Wait for text to appear on screen (OCR), and optionally click it."),
+        new StepTypeInfo(StepKind.InputSequence, StepDescriber.DisplayName(StepKind.InputSequence), "\uE7FC", "Mouse and keyboard input recorded in game mode, played back with its original timing and relative mouse movement."),
     };
+
+    /// <summary>Step types offered in the editor's "Add step" toolbox (recorded input only comes from recording).</summary>
+    public static IReadOnlyList<StepTypeInfo> Addable { get; } = All.Where(t => t.Kind != StepKind.InputSequence).ToList();
 
     public static StepTypeInfo Get(StepKind kind) => All.First(t => t.Kind == kind);
 }
@@ -134,6 +138,7 @@ public abstract class StepViewModel : ObservableObject
         KeyPressStep k => new KeyPressStepViewModel(k),
         TypeTextStep t => new TypeTextStepViewModel(t),
         FindTextStep f => new FindTextStepViewModel(f),
+        InputSequenceStep q => new InputSequenceStepViewModel(q),
         _ => throw new NotSupportedException($"No editor for step type {step.GetType().Name}."),
     };
 }
@@ -206,8 +211,16 @@ public sealed class MouseClickStepViewModel : StepViewModel
     public MouseClickAction Action
     {
         get => _step.Action;
-        set { if (_step.Action == value) return; _step.Action = value; NotifyChanged(); }
+        set
+        {
+            if (_step.Action == value) return;
+            _step.Action = value;
+            NotifyChanged();
+            OnPropertyChanged(nameof(IsClick));
+        }
     }
+
+    public bool IsClick => _step.Action == MouseClickAction.Click;
 
     public bool UseCurrentPosition
     {
@@ -239,6 +252,13 @@ public sealed class MouseClickStepViewModel : StepViewModel
     }
 
     public bool UsesFixedPosition => !_step.UseCurrentPosition && !_step.UseLastFoundText;
+
+    /// <summary>How long a Click keeps the button down (0 = instant).</summary>
+    public int HoldMs
+    {
+        get => _step.HoldMs;
+        set { if (_step.HoldMs == value) return; _step.HoldMs = value; NotifyChanged(); }
+    }
 
     public int X
     {
@@ -319,6 +339,13 @@ public sealed class KeyPressStepViewModel : StepViewModel
     }
 
     public bool IsPress => _step.Action == KeyAction.Press;
+
+    /// <summary>How long a Press keeps the key down (0 = instant).</summary>
+    public int HoldMs
+    {
+        get => _step.HoldMs;
+        set { if (_step.HoldMs == value) return; _step.HoldMs = value; NotifyChanged(); }
+    }
 
     public bool Ctrl
     {
@@ -603,5 +630,51 @@ public sealed class FindTextStepViewModel : StepViewModel
     {
         _isBusy = busy;
         System.Windows.Input.CommandManager.InvalidateRequerySuggested();
+    }
+}
+
+/// <summary>
+/// Read-only overview of a game-mode recording (thousands of events aren't edited one by one),
+/// plus the "start from the recorded cursor position" option.
+/// </summary>
+public sealed class InputSequenceStepViewModel : StepViewModel
+{
+    private readonly InputSequenceStep _step;
+    private readonly InputSequenceSummary _summary;
+
+    public InputSequenceStepViewModel(InputSequenceStep step) : base(step)
+    {
+        _step = step;
+        _summary = StepDescriber.Summarize(step);
+    }
+
+    public string DurationText => $"{_summary.DurationMs / 1000.0:0.00} s";
+
+    public string EventCountText => $"{_summary.EventCount:N0}";
+
+    public string MouseText => $"{_summary.MouseMoves:N0} moves (total {_summary.TotalAbsDx:N0} horizontal, {_summary.TotalAbsDy:N0} vertical counts)";
+
+    public string KeysText => _summary.KeyPresses == 0
+        ? "None"
+        : $"{_summary.KeyPresses:N0} presses: {string.Join(", ", _summary.KeysUsed)}{(_summary.KeysUsed.Count >= 12 ? ", …" : "")}";
+
+    public string ButtonsText => $"{_summary.ButtonPresses:N0} button presses, {_summary.WheelEvents:N0} wheel events";
+
+    public bool MoveCursorToStart
+    {
+        get => _step.MoveCursorToStart;
+        set { if (_step.MoveCursorToStart == value) return; _step.MoveCursorToStart = value; NotifyChanged(); }
+    }
+
+    public int StartX
+    {
+        get => _step.StartX;
+        set { if (_step.StartX == value) return; _step.StartX = value; NotifyChanged(); }
+    }
+
+    public int StartY
+    {
+        get => _step.StartY;
+        set { if (_step.StartY == value) return; _step.StartY = value; NotifyChanged(); }
     }
 }

@@ -9,6 +9,11 @@ internal sealed class FakeInput : IInputSimulator
 {
     public List<string> Calls { get; } = new();
 
+    /// <summary>When set, the clock time of every call is recorded in <see cref="Times"/> (same order as Calls).</summary>
+    public IPlaybackClock? Clock { get; set; }
+
+    public List<TimeSpan> Times { get; } = new();
+
     /// <summary>Lets a test react to a call (e.g. stop playback). Runs on the playback thread.</summary>
     public Action<string>? OnCall { get; set; }
 
@@ -16,6 +21,9 @@ internal sealed class FakeInput : IInputSimulator
     public string? ThrowWhen { get; set; }
 
     public void MoveMouse(int x, int y) => Add($"move {x},{y}");
+    public void MoveMouseRelative(int dx, int dy) => Add($"rel {dx},{dy}");
+    public void KeyWithScanCode(int virtualKey, int scanCode, bool extended, bool down) =>
+        Add($"key {virtualKey} {(down ? "down" : "up")} sc{scanCode}{(extended ? "e" : "")}");
     public void MouseButton(MacroMouseButton button, bool down) => Add($"mouse {button} {(down ? "down" : "up")}");
     public void Scroll(int delta, bool horizontal) => Add($"scroll {delta}{(horizontal ? " h" : "")}");
     public void Key(int virtualKey, bool down) => Add($"key {virtualKey} {(down ? "down" : "up")}");
@@ -23,7 +31,12 @@ internal sealed class FakeInput : IInputSimulator
 
     private void Add(string call)
     {
-        lock (Calls) Calls.Add(call);
+        lock (Calls)
+        {
+            Calls.Add(call);
+            if (Clock is not null) Times.Add(Clock.Elapsed);
+        }
+
         if (ThrowOn is not null && call == ThrowWhen) throw ThrowOn;
         OnCall?.Invoke(call);
     }
@@ -37,6 +50,9 @@ internal sealed class FakeClock : IPlaybackClock
     public TimeSpan Elapsed => TimeSpan.FromTicks(Interlocked.Read(ref _ticks));
 
     public TimeSpan TotalDelayed => Elapsed;
+
+    /// <summary>Moves time forward without a delay (e.g. to simulate time passing while paused).</summary>
+    public void Advance(TimeSpan by) => Interlocked.Add(ref _ticks, by.Ticks);
 
     public Task DelayAsync(TimeSpan delay, CancellationToken cancellationToken)
     {

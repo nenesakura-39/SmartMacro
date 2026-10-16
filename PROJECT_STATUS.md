@@ -1,6 +1,6 @@
 # SmartMacro – Project Status / Handoff
 
-_Last updated: 2026-10-16 (v1.0.0). Owner & developer: Riku_
+_Last updated: 2026-10-16 (v1.0.0 + game-input fidelity work). Owner & developer: Riku_
 
 ## Done
 **Phase 1: Foundation**
@@ -75,9 +75,25 @@ _Last updated: 2026-10-16 (v1.0.0). Owner & developer: Riku_
 - **Release:** `tools\publish.cmd` runs the tests, then publishes a self-contained single-file win-x64 build. It zips it to `release\SmartMacro-1.0.0-win-x64.zip` with `README.md` (user guide).
 - **Cleanup:** removed duplicate interop (ScreenInfoProvider now uses NativeMethods). The repository and import share one file parser.
 
+**Phase 6: Game input fidelity** (written, NOT built or tested yet — no .NET SDK in the AI's environment)
+- Diagnosis (confirmed in code):
+  1. Desktop recording stores absolute cursor positions and plays them with `SetCursorPos`. That never produces raw mouse movement, which is what first-person games (cursor locked) read for camera rotation.
+  2. `RecordingConverter` turned any key/button down+up within 500 ms into an instant Press/Click: the hold time was dropped (a 120 ms W tap became ~0 ms). Mouse moves during that tap were emitted after the release with no delay (wrong order, squashed timing).
+  3. Gaps shorter than `MinDelayMs` (15 ms) were thrown away, not carried over, so recordings got shorter. 30 ms move thinning is fine for absolute positions but would lose movement if applied to relative deltas.
+  4. Every Delay step measured its own time, so timer overshoot (~1 ms per wait) added up over long macros. Held keys stayed down while paused.
+- Fixes:
+  - `KeyPressStep.HoldMs` / `MouseClickStep.HoldMs` (0 = old instant behavior). The converter fills them in (`RecordingOptions.KeepHoldTime`, Settings checkbox, on by default). Taps only collapse into one step when nothing else is recorded in between. Short gaps are carried into the next Delay. The last thinned-out cursor position is kept.
+  - `PlaybackEngine` schedules delays, holds and recorded events on one deadline timeline (no drift; skips ahead if >250 ms behind instead of bursting). Pause releases held keys/buttons and presses them again on resume (`ReleaseHeldInputWhilePaused`); the timeline shifts by the paused time.
+  - New **game recording mode** (Settings → Recording mode): `RawInputRecorder` (Raw Input / WM_INPUT on its own thread with a message-only window, RIDEV_INPUTSINK) records relative mouse counts, buttons, wheel, and keys with scan codes, with µs timestamps. `GameRecordingConverter` keeps every sample (no thinning), trims the stop shortcut, drops early releases/auto-repeat, releases anything still held.
+  - New step `InputSequenceStep` ("inputSequence", editor: read-only summary + optional "move cursor to start"). Events stored as a compact string (`InputEventCodec`, "v1 dt,code,args …"); damaged data is refused on load and by the validator.
+  - Playback: `IInputSimulator.MoveMouseRelative` (SendInput MOUSEEVENTF_MOVE) and `KeyWithScanCode` (recorded scan code + extended flag, so right Shift stays right Shift). `PrecisePlaybackClock` uses a high-resolution waitable timer for sub-ms waits.
+  - File format: `MacroDocument.CurrentSchemaVersion = 2`. A macro is written as version 2 only if it uses hold times or recorded-input steps; everything else is still written as version 1. Version 1 files load unchanged (new fields default to 0/off).
+- Not verified: whether Roblox (or any specific game) accepts SendInput relative mouse movement and keys. Unit tests only prove what SmartMacro sends and when.
+
 ## Architecture
 - `SmartMacro.Core` (net10.0, no WPF): models, validation, storage, logging. All unit tested.
 - `SmartMacro` (net10.0-windows, WPF, MVVM): `Mvvm/`, `ViewModels/`, `Views/`, `Themes/`, `Services/`, `Converters/`.
+- Recording: `Core/Recording/RecordingConverter` (desktop) and `Core/Recording/GameRecordingConverter` + `IRelativeInputRecorder` (game). Model: `Core/Models/InputSequence.cs` (InputEvent, codec).
 - `SmartMacro.Tests` (xUnit): 57 tests verified, plus about 35 new Phase 3 tests (engine, converter, validation) not yet run.
 - OCR: `Core/Ocr` (ScreenRect, IOcrService, OcrTextMatcher) and `Services/Ocr` (WindowsOcrService + ScreenCapture, FindTextTools + RegionPickerWindow). The app's TFM is now `net10.0-windows10.0.19041.0`, which is needed for the WinRT projections; Core and Tests stay on plain `net10.0`.
 - Windows-only code is in `Services/Input` (NativeMethods, Win32InputSimulator, LowLevelInputHook / WindowsInputRecorder / EmergencyStopWatcher), `Services/HotkeyService.cs` and `Services/RunModeHost.cs` (banner + minimize).
@@ -94,7 +110,8 @@ _Last updated: 2026-10-16 (v1.0.0). Owner & developer: Riku_
 ## Known issues / limits
 - Windows doesn't let normal apps send input to, or record input from, apps running as administrator (UIPI). Nothing works on the lock screen or UAC prompts. Some games with anti-cheat ignore simulated input. SmartMacro doesn't try to bypass any of these.
 - Coordinates are physical pixels. The app is per-monitor DPI aware. Recordings made with a different monitor layout may click in the wrong place.
-- Pause takes effect between steps and inside delays. Keys a macro is holding stay held while paused.
+- Pause takes effect between steps and inside delays (within ~50 ms). Held keys/buttons are released while paused and pressed again on resume.
+- Game mode: games may still play a recording differently (frame rate, physics, network, server corrections, anti-cheat ignoring injected input). Mouse buttons 4/5 aren't recorded. Raw input from apps running as administrator isn't visible. "Enhance pointer precision" affects the visible cursor for injected relative moves the same way it does for a real mouse; games that use raw input aren't affected.
 - The Speed field updates when you leave the box (Tab or click elsewhere), not on every keystroke.
 - After the first click that closes a dropdown, the next click is ignored. This is normal WPF popup behavior.
 - Message boxes use the standard light Windows style.
@@ -105,5 +122,7 @@ _Last updated: 2026-10-16 (v1.0.0). Owner & developer: Riku_
 - The Find text timeout counts paused time.
 
 ## Next task
-- Owner: build, run the full regression checklist, and run `tools\publish.cmd`.
+- Owner: run `tools\verify.cmd` and send `artifacts\build.log` / `artifacts\test.log` (Phase 6 has never been compiled).
+- Then the manual checklist: desktop regression (Notepad record/play, clicks, scroll, typing, OCR, old saved macros), then game mode (recording fidelity → input delivery → actual game movement).
+- Then `tools\publish.cmd`.
 - Possible future ideas: loops/conditions in workflows (if text found then…), image matching, macro scheduling, an installer, a signed build.

@@ -14,6 +14,7 @@ public static class StepDescriber
         StepKind.KeyPress => "Key press",
         StepKind.TypeText => "Type text",
         StepKind.FindText => "Find text (OCR)",
+        StepKind.InputSequence => "Recorded input (game mode)",
         _ => kind.ToString(),
     };
 
@@ -23,13 +24,57 @@ public static class StepDescriber
             ? $"Wait {d.DurationMs / 1000.0:0.###} s"
             : $"Wait {d.DurationMs} ms",
         MouseMoveStep m => $"Move to ({m.X}, {m.Y})",
-        MouseClickStep c => $"{ClickVerb(c.Action)} {c.Button.ToString().ToLowerInvariant()} button {(c.UseLastFoundText ? "at found text" : Where(c.UseCurrentPosition, c.X, c.Y))}",
+        MouseClickStep c => $"{ClickVerb(c.Action)} {c.Button.ToString().ToLowerInvariant()} button {(c.UseLastFoundText ? "at found text" : Where(c.UseCurrentPosition, c.X, c.Y))}{Hold(c.Action == MouseClickAction.Click, c.HoldMs)}",
         MouseScrollStep s => $"Scroll {ScrollDirection(s)} {Notches(s.Delta)} {Where(s.UseCurrentPosition, s.X, s.Y)}",
-        KeyPressStep k => $"{KeyVerb(k.Action)} {KeyCombo(k)}",
+        KeyPressStep k => $"{KeyVerb(k.Action)} {KeyCombo(k)}{Hold(k.Action == KeyAction.Press, k.HoldMs)}",
         TypeTextStep t => $"Type \"{Preview(t.Text)}\"",
         FindTextStep f => DescribeFindText(f),
+        InputSequenceStep q => DescribeSequence(q),
         _ => step.GetType().Name,
     };
+
+    /// <summary>Counts for the recorded-input editor and the step list.</summary>
+    public static InputSequenceSummary Summarize(InputSequenceStep step)
+    {
+        var events = step.Events ?? new List<InputEvent>();
+        int moves = 0, keys = 0, buttons = 0, wheels = 0;
+        long dx = 0, dy = 0;
+        var keyNames = new SortedSet<string>(StringComparer.Ordinal);
+        foreach (var e in events)
+        {
+            switch (e.Kind)
+            {
+                case InputEventKind.MouseMove:
+                    moves++;
+                    dx += Math.Abs((long)e.Dx);
+                    dy += Math.Abs((long)e.Dy);
+                    break;
+                case InputEventKind.KeyDown:
+                    keys++;
+                    if (keyNames.Count < 12) keyNames.Add(VirtualKeys.GetName(e.VirtualKey));
+                    break;
+                case InputEventKind.MouseDown:
+                    buttons++;
+                    break;
+                case InputEventKind.Wheel:
+                case InputEventKind.HorizontalWheel:
+                    wheels++;
+                    break;
+            }
+        }
+
+        var duration = events.Count == 0 ? 0 : Math.Max(0, events[^1].TimeUs) / 1000.0;
+        return new InputSequenceSummary(events.Count, duration, moves, keys, buttons, wheels, dx, dy, keyNames.ToList());
+    }
+
+    private static string DescribeSequence(InputSequenceStep step)
+    {
+        var s = Summarize(step);
+        var seconds = s.DurationMs / 1000.0;
+        return $"Play recorded input: {seconds:0.0} s, {s.EventCount:N0} events ({s.MouseMoves:N0} mouse moves, {s.KeyPresses:N0} key presses)";
+    }
+
+    private static string Hold(bool applies, int holdMs) => applies && holdMs > 0 ? $" (hold {holdMs} ms)" : "";
 
     public static string KeyCombo(KeyPressStep step)
     {
@@ -96,3 +141,15 @@ public static class StepDescriber
         return oneLine.Length <= 40 ? oneLine : oneLine[..40] + "…";
     }
 }
+
+/// <summary>Counts shown for a recorded-input step. DurationMs is the time of the last event.</summary>
+public sealed record InputSequenceSummary(
+    int EventCount,
+    double DurationMs,
+    int MouseMoves,
+    int KeyPresses,
+    int ButtonPresses,
+    int WheelEvents,
+    long TotalAbsDx,
+    long TotalAbsDy,
+    IReadOnlyList<string> KeysUsed);
