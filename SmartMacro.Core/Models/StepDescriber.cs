@@ -14,7 +14,7 @@ public static class StepDescriber
         StepKind.KeyPress => "Key press",
         StepKind.TypeText => "Type text",
         StepKind.FindText => "Find text (OCR)",
-        StepKind.InputSequence => "Recorded input (game mode)",
+        StepKind.InputSequence => "Recorded input",
         _ => kind.ToString(),
     };
 
@@ -37,7 +37,7 @@ public static class StepDescriber
     public static InputSequenceSummary Summarize(InputSequenceStep step)
     {
         var events = step.Events ?? new List<InputEvent>();
-        int moves = 0, keys = 0, buttons = 0, wheels = 0;
+        int moves = 0, keys = 0, buttons = 0, wheels = 0, positioned = 0;
         long dx = 0, dy = 0;
         var keyNames = new SortedSet<string>(StringComparer.Ordinal);
         foreach (var e in events)
@@ -46,6 +46,7 @@ public static class StepDescriber
             {
                 case InputEventKind.MouseMove:
                     moves++;
+                    if (e.HasPosition) positioned++;
                     dx += Math.Abs((long)e.Dx);
                     dy += Math.Abs((long)e.Dy);
                     break;
@@ -64,14 +65,36 @@ public static class StepDescriber
         }
 
         var duration = events.Count == 0 ? 0 : Math.Max(0, events[^1].TimeUs) / 1000.0;
-        return new InputSequenceSummary(events.Count, duration, moves, keys, buttons, wheels, dx, dy, keyNames.ToList());
+        var cursorParts = 0;
+        var relativeParts = 0;
+        if (step.MouseSegments is { } segments)
+        {
+            foreach (var segment in segments)
+            {
+                if (segment is null) continue;
+                if (segment.Effective == MouseMovementMode.Relative) relativeParts++;
+                else cursorParts++;
+            }
+        }
+
+        return new InputSequenceSummary(events.Count, duration, moves, keys, buttons, wheels, dx, dy, keyNames.ToList(),
+            positioned, cursorParts, relativeParts);
     }
 
     private static string DescribeSequence(InputSequenceStep step)
     {
         var s = Summarize(step);
         var seconds = s.DurationMs / 1000.0;
-        return $"Play recorded input: {seconds:0.0} s, {s.EventCount:N0} events ({s.MouseMoves:N0} mouse moves, {s.KeyPresses:N0} key presses)";
+        if (!step.HasMouseSegments)
+            return $"Play recorded input: {seconds:0.0} s, {s.EventCount:N0} events ({s.MouseMoves:N0} mouse moves, {s.KeyPresses:N0} key presses)";
+
+        var mouse = (s.CursorParts, s.RelativeParts) switch
+        {
+            (_, 0) => "cursor positions",
+            (0, _) => "camera / relative movement",
+            _ => $"{s.CursorParts} cursor part{(s.CursorParts == 1 ? "" : "s")} + {s.RelativeParts} camera part{(s.RelativeParts == 1 ? "" : "s")}",
+        };
+        return $"Play recorded input: {seconds:0.0} s, {mouse}, {s.KeyPresses:N0} key presses, {s.ButtonPresses:N0} clicks";
     }
 
     private static string Hold(bool applies, int holdMs) => applies && holdMs > 0 ? $" (hold {holdMs} ms)" : "";
@@ -142,7 +165,11 @@ public static class StepDescriber
     }
 }
 
-/// <summary>Counts shown for a recorded-input step. DurationMs is the time of the last event.</summary>
+/// <summary>
+/// Counts shown for a recorded-input step. DurationMs is the time of the last event.
+/// MovesWithPosition: mouse moves that also have a cursor position (smart recordings).
+/// CursorParts / RelativeParts: how many mouse segments play cursor positions / relative movement (0 / 0 for game mode).
+/// </summary>
 public sealed record InputSequenceSummary(
     int EventCount,
     double DurationMs,
@@ -152,4 +179,7 @@ public sealed record InputSequenceSummary(
     int WheelEvents,
     long TotalAbsDx,
     long TotalAbsDy,
-    IReadOnlyList<string> KeysUsed);
+    IReadOnlyList<string> KeysUsed,
+    int MovesWithPosition = 0,
+    int CursorParts = 0,
+    int RelativeParts = 0);

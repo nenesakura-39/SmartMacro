@@ -1,6 +1,6 @@
 # SmartMacro – Project Status / Handoff
 
-_Last updated: 2026-10-16 (v1.0.0 + game-input fidelity work). Owner & developer: Riku_
+_Last updated: 2026-10-16 (v1.0.0 + game-input fidelity work + Stage 1 smart recording). Owner & developer: Riku_
 
 ## Done
 **Phase 1: Foundation**
@@ -106,10 +106,59 @@ _Last updated: 2026-10-16 (v1.0.0 + game-input fidelity work). Owner & developer
 - Right-button camera turning: a Desktop recording can't reproduce it (the game recentres the locked cursor, so absolute positions barely change). Use Game mode, which records relative movement.
 - Not verified in Roblox yet.
 
+**Stage 1: Unified smart recording** (2026-10-16; written, NOT built or tested yet — the AI's environment had no .NET SDK)
+- Goal: one Record button for apps and games (no Desktop/Game choice first). Desktop / Game modes stay as advanced fallbacks.
+- Audit before the change: the owner's last run (after the Roblox UI click fix) was build 0 warnings / 0 errors, 225/225 tests.
+  Desktop mode = low-level hooks (ms timestamps, absolute positions) → `RecordingConverter` → editable steps. Game mode =
+  Raw Input (µs Stopwatch timestamps, relative counts, scan codes) → `GameRecordingConverter` → one `InputSequenceStep`.
+  The two used different clocks and saw the same physical events, so they were NOT merged; one source is used instead.
+- Recorder: `RawInputRecorder(captureCursor: true)`, wrapped as `SmartInputRecorder` (`ISmartInputRecorder` in Core).
+  One Raw Input session, one clock. Each mouse packet also stores `GetCursorPos` (physical pixels) and cursor state flags
+  (`CursorFlags`: Hidden via GetCursorInfo, ConfinedToSpot via GetClipCursor ≤ 8×8 px, AtEdge when the cursor is stuck on a
+  monitor/clip edge in the direction of movement). Cursor state is re-read at most every 8 ms or on button changes.
+  Clicks on SmartMacro's own windows are dropped. Game mode records exactly as before (flag off).
+- Model: `InputEvent` gained optional `HasPosition, X, Y` (mouse events only). Event text format `u1` = v1 codes plus
+  optional `,x,y` on m/bd/bu/w/hw. Lists without positions are still written as `v1` (game recordings byte-identical).
+  `InputSequenceStep.MouseSegments` (null for game mode): sorted `MouseSegment { StartUs, Detected, Evidence, Choice }`,
+  `Effective` = Choice or Detected. Modes: `CursorPosition` / `Relative`.
+- Detection: `Core/Recording/MouseContextClassifier`. Per mouse sample: hidden/confined → relative; otherwise compare the
+  cursor's bounding-box size with the net relative movement in the 150 ms before and after (locked: ≤ 3 px + 12 %, free:
+  ≥ 25 %); if they disagree, the sample's own movement decides (mouse moved, cursor didn't → relative). Unclear samples
+  inherit. Parts < 60 ms are merged. Presses/wheel with a visible cursor right after camera movement (or before the first
+  movement) are put in a cursor part (releases are not, so a camera drag's release never moves the cursor). A held
+  button is NOT treated as camera movement on its own.
+- Conversion: `Core/Recording/SmartRecordingConverter`. Clean-up like game mode (trim stop shortcut, drop early
+  releases / auto-repeat / duplicate presses / empty moves, release anything held at the end). The timeline is cut only
+  where nothing is held. Cursor-only pieces → editable steps through the existing `RecordingConverter` (generic
+  Shift/Ctrl/Alt mapped to left/right VKs from the scan code). Pieces with camera movement → one `InputSequenceStep` with
+  every event, both mouse representations and its mouse segments. Short (< 300 ms) cursor-only movement next to a camera
+  part stays inside that step. Delay steps between pieces are computed from the played timeline (no rounding drift).
+  Conversion runs on a background thread. A pure desktop recording gives the same kind of steps as Desktop mode.
+- Playback (`PlaybackEngine.PlaySequenceAsync`): no segments → relative only (old behaviour). With segments, each event
+  uses its segment: cursor parts call `MoveMouse(x, y)` (skipping repeats; always before a press/wheel; before a release
+  only if needed), relative parts call `MoveMouseRelative`. Exactly one representation per event, never both.
+  The position cache is cleared after a pause/stall. Stop / Esc / failure release everything as before.
+- Editor: "Recorded input" step shows Mouse playback parts (time range, detected mode + reason, drop-down
+  Automatic / Cursor position / Relative, "Plays as"), plus All: cursor / relative / automatic buttons. Game-mode steps
+  keep the old view and "move cursor to start" option.
+- Files: `MacroDocument.CurrentSchemaVersion = 3`. Written as 3 only when a step has mouse segments or positions; game
+  recordings stay 2, plain macros stay 1. Damaged u1 text, out-of-range positions (> 100,000 px), unsorted / unknown
+  segments are refused or reported. Older SmartMacro builds refuse v3 files with the "newer version" message.
+- Settings: `RecordingMode.Smart` (new default). `AppSettings.CurrentSchemaVersion = 2`; version-1 settings files are
+  switched to Smart once. Settings page lists Smart (recommended), Advanced – Desktop only, Advanced – Game only, with help
+  text; "record movement" / "keep hold time" apply to editable steps of Smart and Desktop.
+- Tests: `SmartMacro.Tests/SmartRecordingTests.cs` (24 tests, 29 cases: desktop-only → editable steps, edge pushing, hide-while-typing,
+  hidden-cursor camera, right-drag camera with hold time and mode switches, user override, W held across camera
+  movement with scan code, click → camera → click timeline, equal timestamps, stop shortcut trim, early releases /
+  auto-repeat / duplicates, release at end, L/R modifiers, stop releases held button, legacy relative playback, codec
+  round trip + damaged text, schema 3/2, newer-version refusal, segment validation, settings migration).
+- Docs: `docs/STAGE1_MANUAL_TESTS.md` (beginner checklist: Notepad + games), `docs/ROADMAP_STAGES_2_4.md` (plan only).
+- Not verified: build, test run, any real app or game. Detection thresholds are first guesses and need real-world tuning.
+
 ## Architecture
 - `SmartMacro.Core` (net10.0, no WPF): models, validation, storage, logging. All unit tested.
 - `SmartMacro` (net10.0-windows, WPF, MVVM): `Mvvm/`, `ViewModels/`, `Views/`, `Themes/`, `Services/`, `Converters/`.
-- Recording: `Core/Recording/RecordingConverter` (desktop) and `Core/Recording/GameRecordingConverter` + `IRelativeInputRecorder` (game). Model: `Core/Models/InputSequence.cs` (InputEvent, codec).
+- Recording: `Core/Recording/RecordingConverter` (desktop), `Core/Recording/GameRecordingConverter` + `IRelativeInputRecorder` (game), and `Core/Recording/SmartRecordingConverter` + `MouseContextClassifier` + `ISmartInputRecorder` (smart, the default). Model: `Core/Models/InputSequence.cs` (InputEvent, codec v1/u1) and `Core/Models/MouseSegment.cs`.
 - `SmartMacro.Tests` (xUnit): 57 tests verified, plus about 35 new Phase 3 tests (engine, converter, validation) not yet run.
 - OCR: `Core/Ocr` (ScreenRect, IOcrService, OcrTextMatcher) and `Services/Ocr` (WindowsOcrService + ScreenCapture, FindTextTools + RegionPickerWindow). The app's TFM is now `net10.0-windows10.0.19041.0`, which is needed for the WinRT projections; Core and Tests stay on plain `net10.0`.
 - Windows-only code is in `Services/Input` (NativeMethods, Win32InputSimulator, LowLevelInputHook / WindowsInputRecorder / EmergencyStopWatcher), `Services/HotkeyService.cs` and `Services/RunModeHost.cs` (banner + minimize).
@@ -138,7 +187,10 @@ _Last updated: 2026-10-16 (v1.0.0 + game-input fidelity work). Owner & developer
 - The Find text timeout counts paused time.
 
 ## Next task
-- Owner: run `tools\verify.cmd` again (Phase 6 audit changes are not built yet) and send `artifacts\build.log` / `artifacts\test.log`.
-- Then the manual checklist: desktop regression (Notepad record/play, clicks, scroll, typing, OCR, old saved macros), then game mode (recording fidelity → input delivery → actual game movement).
+- Owner: run `tools\verify.cmd` (Stage 1 + the earlier audit / Roblox click fixes are not built yet) and send
+  `artifacts\build.log` / `artifacts\test.log` if anything fails.
+- Then `docs/STAGE1_MANUAL_TESTS.md`: section A (Notepad + old macros), B (editor), C (games where allowed). Note the
+  "Smart recording: …" log line for each test.
+- Tune `MouseContextOptions` thresholds from real results if parts are detected wrongly.
+- Only after Stage 1 passes: Stage 2 (visual detection) per `docs/ROADMAP_STAGES_2_4.md`.
 - Then `tools\publish.cmd`.
-- Possible future ideas: loops/conditions in workflows (if text found then…), image matching, macro scheduling, an installer, a signed build.

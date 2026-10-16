@@ -19,12 +19,27 @@ namespace SmartMacro.Services.Input;
 /// app (the game) is in front. Sessions never share buffers, window handles or event lists, so a session that
 /// is slow to shut down can't corrupt the next recording.
 ///
+/// With captureCursor (smart recording, see <see cref="SmartInputRecorder"/>) each mouse event also gets the cursor
+/// position and state from GetCursorPos / GetCursorInfo / GetClipCursor, read in the same handler.
+///
 /// Limits: input to apps running as administrator may not be visible to a normal app (Windows UIPI), extra
 /// mouse buttons (4/5) aren't recorded, and timestamps are "when SmartMacro processed the message", which is
 /// normally well under a millisecond after the device reported it but can lag if the PC is very busy.
 /// </summary>
 public sealed class RawInputRecorder : IRelativeInputRecorder, IDisposable
 {
+    private readonly bool _captureCursor;
+
+    /// <param name="captureCursor">
+    /// Smart recording: also store the cursor position (and whether it's hidden / confined) with every mouse event,
+    /// taken in the same WM_INPUT handler on the same clock, so the two representations can never disagree about
+    /// order or timing. Off for game mode, which records exactly as before.
+    /// </param>
+    public RawInputRecorder(bool captureCursor = false)
+    {
+        _captureCursor = captureCursor;
+    }
+
     private static readonly TimeSpan StartTimeout = TimeSpan.FromSeconds(5);
     private static readonly TimeSpan StopTimeout = TimeSpan.FromSeconds(2);
 
@@ -59,23 +74,26 @@ public sealed class RawInputRecorder : IRelativeInputRecorder, IDisposable
             StartY = cursor.Y;
         }
 
-        var session = new Session();
+        var session = new Session(_captureCursor);
         _lastSession = session;
         session.Start(); // throws with a readable message if Windows refuses
         _session = session;
     }
 
-    public IReadOnlyList<InputEvent> Stop()
+    public IReadOnlyList<InputEvent> Stop() => StopCaptured().Select(c => c.Input).ToList();
+
+    /// <summary>Stops recording and returns every event with the cursor state captured alongside it.</summary>
+    public IReadOnlyList<CapturedInputEvent> StopCaptured()
     {
         var session = _session;
-        if (session is null) return _lastSession?.Snapshot() ?? new List<InputEvent>();
+        if (session is null) return _lastSession?.Snapshot() ?? new List<CapturedInputEvent>();
 
         _session = null;
         session.Stop();
         return session.Snapshot();
     }
 
-    public void Dispose() => Stop();
+    public void Dispose() => StopCaptured();
 
     private static bool TryRegister(Session session, IntPtr hwnd)
     {
@@ -117,7 +135,8 @@ public sealed class RawInputRecorder : IRelativeInputRecorder, IDisposable
         private static readonly uint OwnTag = unchecked((uint)SmartMacroInputTag.ToInt64());
 
         private readonly object _lock = new();
-        private readonly List<InputEvent> _events = new();
+        private readonly List<CapturedInputEvent> _events = new();
+        private readonly bool _captureCursor;
         private readonly ManualResetEventSlim _ready = new(false); // not disposed: a late thread may still signal it
 
         private Thread? _thread;
@@ -132,6 +151,22 @@ public sealed class RawInputRecorder : IRelativeInputRecorder, IDisposable
         private int _lastAbsX;
         private int _lastAbsY;
 
+        // Smart recording: cursor state. Hidden / confined are re-read at most every CursorStateIntervalUs
+        // (and on every button change), so the WM_INPUT handler stays fast at 1000+ Hz.
+        private const long CursorStateIntervalUs = 8_000;
+        private long _cursorStateUs = long.MinValue / 2; // "long ago" without overflowing the subtraction
+        private bool _cursorHidden;
+        private bool _cursorConfined;
+        private RECT _clip;
+        private bool _hasLastCursor;
+        private int _lastCursorX;
+        private int _lastCursorY;
+
+        public Session(bool captureCursor)
+        {
+            _captureCursor = captureCursor;
+        }
+
         public int EventCount
         {
             get { lock (_lock) return _events.Count; }
@@ -141,7 +176,7 @@ public sealed class RawInputRecorder : IRelativeInputRecorder, IDisposable
 
         public Exception? LastHandlerError { get; private set; }
 
-        public List<InputEvent> Snapshot()
+        public List<CapturedInputEvent> Snapshot()
         {
             lock (_lock) return _events.ToList();
         }
@@ -355,10 +390,16 @@ public sealed class RawInputRecorder : IRelativeInputRecorder, IDisposable
                 dy = m.lLastY;
             }
 
+            var flags = m.usButtonFlags;
+            if (_captureCursor)
+            {
+                AddMouseWithCursor(timeUs, dx, dy, flags, m.usButtonData);
+                return;
+            }
+
             // One raw packet can carry movement and button changes; movement is stored first.
             if (dx != 0 || dy != 0) Add(InputEvent.Move(timeUs, dx, dy));
 
-            var flags = m.usButtonFlags;
             if ((flags & RI_MOUSE_LEFT_BUTTON_DOWN) != 0) Add(InputEvent.ButtonDown(timeUs, MacroMouseButton.Left));
             if ((flags & RI_MOUSE_LEFT_BUTTON_UP) != 0) Add(InputEvent.ButtonUp(timeUs, MacroMouseButton.Left));
             if ((flags & RI_MOUSE_RIGHT_BUTTON_DOWN) != 0) Add(InputEvent.ButtonDown(timeUs, MacroMouseButton.Right));
@@ -367,6 +408,100 @@ public sealed class RawInputRecorder : IRelativeInputRecorder, IDisposable
             if ((flags & RI_MOUSE_MIDDLE_BUTTON_UP) != 0) Add(InputEvent.ButtonUp(timeUs, MacroMouseButton.Middle));
             if ((flags & RI_MOUSE_WHEEL) != 0) Add(InputEvent.WheelEvent(timeUs, (short)m.usButtonData));
             if ((flags & RI_MOUSE_HWHEEL) != 0) Add(InputEvent.WheelEvent(timeUs, (short)m.usButtonData, horizontal: true));
+        }
+
+        /// <summary>
+        /// Smart recording: the same events as game mode, each also carrying where the cursor is right now and
+        /// whether it's hidden / confined / stuck on an edge. Movement first, then buttons, then wheel (same packet,
+        /// same timestamp, original order).
+        /// </summary>
+        private void AddMouseWithCursor(long timeUs, int dx, int dy, ushort buttonFlags, ushort buttonData)
+        {
+            if (!GetCursorPos(out var cursor))
+            {
+                // No cursor information (e.g. a secure desktop): keep the relative data only.
+                if (dx != 0 || dy != 0) Add(InputEvent.Move(timeUs, dx, dy));
+                return;
+            }
+
+            var buttonsChanged = (buttonFlags & ButtonMask) != 0;
+            if (buttonsChanged || timeUs - _cursorStateUs >= CursorStateIntervalUs) RefreshCursorState(timeUs);
+
+            var cursorFlags = CursorFlags.None;
+            if (_cursorHidden) cursorFlags |= CursorFlags.Hidden;
+            if (_cursorConfined) cursorFlags |= CursorFlags.ConfinedToSpot;
+            var stuck = _hasLastCursor && cursor.X == _lastCursorX && cursor.Y == _lastCursorY;
+            if (stuck && (dx != 0 || dy != 0) && IsAgainstEdge(cursor, dx, dy)) cursorFlags |= CursorFlags.AtEdge;
+            _hasLastCursor = true;
+            _lastCursorX = cursor.X;
+            _lastCursorY = cursor.Y;
+
+            int x = cursor.X, y = cursor.Y;
+            if (dx != 0 || dy != 0) Add(InputEvent.Move(timeUs, dx, dy, x, y), cursorFlags);
+
+            // Clicks on SmartMacro's own windows (e.g. its Stop button) aren't part of the recording. The matching
+            // release is then dropped by the converter as "released but never pressed".
+            if ((buttonFlags & ButtonDownMask) != 0 && IsOwnWindowAt(cursor)) buttonFlags &= unchecked((ushort)~ButtonDownMask);
+
+            if ((buttonFlags & RI_MOUSE_LEFT_BUTTON_DOWN) != 0) Add(InputEvent.ButtonDown(timeUs, MacroMouseButton.Left, x, y), cursorFlags);
+            if ((buttonFlags & RI_MOUSE_LEFT_BUTTON_UP) != 0) Add(InputEvent.ButtonUp(timeUs, MacroMouseButton.Left, x, y), cursorFlags);
+            if ((buttonFlags & RI_MOUSE_RIGHT_BUTTON_DOWN) != 0) Add(InputEvent.ButtonDown(timeUs, MacroMouseButton.Right, x, y), cursorFlags);
+            if ((buttonFlags & RI_MOUSE_RIGHT_BUTTON_UP) != 0) Add(InputEvent.ButtonUp(timeUs, MacroMouseButton.Right, x, y), cursorFlags);
+            if ((buttonFlags & RI_MOUSE_MIDDLE_BUTTON_DOWN) != 0) Add(InputEvent.ButtonDown(timeUs, MacroMouseButton.Middle, x, y), cursorFlags);
+            if ((buttonFlags & RI_MOUSE_MIDDLE_BUTTON_UP) != 0) Add(InputEvent.ButtonUp(timeUs, MacroMouseButton.Middle, x, y), cursorFlags);
+            if ((buttonFlags & RI_MOUSE_WHEEL) != 0) Add(InputEvent.WheelAt(timeUs, (short)buttonData, false, x, y), cursorFlags);
+            if ((buttonFlags & RI_MOUSE_HWHEEL) != 0) Add(InputEvent.WheelAt(timeUs, (short)buttonData, true, x, y), cursorFlags);
+        }
+
+        private const ushort ButtonDownMask = RI_MOUSE_LEFT_BUTTON_DOWN | RI_MOUSE_RIGHT_BUTTON_DOWN | RI_MOUSE_MIDDLE_BUTTON_DOWN;
+
+        private const ushort ButtonMask = ButtonDownMask | RI_MOUSE_LEFT_BUTTON_UP | RI_MOUSE_RIGHT_BUTTON_UP | RI_MOUSE_MIDDLE_BUTTON_UP;
+
+        /// <summary>Re-reads whether the cursor is hidden and how far it may move (ClipCursor).</summary>
+        private void RefreshCursorState(long timeUs)
+        {
+            _cursorStateUs = timeUs;
+
+            var info = new CURSORINFO { cbSize = Marshal.SizeOf<CURSORINFO>() };
+            _cursorHidden = GetCursorInfo(ref info) && ((info.flags & CURSOR_SHOWING) == 0 || info.hCursor == IntPtr.Zero);
+
+            if (GetClipCursor(out var clip))
+            {
+                _clip = clip;
+                // A clip area of a few pixels means the game has pinned the cursor in place.
+                _cursorConfined = clip.Right - clip.Left <= 8 && clip.Bottom - clip.Top <= 8;
+            }
+            else
+            {
+                _clip = default;
+                _cursorConfined = false;
+            }
+        }
+
+        /// <summary>
+        /// True when the cursor can't follow the movement because it's on the edge of its allowed area or monitor
+        /// in the direction the mouse moved (pushing against the screen edge isn't a "locked" cursor).
+        /// </summary>
+        private bool IsAgainstEdge(POINT p, int dx, int dy)
+        {
+            if (_clip.Right > _clip.Left && _clip.Bottom > _clip.Top && OnEdge(p, _clip, dx, dy)) return true;
+
+            var monitor = MonitorFromPoint(p, MONITOR_DEFAULTTONEAREST);
+            if (monitor == IntPtr.Zero) return false;
+            var info = new MONITORINFO { cbSize = Marshal.SizeOf<MONITORINFO>() };
+            return GetMonitorInfo(monitor, ref info) && OnEdge(p, info.rcMonitor, dx, dy);
+        }
+
+        private static bool OnEdge(POINT p, RECT r, int dx, int dy) =>
+            (dx < 0 && p.X <= r.Left) || (dx > 0 && p.X >= r.Right - 1) ||
+            (dy < 0 && p.Y <= r.Top) || (dy > 0 && p.Y >= r.Bottom - 1);
+
+        private static bool IsOwnWindowAt(POINT p)
+        {
+            var hwnd = WindowFromPoint(p);
+            if (hwnd == IntPtr.Zero) return false;
+            GetWindowThreadProcessId(hwnd, out var pid);
+            return pid == OwnProcessId;
         }
 
         private void AddKeyboard(long timeUs, RAWKEYBOARD k)
@@ -388,7 +523,7 @@ public sealed class RawInputRecorder : IRelativeInputRecorder, IDisposable
                 : InputEvent.KeyDown(timeUs, k.VKey, scan, extended));
         }
 
-        private void Add(InputEvent e)
+        private void Add(InputEvent e, CursorFlags cursor = CursorFlags.None)
         {
             lock (_lock)
             {
@@ -398,7 +533,7 @@ public sealed class RawInputRecorder : IRelativeInputRecorder, IDisposable
                     return;
                 }
 
-                _events.Add(e);
+                _events.Add(new CapturedInputEvent(e, cursor));
             }
         }
 
@@ -411,4 +546,34 @@ public sealed class RawInputRecorder : IRelativeInputRecorder, IDisposable
             return pid == OwnProcessId;
         }
     }
+}
+
+/// <summary>
+/// Smart recorder (the default Record button). One Raw Input session — one source, one clock — so a physical
+/// click or movement is captured exactly once: there's no second recorder whose events would have to be merged or
+/// de-duplicated. Every mouse event carries the relative counts AND the cursor position read in the same handler;
+/// see <see cref="SmartRecordingConverter"/> for how the recording is turned into steps.
+/// </summary>
+public sealed class SmartInputRecorder : ISmartInputRecorder, IDisposable
+{
+    private readonly RawInputRecorder _recorder = new(captureCursor: true);
+
+    public bool IsRecording => _recorder.IsRecording;
+
+    public int EventCount => _recorder.EventCount;
+
+    public bool LimitReached => _recorder.LimitReached;
+
+    public int StartX => _recorder.StartX;
+
+    public int StartY => _recorder.StartY;
+
+    /// <summary>Last error inside the WM_INPUT handler of the latest recording.</summary>
+    public Exception? LastHandlerError => _recorder.LastHandlerError;
+
+    public void Start() => _recorder.Start();
+
+    public IReadOnlyList<CapturedInputEvent> Stop() => _recorder.StopCaptured();
+
+    public void Dispose() => _recorder.Dispose();
 }

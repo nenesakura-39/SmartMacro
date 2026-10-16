@@ -33,21 +33,33 @@ Your macros and settings live in `%LOCALAPPDATA%\SmartMacro`, separate from the 
    - In the editor header, set how many times to repeat (0 = until stopped), the speed, and a wait between repeats.
 4. **Find text:** add a **Find text (OCR)** step. Type the text, optionally click **Pick area on screen**, press **Test now**, and choose what happens when it's found (for example, "Click it").
 
-## Recording games (game mode)
+## Recording (one Record button for apps and games)
 
-Normal recording saves cursor **positions** ("move to X/Y"). First-person games lock the cursor and turn the camera from the
-mouse's **relative movement**, so position-based playback can't turn the camera. For those, use game mode:
+You don't have to pick a mode first. SmartMacro records every mouse event **twice on one timeline**: where the
+cursor was (screen position) *and* how far the mouse moved (relative movement), plus the exact down/up time of every
+key and button. When you stop, it looks at what the cursor was doing:
 
-1. **Settings → Recording and playback → Recording mode → Game**, then **Save**.
-2. Stand in your starting spot and face your starting direction. Press the record shortcut, play, press it again.
-3. The recording becomes one **Recorded input (game mode)** step. It keeps every mouse movement sample and the exact
-   down/up time of every key and button, and plays them back on the original timeline.
-4. Before playing, put your character in the **same spot facing the same way**, then press Play.
+- **The cursor moved freely** (apps, menus, shop buttons) → normal editable steps: Click, Press, Move, Delay.
+- **A game hid or locked the cursor while the mouse moved** (turning the camera, holding the right button to look
+  around) → one **Recorded input** step that plays that part as relative movement, like a real mouse.
+  Keys and buttons held across the change (for example holding W while turning) stay in that step so they're never cut.
+
+Open a **Recorded input** step to see its parts. Each part says what was detected and why ("the cursor was hidden",
+"the mouse moved but the cursor stayed in place"…). If SmartMacro guessed wrong, change the part to
+**Cursor position** or **Relative movement** — no need to record again. Each part always plays the mouse one way only.
+
+Tips for games:
+
+1. Put your character in the **same spot facing the same way** before recording and before playing.
+2. Keep the game's mouse sensitivity, window size and frame rate the same as when you recorded.
+3. Use the record shortcut to stop (clicking SmartMacro's own Stop button isn't recorded, but clicking the taskbar is).
 
 Even with a perfect recording, a game can play it back a little differently: frame rate, physics, network lag and game
 updates all change results, and some games ignore simulated input. Small differences can add up over a long recording.
-Short recordings, a fixed starting point, and game sensitivity/frame-rate settings that match the recording help most.
-Game mode never tries to get around anti-cheat.
+SmartMacro never tries to get around anti-cheat.
+
+**Advanced:** Settings → Recording mode still offers the older **Desktop only** and **Game only** recorders as fallbacks.
+Macros made with them keep working exactly as before.
 
 ## Safety
 
@@ -75,8 +87,10 @@ Game mode never tries to get around anti-cheat.
 - Daily log files: `%LOCALAPPDATA%\SmartMacro\Logs`.
 - **Find text → Test now** saves `Logs\last-ocr-test.png`, which shows exactly what was captured.
 - **Clicks in a game's menus don't register:** check the log for lines starting with "Input check:". They say if the
-  game window wasn't active (the click only switched to it) or if the game had locked the mouse. Use Desktop mode for
-  menu clicks, and Game mode for camera movement (including holding the right mouse button to turn the camera).
+  game window wasn't active (the click only switched to it) or if the game had locked the mouse.
+- **The camera didn't turn (or the cursor jumped instead):** open the **Recorded input** step and check its parts. A
+  camera part must say "Plays as: relative movement"; a menu part should say "cursor position". Change the part if not.
+- After recording, the log says how many cursor and camera parts were found.
 
 ---
 

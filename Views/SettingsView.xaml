@@ -77,11 +77,11 @@
                                   SelectedValue="{Binding RecordingMode}" MaxWidth="520" HorizontalAlignment="Left"
                                   AutomationProperties.Name="Recording mode" />
                         <TextBlock Style="{StaticResource MutedText}" FontSize="12" Margin="0,6,0,0" TextWrapping="Wrap"
-                                   Text="Game mode records what the mouse and keyboard report (Raw Input): relative mouse movement for camera turning and the exact down/up time of every key, as one &quot;Recorded input&quot; step. Use it for first-person / camera movement. Games may still play back differently (frame rate, physics, network, anti-cheat), and some games ignore simulated input." />
-                        <CheckBox Content="Record mouse movement (turn off to record only clicks, scrolls and keys)" IsChecked="{Binding RecordMouseMovement}" Margin="0,12,0,0"
-                                  IsEnabled="{Binding IsDesktopRecording}" />
-                        <CheckBox Content="Keep how long each key / click was held (desktop mode)" IsChecked="{Binding KeepTapHoldTime}" Margin="0,10,0,0"
-                                  IsEnabled="{Binding IsDesktopRecording}" />
+                                   Text="{Binding RecordingModeHelp}" />
+                        <CheckBox Content="Record cursor movement in editable steps (turn off to record only clicks, scrolls and keys; camera movement is always kept)" IsChecked="{Binding RecordMouseMovement}" Margin="0,12,0,0"
+                                  IsEnabled="{Binding MakesEditableSteps}" />
+                        <CheckBox Content="Keep how long each key / click was held (editable steps)" IsChecked="{Binding KeepTapHoldTime}" Margin="0,10,0,0"
+                                  IsEnabled="{Binding MakesEditableSteps}" />
                     </StackPanel>
                 </Border>
 

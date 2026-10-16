@@ -479,14 +479,23 @@ public sealed class PlaybackEngine
     }
 
     /// <summary>
-    /// Plays a game-mode recording: every event is sent at (step start + its recorded time ÷ speed), in the
-    /// recorded order. Mouse movement is relative. Anything the step pressed and didn't release is released
-    /// at the end of the step.
+    /// Plays a recorded-input step: every event is sent at (step start + its recorded time ÷ speed), in the
+    /// recorded order. Anything the step pressed and didn't release is released at the end of the step.
+    /// Mouse movement:
+    /// - Game-mode recordings (no mouse segments): always relative, exactly as before.
+    /// - Smart recordings: each event uses its segment's mode. Cursor-position parts move the cursor to the
+    ///   recorded position (also right before a click / wheel there); relative parts send the recorded counts.
+    ///   Exactly one of the two is sent per event, never both. Movement without a recorded position is relative.
     /// </summary>
     private async Task PlaySequenceAsync(InputSequenceStep step, double speed, HeldInput held, CancellationToken token)
     {
         var events = step.Events;
         if (step.MoveCursorToStart) _input.MoveMouse(step.StartX, step.StartY);
+
+        var segments = step.HasMouseSegments ? step.MouseSegments! : null;
+        var segmentIndex = 0;
+        var mode = segments is null ? MouseMovementMode.Relative : segments[0].Effective;
+        (int X, int Y)? cursorSent = null; // last position a move put the cursor on (repeated moves are skipped)
 
         // If the previous steps left us far behind schedule, start this recording from "now".
         if (_clock.Elapsed - _timelineTarget > MaxTimelineLag) ResetTimeline();
@@ -504,23 +513,69 @@ public sealed class PlaybackEngine
                 // never accumulates across thousands of events.
                 var offset = TimeSpan.FromTicks((long)Math.Round(e.TimeUs * 10.0 / speed));
                 _timelineTarget = stepStart + offset + (_timelineShift - shiftAtStart);
+                var shiftBeforeWait = _timelineShift;
                 await WaitForTimelineAsync(token).ConfigureAwait(false);
+                if (_timelineShift != shiftBeforeWait) cursorSent = null; // paused or stalled: the cursor may have been moved
+
+                if (segments is not null)
+                {
+                    while (segmentIndex + 1 < segments.Count && segments[segmentIndex + 1].StartUs <= e.TimeUs)
+                    {
+                        segmentIndex++;
+                        mode = segments[segmentIndex].Effective;
+                    }
+                }
+
+                // In a cursor-position part, mouse events go to their recorded spot first.
+                var usePosition = mode == MouseMovementMode.CursorPosition && e.HasPosition && e.IsMouse;
 
                 switch (e.Kind)
                 {
                     case InputEventKind.MouseMove:
-                        if (e.Dx != 0 || e.Dy != 0) _input.MoveMouseRelative(e.Dx, e.Dy);
+                        if (usePosition)
+                        {
+                            if (cursorSent != (e.X, e.Y))
+                            {
+                                _input.MoveMouse(e.X, e.Y);
+                                cursorSent = (e.X, e.Y);
+                            }
+                        }
+                        else if (e.Dx != 0 || e.Dy != 0)
+                        {
+                            _input.MoveMouseRelative(e.Dx, e.Dy);
+                            cursorSent = null; // the cursor (if visible) has moved by an unknown number of pixels
+                        }
+
                         break;
                     case InputEventKind.MouseDown:
+                        if (usePosition)
+                        {
+                            _input.MoveMouse(e.X, e.Y);
+                            cursorSent = (e.X, e.Y);
+                        }
+
                         _input.MouseButton(e.Button, true);
                         held.Buttons.Add(e.Button);
                         break;
                     case InputEventKind.MouseUp:
+                        // Only if the cursor isn't already there (normally the last move put it there).
+                        if (usePosition && cursorSent != (e.X, e.Y))
+                        {
+                            _input.MoveMouse(e.X, e.Y);
+                            cursorSent = (e.X, e.Y);
+                        }
+
                         _input.MouseButton(e.Button, false);
                         held.Buttons.Remove(e.Button);
                         break;
                     case InputEventKind.Wheel:
                     case InputEventKind.HorizontalWheel:
+                        if (usePosition)
+                        {
+                            _input.MoveMouse(e.X, e.Y);
+                            cursorSent = (e.X, e.Y);
+                        }
+
                         _input.Scroll(e.Delta, e.Kind == InputEventKind.HorizontalWheel);
                         break;
                     case InputEventKind.KeyDown:

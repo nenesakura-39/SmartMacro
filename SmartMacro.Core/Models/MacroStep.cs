@@ -225,17 +225,31 @@ public sealed class FindTextStep : MacroStep
 }
 
 /// <summary>
-/// A recorded stream of raw input (game mode): relative mouse movement, key and button down/up and wheel
-/// events, each with its own timestamp. Played back on one timeline so the original order and spacing of
-/// simultaneous keyboard and mouse input is kept. Mouse movement is relative (like a real mouse), not
-/// "go to X/Y", which is what first-person games read for camera rotation.
-/// Created by recording in game mode; not added by hand from the toolbox.
+/// A recorded stream of input: mouse movement, key and button down/up and wheel events, each with its own
+/// timestamp. Played back on one timeline so the original order and spacing of simultaneous keyboard and
+/// mouse input is kept. Created by recording; not added by hand from the toolbox.
+/// Two flavours:
+/// - Game mode (no <see cref="MouseSegments"/>): mouse movement is always relative (like a real mouse),
+///   which is what first-person games read for camera rotation. This is the original format.
+/// - Smart recording (has <see cref="MouseSegments"/>): every mouse event also has the cursor position, and each
+///   segment says whether that part plays cursor positions (menus, buttons) or relative movement (camera).
 /// </summary>
 public sealed class InputSequenceStep : MacroStep
 {
     /// <summary>The recorded events, oldest first. Times are microseconds from the start of the step.</summary>
     [JsonConverter(typeof(InputEventListJsonConverter))]
     public List<InputEvent> Events { get; set; } = new();
+
+    /// <summary>
+    /// Smart recordings only: how each part of the timeline plays mouse movement. Null for game-mode recordings
+    /// (and old files), which always play relative movement exactly like before.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public List<MouseSegment>? MouseSegments { get; set; }
+
+    /// <summary>True for smart recordings (per-segment mouse playback).</summary>
+    [JsonIgnore]
+    public bool HasMouseSegments => MouseSegments is { Count: > 0 };
 
     /// <summary>Where the cursor was when recording started (physical pixels).</summary>
     public int StartX { get; set; }

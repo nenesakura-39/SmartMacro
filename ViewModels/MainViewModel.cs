@@ -33,6 +33,7 @@ public sealed record AutomationServices(
     PlaybackEngine Engine,
     IInputRecorder Recorder,
     IRelativeInputRecorder GameRecorder,
+    ISmartInputRecorder SmartRecorder,
     EmergencyStopWatcher Emergency,
     IRunModeHost Host,
     IOcrService Ocr,
@@ -89,7 +90,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         ShowLogsCommand = new RelayCommand(() => CurrentPage = AppPage.Logs);
 
         Automation = new AutomationViewModel(
-            automation.Engine, automation.Recorder, automation.GameRecorder, automation.Emergency, automation.Host, automation.Ocr, log, dialogs, dispatcher,
+            automation.Engine, automation.Recorder, automation.GameRecorder, automation.SmartRecorder, automation.Emergency, automation.Host, automation.Ocr, log, dialogs, dispatcher,
             new AutomationHooks
             {
                 GetPlayTarget = GetPlayTarget,

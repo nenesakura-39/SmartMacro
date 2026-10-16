@@ -5,10 +5,14 @@ using System.Text.Json.Serialization;
 
 namespace SmartMacro.Core.Models;
 
-/// <summary>What one recorded game-mode event does.</summary>
+/// <summary>What one recorded event does.</summary>
 public enum InputEventKind
 {
-    /// <summary>Relative mouse movement (Dx, Dy in mouse counts, like a real mouse reports).</summary>
+    /// <summary>
+    /// Mouse movement. Dx, Dy are relative mouse counts (like a real mouse reports). Smart recordings also store
+    /// where the cursor was right after the movement (HasPosition, X, Y in physical screen pixels), so playback can
+    /// use either representation — but only ever one of them per event (see <see cref="MouseSegment"/>).
+    /// </summary>
     MouseMove,
     MouseDown,
     MouseUp,
@@ -25,7 +29,10 @@ public enum InputEventKind
 /// <summary>
 /// One event inside an <see cref="InputSequenceStep"/>. TimeUs is microseconds from the start of the step.
 /// Only the fields that matter for the Kind are used:
-/// MouseMove → Dx/Dy, MouseDown/Up → Button, Wheel → Delta, KeyDown/Up → VirtualKey, ScanCode, Extended.
+/// MouseMove → Dx/Dy (+ optional X/Y), MouseDown/Up → Button (+ optional X/Y), Wheel → Delta (+ optional X/Y),
+/// KeyDown/Up → VirtualKey, ScanCode, Extended.
+/// HasPosition says whether X/Y were recorded. Game-mode recordings never have positions; smart recordings
+/// have them on every mouse event. A relative delta is never turned into a position or the other way round.
 /// </summary>
 public readonly record struct InputEvent(
     long TimeUs,
@@ -36,16 +43,33 @@ public readonly record struct InputEvent(
     int Delta = 0,
     int VirtualKey = 0,
     int ScanCode = 0,
-    bool Extended = false)
+    bool Extended = false,
+    bool HasPosition = false,
+    int X = 0,
+    int Y = 0)
 {
     public static InputEvent Move(long timeUs, int dx, int dy) => new(timeUs, InputEventKind.MouseMove, Dx: dx, Dy: dy);
 
+    /// <summary>Relative movement plus the cursor position (physical pixels) right after it.</summary>
+    public static InputEvent Move(long timeUs, int dx, int dy, int x, int y) =>
+        new(timeUs, InputEventKind.MouseMove, Dx: dx, Dy: dy, HasPosition: true, X: x, Y: y);
+
     public static InputEvent ButtonDown(long timeUs, MacroMouseButton button) => new(timeUs, InputEventKind.MouseDown, Button: button);
+
+    public static InputEvent ButtonDown(long timeUs, MacroMouseButton button, int x, int y) =>
+        new(timeUs, InputEventKind.MouseDown, Button: button, HasPosition: true, X: x, Y: y);
 
     public static InputEvent ButtonUp(long timeUs, MacroMouseButton button) => new(timeUs, InputEventKind.MouseUp, Button: button);
 
+    public static InputEvent ButtonUp(long timeUs, MacroMouseButton button, int x, int y) =>
+        new(timeUs, InputEventKind.MouseUp, Button: button, HasPosition: true, X: x, Y: y);
+
     public static InputEvent WheelEvent(long timeUs, int delta, bool horizontal = false) =>
         new(timeUs, horizontal ? InputEventKind.HorizontalWheel : InputEventKind.Wheel, Delta: delta);
+
+    /// <summary>Wheel event plus where the cursor was.</summary>
+    public static InputEvent WheelAt(long timeUs, int delta, bool horizontal, int x, int y) =>
+        new(timeUs, horizontal ? InputEventKind.HorizontalWheel : InputEventKind.Wheel, Delta: delta, HasPosition: true, X: x, Y: y);
 
     public static InputEvent KeyDown(long timeUs, int virtualKey, int scanCode = 0, bool extended = false) =>
         new(timeUs, InputEventKind.KeyDown, VirtualKey: virtualKey, ScanCode: scanCode, Extended: extended);
@@ -56,24 +80,48 @@ public readonly record struct InputEvent(
     public bool IsKey => Kind is InputEventKind.KeyDown or InputEventKind.KeyUp;
 
     public bool IsButton => Kind is InputEventKind.MouseDown or InputEventKind.MouseUp;
+
+    public bool IsWheel => Kind is InputEventKind.Wheel or InputEventKind.HorizontalWheel;
+
+    /// <summary>Mouse events can carry a cursor position; key events never do.</summary>
+    public bool IsMouse => Kind is InputEventKind.MouseMove or InputEventKind.MouseDown or InputEventKind.MouseUp
+        or InputEventKind.Wheel or InputEventKind.HorizontalWheel;
 }
 
 /// <summary>
 /// Compact text format for recorded events, so a few minutes of 1000 Hz mouse data stays a reasonable file size
-/// (one JSON object per event would be 5-10x bigger). Format:
-/// <c>v1 dt,code[,args] dt,code[,args] ...</c> where dt is microseconds since the previous event.
-/// Codes: m dx,dy | bd button | bu button | w delta | hw delta | kd vk,scan,ext | ku vk,scan,ext.
+/// (one JSON object per event would be 5-10x bigger). Two versions:
+/// <list type="bullet">
+/// <item><c>v1</c> (game mode, unchanged): <c>v1 dt,code[,args] ...</c> where dt is microseconds since the
+/// previous event. Codes: m dx,dy | bd button | bu button | w delta | hw delta | kd vk,scan,ext | ku vk,scan,ext.</item>
+/// <item><c>u1</c> (smart recording): the same codes, and mouse events may add the cursor position at the end:
+/// m dx,dy,x,y | bd button,x,y | bu button,x,y | w delta,x,y | hw delta,x,y.</item>
+/// </list>
+/// A list is written as v1 whenever no event has a position, so game-mode recordings are byte-for-byte unchanged.
 /// Only numbers and these codes are accepted, so a damaged or hand-edited file can't do anything unexpected.
 /// </summary>
 public static class InputEventCodec
 {
     public const string Version1 = "v1";
 
+    /// <summary>Unified (smart) recording format: like v1, plus optional cursor positions on mouse events.</summary>
+    public const string UnifiedVersion1 = "u1";
+
     public static string Encode(IReadOnlyList<InputEvent> events)
     {
         ArgumentNullException.ThrowIfNull(events);
-        var sb = new StringBuilder(4 + events.Count * 12);
-        sb.Append(Version1);
+        var unified = false;
+        foreach (var e in events)
+        {
+            if (e.HasPosition && e.IsMouse)
+            {
+                unified = true;
+                break;
+            }
+        }
+
+        var sb = new StringBuilder(4 + events.Count * (unified ? 20 : 12));
+        sb.Append(unified ? UnifiedVersion1 : Version1);
         long previous = 0;
         foreach (var e in events)
         {
@@ -109,6 +157,9 @@ public static class InputEventCodec
                 default:
                     throw new InvalidOperationException($"Unknown input event kind {(int)e.Kind}.");
             }
+
+            if (unified && e.HasPosition && e.IsMouse)
+                sb.Append(',').Append(Num(e.X)).Append(',').Append(Num(e.Y));
         }
 
         return sb.ToString();
@@ -119,9 +170,11 @@ public static class InputEventCodec
     {
         ArgumentNullException.ThrowIfNull(text);
         var tokens = text.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-        if (tokens.Length == 0 || tokens[0] != Version1)
+        if (tokens.Length == 0 || (tokens[0] != Version1 && tokens[0] != UnifiedVersion1))
             throw new FormatException("unknown recorded-input format");
 
+        // Positions are only allowed in the unified format, so a v1 (game-mode) list can never gain them.
+        var unified = tokens[0] == UnifiedVersion1;
         var events = new List<InputEvent>(tokens.Length - 1);
         long time = 0;
         for (var i = 1; i < tokens.Length; i++)
@@ -134,10 +187,20 @@ public static class InputEventCodec
             InputEvent e = parts[1] switch
             {
                 "m" when args == 2 => InputEvent.Move(time, ParseInt(parts[2], i), ParseInt(parts[3], i)),
+                "m" when unified && args == 4 => InputEvent.Move(time, ParseInt(parts[2], i), ParseInt(parts[3], i),
+                    ParseInt(parts[4], i), ParseInt(parts[5], i)),
                 "bd" when args == 1 => InputEvent.ButtonDown(time, (MacroMouseButton)ParseInt(parts[2], i)),
+                "bd" when unified && args == 3 => InputEvent.ButtonDown(time, (MacroMouseButton)ParseInt(parts[2], i),
+                    ParseInt(parts[3], i), ParseInt(parts[4], i)),
                 "bu" when args == 1 => InputEvent.ButtonUp(time, (MacroMouseButton)ParseInt(parts[2], i)),
+                "bu" when unified && args == 3 => InputEvent.ButtonUp(time, (MacroMouseButton)ParseInt(parts[2], i),
+                    ParseInt(parts[3], i), ParseInt(parts[4], i)),
                 "w" when args == 1 => InputEvent.WheelEvent(time, ParseInt(parts[2], i)),
+                "w" when unified && args == 3 => InputEvent.WheelAt(time, ParseInt(parts[2], i), false,
+                    ParseInt(parts[3], i), ParseInt(parts[4], i)),
                 "hw" when args == 1 => InputEvent.WheelEvent(time, ParseInt(parts[2], i), horizontal: true),
+                "hw" when unified && args == 3 => InputEvent.WheelAt(time, ParseInt(parts[2], i), true,
+                    ParseInt(parts[3], i), ParseInt(parts[4], i)),
                 "kd" when args == 3 => InputEvent.KeyDown(time, ParseInt(parts[2], i), ParseInt(parts[3], i), ParseFlag(parts[4], i)),
                 "ku" when args == 3 => InputEvent.KeyUp(time, ParseInt(parts[2], i), ParseInt(parts[3], i), ParseFlag(parts[4], i)),
                 _ => throw Bad(i),

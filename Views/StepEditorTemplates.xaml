@@ -351,8 +351,39 @@
             </Border>
 
             <TextBlock Style="{StaticResource MutedText}" FontSize="11" Margin="0,8,0,0" TextWrapping="Wrap"
-                       Text="Played back with the original timing, as relative mouse movement and exact key down/up. Start from the same spot and camera direction you recorded from. The macro's Speed setting also applies here." />
+                       Text="{Binding PlaybackExplanation}" />
 
+            <!-- Smart recordings: how each part plays the mouse (exactly one way per part). -->
+            <StackPanel Margin="0,16,0,0" Visibility="{Binding HasMouseParts, Converter={StaticResource BoolToVisibility}}">
+                <TextBlock Text="Mouse playback" Style="{StaticResource FieldLabel}" />
+                <WrapPanel Margin="0,4,0,8">
+                    <Button Content="All: cursor position" Command="{Binding UseCursorEverywhereCommand}" Padding="10,4" FontSize="12" Margin="0,0,6,6"
+                            ToolTip="Play every part by moving the cursor to the recorded screen positions." />
+                    <Button Content="All: relative" Command="{Binding UseRelativeEverywhereCommand}" Padding="10,4" FontSize="12" Margin="0,0,6,6"
+                            ToolTip="Play every part as relative mouse movement (like game mode)." />
+                    <Button Content="All: automatic" Command="{Binding UseAutomaticEverywhereCommand}" Padding="10,4" FontSize="12" Margin="0,0,6,6"
+                            ToolTip="Go back to what SmartMacro detected while recording." />
+                </WrapPanel>
+                <ItemsControl ItemsSource="{Binding MouseParts}" Focusable="False">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate DataType="{x:Type steps:MouseSegmentViewModel}">
+                            <Border Margin="0,0,0,8" Padding="10,8" CornerRadius="6" Background="{StaticResource SurfaceAltBrush}">
+                                <StackPanel>
+                                    <TextBlock FontSize="12">
+                                        <Run Text="{Binding Title, Mode=OneWay}" FontWeight="SemiBold" /><Run Text="   " /><Run Text="{Binding RangeText, Mode=OneWay}" />
+                                    </TextBlock>
+                                    <TextBlock Text="{Binding DetectedText}" Style="{StaticResource MutedText}" FontSize="11" TextWrapping="Wrap" Margin="0,2,0,6" />
+                                    <ComboBox ItemsSource="{x:Static steps:MouseSegmentViewModel.Choices}" DisplayMemberPath="Label" SelectedValuePath="Value"
+                                              SelectedValue="{Binding SelectedMode}" AutomationProperties.Name="Mouse playback for this part" />
+                                    <TextBlock Text="{Binding EffectiveText}" FontSize="11" Margin="0,4,0,0" />
+                                </StackPanel>
+                            </Border>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </StackPanel>
+
+            <StackPanel Visibility="{Binding IsGameModeRecording, Converter={StaticResource BoolToVisibility}}">
             <CheckBox Content="Move the cursor to where recording started, before playing" IsChecked="{Binding MoveCursorToStart}" Margin="0,16,0,0" />
             <TextBlock Style="{StaticResource MutedText}" FontSize="11" Margin="0,4,0,0" TextWrapping="Wrap"
                        Text="Useful when the game shows a free cursor (menus). Leave it off while the game locks the cursor for the camera." />
@@ -377,6 +408,7 @@
                     </DataTemplate>
                 </ContentControl.ContentTemplate>
             </ContentControl>
+            </StackPanel>
 
             <ContentControl Content="{Binding}" ContentTemplate="{StaticResource StepFooterTemplate}" Focusable="False" />
         </StackPanel>

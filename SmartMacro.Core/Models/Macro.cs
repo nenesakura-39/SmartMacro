@@ -29,33 +29,51 @@ public sealed class MacroDocument
     /// <summary>
     /// Newest format this version understands.
     /// 1 = original format. 2 = adds hold times on Press / Click steps and "Recorded input (game mode)" steps.
+    /// 3 = adds smart recordings: recorded input with cursor positions ("u1" event text) and mouse segments.
     /// </summary>
-    public const int CurrentSchemaVersion = 2;
+    public const int CurrentSchemaVersion = 3;
 
     public int SchemaVersion { get; set; }
     public Macro? Macro { get; set; }
 
     /// <summary>
     /// The oldest format that can hold this macro without losing anything. Macros that don't use the
-    /// version 2 features are still written as version 1, so older copies of SmartMacro can keep opening them.
-    /// Version 1 files need no migration: the new fields simply default to 0 / off, which is the old behavior.
+    /// version 2 / 3 features are still written as the older version, so older copies of SmartMacro can keep
+    /// opening them. Older files need no migration: the new fields simply default to 0 / off / null, which is
+    /// exactly the old behavior (game-mode recordings stay relative-only).
     /// </summary>
     public static int RequiredSchemaVersion(Macro macro)
     {
         ArgumentNullException.ThrowIfNull(macro);
         if (macro.Steps is null) return 1;
 
+        var required = 1;
         foreach (var step in macro.Steps)
         {
             switch (step)
             {
+                case InputSequenceStep q when UsesSmartRecordingFeatures(q):
+                    return 3;
                 case InputSequenceStep:
                 case KeyPressStep { HoldMs: not 0 }:
                 case MouseClickStep { HoldMs: not 0 }:
-                    return 2;
+                    required = 2;
+                    break;
             }
         }
 
-        return 1;
+        return required;
+    }
+
+    private static bool UsesSmartRecordingFeatures(InputSequenceStep step)
+    {
+        if (step.MouseSegments is not null) return true;
+        if (step.Events is null) return false;
+        foreach (var e in step.Events)
+        {
+            if (e.HasPosition && e.IsMouse) return true;
+        }
+
+        return false;
     }
 }

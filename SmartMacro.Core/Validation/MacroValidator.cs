@@ -71,6 +71,8 @@ public static class MacroValidator
     public const int MaxSequenceEvents = 1_000_000;
     public const long MaxSequenceDurationUs = 3_600_000_000L; // 1 hour
     public const int MaxRelativeMove = 100_000;    // per event, in mouse counts
+    public const int MaxScreenCoordinate = 100_000; // recorded cursor positions, physical pixels (any sign)
+    public const int MaxMouseSegments = 10_000;
     public const double MinSpeed = 0.1;
     public const double MaxSpeed = 10.0;
 
@@ -301,7 +303,9 @@ public static class MacroValidator
                 problem = "is more than 1 hour after the start";
             else
             {
-                switch (e.Kind)
+                if (e.HasPosition && (Math.Abs((long)e.X) > MaxScreenCoordinate || Math.Abs((long)e.Y) > MaxScreenCoordinate))
+                    problem = "has a cursor position far outside any screen";
+                else switch (e.Kind)
                 {
                     case InputEventKind.MouseMove:
                         if (Math.Abs((long)e.Dx) > MaxRelativeMove || Math.Abs((long)e.Dy) > MaxRelativeMove)
@@ -341,6 +345,56 @@ public static class MacroValidator
 
         if (keysDown.Count > 0 || buttonsDown.Count > 0)
             issues.Add(Warning("Some keys or buttons are still held at the end of the recording; they'll be released when this step finishes.", property));
+
+        ValidateMouseSegments(issues, step);
+    }
+
+    /// <summary>
+    /// Smart recordings: the segments must be sorted, start at a valid time and use known modes. A cursor-position
+    /// segment needs recorded positions; movement without one is always played as relative movement.
+    /// </summary>
+    private static void ValidateMouseSegments(List<ValidationIssue> issues, InputSequenceStep step)
+    {
+        const string property = nameof(InputSequenceStep.MouseSegments);
+        var segments = step.MouseSegments;
+        if (segments is null) return;
+
+        if (segments.Count == 0)
+        {
+            issues.Add(Error("The mouse playback parts of this recording are missing. The recording may be damaged.", property));
+            return;
+        }
+
+        if (segments.Count > MaxMouseSegments)
+        {
+            issues.Add(Error($"A recorded input step can have at most {MaxMouseSegments:N0} mouse parts.", property));
+            return;
+        }
+
+        long previous = -1;
+        for (var i = 0; i < segments.Count; i++)
+        {
+            var segment = segments[i];
+            string? problem = null;
+            if (segment is null) problem = "is empty";
+            else if (i == 0 && segment.StartUs != 0) problem = "doesn't start at the beginning of the recording";
+            else if (segment.StartUs <= previous) problem = "starts before the part before it ends";
+            else if (segment.StartUs > MaxSequenceDurationUs) problem = "starts more than 1 hour after the beginning";
+            else if (!Enum.IsDefined(segment.Detected) || !Enum.IsDefined(segment.Choice) || !Enum.IsDefined(segment.Evidence))
+                problem = "has an unknown option value";
+
+            if (problem is not null)
+            {
+                issues.Add(Error($"Mouse part {i + 1:N0} {problem}. The recording may be damaged.", property));
+                return;
+            }
+
+            previous = segment!.StartUs;
+        }
+
+        if (segments.Any(s => s.Effective == MouseMovementMode.CursorPosition)
+            && step.Events is { } events && events.Any(e => e.Kind == InputEventKind.MouseMove && !e.HasPosition))
+            issues.Add(Warning("Some mouse movement has no recorded cursor position; it's played as relative movement.", property));
     }
 
     private static void CheckPosition(List<ValidationIssue> issues, int x, int y, ScreenBounds? screen)

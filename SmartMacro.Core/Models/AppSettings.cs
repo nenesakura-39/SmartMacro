@@ -5,7 +5,11 @@ namespace SmartMacro.Core.Models;
 /// <summary>User preferences, stored in settings.json.</summary>
 public sealed class AppSettings
 {
-    public const int CurrentSchemaVersion = 1;
+    /// <summary>
+    /// 1 = original. 2 = adds the Smart recording mode (the new default). Version 1 files are switched to Smart once,
+    /// because version 1 only offered Desktop / Game; both are still available as advanced options.
+    /// </summary>
+    public const int CurrentSchemaVersion = 2;
     public const int MaxDefaultDelayMs = 60_000;
 
     public int SchemaVersion { get; set; } = CurrentSchemaVersion;
@@ -29,10 +33,10 @@ public sealed class AppSettings
     public bool RecordMouseMovement { get; set; } = true;
 
     /// <summary>
-    /// Desktop = editable steps with screen positions (default). Game = raw relative mouse movement and exact
-    /// key timing, for games that use the mouse for camera control.
+    /// Smart (default) = one recording that keeps cursor positions and relative mouse movement and picks the right
+    /// one per part. Desktop / Game = the older single-purpose recorders, kept as advanced fallbacks.
     /// </summary>
-    public RecordingMode RecordingMode { get; set; } = RecordingMode.Desktop;
+    public RecordingMode RecordingMode { get; set; } = RecordingMode.Smart;
 
     /// <summary>
     /// Desktop recordings: keep how long each key / click was held (a short W tap stays as long as it was).
@@ -56,7 +60,10 @@ public sealed class AppSettings
     {
         if (DefaultDelayMs < 0) DefaultDelayMs = 0;
         if (DefaultDelayMs > MaxDefaultDelayMs) DefaultDelayMs = MaxDefaultDelayMs;
-        if (!Enum.IsDefined(RecordingMode)) RecordingMode = RecordingMode.Desktop;
+        if (!Enum.IsDefined(RecordingMode)) RecordingMode = RecordingMode.Smart;
+
+        // Settings saved before Smart recording existed: start using it (Desktop / Game stay in Settings → Advanced).
+        if (SchemaVersion < 2) RecordingMode = RecordingMode.Smart;
 
         // Broken or clashing shortcuts (e.g. from a hand-edited file) fall back to the defaults.
         if (RecordHotkey is null || PlayHotkey is null || PauseHotkey is null

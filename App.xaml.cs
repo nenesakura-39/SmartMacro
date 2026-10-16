@@ -77,6 +77,7 @@ public partial class App : Application
             new PlaybackEngine(new Win32InputSimulator(_log), _playbackClock, ocr),
             new WindowsInputRecorder(),
             new RawInputRecorder(),
+            new SmartInputRecorder(),
             new EmergencyStopWatcher(),
             _runHost,
             ocr,

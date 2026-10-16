@@ -8,16 +8,24 @@ namespace SmartMacro.Core.Recording;
 public enum RecordingMode
 {
     /// <summary>
-    /// Low-level hooks, absolute cursor positions, editable steps (Click, Move to X/Y, Press...).
+    /// Advanced / fallback. Low-level hooks, absolute cursor positions, editable steps (Click, Move to X/Y, Press...).
     /// Best for normal desktop apps and menus.
     /// </summary>
     Desktop,
 
     /// <summary>
-    /// Raw Input: relative mouse movement and exact key down/up timing, stored as one
+    /// Advanced / fallback. Raw Input: relative mouse movement and exact key down/up timing, stored as one
     /// "Recorded input (game mode)" step. For games that use the mouse for camera control.
     /// </summary>
     Game,
+
+    /// <summary>
+    /// The default. One Raw Input recording that keeps both the cursor position and the relative mouse counts for
+    /// every mouse event, on one timeline. Parts where the cursor moves freely become editable steps; parts where a
+    /// game hides or locks the cursor (camera turning) become "Recorded input" steps that play relative movement.
+    /// See <see cref="SmartRecordingConverter"/>.
+    /// </summary>
+    Smart,
 }
 
 /// <summary>
@@ -212,7 +220,7 @@ public static class GameRecordingConverter
     /// events that belong to it (mouse moves between them are ignored). Everything from there on is cut;
     /// movement before the shortcut is kept.
     /// </summary>
-    private static int TrailingCut(List<InputEvent> events, IReadOnlyCollection<int> trimKeys)
+    internal static int TrailingCut(IReadOnlyList<InputEvent> events, IReadOnlyCollection<int> trimKeys)
     {
         var cut = events.Count;
         if (trimKeys.Count == 0) return cut;
