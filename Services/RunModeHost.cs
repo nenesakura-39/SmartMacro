@@ -128,11 +128,12 @@ internal sealed class RunOverlayWindow : Window
         Content = new Border
         {
             Background = new SolidColorBrush(Color.FromArgb(0xEE, 0x0E, 0x16, 0x26)),
-            BorderBrush = new SolidColorBrush(Color.FromRgb(0x26, 0x32, 0x4A)),
+            // The brand's glowing cyan → indigo edge (Themes/Brand.xaml), like the app icon.
+            BorderBrush = Application.Current?.TryFindResource("BrandBorderBrush") as Brush ?? new SolidColorBrush(Color.FromRgb(0x26, 0x32, 0x4A)),
             BorderThickness = new Thickness(1),
             CornerRadius = new CornerRadius(16),
-            Padding = new Thickness(12, 6, 14, 6),
-            Child = new StackPanel { Orientation = Orientation.Horizontal, Children = { _dot, _text } },
+            Padding = new Thickness(8, 5, 14, 5),
+            Child = new StackPanel { Orientation = Orientation.Horizontal, Children = { new Views.BrandLogo { Width = 20, Height = 20, Margin = new Thickness(0, 0, 8, 0), VerticalAlignment = VerticalAlignment.Center }, _dot, _text } },
         };
 
         SizeChanged += (_, _) => PositionAtCorner();

@@ -1,0 +1,133 @@
+<!--
+  SmartMacro brand mark: "Cybernetic Vision Core + Hyper-Velocity Cursor" (vector, 256 × 256 design grid).
+  The same shapes and colours as Assets/SmartMacro.ico (tools/generate-icon.py), so the in-app logo matches the
+  taskbar / Explorer icon. Use it anywhere as an image:  <Image Source="{StaticResource BrandLogo}" Width="32" Height="32" />
+  Glows are drawn as wide, faint strokes (DrawingImage has no blur effects), so it stays crisp at every size.
+-->
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <!-- Brand palette -->
+    <Color x:Key="BrandMidnightColor">#050B14</Color>
+    <Color x:Key="BrandIndigoColor">#17153B</Color>
+    <Color x:Key="BrandCyanColor">#22D3EE</Color>
+    <Color x:Key="BrandSkyColor">#38BDF8</Color>
+    <Color x:Key="BrandVioletColor">#A855F7</Color>
+    <Color x:Key="BrandLavenderColor">#C084FC</Color>
+
+    <!-- Deep-space squircle: indigo core fading to midnight slate. -->
+    <RadialGradientBrush x:Key="BrandBaseBrush" Center="0.5,0.4" GradientOrigin="0.5,0.4" RadiusX="0.78" RadiusY="0.78">
+        <GradientStop Color="#26225E" Offset="0" />
+        <GradientStop Color="{StaticResource BrandIndigoColor}" Offset="0.35" />
+        <GradientStop Color="#0B1026" Offset="0.75" />
+        <GradientStop Color="{StaticResource BrandMidnightColor}" Offset="1" />
+    </RadialGradientBrush>
+
+    <!-- Glowing 1 px inner border: cyan on top, indigo at the bottom. -->
+    <LinearGradientBrush x:Key="BrandBorderBrush" StartPoint="0.5,0" EndPoint="0.5,1">
+        <GradientStop Color="#E638BDF8" Offset="0" />
+        <GradientStop Color="#B35B6ED6" Offset="0.5" />
+        <GradientStop Color="#85818CF8" Offset="1" />
+    </LinearGradientBrush>
+
+    <!-- Scanner brackets: cyan → indigo → neon violet, top-left to bottom-right. -->
+    <LinearGradientBrush x:Key="BrandBracketBrush" StartPoint="0,0" EndPoint="1,1">
+        <GradientStop Color="{StaticResource BrandCyanColor}" Offset="0" />
+        <GradientStop Color="#818CF8" Offset="0.5" />
+        <GradientStop Color="{StaticResource BrandVioletColor}" Offset="1" />
+    </LinearGradientBrush>
+
+    <!-- Neural bolt: electric blue → lavender → magenta. -->
+    <LinearGradientBrush x:Key="BrandBoltBrush" StartPoint="0.6,0" EndPoint="0.35,1">
+        <GradientStop Color="{StaticResource BrandSkyColor}" Offset="0" />
+        <GradientStop Color="{StaticResource BrandLavenderColor}" Offset="0.55" />
+        <GradientStop Color="#E879F9" Offset="1" />
+    </LinearGradientBrush>
+
+    <!-- Titanium cursor bevel. -->
+    <LinearGradientBrush x:Key="BrandTitaniumBrush" StartPoint="0.1,0" EndPoint="0.7,1">
+        <GradientStop Color="#F8FAFC" Offset="0" />
+        <GradientStop Color="#CBD5E1" Offset="0.45" />
+        <GradientStop Color="#7C8AA0" Offset="0.8" />
+        <GradientStop Color="#A5B4C8" Offset="1" />
+    </LinearGradientBrush>
+
+    <!-- Shapes (same coordinates as tools/generate-icon.py). -->
+    <RectangleGeometry x:Key="BrandSquircleGeometry" Rect="10,10,236,236" RadiusX="56.6" RadiusY="56.6" />
+    <Geometry x:Key="BrandBracketsGeometry">M44,84 L44,44 L84,44 M172,44 L212,44 L212,84 M44,172 L44,212 L84,212 M172,212 L212,212 L212,172</Geometry>
+    <Geometry x:Key="BrandBoltGeometry">M168,58 L126,136 L156,136 L132,204 L202,116 L170,116 L194,58 Z</Geometry>
+    <Geometry x:Key="BrandBoltCoreGeometry">M176,72 L142,130 L166,130 L152,178 L188,124 L160,124 L182,72 Z</Geometry>
+    <Geometry x:Key="BrandCursorGeometry">M80,68 L80,172 L105,149 L121,186 L141,177 L125,142 L159,142 Z</Geometry>
+    <Geometry x:Key="BrandCursorShadowGeometry">M84,73 L84,177 L109,154 L125,191 L145,182 L129,147 L163,147 Z</Geometry>
+    <Geometry x:Key="BrandCursorFacetGeometry">M105,149 L121,186 L141,177 L125,142 Z</Geometry>
+
+    <!-- The full logo. -->
+    <DrawingImage x:Key="BrandLogo">
+        <DrawingImage.Drawing>
+            <DrawingGroup>
+                <!-- Keeps the 256 × 256 frame so the logo scales around its centre. -->
+                <GeometryDrawing Brush="Transparent">
+                    <GeometryDrawing.Geometry>
+                        <RectangleGeometry Rect="0,0,256,256" />
+                    </GeometryDrawing.Geometry>
+                </GeometryDrawing>
+
+                <!-- Base squircle + soft cyan nebula behind the emblem -->
+                <GeometryDrawing Brush="{StaticResource BrandBaseBrush}" Geometry="{StaticResource BrandSquircleGeometry}" />
+                <GeometryDrawing>
+                    <GeometryDrawing.Brush>
+                        <RadialGradientBrush Center="0.5,0.5" GradientOrigin="0.5,0.5" RadiusX="0.5" RadiusY="0.5">
+                            <GradientStop Color="#4D38BDF8" Offset="0" />
+                            <GradientStop Color="#1438BDF8" Offset="0.6" />
+                            <GradientStop Color="#0038BDF8" Offset="1" />
+                        </RadialGradientBrush>
+                    </GeometryDrawing.Brush>
+                    <GeometryDrawing.Geometry>
+                        <EllipseGeometry Center="135,128" RadiusX="96" RadiusY="96" />
+                    </GeometryDrawing.Geometry>
+                </GeometryDrawing>
+
+                <!-- Target scanner brackets -->
+                <GeometryDrawing Geometry="{StaticResource BrandBracketsGeometry}">
+                    <GeometryDrawing.Pen>
+                        <Pen Brush="{StaticResource BrandBracketBrush}" Thickness="9" StartLineCap="Round" EndLineCap="Round" LineJoin="Round" />
+                    </GeometryDrawing.Pen>
+                </GeometryDrawing>
+
+                <!-- Neural lightning bolt: neon body, white-hot core -->
+                <GeometryDrawing Brush="{StaticResource BrandBoltBrush}" Geometry="{StaticResource BrandBoltGeometry}" />
+                <GeometryDrawing Brush="#EBFFFFFF" Geometry="{StaticResource BrandBoltCoreGeometry}" />
+
+                <!-- Precision cursor: drop shadow, dark outline, titanium body, bevel highlight, lower facet, energy rim -->
+                <GeometryDrawing Brush="#73000000" Geometry="{StaticResource BrandCursorShadowGeometry}" />
+                <GeometryDrawing Brush="#060A18" Geometry="{StaticResource BrandCursorGeometry}">
+                    <GeometryDrawing.Pen>
+                        <Pen Brush="#060A18" Thickness="8" LineJoin="Round" />
+                    </GeometryDrawing.Pen>
+                </GeometryDrawing>
+                <GeometryDrawing Brush="{StaticResource BrandTitaniumBrush}" Geometry="{StaticResource BrandCursorGeometry}" />
+                <GeometryDrawing Brush="#59596B86" Geometry="{StaticResource BrandCursorFacetGeometry}" />
+                <GeometryDrawing Geometry="M85,82 L85,150">
+                    <GeometryDrawing.Pen>
+                        <Pen Brush="#D9FFFFFF" Thickness="4" StartLineCap="Round" EndLineCap="Round" />
+                    </GeometryDrawing.Pen>
+                </GeometryDrawing>
+                <GeometryDrawing Geometry="M125,142 L159,142 L80,68">
+                    <GeometryDrawing.Pen>
+                        <Pen Brush="#B338BDF8" Thickness="2.5" LineJoin="Round" />
+                    </GeometryDrawing.Pen>
+                </GeometryDrawing>
+
+                <!-- Glowing inner border -->
+                <GeometryDrawing>
+                    <GeometryDrawing.Geometry>
+                        <RectangleGeometry Rect="11,11,234,234" RadiusX="55.6" RadiusY="55.6" />
+                    </GeometryDrawing.Geometry>
+                    <GeometryDrawing.Pen>
+                        <Pen Brush="{StaticResource BrandBorderBrush}" Thickness="2" />
+                    </GeometryDrawing.Pen>
+                </GeometryDrawing>
+            </DrawingGroup>
+        </DrawingImage.Drawing>
+    </DrawingImage>
+</ResourceDictionary>

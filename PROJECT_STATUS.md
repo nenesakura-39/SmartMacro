@@ -22,6 +22,27 @@ Developer: Riku (リク) · Brand: KuroLogic_
 
 
 
+## New brand icon + logo (2026-10-17) – "Cybernetic Vision Core + Hyper-Velocity Cursor"; icon generated, app code NOT built
+- `tools/generate-icon.py` (Python 3 + Pillow + NumPy; run from the repo root: `python tools/generate-icon.py`) draws the icon
+  from vector shapes at ≥ 1024 px and scales down with Lanczos: squircle (24 % corners) with a radial deep-space gradient
+  (#26225E / #17153B → #050B14), cyan nebula, faint HUD scan lines (≥ 64 px), four scanner brackets (#22D3EE → #818CF8 →
+  #A855F7, glow), neural bolt (#38BDF8 → #C084FC → #E879F9 with halo + white-hot core), titanium arrow cursor (dark outline,
+  bevel, facet, cyan energy rim, drop shadow), 1 px inner border (cyan top → indigo bottom). 16 / 24 / 32 px frames use a
+  pixel-optimized variant (thicker / shorter brackets, bigger cursor, simple bolt with a bright spine, no hairlines, light
+  unsharp mask). Writes `Assets/SmartMacro.ico` (7 PNG frames: 16, 24, 32, 48, 64, 128, 256; ~93 KB) and previews
+  `Assets/SmartMacro-256.png` / `-1024.png`. The AI ran it and checked the frames visually (contact sheet). A PowerShell /
+  C# generator was not used because the AI's environment has no Windows / .NET; Python + Pillow runs anywhere.
+- `Themes/Brand.xaml` (merged in `App.xaml`): brand colours, brushes (`BrandBaseBrush`, `BrandBorderBrush`,
+  `BrandBracketBrush`, `BrandBoltBrush`, `BrandTitaniumBrush`), shared geometries (same coordinates as the script) and a flat
+  `BrandLogo` DrawingImage. `Views/BrandLogo.xaml(.cs)`: vector control with real BlurEffect glows clipped to the squircle;
+  blur radii scale with the control size. Used in the `MainWindow` sidebar (34 px, replaces the old blue E945 badge) and the
+  mini status overlay (`Services/RunModeHost.cs`, 20 px + brand gradient border).
+- `MainWindow.Icon` = `pack://application:,,,/Assets/SmartMacro.ico`, csproj `ApplicationIcon` + `<Resource>` already pointed
+  at it (unchanged). `tools/publish.cmd` now checks the icon has all 7 sizes before publishing.
+- Windows caches icons: after building, a pinned taskbar shortcut / Explorer may show the old icon until the cache refreshes
+  (unpin / re-pin, or `ie4uinit.exe -show`).
+- Not verified: XAML compile, how the control looks in the app (BlurEffect scaling), the icon inside the built EXE.
+
 ## Studio upgrades batch (2026-10-17, on top of `cdd0919`) – 7 items; written WITHOUT a .NET SDK: **NOT built, NOT tested**
 The AI's environment had no .NET SDK / NuGet / PyPI access (and no shell on the owner's PC), so nothing was compiled.
 Checked by script: XAML well-formed, every `StaticResource` key defined, binding names exist, C# brace balance.
@@ -774,6 +795,8 @@ no .NET SDK in the AI's environment)
   csproj Company/Authors "Riku", Copyright "© 2026 Riku", README "© 2026 Riku") – change awaits owner approval.
 
 ## Next task
+- Owner: `tools\verify.cmd` for the brand icon / logo change too, then look at the sidebar logo, the mini overlay,
+  the taskbar / Alt+Tab / Explorer icon (16 → 256 px).
 - Owner: `tools\verify.cmd` for the Studio upgrades batch (never compiled; send `artifacts\build.log` /
   `artifacts\test.log`), then `docs/STUDIO_UPGRADES_MANUAL_TESTS.md`.
 - Owner: `tools\verify.cmd` for the Studio UI redesign (XAML never compiled; send `artifacts\build.log` if it fails),

@@ -72,6 +72,15 @@ if defined DOCPROBLEM (
   echo   Continuing because of --allow-drafts. This build is NOT for release.
 )
 
+rem The app icon (Assets\SmartMacro.ico, made by tools\generate-icon.py) is built into SmartMacro.exe.
+rem Check it has every Windows size, so the taskbar / Explorer / Alt+Tab never show a blurry, scaled frame.
+echo       Checking Assets\SmartMacro.ico ...
+powershell -NoProfile -Command "$p='Assets\SmartMacro.ico'; if (-not (Test-Path $p)) { Write-Host '  ICON MISSING: run python tools\generate-icon.py'; exit 1 }; $b=[IO.File]::ReadAllBytes($p); $n=[BitConverter]::ToUInt16($b,4); $s=@(); for ($i=0; $i -lt $n; $i++) { $w=[int]$b[6+16*$i]; if ($w -eq 0) { $w=256 }; $s+=$w }; $miss=@(16,24,32,48,64,128,256 | Where-Object { $s -notcontains $_ }); if ($miss.Count -gt 0) { Write-Host ('  ICON INCOMPLETE: missing ' + ($miss -join ', ') + ' px. Run python tools\generate-icon.py'); exit 1 }; Write-Host ('  Icon OK: ' + ($s -join ', ') + ' px')"
+if errorlevel 1 (
+  pause
+  exit /b 1
+)
+
 if exist "%OUT%" rmdir /s /q "%OUT%"
 if not exist release mkdir release
 rem A real release replaces any old private test build of the same version, so the two can't be mixed up.

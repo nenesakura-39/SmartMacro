@@ -70,12 +70,9 @@
         <Border Grid.Column="0" Background="{StaticResource SidebarBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,0,1,0"
                 ClipToBounds="True">
             <DockPanel LastChildFill="False">
-                <!-- Logo -->
-                <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="14,16,8,18">
-                    <Border Width="30" Height="30" CornerRadius="8" Background="{StaticResource AccentBrush}">
-                        <TextBlock Text="&#xE945;" FontFamily="{StaticResource IconFont}" FontSize="15" Foreground="White"
-                                   HorizontalAlignment="Center" VerticalAlignment="Center" />
-                    </Border>
+                <!-- Logo: vector brand mark ("Cybernetic Vision Core + Hyper-Velocity Cursor", Views/BrandLogo.xaml) -->
+                <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="12,14,8,16">
+                    <views:BrandLogo Width="34" Height="34" />
                     <StackPanel Margin="10,0,0,0" VerticalAlignment="Center"
                                 Visibility="{Binding IsChecked, ElementName=SidebarToggle, Converter={StaticResource BoolToVisibility}}">
                         <TextBlock Text="SmartMacro" FontSize="14" FontWeight="SemiBold" />

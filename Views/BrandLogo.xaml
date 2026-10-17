@@ -1,0 +1,81 @@
+<!--
+  SmartMacro brand mark as a vector control ("Cybernetic Vision Core + Hyper-Velocity Cursor"), with real blurred glows.
+  Matches Assets/SmartMacro.ico (tools/generate-icon.py). Shapes, brushes and colours live in Themes/Brand.xaml.
+  Usage: <views:BrandLogo Width="32" Height="32" />   (scales to any size; keep it square)
+-->
+<UserControl x:Class="SmartMacro.Views.BrandLogo"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             IsHitTestVisible="False" Focusable="False" SnapsToDevicePixels="False"
+             AutomationProperties.Name="SmartMacro logo">
+    <Viewbox Stretch="Uniform">
+        <Canvas Width="256" Height="256">
+            <!-- Deep-space squircle -->
+            <Path Data="{StaticResource BrandSquircleGeometry}" Fill="{StaticResource BrandBaseBrush}" />
+
+            <!-- Everything that glows stays inside the squircle -->
+            <Canvas Width="256" Height="256" Clip="{StaticResource BrandSquircleGeometry}">
+                <!-- Soft cyan nebula behind the emblem -->
+                <Ellipse Canvas.Left="39" Canvas.Top="32" Width="192" Height="192">
+                    <Ellipse.Fill>
+                        <RadialGradientBrush>
+                            <GradientStop Color="#4D38BDF8" Offset="0" />
+                            <GradientStop Color="#1438BDF8" Offset="0.6" />
+                            <GradientStop Color="#0038BDF8" Offset="1" />
+                        </RadialGradientBrush>
+                    </Ellipse.Fill>
+                </Ellipse>
+
+                <!-- Vision-HUD scan lines -->
+                <Path Stroke="#0938BDF8" StrokeThickness="1"
+                      Data="M14,30 H242 M14,42 H242 M14,54 H242 M14,66 H242 M14,78 H242 M14,90 H242 M14,102 H242 M14,114 H242 M14,126 H242 M14,138 H242 M14,150 H242 M14,162 H242 M14,174 H242 M14,186 H242 M14,198 H242 M14,210 H242 M14,222 H242" />
+
+                <!-- Glows: brackets (cyan), bolt (lavender halo + blue rim), cursor drop shadow -->
+                <Path Data="{StaticResource BrandBracketsGeometry}" Stroke="{StaticResource BrandBracketBrush}" StrokeThickness="14"
+                      StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round" Opacity="0.6">
+                    <Path.Effect>
+                        <BlurEffect x:Name="BracketGlow" Radius="12" KernelType="Gaussian" />
+                    </Path.Effect>
+                </Path>
+                <Path Data="{StaticResource BrandBoltGeometry}" Fill="#C084FC" Opacity="0.9">
+                    <Path.Effect>
+                        <BlurEffect x:Name="BoltHalo" Radius="30" KernelType="Gaussian" />
+                    </Path.Effect>
+                </Path>
+                <Path Data="{StaticResource BrandBoltGeometry}" Fill="#38BDF8" Opacity="0.7">
+                    <Path.Effect>
+                        <BlurEffect x:Name="BoltRim" Radius="10" KernelType="Gaussian" />
+                    </Path.Effect>
+                </Path>
+                <Path Data="{StaticResource BrandCursorShadowGeometry}" Fill="Black" Opacity="0.55" Stroke="Black" StrokeThickness="8" StrokeLineJoin="Round">
+                    <Path.Effect>
+                        <BlurEffect x:Name="CursorShadow" Radius="12" KernelType="Gaussian" />
+                    </Path.Effect>
+                </Path>
+            </Canvas>
+
+            <!-- Target scanner brackets -->
+            <Path Data="{StaticResource BrandBracketsGeometry}" Stroke="{StaticResource BrandBracketBrush}" StrokeThickness="9"
+                  StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round" />
+
+            <!-- Neural lightning bolt: neon body + white-hot core -->
+            <Path Data="{StaticResource BrandBoltGeometry}" Fill="{StaticResource BrandBoltBrush}" />
+            <Path Data="{StaticResource BrandBoltCoreGeometry}" Fill="#F2FFFFFF">
+                <Path.Effect>
+                    <BlurEffect x:Name="BoltCore" Radius="4" KernelType="Gaussian" />
+                </Path.Effect>
+            </Path>
+
+            <!-- Precision cursor: dark outline, titanium body, lower facet, bevel highlight, energy rim -->
+            <Path Data="{StaticResource BrandCursorGeometry}" Fill="#060A18" Stroke="#060A18" StrokeThickness="8" StrokeLineJoin="Round" />
+            <Path Data="{StaticResource BrandCursorGeometry}" Fill="{StaticResource BrandTitaniumBrush}" />
+            <Path Data="{StaticResource BrandCursorFacetGeometry}" Fill="#59596B86" />
+            <Path Data="M85,82 L85,150" Stroke="#D9FFFFFF" StrokeThickness="4" StrokeStartLineCap="Round" StrokeEndLineCap="Round" />
+            <Path Data="M125,142 L159,142 L80,68" Stroke="#B338BDF8" StrokeThickness="2.5" StrokeLineJoin="Round" />
+
+            <!-- Glowing inner border: cyan top → indigo bottom -->
+            <Rectangle Canvas.Left="11" Canvas.Top="11" Width="234" Height="234" RadiusX="55.6" RadiusY="55.6"
+                       Stroke="{StaticResource BrandBorderBrush}" StrokeThickness="2" />
+        </Canvas>
+    </Viewbox>
+</UserControl>
