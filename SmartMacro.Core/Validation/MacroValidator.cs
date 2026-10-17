@@ -68,8 +68,8 @@ public static class MacroValidator
     public const int MinCheckIntervalMs = 100;
     public const int MinVisionCheckIntervalMs = 50;  // Find image / Find color (cheaper than OCR)
     public const int MinTemplateSize = 6;            // pixels, each side
-    public const int MaxTemplateSize = 400;          // pixels, each side
-    public const int MaxTemplateDataLength = 1_500_000; // characters of Base64
+    public const int MaxTemplateSize = MaxRegionSize; // pixels, each side (no 400x400 cap; up to full monitor/region resolution)
+    public const int MaxTemplateDataLength = 50_000_000; // characters of Base64
     public const int MaxColorPixels = 10_000_000;
     public const int MaxCheckIntervalMs = 60_000;
     public const int MaxOffset = 5_000;

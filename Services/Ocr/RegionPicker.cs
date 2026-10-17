@@ -100,21 +100,53 @@ internal static class RegionPicker
             }
         }
 
+        var session = new PickerSession(UnionBounds(monitors, frozen?.Bounds));
         foreach (var monitor in monitors)
-            windows.Add(new RegionPickerWindow(monitor, Finish, hint ?? DefaultHint, pickPoint, CropFor(frozen, monitor), Refreeze));
+            windows.Add(new RegionPickerWindow(monitor, session, Finish, hint ?? DefaultHint, pickPoint, CropFor(frozen, monitor), Refreeze));
 
+        session.Windows = windows;
         foreach (var window in windows) window.Show();
         ActivateUnderCursor(windows);
 
         return await result.Task;
     }
 
+    internal static NativeMethods.POINT GetPhysicalCursorPos()
+    {
+        using var _ = NativeMethods.PhysicalPixelsScope.Enter();
+        NativeMethods.GetCursorPos(out var pt);
+        return pt;
+    }
+
+    private static ScreenRect UnionBounds(IReadOnlyList<ScreenRect> monitors, ScreenRect? frozenBounds)
+    {
+        var rect = frozenBounds ?? default;
+        foreach (var m in monitors)
+        {
+            if (rect.IsEmpty)
+            {
+                rect = m;
+                continue;
+            }
+
+            var left = Math.Min(rect.X, m.X);
+            var top = Math.Min(rect.Y, m.Y);
+            var right = Math.Max(rect.Right, m.Right);
+            var bottom = Math.Max(rect.Bottom, m.Bottom);
+            rect = new ScreenRect(left, top, right - left, bottom - top);
+        }
+
+        return rect;
+    }
+
     /// <summary>Gives keyboard focus (for Esc / Space) to the overlay under the mouse.</summary>
     private static void ActivateUnderCursor(List<RegionPickerWindow> windows)
     {
         if (windows.Count == 0) return;
-        NativeMethods.GetCursorPos(out var cursor);
-        (windows.FirstOrDefault(w => w.Contains(cursor.X, cursor.Y)) ?? windows[0]).Activate();
+        var cursor = GetPhysicalCursorPos();
+        var active = windows.FirstOrDefault(w => w.Contains(cursor.X, cursor.Y)) ?? windows[0];
+        active.Activate();
+        active.FocusOverlay();
     }
 
     /// <summary>One screenshot of the whole desktop (SmartMacro is already hidden), or null if Windows refused.</summary>
@@ -131,16 +163,16 @@ internal static class RegionPicker
         }
     }
 
-    /// <summary>The part of the frozen desktop that one monitor shows (exactly the monitor's size), or null.</summary>
-    private static BgraImage? CropFor(ScreenFrame? frozen, ScreenRect monitor)
+    /// <summary>The part of the frozen desktop that one monitor shows (clamped safely to the frozen screenshot), or null.</summary>
+    internal static BgraImage? CropFor(ScreenFrame? frozen, ScreenRect monitor)
     {
         if (frozen is null) return null;
-        var local = new ScreenRect(monitor.X - frozen.Bounds.X, monitor.Y - frozen.Bounds.Y, monitor.Width, monitor.Height);
-        if (local.X < 0 || local.Y < 0 || local.Right > frozen.Image.Width || local.Bottom > frozen.Image.Height) return null;
-        return frozen.Image.Crop(local);
+        var local = new ScreenRect(monitor.X - frozen.Bounds.X, monitor.Y - frozen.Bounds.Y, monitor.Width, monitor.Height)
+            .Intersect(new ScreenRect(0, 0, frozen.Image.Width, frozen.Image.Height));
+        return local.IsEmpty ? null : frozen.Image.Crop(local);
     }
 
-    private static List<ScreenRect> MonitorBounds()
+    internal static List<ScreenRect> MonitorBounds()
     {
         var monitors = new List<ScreenRect>();
         using var dpi = NativeMethods.PhysicalPixelsScope.Enter();
@@ -157,6 +189,17 @@ internal static class RegionPicker
         }, IntPtr.Zero);
         return monitors;
     }
+}
+
+/// <summary>Shared drag state across all monitor overlays in a single picker session.</summary>
+internal sealed class PickerSession
+{
+    public PickerSession(ScreenRect virtualBounds) => VirtualBounds = virtualBounds;
+
+    public ScreenRect VirtualBounds { get; }
+    public NativeMethods.POINT? Start { get; set; }
+    public bool PointPressed { get; set; }
+    public IReadOnlyList<RegionPickerWindow> Windows { get; set; } = Array.Empty<RegionPickerWindow>();
 }
 
 /// <summary>
@@ -269,11 +312,12 @@ internal sealed class RegionPickerWindow : Window
     private static readonly Brush LiveBackground = new SolidColorBrush(Color.FromArgb(0x55, 0x05, 0x0A, 0x14));
 
     private readonly ScreenRect _monitor;
+    private readonly PickerSession _session;
     private readonly Action<ScreenRect?> _done;
     private readonly Action? _refreeze;
     private readonly bool _pickPoint;
     private readonly string _hintText;
-    private readonly Canvas _canvas = new();
+    private readonly Canvas _canvas = new() { Background = Brushes.Transparent, Focusable = true };
     private readonly Image _frozenImage;
     private readonly Rectangle _dim;
     private readonly Rectangle _selection;
@@ -288,26 +332,30 @@ internal sealed class RegionPickerWindow : Window
     private readonly TextBlock _loupeText;
     private BgraImage? _frozen;
     private BitmapSource? _frozenSource;
-    private NativeMethods.POINT? _start;
-    private bool _pointPressed;
     private bool _closed;
 
-    public RegionPickerWindow(ScreenRect monitor, Action<ScreenRect?> done, string hintText, bool pickPoint, BgraImage? frozen = null,
-        Action? refreeze = null)
+    public RegionPickerWindow(ScreenRect monitor, PickerSession session, Action<ScreenRect?> done, string hintText, bool pickPoint,
+        BgraImage? frozen = null, Action? refreeze = null)
     {
         _monitor = monitor;
+        _session = session;
         _done = done;
         _pickPoint = pickPoint;
         _hintText = hintText;
         _refreeze = refreeze;
 
         WindowStyle = WindowStyle.None;
-        AllowsTransparency = true;
-        Background = LiveBackground;
+        AllowsTransparency = frozen is null;
+        Background = frozen is null ? LiveBackground : Brushes.Black;
         Topmost = true;
         ShowInTaskbar = false;
+        Focusable = true;
         ResizeMode = ResizeMode.NoResize;
         WindowStartupLocation = WindowStartupLocation.Manual;
+        Left = monitor.X;
+        Top = monitor.Y;
+        Width = monitor.Width;
+        Height = monitor.Height;
         Cursor = Cursors.Cross;
         Title = "Pick the search area";
 
@@ -404,7 +452,7 @@ internal sealed class RegionPickerWindow : Window
         _canvas.Children.Add(_loupe);
         _canvas.Children.Add(hint);
 
-        var root = new Grid();
+        var root = new Grid { Background = Brushes.Transparent };
         root.Children.Add(_frozenImage);
         root.Children.Add(_dim);
         root.Children.Add(_canvas);
@@ -412,19 +460,30 @@ internal sealed class RegionPickerWindow : Window
 
         SetFrozen(frozen);
 
-        MouseLeftButtonDown += OnDown;
-        MouseMove += OnMove;
-        MouseLeftButtonUp += OnUp;
-        MouseRightButtonUp += (_, _) => _done(null);
-        KeyDown += (_, e) =>
+        // Use Preview (tunneling) events and never close on Deactivated / LostFocus / LostMouseCapture so Visual Studio's
+        // XAML In-App Debug Toolbar (vsgdiagnostics) cannot swallow clicks or cancel the picker.
+        PreviewMouseLeftButtonDown += OnDown;
+        PreviewMouseMove += OnMove;
+        PreviewMouseLeftButtonUp += OnUp;
+        PreviewMouseRightButtonUp += (_, e) =>
         {
-            if (e.Key == Key.Escape) _done(null);
-            else if (e.Key == Key.Space && _refreeze is not null && !_pointPressed && _start is null)
+            e.Handled = true;
+            _done(null);
+        };
+        PreviewKeyDown += (_, e) =>
+        {
+            if (e.Key == Key.Escape)
+            {
+                e.Handled = true;
+                _done(null);
+            }
+            else if (e.Key == Key.Space && _refreeze is not null && !_session.PointPressed && _session.Start is null)
             {
                 e.Handled = true;
                 _refreeze();
             }
         };
+        Loaded += (_, _) => ApplyBounds();
         Closed += (_, _) =>
         {
             _closed = true;
@@ -438,6 +497,12 @@ internal sealed class RegionPickerWindow : Window
     public bool Contains(int x, int y) =>
         x >= _monitor.X && y >= _monitor.Y && x < _monitor.Right && y < _monitor.Bottom;
 
+    public void FocusOverlay()
+    {
+        Focus();
+        _canvas.Focus();
+    }
+
     public void CloseQuietly()
     {
         if (_closed) return;
@@ -448,7 +513,7 @@ internal sealed class RegionPickerWindow : Window
     /// <summary>Shows a (new) frozen picture of this monitor, or null to go back to the see-through overlay.</summary>
     public void SetFrozen(BgraImage? frozen)
     {
-        _frozen = frozen is not null && frozen.Width == _monitor.Width && frozen.Height == _monitor.Height ? frozen : null;
+        _frozen = frozen is not null && frozen.Width > 0 && frozen.Height > 0 ? frozen : null;
         if (_frozen is { } image)
         {
             var source = BitmapSource.Create(image.Width, image.Height, 96, 96, PixelFormats.Bgr32, null, image.Pixels, image.Stride);
@@ -478,9 +543,16 @@ internal sealed class RegionPickerWindow : Window
     protected override void OnSourceInitialized(EventArgs e)
     {
         base.OnSourceInitialized(e);
+        var hwnd = new WindowInteropHelper(this).Handle;
+        if (hwnd != IntPtr.Zero)
+        {
+            var style = NativeMethods.GetWindowLongValue(hwnd, NativeMethods.GWL_EXSTYLE);
+            NativeMethods.SetWindowLongValue(hwnd, NativeMethods.GWL_EXSTYLE, style | NativeMethods.WS_EX_TOOLWINDOW);
+            if (_frozen is null)
+                NativeMethods.SetWindowDisplayAffinity(hwnd, NativeMethods.WDA_EXCLUDEFROMCAPTURE);
+        }
+
         ApplyBounds();
-        // Never part of a screenshot (also not of the next frozen frame).
-        NativeMethods.SetWindowDisplayAffinity(new WindowInteropHelper(this).Handle, NativeMethods.WDA_EXCLUDEFROMCAPTURE);
     }
 
     protected override void OnDpiChanged(DpiScale oldDpi, DpiScale newDpi)
@@ -495,32 +567,34 @@ internal sealed class RegionPickerWindow : Window
     {
         var hwnd = new WindowInteropHelper(this).Handle;
         if (hwnd == IntPtr.Zero) return;
+        using var _ = NativeMethods.PhysicalPixelsScope.Enter();
         NativeMethods.SetWindowPos(hwnd, NativeMethods.HWND_TOPMOST, _monitor.X, _monitor.Y,
             _monitor.Width, _monitor.Height, NativeMethods.SWP_SHOWWINDOW);
     }
 
     private void OnDown(object sender, MouseButtonEventArgs e)
     {
-        NativeMethods.GetCursorPos(out var point);
+        e.Handled = true;
+        Focus();
+        _canvas.Focus();
+        if (!_canvas.CaptureMouse()) CaptureMouse();
+
+        var point = RegionPicker.GetPhysicalCursorPos();
         if (_pickPoint)
         {
             // One click = one pixel. Picked on release (see OnUp), so the release doesn't reach the app below.
-            _pointPressed = true;
-            CaptureMouse();
+            _session.PointPressed = true;
             ShowCrosshair(point);
             return;
         }
 
-        _start = point;
-        CaptureMouse();
-        UpdateSelection(point);
-        _selection.Visibility = Visibility.Visible;
-        _sizeLabel.Visibility = Visibility.Visible;
+        _session.Start = point;
+        foreach (var w in _session.Windows) w.UpdateSelection(point);
     }
 
     private void OnMove(object sender, MouseEventArgs e)
     {
-        NativeMethods.GetCursorPos(out var point);
+        var point = RegionPicker.GetPhysicalCursorPos();
         UpdateLoupe(point);
         if (_pickPoint)
         {
@@ -528,29 +602,35 @@ internal sealed class RegionPickerWindow : Window
             return;
         }
 
-        if (_start is null) return;
-        UpdateSelection(point);
+        if (_session.Start is null) return;
+        foreach (var w in _session.Windows) w.UpdateSelection(point);
     }
 
     private void OnUp(object sender, MouseButtonEventArgs e)
     {
+        e.Handled = true;
         if (_pickPoint)
         {
-            if (!_pointPressed) return;
-            _pointPressed = false;
+            if (!_session.PointPressed) return;
+            _session.PointPressed = false;
+            if (_canvas.IsMouseCaptured) _canvas.ReleaseMouseCapture();
             ReleaseMouseCapture();
-            NativeMethods.GetCursorPos(out var picked);
-            if (Contains(picked.X, picked.Y)) _done(new ScreenRect(picked.X, picked.Y, 1, 1));
+            var picked = RegionPicker.GetPhysicalCursorPos();
+            var bounds = _session.VirtualBounds.IsEmpty ? _monitor : _session.VirtualBounds;
+            var px = Math.Clamp(picked.X, bounds.X, Math.Max(bounds.X, bounds.Right - 1));
+            var py = Math.Clamp(picked.Y, bounds.Y, Math.Max(bounds.Y, bounds.Bottom - 1));
+            _done(new ScreenRect(px, py, 1, 1));
             return;
         }
 
-        if (_start is not { } start) return;
+        if (_session.Start is not { } start) return;
+        if (_canvas.IsMouseCaptured) _canvas.ReleaseMouseCapture();
         ReleaseMouseCapture();
-        NativeMethods.GetCursorPos(out var end);
-        _start = null;
+        var end = RegionPicker.GetPhysicalCursorPos();
+        _session.Start = null;
 
-        // Keep the box on this monitor.
-        var rect = ToRect(start, end).Intersect(_monitor);
+        var clampBounds = _session.VirtualBounds.IsEmpty ? _monitor : _session.VirtualBounds;
+        var rect = ToRect(start, end).Intersect(clampBounds);
         if (rect.Width >= 5 && rect.Height >= 5)
         {
             _done(rect);
@@ -558,29 +638,58 @@ internal sealed class RegionPickerWindow : Window
         else
         {
             // Too small (probably a stray click): let the user try again.
-            _selection.Visibility = Visibility.Collapsed;
-            _sizeLabel.Visibility = Visibility.Collapsed;
+            foreach (var w in _session.Windows) w.ClearSelection();
         }
     }
 
-    private void UpdateSelection(NativeMethods.POINT current)
+    internal void ClearSelection()
     {
-        if (_start is not { } start) return;
-        var rect = ToRect(start, current).Intersect(_monitor);
-        if (rect.IsEmpty) return;
+        _selection.Visibility = Visibility.Collapsed;
+        _sizeLabel.Visibility = Visibility.Collapsed;
+    }
 
-        // Convert physical screen pixels to this window's layout units (this window has one DPI).
-        var topLeft = PointFromScreen(new Point(rect.X, rect.Y));
-        var bottomRight = PointFromScreen(new Point(rect.Right, rect.Bottom));
+    internal void UpdateSelection(NativeMethods.POINT current)
+    {
+        if (_session.Start is not { } start) return;
+        var fullRect = ToRect(start, current);
+        var rect = fullRect.Intersect(_monitor);
+        if (rect.IsEmpty)
+        {
+            ClearSelection();
+            return;
+        }
+
+        // Convert physical screen pixels to this canvas's local WPF coordinates.
+        var topLeft = PhysicalToCanvas(rect.X, rect.Y);
+        var bottomRight = PhysicalToCanvas(rect.Right, rect.Bottom);
 
         Canvas.SetLeft(_selection, topLeft.X);
         Canvas.SetTop(_selection, topLeft.Y);
         _selection.Width = Math.Max(0, bottomRight.X - topLeft.X);
         _selection.Height = Math.Max(0, bottomRight.Y - topLeft.Y);
+        _selection.Visibility = Visibility.Visible;
 
-        _sizeLabel.Text = $"{rect.Width} × {rect.Height}  at ({rect.X}, {rect.Y})";
+        _sizeLabel.Text = $"{fullRect.Width} × {fullRect.Height}  at ({fullRect.X}, {fullRect.Y})";
         Canvas.SetLeft(_sizeLabel, topLeft.X);
         Canvas.SetTop(_sizeLabel, Math.Max(0, topLeft.Y - 24));
+        _sizeLabel.Visibility = Visibility.Visible;
+    }
+
+    private Point PhysicalToCanvas(int screenX, int screenY)
+    {
+        try
+        {
+            if (PresentationSource.FromVisual(_canvas) is not null)
+                return _canvas.PointFromScreen(new Point(screenX, screenY));
+        }
+        catch (InvalidOperationException)
+        {
+        }
+
+        var dpi = VisualTreeHelper.GetDpi(this);
+        var scaleX = dpi.DpiScaleX > 0 ? dpi.DpiScaleX : 1.0;
+        var scaleY = dpi.DpiScaleY > 0 ? dpi.DpiScaleY : 1.0;
+        return new Point((screenX - _monitor.X) / scaleX, (screenY - _monitor.Y) / scaleY);
     }
 
     /// <summary>Point mode: crosshair lines through the cursor and its exact screen position next to it.</summary>
@@ -592,8 +701,8 @@ internal sealed class RegionPickerWindow : Window
             return;
         }
 
-        // Physical screen pixels → this window's layout units (the window has one DPI: its monitor's).
-        var p = PointFromScreen(new Point(point.X, point.Y));
+        // Physical screen pixels → this canvas's layout units (the window has one DPI: its monitor's).
+        var p = PhysicalToCanvas(point.X, point.Y);
         var width = ActualWidth;
         var height = ActualHeight;
         _crossX.X1 = 0; _crossX.X2 = width; _crossX.Y1 = _crossX.Y2 = p.Y;
@@ -622,8 +731,8 @@ internal sealed class RegionPickerWindow : Window
             return;
         }
 
-        var px = point.X - _monitor.X;
-        var py = point.Y - _monitor.Y;
+        var px = Math.Clamp(point.X - _monitor.X, 0, image.Width - 1);
+        var py = Math.Clamp(point.Y - _monitor.Y, 0, image.Height - 1);
         var cropWidth = Math.Min(LoupePixels, image.Width);
         var cropHeight = Math.Min(LoupePixels, image.Height);
         var x0 = Math.Clamp(px - LoupeRadius, 0, image.Width - cropWidth);
@@ -637,13 +746,13 @@ internal sealed class RegionPickerWindow : Window
         Canvas.SetLeft(_loupeImage, (x0 - (px - LoupeRadius)) * LoupeZoom);
         Canvas.SetTop(_loupeImage, (y0 - (py - LoupeRadius)) * LoupeZoom);
 
-        var color = image.GetPixel(Math.Clamp(px, 0, image.Width - 1), Math.Clamp(py, 0, image.Height - 1));
+        var color = image.GetPixel(px, py);
         var swatch = new SolidColorBrush(Color.FromRgb(color.R, color.G, color.B));
         swatch.Freeze();
         _loupeSwatch.Background = swatch;
         _loupeText.Text = $"{color}   RGB({color.R}, {color.G}, {color.B}){Environment.NewLine}X {point.X}, Y {point.Y}";
 
-        var p = PointFromScreen(new Point(point.X, point.Y));
+        var p = PhysicalToCanvas(point.X, point.Y);
         const double offset = 28;
         const double panelWidth = LoupeSize + 24;
         const double panelHeight = LoupeSize + 60;
@@ -652,7 +761,7 @@ internal sealed class RegionPickerWindow : Window
         _loupe.Visibility = Visibility.Visible;
     }
 
-    private static ScreenRect ToRect(NativeMethods.POINT a, NativeMethods.POINT b)
+    internal static ScreenRect ToRect(NativeMethods.POINT a, NativeMethods.POINT b)
     {
         var x = Math.Min(a.X, b.X);
         var y = Math.Min(a.Y, b.Y);

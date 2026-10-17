@@ -24,11 +24,28 @@ public sealed class GdiScreenCapture : IScreenCapture
     {
         // The virtual-screen size must be in the same physical pixels as the capture and the mouse steps.
         using var dpi = NativeMethods.PhysicalPixelsScope.Enter();
-        return new ScreenRect(
+        var rect = new ScreenRect(
             NativeMethods.GetSystemMetrics(SM_XVIRTUALSCREEN),
             NativeMethods.GetSystemMetrics(SM_YVIRTUALSCREEN),
             NativeMethods.GetSystemMetrics(SM_CXVIRTUALSCREEN),
             NativeMethods.GetSystemMetrics(SM_CYVIRTUALSCREEN));
+
+        foreach (var m in RegionPicker.MonitorBounds())
+        {
+            if (rect.IsEmpty)
+            {
+                rect = m;
+                continue;
+            }
+
+            var left = Math.Min(rect.X, m.X);
+            var top = Math.Min(rect.Y, m.Y);
+            var right = Math.Max(rect.Right, m.Right);
+            var bottom = Math.Max(rect.Bottom, m.Bottom);
+            rect = new ScreenRect(left, top, right - left, bottom - top);
+        }
+
+        return rect;
     }
 
     public Task<ScreenFrame> CaptureAsync(ScreenRect region, CancellationToken cancellationToken)

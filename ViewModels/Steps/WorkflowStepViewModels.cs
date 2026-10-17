@@ -389,8 +389,13 @@ public sealed class RepeatStepViewModel : StepViewModel
     private void RebuildCondition()
     {
         Condition = _step.Mode != RepeatMode.Times && _step.Condition is { } condition
-            ? new ConditionViewModel(condition, () => NotifyChanged(nameof(Condition))) { Tools = _tools }
+            ? new ConditionViewModel(condition, () =>
+            {
+                NotifyChanged(nameof(Condition));
+                OnPropertyChanged(nameof(KeepCheckingForMs));
+            }) { Tools = _tools }
             : null;
+        OnPropertyChanged(nameof(KeepCheckingForMs));
     }
 }
 

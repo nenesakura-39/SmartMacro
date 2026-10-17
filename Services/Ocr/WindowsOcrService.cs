@@ -51,11 +51,32 @@ public sealed class WindowsOcrService : IOcrService
 
     public string StatusText { get; }
 
-    public ScreenRect GetVirtualScreen() => new(
-        NativeMethods.GetSystemMetrics(SM_XVIRTUALSCREEN),
-        NativeMethods.GetSystemMetrics(SM_YVIRTUALSCREEN),
-        NativeMethods.GetSystemMetrics(SM_CXVIRTUALSCREEN),
-        NativeMethods.GetSystemMetrics(SM_CYVIRTUALSCREEN));
+    public ScreenRect GetVirtualScreen()
+    {
+        using var dpi = NativeMethods.PhysicalPixelsScope.Enter();
+        var rect = new ScreenRect(
+            NativeMethods.GetSystemMetrics(SM_XVIRTUALSCREEN),
+            NativeMethods.GetSystemMetrics(SM_YVIRTUALSCREEN),
+            NativeMethods.GetSystemMetrics(SM_CXVIRTUALSCREEN),
+            NativeMethods.GetSystemMetrics(SM_CYVIRTUALSCREEN));
+
+        foreach (var m in RegionPicker.MonitorBounds())
+        {
+            if (rect.IsEmpty)
+            {
+                rect = m;
+                continue;
+            }
+
+            var left = Math.Min(rect.X, m.X);
+            var top = Math.Min(rect.Y, m.Y);
+            var right = Math.Max(rect.Right, m.Right);
+            var bottom = Math.Max(rect.Bottom, m.Bottom);
+            rect = new ScreenRect(left, top, right - left, bottom - top);
+        }
+
+        return rect;
+    }
 
     public async Task<OcrReadResult> ReadAsync(ScreenRect region, CancellationToken cancellationToken)
     {

@@ -1492,10 +1492,9 @@ public sealed class FindImageStepViewModel : ScreenSearchStepViewModel
         }
 
         var image = captured.Image;
-        if (image.Width < MacroValidator.MinTemplateSize || image.Height < MacroValidator.MinTemplateSize
-            || image.Width > MacroValidator.MaxTemplateSize || image.Height > MacroValidator.MaxTemplateSize)
+        if (image.Width < MacroValidator.MinTemplateSize || image.Height < MacroValidator.MinTemplateSize)
         {
-            TestResult = $"The box was {image.Width} × {image.Height} pixels. The image must be {MacroValidator.MinTemplateSize} to {MacroValidator.MaxTemplateSize} pixels on each side; please drag again.";
+            TestResult = $"The box was {image.Width} × {image.Height} pixels. The image must be at least {MacroValidator.MinTemplateSize} × {MacroValidator.MinTemplateSize} pixels; please drag again.";
             return;
         }
 

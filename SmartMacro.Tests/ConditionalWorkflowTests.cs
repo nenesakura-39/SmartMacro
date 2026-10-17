@@ -312,6 +312,173 @@ public class ConditionalPlaybackTests
         Assert.Contains("OCR", result.Error);
         Assert.Empty(input.Calls);
     }
+
+    [Fact]
+    public async Task Nested_Case_A_outer_true_inner_false_without_inner_else_jumps_to_inner_end_if_and_skips_outer_else()
+    {
+        // Case A: Outer If (true) -> Inner If (false) [no inner Else] -> Inner EndIf -> Outer Else -> Outer EndIf.
+        // Inner If (false) MUST jump to Inner EndIf, NOT Outer Else!
+        // And after Inner EndIf, execution MUST skip Outer Else and jump to Outer EndIf!
+        var input = new FakeInput();
+        var capture = new FakeCapture(Flow.Screen(green: true));
+
+        var steps = new MacroStep[]
+        {
+            Flow.If(Flow.Green(negate: false)),         // 0: Outer If (true)
+            Flow.Move(1),                               // 1: runs before Inner If
+            Flow.If(Flow.Green(negate: true)),          // 2: Inner If (false, no inner Else)
+            Flow.Move(2),                               // 3: skipped
+            new EndIfStep(),                            // 4: Inner EndIf
+            Flow.Move(3),                               // 5: after Inner EndIf, still inside Outer If then-branch!
+            new ElseStep(),                             // 6: Outer Else (must be skipped!)
+            Flow.Move(4),                               // 7: inside Outer Else (skipped)
+            new EndIfStep(),                            // 8: Outer EndIf
+            Flow.Move(5),                               // 9: after Outer EndIf
+        };
+
+        var blocks = BlockStructure.Analyze(steps);
+        Assert.True(blocks.IsValid);
+        Assert.Equal(6, blocks.ElseOf(0));
+        Assert.Equal(8, blocks.EndOf(0));
+        Assert.Equal(-1, blocks.ElseOf(2));
+        Assert.Equal(4, blocks.EndOf(2));
+        Assert.Equal(8, blocks.EndOf(6));
+
+        var result = await new PlaybackEngine(input, new FakeClock(), capture: capture).RunAsync(Flow.Macro(steps));
+
+        Assert.Equal(PlaybackOutcome.Completed, result.Outcome);
+        Assert.Equal(new[] { "move 1,0", "move 3,0", "move 5,0" }, input.Calls);
+    }
+
+    [Fact]
+    public async Task Nested_Case_B_outer_false_skips_inner_if_else_end_if_and_lands_on_outer_else()
+    {
+        // Case B: Outer If (false) -> [Inner If ... Inner Else ... Inner EndIf] -> Outer Else -> Outer EndIf.
+        // Outer If (false) MUST skip the entire inner If/Else/EndIf and land on Outer Else, NOT Inner Else!
+        var input = new FakeInput();
+        var capture = new FakeCapture(Flow.Screen(green: false));
+
+        var steps = new MacroStep[]
+        {
+            Flow.If(Flow.Green(negate: false)),         // 0: Outer If (false)
+            Flow.Move(1),                               // 1: skipped
+            Flow.If(Flow.Green(negate: true)),          // 2: Inner If (skipped)
+            Flow.Move(2),                               // 3: skipped
+            new ElseStep(),                             // 4: Inner Else (must NOT be landed on!)
+            Flow.Move(3),                               // 5: skipped
+            new EndIfStep(),                            // 6: Inner EndIf (skipped)
+            Flow.Move(4),                               // 7: skipped
+            new ElseStep(),                             // 8: Outer Else (must land here!)
+            Flow.Move(5),                               // 9: runs inside Outer Else
+            new EndIfStep(),                            // 10: Outer EndIf
+            Flow.Move(6),                               // 11: runs after Outer EndIf
+        };
+
+        var blocks = BlockStructure.Analyze(steps);
+        Assert.True(blocks.IsValid);
+        Assert.Equal(8, blocks.ElseOf(0));
+        Assert.Equal(10, blocks.EndOf(0));
+        Assert.Equal(4, blocks.ElseOf(2));
+        Assert.Equal(6, blocks.EndOf(2));
+
+        var result = await new PlaybackEngine(input, new FakeClock(), capture: capture).RunAsync(Flow.Macro(steps));
+
+        Assert.Equal(PlaybackOutcome.Completed, result.Outcome);
+        Assert.Equal(new[] { "move 5,0", "move 6,0" }, input.Calls);
+        Assert.Equal(1, capture.Captures); // Inner condition is never even evaluated when Outer If is false
+    }
+
+    [Fact]
+    public async Task Nested_Case_C_three_level_deep_nested_if_else_inside_repeat_loop()
+    {
+        // Case C: 3-level deep nested If/Else inside a Repeat loop.
+        var input = new FakeInput();
+        // Turn 1: green = true  -> Level 1 True -> Level 2 False (negate) -> Level 2 Else -> Level 3 True -> move 121
+        // Turn 2: green = false -> Level 1 Else -> Level 2 True (negate)  -> Level 3 False -> Level 3 Else -> move 212
+        var capture = new FakeCapture(
+            Flow.Screen(green: true),
+            Flow.Screen(green: true),
+            Flow.Screen(green: true),
+            Flow.Screen(green: false),
+            Flow.Screen(green: false),
+            Flow.Screen(green: false));
+
+        var result = await new PlaybackEngine(input, new FakeClock(), capture: capture).RunAsync(Flow.Macro(
+            Flow.Times(2),
+                Flow.If(Flow.Green(negate: false)),                     // Level 1 If
+                    Flow.If(Flow.Green(negate: true)),                  // Level 2 If (in L1 Then)
+                        Flow.Move(110),
+                    new ElseStep(),                                     // Level 2 Else
+                        Flow.If(Flow.Green(negate: false)),             // Level 3 If (in L2 Else)
+                            Flow.Move(121),
+                        new ElseStep(),                                 // Level 3 Else
+                            Flow.Move(122),
+                        new EndIfStep(),                                // Level 3 EndIf
+                    new EndIfStep(),                                    // Level 2 EndIf
+                new ElseStep(),                                         // Level 1 Else
+                    Flow.If(Flow.Green(negate: true)),                  // Level 2 If (in L1 Else)
+                        Flow.If(Flow.Green(negate: false)),             // Level 3 If (in L2 Then)
+                            Flow.Move(211),
+                        new ElseStep(),                                 // Level 3 Else
+                            Flow.Move(212),
+                        new EndIfStep(),                                // Level 3 EndIf
+                    new ElseStep(),                                     // Level 2 Else
+                        Flow.Move(220),
+                    new EndIfStep(),                                    // Level 2 EndIf
+                new EndIfStep(),                                        // Level 1 EndIf
+            new EndRepeatStep(),
+            Flow.Move(999)));
+
+        Assert.Equal(PlaybackOutcome.Completed, result.Outcome);
+        Assert.Equal(new[] { "move 121,0", "move 212,0", "move 999,0" }, input.Calls);
+    }
+
+    [Fact]
+    public void Smart_insertion_puts_nested_if_and_repeat_inside_selected_block_even_when_add_at_end_was_on()
+    {
+        var steps = new List<MacroStep>();
+
+        static int AddPair(List<MacroStep> list, int selectedIndex, InsertPosition position, StepKind kind)
+        {
+            var index = StepListEditing.InsertIndex(list, selectedIndex, position, kind);
+            list.Insert(index, MacroFactory.CreateStep(kind));
+            if (kind is StepKind.If or StepKind.Repeat)
+                list.Insert(index + 1, MacroFactory.CreateStep(kind == StepKind.If ? StepKind.EndIf : StepKind.EndRepeat));
+            return index;
+        }
+
+        // 1. Add outer If -> inserts If (0), EndIf (1)
+        var sel = AddPair(steps, -1, InsertPosition.AtEnd, StepKind.If);
+        Assert.Equal(0, sel);
+        Assert.Equal(new[] { StepKind.If, StepKind.EndIf }, steps.Select(s => s.Kind));
+
+        // 2. Even when InsertPosition.AtEnd is passed while outer If (or a step inside it) is selected,
+        // adding a nested If or Repeat inserts it INSIDE the outer block right after the selected step!
+        sel = AddPair(steps, sel, InsertPosition.AtEnd, StepKind.If);
+        Assert.Equal(1, sel);
+        Assert.Equal(new[] { StepKind.If, StepKind.If, StepKind.EndIf, StepKind.EndIf }, steps.Select(s => s.Kind));
+        Assert.True(BlockStructure.Analyze(steps).IsValid);
+
+        // 3. Adding Else when EndIf is selected inserts Else right before EndIf; adding a step after Else inserts inside Else!
+        var elseIdx = AddPair(steps, 2, InsertPosition.AtEnd, StepKind.Else); // selected = inner EndIf (index 2)
+        Assert.Equal(2, elseIdx);
+        var moveIdx = AddPair(steps, elseIdx, InsertPosition.AfterSelected, StepKind.MouseMove);
+        Assert.Equal(3, moveIdx);
+        Assert.Equal(
+            new[] { StepKind.If, StepKind.If, StepKind.Else, StepKind.MouseMove, StepKind.EndIf, StepKind.EndIf },
+            steps.Select(s => s.Kind));
+        Assert.True(BlockStructure.Analyze(steps).IsValid);
+
+        // 4. Moving inner EndIf down across outer EndIf or outer Else is refused so block partners never silently swap.
+        var outerIf = Flow.If(Flow.Text("A"));
+        var innerIf = Flow.If(Flow.Text("B"));
+        var innerEnd = new EndIfStep();
+        var outerElse = new ElseStep();
+        var outerEnd = new EndIfStep();
+        var list = new List<MacroStep> { outerIf, innerIf, Flow.Move(1), innerEnd, outerElse, Flow.Move(2), outerEnd };
+        var badMove = StepListEditing.PlanMove(list, 3, 3, MoveDirection.Down); // innerEnd across outerElse
+        Assert.False(badMove.Allowed);
+    }
 }
 
 public class LoopPlaybackTests

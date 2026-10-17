@@ -148,7 +148,7 @@ public sealed class VisionTools : IVisionTools
         if (picked is null) return null;
 
         // Take the pixels from the frozen picture: exactly what you saw, even if the game has moved on since.
-        if (FromFrozen(picked) is { } frozenPart) return (CapturedTemplate?)new CapturedTemplate(picked.Rect, frozenPart);
+        if (FromFrozen(picked) is { } frozenPart) return (CapturedTemplate?)new CapturedTemplate(frozenPart.Bounds, frozenPart.Image);
 
         await Task.Delay(OverlayFadeMs);
         var frame = _capture.Capture(picked.Rect);
@@ -163,21 +163,16 @@ public sealed class VisionTools : IVisionTools
         var point = picked.Rect;
 
         if (FromFrozen(picked) is { } frozenPixel)
-            return (PickedColor?)new PickedColor(point.X, point.Y, frozenPixel.GetPixel(0, 0));
+            return (PickedColor?)new PickedColor(frozenPixel.Bounds.X, frozenPixel.Bounds.Y, frozenPixel.Image.GetPixel(0, 0));
 
         await Task.Delay(OverlayFadeMs);
         var frame = _capture.Capture(point);
         return (PickedColor?)new PickedColor(point.X, point.Y, frame.Image.GetPixel(0, 0));
     });
 
-    /// <summary>The picked rectangle cut out of the frozen screenshot (null if there was none or it doesn't cover it).</summary>
-    private static BgraImage? FromFrozen(PickerResult picked)
-    {
-        if (picked.Frozen is not { } frozen) return null;
-        var local = new ScreenRect(picked.Rect.X - frozen.Bounds.X, picked.Rect.Y - frozen.Bounds.Y, picked.Rect.Width, picked.Rect.Height);
-        if (local.X < 0 || local.Y < 0 || local.Right > frozen.Image.Width || local.Bottom > frozen.Image.Height) return null;
-        return frozen.Image.Crop(local);
-    }
+    /// <summary>The picked rectangle cut out of the frozen screenshot (clamped safely to the frozen image bounds).</summary>
+    internal static ScreenFrame? FromFrozen(PickerResult picked) =>
+        picked.Frozen?.CropFromScreen(picked.Rect);
 
     public Task<ScreenPoint?> PickPositionAsync() => WhileHiddenAsync(async () =>
     {
@@ -186,8 +181,11 @@ public sealed class VisionTools : IVisionTools
         return picked is { } point ? new ScreenPoint(point.X, point.Y) : (ScreenPoint?)null;
     });
 
-    public ScreenPoint? GetCursorPosition() =>
-        NativeMethods.GetCursorPos(out var point) ? new ScreenPoint(point.X, point.Y) : null;
+    public ScreenPoint? GetCursorPosition()
+    {
+        using var _ = NativeMethods.PhysicalPixelsScope.Enter();
+        return NativeMethods.GetCursorPos(out var point) ? new ScreenPoint(point.X, point.Y) : null;
+    }
 
     public async Task<string> TestImageAsync(FindImageStep step)
     {

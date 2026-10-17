@@ -290,6 +290,63 @@ public class TemplateMatcherTests
         Assert.ThrowsAny<OperationCanceledException>(() =>
             TemplateMatcher.Find(TestImages.Blocky(400, 300, 1), TestImages.Icon(20, 20), cancellationToken: cts.Token));
     }
+
+    [Theory]
+    [InlineData(500, 400)]
+    [InlineData(640, 480)]
+    public void Large_templates_over_400x400_match_accurately_and_fast(int templateWidth, int templateHeight)
+    {
+        var screen = TestImages.Blocky(1920, 1080, seed: 21);
+        var template = TestImages.Icon(templateWidth, templateHeight, seed: 22);
+        TestImages.Paste(screen, template, 613, 277);
+
+        // Warm up JIT
+        _ = TemplateMatcher.Find(screen, template);
+
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        var result = TemplateMatcher.Find(screen, template);
+        sw.Stop();
+
+        Assert.True(result.Scale >= 4, $"expected multi-scale coarse pass, got scale {result.Scale}");
+        var best = Assert.IsType<VisualMatch>(result.Best);
+        Assert.Equal(new ScreenRect(613, 277, templateWidth, templateHeight), best.Bounds);
+        Assert.True(best.Score > 0.98, $"score {best.Score}");
+        Assert.True(sw.Elapsed.TotalMilliseconds < 20.0, $"expected < 20ms, took {sw.Elapsed.TotalMilliseconds:F2}ms");
+    }
+
+    [Fact]
+    public void Large_foreground_masked_template_matches_accurately_and_fast()
+    {
+        // Semi-transparent UI element: bright white strokes captured over a dark background, searched over a blue-grey background.
+        var screen = TestImages.Blocky(1920, 1080, seed: 31);
+        screen.FillRectangle(new ScreenRect(500, 300, 520, 420), new RgbColor(70, 90, 120));
+        var template = TestImages.Solid(520, 420, new RgbColor(20, 20, 20));
+        var fgColor = new RgbColor(245, 245, 245);
+        var badge = TestImages.Icon(260, 210, seed: 32, new RgbColor(20, 20, 20), fgColor, cell: 16);
+        for (var y = 0; y < badge.Height; y++)
+        {
+            for (var x = 0; x < badge.Width; x++)
+            {
+                if (badge.GetPixel(x, y) != fgColor) continue;
+                template.SetPixel(130 + x, 105 + y, fgColor);
+                screen.SetPixel(500 + 130 + x, 300 + 105 + y, fgColor);
+            }
+        }
+
+        var options = new TemplateMatchOptions { MatchForeground = true };
+
+        // Warm up JIT
+        _ = TemplateMatcher.Find(screen, template, options);
+
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        var result = TemplateMatcher.Find(screen, template, options);
+        sw.Stop();
+
+        var best = Assert.IsType<VisualMatch>(result.Best);
+        Assert.Equal(new ScreenRect(500, 300, 520, 420), best.Bounds);
+        Assert.True(best.Score >= 0.9, $"score {best.Score}");
+        Assert.True(sw.Elapsed.TotalMilliseconds < 20.0, $"expected < 20ms, took {sw.Elapsed.TotalMilliseconds:F2}ms");
+    }
 }
 
 public class ColorFinderTests
@@ -645,8 +702,90 @@ public class VisionValidationAndFileTests
         var flat = new FindImageStep { TemplateWidth = 10, TemplateHeight = 10, TemplateData = TemplateCodec.Encode(TestImages.Solid(10, 10, RgbColor.White)) };
         Assert.True(MacroValidator.ValidateStep(flat).HasErrors());
 
-        var tooBig = new FindImageStep { TemplateWidth = 401, TemplateHeight = 10, TemplateData = "x" };
+        var tooBig = new FindImageStep { TemplateWidth = MacroValidator.MaxTemplateSize + 1, TemplateHeight = 10, TemplateData = "x" };
         Assert.True(MacroValidator.ValidateStep(tooBig).HasErrors());
+    }
+
+    [Theory]
+    [InlineData(400, 400)]
+    [InlineData(500, 400)]
+    [InlineData(800, 600)]
+    public void Large_captured_images_above_400x400_are_valid(int width, int height)
+    {
+        var icon = TestImages.Icon(width, height, seed: 42);
+        var step = new FindImageStep
+        {
+            TemplateWidth = width,
+            TemplateHeight = height,
+            TemplateData = TemplateCodec.Encode(icon),
+        };
+
+        Assert.False(MacroValidator.ValidateStep(step).HasErrors());
+    }
+
+    [Fact]
+    public async Task Capture_image_above_400x400_works_across_find_image_if_repeat_and_clamps_multi_monitor_coords()
+    {
+        // Secondary monitor at negative physical coordinates (-1920, -200) and primary at (0, 0).
+        var virtualBounds = new ScreenRect(-1920, -200, 3840, 1280);
+        var desktop = TestImages.Blocky(3840, 1280, seed: 55);
+        var bigPatch = TestImages.Icon(520, 440, seed: 56);
+        // Place at (-1500, -100) in virtual screen coordinates -> local (420, 100) in the frozen desktop image.
+        TestImages.Paste(desktop, bigPatch, 420, 100);
+        var frozen = new ScreenFrame(virtualBounds, desktop);
+
+        // Selection extending slightly past the top-left of the virtual screen clamps cleanly into the frozen bitmap.
+        var clamped = frozen.CropFromScreen(new ScreenRect(-1930, -210, 500, 420));
+        Assert.NotNull(clamped);
+        Assert.Equal(new ScreenRect(-1920, -200, 490, 410), clamped!.Bounds);
+        Assert.Equal(490, clamped.Image.Width);
+        Assert.Equal(410, clamped.Image.Height);
+
+        // Exact 520x440 crop on secondary monitor:
+        var picked = frozen.CropFromScreen(new ScreenRect(-1500, -100, 520, 440));
+        Assert.NotNull(picked);
+        Assert.Equal((520, 440), (picked!.Image.Width, picked.Image.Height));
+        var encoded = TemplateCodec.Encode(picked.Image);
+
+        // 1. FindImageStep, 2. IfStep (ImageVisible), and 3. RepeatStep (ImageVisible) all validate and execute with a 520x440 image on a multi-monitor setup:
+        FindImageStep MakeCheck() => new()
+        {
+            TemplateWidth = 520,
+            TemplateHeight = 440,
+            TemplateData = encoded,
+            TimeoutMs = 0,
+            Action = FoundTextAction.Move,
+        };
+
+        var macro = new Macro
+        {
+            Name = "Large multi-monitor image test",
+            Steps =
+            {
+                MakeCheck(),
+                new IfStep { Condition = new Condition { Check = MakeCheck() }, ThenAction = FoundTextAction.Click },
+                new EndIfStep(),
+                new RepeatStep
+                {
+                    Mode = RepeatMode.Until,
+                    Condition = new Condition { Check = MakeCheck() },
+                    MaxIterations = 3,
+                },
+                new MouseMoveStep { X = 10, Y = 10 },
+                new EndRepeatStep(),
+            },
+        };
+
+        Assert.False(MacroValidator.Validate(macro).HasErrors());
+
+        var input = new FakeInput();
+        var capture = new FakeCapture(virtualBounds.X, virtualBounds.Y, desktop);
+        var result = await new PlaybackEngine(input, new FakeClock(), capture: capture).RunAsync(macro);
+
+        Assert.Equal(PlaybackOutcome.Completed, result.Outcome);
+        // Center of (-1500, -100, 520, 440) is (-1240, 120)
+        Assert.Contains("move -1240,120", input.Calls);
+        Assert.DoesNotContain("move 10,10", input.Calls); // Repeat Until stopped immediately because the 520x440 image was seen
     }
 
     [Theory]

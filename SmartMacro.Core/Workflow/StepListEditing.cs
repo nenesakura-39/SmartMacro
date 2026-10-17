@@ -61,6 +61,30 @@ public static class StepListEditing
         return selectedIndex + 1;
     }
 
+    /// <summary>
+    /// Index at which a new step is inserted, taking <c>If / Else / End If</c> and <c>Repeat / End Repeat</c> blocks
+    /// into account so adding a nested <c>If</c>, <c>Repeat</c>, or <c>Else</c> while a block header or inner step is
+    /// selected inserts inside the current block right after the selected step instead of at the bottom of the macro.
+    /// </summary>
+    public static int InsertIndex(IReadOnlyList<MacroStep> steps, int selectedIndex, InsertPosition position, StepKind? newKind = null)
+    {
+        ArgumentNullException.ThrowIfNull(steps);
+        if (selectedIndex < 0 || selectedIndex >= steps.Count) return steps.Count;
+
+        var blocks = BlockStructure.Analyze(steps);
+        var selected = steps[selectedIndex];
+
+        if (newKind == StepKind.Else && selected is EndIfStep &&
+            (position == InsertPosition.AfterSelected || blocks.StartOf(selectedIndex) >= 0))
+            return selectedIndex;
+
+        var insideOrOpener = selected is IfStep or ElseStep or RepeatStep || blocks.Depth[selectedIndex] > 0;
+        if (insideOrOpener && (position == InsertPosition.AfterSelected || newKind is StepKind.If or StepKind.Repeat or StepKind.Else))
+            return selectedIndex + 1;
+
+        return InsertIndex(steps.Count, selectedIndex, position);
+    }
+
     /// <summary>Plans Move up / down / to top / to bottom for the contiguous range first..last.</summary>
     public static MovePlan PlanMove(IReadOnlyList<MacroStep> steps, int first, int last, MoveDirection direction)
     {
@@ -150,16 +174,49 @@ public static class StepListEditing
         if (newFirst < 0 || newFirst + count > steps.Count || newFirst == first) return MovePlan.Nothing(first, last);
 
         var plan = new MovePlan(true, first, last, newFirst) { TookWholeBlocks = tookBlocks };
-        if (!BlockStructure.Analyze(steps).IsValid) return plan; // already broken: let the user fix it
+        var before = BlockStructure.Analyze(steps);
+        if (!before.IsValid) return plan; // already broken: let the user fix it
 
-        var after = BlockStructure.Analyze(Apply(steps, plan));
-        if (after.IsValid) return plan;
+        var afterSteps = Apply(steps, plan);
+        var after = BlockStructure.Analyze(afterSteps);
+        if (after.IsValid && SameBlockPairs(steps, before, afterSteps, after)) return plan;
 
         var what = count == 1 ? "this step" : "these steps";
+        var reason = after.Problems.Count > 0
+            ? after.Problems[0].Message.TrimEnd('.')
+            : "it would cross another If / Else / End If boundary";
         return MovePlan.Refused(first, last,
-            $"Moving {what} there would break the If / Repeat blocks ({after.Problems[0].Message.TrimEnd('.')}). " +
+            $"Moving {what} there would break the If / Repeat blocks ({reason}). " +
             "To move a whole block, select it from its If / Repeat to its End (or use Move to top / bottom, or drag it), " +
             "or move the markers one place at a time.");
+    }
+
+    private static bool SameBlockPairs(
+        IReadOnlyList<MacroStep> beforeSteps, BlockStructure before,
+        IReadOnlyList<MacroStep> afterSteps, BlockStructure after)
+    {
+        for (var i = 0; i < beforeSteps.Count; i++)
+        {
+            if (beforeSteps[i] is not (IfStep or RepeatStep)) continue;
+            var j = -1;
+            for (var k = 0; k < afterSteps.Count; k++)
+            {
+                if (ReferenceEquals(afterSteps[k], beforeSteps[i])) { j = k; break; }
+            }
+            if (j < 0) return false;
+
+            var beforeEnd = before.EndOf(i);
+            var afterEnd = after.EndOf(j);
+            if (beforeEnd < 0 || afterEnd < 0 || !ReferenceEquals(beforeSteps[beforeEnd], afterSteps[afterEnd]))
+                return false;
+
+            var beforeElse = before.ElseOf(i);
+            var afterElse = after.ElseOf(j);
+            if ((beforeElse < 0) != (afterElse < 0)) return false;
+            if (beforeElse >= 0 && !ReferenceEquals(beforeSteps[beforeElse], afterSteps[afterElse]))
+                return false;
+        }
+        return true;
     }
 
     private static bool IsRange(IReadOnlyList<MacroStep> steps, int first, int last) =>

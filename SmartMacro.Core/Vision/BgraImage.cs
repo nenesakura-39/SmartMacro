@@ -100,6 +100,21 @@ public sealed record ScreenFrame(ScreenRect Bounds, BgraImage Image)
 {
     /// <summary>Turns a rectangle inside the picture into screen coordinates.</summary>
     public ScreenRect ToScreen(ScreenRect local) => new(Bounds.X + local.X, Bounds.Y + local.Y, local.Width, local.Height);
+
+    /// <summary>
+    /// Crops a physical screen rectangle out of this capture, clamping safely to <c>[0, Image.Width] × [0, Image.Height]</c>
+    /// across multi-monitor and negative secondary-monitor coordinates.
+    /// </summary>
+    public ScreenFrame? CropFromScreen(ScreenRect screenRect)
+    {
+        var local = new ScreenRect(
+            screenRect.X - Bounds.X,
+            screenRect.Y - Bounds.Y,
+            screenRect.Width,
+            screenRect.Height).Intersect(new ScreenRect(0, 0, Image.Width, Image.Height));
+        if (local.IsEmpty) return null;
+        return new ScreenFrame(ToScreen(local), Image.Crop(local));
+    }
 }
 
 /// <summary>An RGB colour. Written as "#RRGGBB" in macro files.</summary>
@@ -163,7 +178,7 @@ public static class TemplateCodec
             return false;
         }
 
-        if (width <= 0 || height <= 0 || (long)width * height > 4_000_000)
+        if (width <= 0 || height <= 0 || (long)width * height > 40_000_000)
         {
             error = "The image size is invalid.";
             return false;

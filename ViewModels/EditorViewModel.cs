@@ -90,8 +90,8 @@ public sealed class EditorViewModel : ObservableObject
         MoveDownCommand = new RelayCommand(() => MoveSelected(MoveDirection.Down), () => CanMove(up: false));
         MoveToTopCommand = new RelayCommand(() => MoveSelected(MoveDirection.ToTop), () => CanMove(up: true));
         MoveToBottomCommand = new RelayCommand(() => MoveSelected(MoveDirection.ToBottom), () => CanMove(up: false));
-        AddToEndCommand = new RelayCommand(p => AddStep(p, InsertPosition.AtEnd), p => HasMacro && p is StepKind);
-        InsertAfterSelectedCommand = new RelayCommand(p => AddStep(p, InsertPosition.AfterSelected), p => HasMacro && p is StepKind);
+        AddToEndCommand = new RelayCommand(p => AddStep(p, InsertPosition.AtEnd, forcePosition: true), p => HasMacro && p is StepKind);
+        InsertAfterSelectedCommand = new RelayCommand(p => AddStep(p, InsertPosition.AfterSelected, forcePosition: true), p => HasMacro && p is StepKind);
         SaveCommand = new AsyncRelayCommand(async () => await SaveAsync(), HandleUnexpectedError, () => HasMacro && !_isSaving);
         RevertCommand = new RelayCommand(Revert, () => HasMacro && IsDirty);
         GoToLibraryCommand = new RelayCommand(goToLibrary);
@@ -595,7 +595,11 @@ public sealed class EditorViewModel : ObservableObject
         set
         {
             if (SetProperty(ref _selectedStep, value))
+            {
+                if (value is not null && (value.Model is IfStep or ElseStep or RepeatStep || value.IndentLevel > 0))
+                    AddAtEnd = false;
                 OnPropertyChanged(nameof(HasSelection));
+            }
         }
     }
 
@@ -808,14 +812,16 @@ public sealed class EditorViewModel : ObservableObject
         _setStatus($"Changes to \"{name}\" were discarded.", StatusKind.Info);
     }
 
-    private void AddStep(object? parameter, InsertPosition position)
+    private void AddStep(object? parameter, InsertPosition position, bool forcePosition = false)
     {
         if (!HasMacro || parameter is not StepKind kind) return;
 
         RecordUndo();
         var step = CreateStepViewModel(MacroFactory.CreateStep(kind, _defaultDelayMs()));
         var selectedIndex = SelectedStep is null ? -1 : Steps.IndexOf(SelectedStep);
-        var index = StepListEditing.InsertIndex(Steps.Count, selectedIndex, position);
+        var index = forcePosition
+            ? StepListEditing.InsertIndex(Steps.Count, selectedIndex, position)
+            : StepListEditing.InsertIndex(Steps.Select(s => s.Model).ToList(), selectedIndex, position, kind);
         Steps.Insert(index, step);
 
         // If and Repeat come with their End, so the new block is complete straight away.
@@ -957,10 +963,46 @@ public sealed class EditorViewModel : ObservableObject
     private void DuplicateSelectedStep()
     {
         if (SelectedStep is not { } step) return;
+        var index = Steps.IndexOf(step);
+        if (index < 0) return;
+
+        if (step.Model is IfStep or RepeatStep or EndIfStep or EndRepeatStep or ElseStep)
+        {
+            var models = Steps.Select(s => s.Model).ToList();
+            var blocks = BlockStructure.Analyze(models);
+            if (blocks.IsValid)
+            {
+                if (step.Model is ElseStep)
+                {
+                    _setStatus("An If block can have only one Else. To duplicate the whole If block, select its If step and press Ctrl+D.", StatusKind.Warning);
+                    return;
+                }
+
+                var start = step.Model is IfStep or RepeatStep ? index : blocks.StartOf(index);
+                var end = start >= 0 ? blocks.EndOf(start) : -1;
+                if (start >= 0 && end >= 0)
+                {
+                    RecordUndo();
+                    var added = new List<StepViewModel>();
+                    for (var i = start; i <= end; i++)
+                    {
+                        var vm = CreateStepViewModel(MacroFactory.DuplicateStep(models[i]));
+                        Steps.Insert(end + 1 + added.Count, vm);
+                        added.Add(vm);
+                    }
+
+                    _selection = added;
+                    SelectedStep = added[0];
+                    SelectStepsRequested?.Invoke(this, added);
+                    Touch();
+                    return;
+                }
+            }
+        }
 
         RecordUndo();
         var copy = CreateStepViewModel(MacroFactory.DuplicateStep(step.Model));
-        Steps.Insert(Steps.IndexOf(step) + 1, copy);
+        Steps.Insert(index + 1, copy);
         SelectedStep = copy;
         Touch();
     }
