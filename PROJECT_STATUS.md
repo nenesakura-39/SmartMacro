@@ -630,6 +630,13 @@ no .NET SDK in the AI's environment)
   are guesses until the owner's measurements (STAGE4 tests B3 / D2) are in.
 
 ## Release preparation (not released; nothing published)
+- **2026-10-17 16:48 fresh publish (owner's PC, `tools\publish.cmd`, real build, no --allow-drafts):** tests
+  **709/709 passed**; publish OK; all five docs passed the marker check; `bundle-versions.txt` OK (every bundled component
+  listed: .NET / WPF runtime packs 10.0.11, Windows SDK projection 10.0.19041.57). Output:
+  `release\SmartMacro-1.0.0-win-x64.zip` (62.2 MB; SmartMacro.exe 68.1 MB + 5 docs), SHA-256
+  `87D34104353DBF605F84B90BB7F27C375C8E0B2B0B60F3CB41FEE42874AA1CFF`. Built from the current working copy (includes the
+  next-gen QoL + live-test fix batches, which therefore compile). Sent to a friend as an early test build for debugging;
+  manual tests still open. Version stays 1.0.0 – bump `<Version>` in the csproj (and EULA/README) for the next test build.
 - **2026-10-17 EULA simplification (docs only, no code changed):** `release-docs/EULA.txt` rewritten as a shorter
   plain-English draft (old text: `Claude outputs/archive/EULA-long-draft-2026-10-16.txt`). Privacy section written from the
   source (no network code; local data folder, daily logs, last test PNGs, diagnostics on click only). README version set to
