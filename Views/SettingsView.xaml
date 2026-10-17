@@ -4,6 +4,7 @@
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
              xmlns:vm="clr-namespace:SmartMacro.ViewModels"
+             xmlns:views="clr-namespace:SmartMacro.Views"
              mc:Ignorable="d"
              d:DataContext="{d:DesignInstance Type=vm:SettingsViewModel}">
     <UserControl.Resources>
@@ -66,10 +67,8 @@
                 <!-- ===== About ===== -->
                 <Border Style="{StaticResource SettingsCard}" Padding="16">
                     <DockPanel>
-                        <Border DockPanel.Dock="Left" Width="52" Height="52" CornerRadius="12" Background="{StaticResource AccentBrush}" VerticalAlignment="Top">
-                            <TextBlock Text="&#xE945;" FontFamily="{StaticResource IconFont}" FontSize="24" Foreground="White"
-                                       HorizontalAlignment="Center" VerticalAlignment="Center" />
-                        </Border>
+                        <!-- Brand mark (same vector logo as the sidebar and the app icon, Views/BrandLogo.xaml) -->
+                        <views:BrandLogo DockPanel.Dock="Left" Width="60" Height="60" VerticalAlignment="Top" Margin="-4,-4,0,0" />
                         <Button DockPanel.Dock="Right" Command="{Binding CopyDiagnosticsCommand}" VerticalAlignment="Top"
                                 ToolTip="Copies version, Windows, screen and OCR info plus the recent log, for bug reports">
                             <StackPanel Orientation="Horizontal">

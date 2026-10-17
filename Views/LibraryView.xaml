@@ -4,6 +4,7 @@
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
              xmlns:vm="clr-namespace:SmartMacro.ViewModels"
+             xmlns:views="clr-namespace:SmartMacro.Views"
              mc:Ignorable="d"
              d:DataContext="{d:DesignInstance Type=vm:LibraryViewModel}"
              d:DesignWidth="1000" d:DesignHeight="640">
@@ -252,9 +253,7 @@
                     <!-- Empty library -->
                     <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="380"
                                 Visibility="{Binding IsEmpty, Converter={StaticResource BoolToVisibility}}">
-                        <Border Width="64" Height="64" CornerRadius="16" Background="{StaticResource AccentSoftBrush}" HorizontalAlignment="Center">
-                            <TextBlock Text="&#xE945;" Style="{StaticResource IconText}" FontSize="28" Foreground="{StaticResource AccentBrush}" HorizontalAlignment="Center" />
-                        </Border>
+                        <views:BrandLogo Width="72" Height="72" HorizontalAlignment="Center" />
                         <TextBlock Text="No macros yet" Style="{StaticResource SectionTitle}" FontSize="16" HorizontalAlignment="Center" Margin="0,16,0,0" />
                         <TextBlock Text="A macro is a list of steps such as mouse clicks, key presses and delays. Create one, or import a .smacro file a friend shared."
                                    Style="{StaticResource MutedText}" TextAlignment="Center" Margin="0,6,0,16" />
