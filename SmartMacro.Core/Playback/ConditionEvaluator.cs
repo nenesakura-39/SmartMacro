@@ -1,4 +1,5 @@
 using SmartMacro.Core.Models;
+using SmartMacro.Core.Ocr;
 using SmartMacro.Core.Vision;
 
 namespace SmartMacro.Core.Playback;
@@ -7,8 +8,9 @@ namespace SmartMacro.Core.Playback;
 /// Result of checking a condition once.
 /// Seen: the text / image / colour was found (before "NOT" is applied). IsTrue: the condition's answer.
 /// X / Y: where it was seen (screen pixels), only meaningful when Seen. Details: a sentence for the log.
+/// Match: the rectangle of what was seen (empty when unknown).
 /// </summary>
-public sealed record ConditionCheck(bool Seen, bool IsTrue, int X, int Y, string Details);
+public sealed record ConditionCheck(bool Seen, bool IsTrue, int X, int Y, string Details, ScreenRect Match = default);
 
 /// <summary>
 /// Answers a condition by looking at the screen once. Waiting, timeouts, pause and stop are handled by the
@@ -50,7 +52,7 @@ public sealed class ScreenConditionEvaluator : IConditionEvaluator
         var probe = await search.LookAsync(timer, cancellationToken).ConfigureAwait(false);
         var isTrue = probe.Found != condition.Negate;
         var details = probe.Found ? probe.FoundText : $"{search.What} is not on screen.{probe.MissText}";
-        return new ConditionCheck(probe.Found, isTrue, probe.X, probe.Y, details);
+        return new ConditionCheck(probe.Found, isTrue, probe.X, probe.Y, details, probe.Match);
     }
 
     public DetectionTimer? NewTimer(Condition condition) => Prepare(condition).NewTimer();

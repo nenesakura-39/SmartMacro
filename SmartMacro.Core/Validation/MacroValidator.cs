@@ -128,6 +128,8 @@ public static class MacroValidator
         if (double.IsNaN(macro.Speed) || macro.Speed < MinSpeed || macro.Speed > MaxSpeed)
             issues.Add(Error($"Speed must be between {MinSpeed} and {MaxSpeed}.", property: nameof(Macro.Speed)));
 
+        ValidateMacroSettings(issues, macro);
+
         if (macro.Steps is null)
         {
             issues.Add(Error("The step list is missing."));
@@ -178,6 +180,29 @@ public static class MacroValidator
 
         ValidateBlocks(issues, macro.Steps);
         return issues;
+    }
+
+    /// <summary>Target window / coordinate scaling and Humanize (macro settings added in format 11).</summary>
+    private static void ValidateMacroSettings(List<ValidationIssue> issues, Macro macro)
+    {
+        if (macro.TargetWindowTitle is { } title && (title.Trim().Length == 0 || title.Length > SearchArea.MaxWindowTitleLength))
+            issues.Add(Error($"The target window title must be 1 to {SearchArea.MaxWindowTitleLength} characters (or choose \"Any / main screen\").",
+                property: nameof(Macro.TargetWindowTitle)));
+
+        if (macro.ScaleCoordinatesToWindow)
+        {
+            if (macro.ReferenceWidth <= 0 || macro.ReferenceHeight <= 0 || macro.ReferenceWidth > 100_000 || macro.ReferenceHeight > 100_000)
+                issues.Add(Error("\"Auto-adjust coordinates\" needs the reference size (the window or screen size the positions were picked on). Click \"Use current size\" in the macro settings.",
+                    property: nameof(Macro.ReferenceWidth)));
+            else if (Math.Abs((long)macro.ReferenceLeft) > 100_000 || Math.Abs((long)macro.ReferenceTop) > 100_000)
+                issues.Add(Error("The reference position is far outside any screen. Click \"Use current size\" in the macro settings.",
+                    property: nameof(Macro.ReferenceLeft)));
+        }
+
+        if (macro.ClickJitterPx is < 0 or > Macro.MaxClickJitterPx)
+            issues.Add(Error($"Humanize click jitter must be 0 to {Macro.MaxClickJitterPx} px.", property: nameof(Macro.ClickJitterPx)));
+        if (macro.DelayJitterPercent is < 0 or > Macro.MaxDelayJitterPercent)
+            issues.Add(Error($"Humanize timing variation must be 0 to {Macro.MaxDelayJitterPercent} %.", property: nameof(Macro.DelayJitterPercent)));
     }
 
     /// <summary>

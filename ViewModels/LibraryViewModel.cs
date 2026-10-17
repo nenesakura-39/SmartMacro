@@ -35,11 +35,70 @@ public sealed class MacroListItemViewModel : ObservableObject
     public string IdText => _macro.Id.ToString();
     public bool HasErrors { get; private set; }
 
+    // Category pills on the Studio Macro Card: what kinds of steps the macro uses.
+    public bool UsesInput { get; private set; }
+    public bool UsesVision { get; private set; }
+    public bool UsesOcr { get; private set; }
+    public bool UsesFeedback { get; private set; }
+    public bool UsesLogic { get; private set; }
+    public bool UsesHumanize => _macro.HumanizePlayback;
+    public bool UsesTargetWindow => _macro.ScaleCoordinatesToWindow || !string.IsNullOrWhiteSpace(_macro.TargetWindowTitle);
+
+    /// <summary>E.g. "just now", "5 min ago", "yesterday", or the date.</summary>
+    public string ModifiedAgoText
+    {
+        get
+        {
+            if (_macro.ModifiedAt == default) return "never saved";
+            var age = DateTimeOffset.Now - _macro.ModifiedAt;
+            if (age < TimeSpan.FromMinutes(1)) return "edited just now";
+            if (age < TimeSpan.FromHours(1)) return $"edited {(int)age.TotalMinutes} min ago";
+            if (age < TimeSpan.FromDays(1)) return $"edited {(int)age.TotalHours} h ago";
+            if (age < TimeSpan.FromDays(2)) return "edited yesterday";
+            if (age < TimeSpan.FromDays(7)) return $"edited {(int)age.TotalDays} days ago";
+            return "edited " + _macro.ModifiedAt.ToLocalTime().ToString("MMM d, yyyy");
+        }
+    }
+
+    public string RepeatText => _macro.RepeatCount switch
+    {
+        0 => "loops until stopped",
+        1 => "runs once",
+        var n => $"runs {n:N0}×",
+    };
+
     public void Update(Macro macro)
     {
         _macro = macro;
         HasErrors = MacroValidator.Validate(macro).HasErrors();
+
+        var steps = macro.Steps ?? new List<MacroStep>();
+        var searches = steps.SelectMany(WorkflowSteps.ScreenSearches).ToList();
+        UsesInput = steps.Any(s => s is MouseMoveStep or MouseClickStep or MouseScrollStep or KeyPressStep or TypeTextStep or InputSequenceStep);
+        UsesVision = searches.Any(s => s is FindImageStep or FindColorStep);
+        UsesOcr = searches.Any(s => s is FindTextStep);
+        UsesFeedback = steps.Any(s => s is FeedbackLoopStep);
+        UsesLogic = steps.Any(WorkflowSteps.IsBlockStep);
         OnPropertyChanged(string.Empty);
+    }
+
+    /// <summary>True when the card matches a search (name, description or a category word like "ocr").</summary>
+    public bool Matches(string term)
+    {
+        if (Name.Contains(term, StringComparison.CurrentCultureIgnoreCase)
+            || (_macro.Description?.Contains(term, StringComparison.CurrentCultureIgnoreCase) ?? false))
+            return true;
+
+        return term.ToLowerInvariant() switch
+        {
+            "vision" or "image" or "color" or "colour" => UsesVision,
+            "ocr" or "text" => UsesOcr,
+            "feedback" or "loop" or "minigame" => UsesFeedback,
+            "input" or "click" or "mouse" or "key" => UsesInput,
+            "logic" or "if" or "repeat" => UsesLogic,
+            "error" or "errors" or "problem" or "problems" => HasErrors,
+            _ => false,
+        };
     }
 
     public static MacroListItemViewModel From(Macro macro)
@@ -62,7 +121,8 @@ public sealed class LibraryViewModel : ObservableObject
     private readonly Func<Macro, Task>? _playMacro;
     private readonly Func<bool> _canPlay;
 
-    private const string MacroFileFilter = "SmartMacro macro (*.smartmacro;*.json)|*.smartmacro;*.json|All files (*.*)|*.*";
+    private const string ImportFileFilter = "SmartMacro macro (*.smacro;*.smartmacro;*.json)|*.smacro;*.smartmacro;*.json|All files (*.*)|*.*";
+    private const string ExportFileFilter = "SmartMacro macro (*.smacro)|*.smacro|All files (*.*)|*.*";
 
     private MacroListItemViewModel? _selectedItem;
     private string _searchText = string.Empty;
@@ -95,19 +155,34 @@ public sealed class LibraryViewModel : ObservableObject
         ItemsView.SortDescriptions.Add(new SortDescription(nameof(MacroListItemViewModel.Name), ListSortDirection.Ascending));
 
         NewCommand = new AsyncRelayCommand(CreateNewAsync, HandleError, () => !IsLoading);
-        OpenCommand = new AsyncRelayCommand(OpenSelectedAsync, HandleError, () => SelectedItem is not null);
-        DuplicateCommand = new AsyncRelayCommand(DuplicateSelectedAsync, HandleError, () => SelectedItem is not null);
-        DeleteCommand = new AsyncRelayCommand(DeleteSelectedAsync, HandleError, () => SelectedItem is not null);
+        // Card buttons pass their own macro as the parameter; toolbar / keyboard use the selection.
+        OpenCommand = new AsyncRelayCommand(p => OpenSelectedAsync(Target(p)), HandleError, HasTarget);
+        DuplicateCommand = new AsyncRelayCommand(p => DuplicateSelectedAsync(Target(p)), HandleError, HasTarget);
+        DeleteCommand = new AsyncRelayCommand(p => DeleteSelectedAsync(Target(p)), HandleError, HasTarget);
         ReloadCommand = new AsyncRelayCommand(LoadAsync, HandleError, () => !IsLoading);
         OpenFolderCommand = new RelayCommand(OpenFolder);
         ClearSearchCommand = new RelayCommand(() => SearchText = string.Empty);
         ImportCommand = new AsyncRelayCommand(ImportAsync, HandleError, () => !IsLoading);
-        ExportCommand = new AsyncRelayCommand(ExportSelectedAsync, HandleError, () => SelectedItem is not null);
+        ExportCommand = new AsyncRelayCommand(p => ExportSelectedAsync(Target(p)), HandleError, HasTarget);
         PlayItemCommand = new AsyncRelayCommand(
             p => PlayItemAsync(p as MacroListItemViewModel ?? SelectedItem),
             HandleError,
             p => _playMacro is not null && _canPlay() && (p is MacroListItemViewModel || SelectedItem is not null));
     }
+
+    /// <summary>The card a button belongs to (its parameter), or the selected macro. Selects it too.</summary>
+    private MacroListItemViewModel? Target(object? parameter)
+    {
+        if (parameter is MacroListItemViewModel item)
+        {
+            SelectedItem = item;
+            return item;
+        }
+
+        return SelectedItem;
+    }
+
+    private bool HasTarget(object? parameter) => parameter is MacroListItemViewModel || SelectedItem is not null;
 
     public AsyncRelayCommand ImportCommand { get; }
     public AsyncRelayCommand ExportCommand { get; }
@@ -262,12 +337,12 @@ public sealed class LibraryViewModel : ObservableObject
         await _openInEditor(macro.Id);
     }
 
-    private Task OpenSelectedAsync() =>
-        SelectedItem is { } item ? _openInEditor(item.Id) : Task.CompletedTask;
+    private Task OpenSelectedAsync(MacroListItemViewModel? target) =>
+        target is { } item ? _openInEditor(item.Id) : Task.CompletedTask;
 
-    private async Task DuplicateSelectedAsync()
+    private async Task DuplicateSelectedAsync(MacroListItemViewModel? target)
     {
-        if (SelectedItem is not { } item) return;
+        if (target is not { } item) return;
 
         var copy = MacroFactory.Duplicate(item.Macro, Names);
         try
@@ -291,9 +366,9 @@ public sealed class LibraryViewModel : ObservableObject
         _setStatus($"Created \"{copy.Name}\".", StatusKind.Success);
     }
 
-    private async Task DeleteSelectedAsync()
+    private async Task DeleteSelectedAsync(MacroListItemViewModel? target)
     {
-        if (SelectedItem is not { } item) return;
+        if (target is not { } item) return;
 
         if (_confirmBeforeDelete() &&
             !_dialogs.Confirm("Delete macro",
@@ -345,7 +420,7 @@ public sealed class LibraryViewModel : ObservableObject
     /// <summary>Adds macros from .smartmacro / .json files. Each file is checked; bad files are skipped with a reason.</summary>
     private async Task ImportAsync()
     {
-        var files = _dialogs.PickFilesToOpen("Import macros", MacroFileFilter);
+        var files = _dialogs.PickFilesToOpen("Import .smacro files", ImportFileFilter);
         if (files is null || files.Length == 0) return;
 
         var imported = new List<string>();
@@ -407,21 +482,21 @@ public sealed class LibraryViewModel : ObservableObject
         }
     }
 
-    /// <summary>Saves the selected macro as a .smartmacro file (to share or back up).</summary>
-    private async Task ExportSelectedAsync()
+    /// <summary>Saves a macro as a self-contained .smacro file (to share or back up).</summary>
+    private async Task ExportSelectedAsync(MacroListItemViewModel? target)
     {
-        if (SelectedItem is not { } item) return;
+        if (target is not { } item) return;
 
         var safeName = string.Concat(item.Name.Select(c => Path.GetInvalidFileNameChars().Contains(c) ? '_' : c)).Trim();
         if (safeName.Length == 0) safeName = "macro";
 
-        var path = _dialogs.PickSaveFile("Export macro", MacroFileFilter, safeName + MacroFileFormat.ExportExtension);
+        var path = _dialogs.PickSaveFile("Export macro", ExportFileFilter, safeName + MacroFileFormat.ExportExtension);
         if (path is null) return;
 
         try
         {
             await AtomicFile.WriteAllTextAsync(path, MacroFileFormat.Serialize(MacroJson.Clone(item.Macro)));
-            _setStatus($"Exported \"{item.Name}\" to {path}.", StatusKind.Success);
+            _setStatus($"Exported \"{item.Name}\" to {path}. It's one self-contained file (pictures included): send it to a friend and they can import it.", StatusKind.Success);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
@@ -434,9 +509,7 @@ public sealed class LibraryViewModel : ObservableObject
     {
         if (obj is not MacroListItemViewModel item) return false;
         if (string.IsNullOrWhiteSpace(_searchText)) return true;
-        var term = _searchText.Trim();
-        return item.Name.Contains(term, StringComparison.CurrentCultureIgnoreCase)
-            || (item.Macro.Description?.Contains(term, StringComparison.CurrentCultureIgnoreCase) ?? false);
+        return item.Matches(_searchText.Trim());
     }
 
     private void RaiseStateChanged()

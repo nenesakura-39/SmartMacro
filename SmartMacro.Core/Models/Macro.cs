@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace SmartMacro.Core.Models;
 
 /// <summary>A saved macro: a name plus an ordered list of steps.</summary>
@@ -18,6 +20,71 @@ public sealed class Macro
 
     /// <summary>Pause between repeats, in ms (not after the last one). Also scaled by Speed.</summary>
     public int RepeatDelayMs { get; set; }
+
+    // ---------------- Target window + resolution scaling (format 11) ----------------
+
+    /// <summary>
+    /// The window the macro is made for (part of its title, e.g. "Roblox"), or null for "Any / main screen".
+    /// Only used when <see cref="ScaleCoordinatesToWindow"/> is on.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? TargetWindowTitle { get; set; }
+
+    /// <summary>
+    /// Where the target window (or the main monitor) was, and how big it was, when the positions in this macro were picked
+    /// or recorded: physical pixels in screen coordinates (e.g. 0, 0, 1920×1080).
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public int ReferenceLeft { get; set; }
+
+    /// <inheritdoc cref="ReferenceLeft"/>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public int ReferenceTop { get; set; }
+
+    /// <inheritdoc cref="ReferenceLeft"/>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public int ReferenceWidth { get; set; }
+
+    /// <inheritdoc cref="ReferenceLeft"/>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public int ReferenceHeight { get; set; }
+
+    /// <summary>
+    /// "Auto-adjust coordinates if the window moves or the screen resolution changes": at playback time every stored
+    /// position (Move / Click / Scroll, drag ends, custom search areas, feedback bar areas) is moved and scaled from the
+    /// reference rectangle into the target window's current bounds (or the current main monitor). Off = exact pixels.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public bool ScaleCoordinatesToWindow { get; set; }
+
+    // ---------------- Humanize (format 11) ----------------
+
+    /// <summary>
+    /// "Humanize": small random variation so repeated clicks don't hit the exact same pixel with the exact same timing:
+    /// ± <see cref="EffectiveClickJitterPx"/> around click spots (kept inside what was found) and
+    /// ± <see cref="EffectiveDelayJitterPercent"/> % on delays and mouse glide times. Off by default.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public bool HumanizePlayback { get; set; }
+
+    /// <summary>Largest random click offset in pixels (null = <see cref="DefaultClickJitterPx"/>).</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? ClickJitterPx { get; set; }
+
+    /// <summary>Largest random delay / glide change in percent (null = <see cref="DefaultDelayJitterPercent"/>).</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? DelayJitterPercent { get; set; }
+
+    public const int DefaultClickJitterPx = 3;
+    public const int DefaultDelayJitterPercent = 8;
+    public const int MaxClickJitterPx = 50;
+    public const int MaxDelayJitterPercent = 50;
+
+    [JsonIgnore]
+    public int EffectiveClickJitterPx => ClickJitterPx ?? DefaultClickJitterPx;
+
+    [JsonIgnore]
+    public int EffectiveDelayJitterPercent => DelayJitterPercent ?? DefaultDelayJitterPercent;
 }
 
 /// <summary>
@@ -42,8 +109,10 @@ public sealed class MacroDocument
     /// 10 = adds "where to look" (main monitor / a specific monitor / an app window) on Find steps and conditions,
     ///     movement styles (smooth glide / human curve) with a glide time on Move / Click / Find steps, and click timing
     ///     (click hold, double-click gap, wait after click) on Mouse click and Find steps.
+    /// 11 = adds macro settings: a target window with "auto-adjust coordinates" (reference rectangle) and "Humanize"
+    ///     (click jitter / delay variation).
     /// </summary>
-    public const int CurrentSchemaVersion = 10;
+    public const int CurrentSchemaVersion = 11;
 
     public int SchemaVersion { get; set; }
     public Macro? Macro { get; set; }
@@ -57,9 +126,9 @@ public sealed class MacroDocument
     public static int RequiredSchemaVersion(Macro macro)
     {
         ArgumentNullException.ThrowIfNull(macro);
-        if (macro.Steps is null) return 1;
+        if (macro.Steps is null) return UsesVersion11Features(macro) ? 11 : 1;
 
-        var required = 1;
+        var required = UsesVersion11Features(macro) ? 11 : 1;
         foreach (var step in macro.Steps)
         {
             var needed = step switch
@@ -84,6 +153,12 @@ public sealed class MacroDocument
 
         return required;
     }
+
+    /// <summary>True if the macro uses a macro-level option added in format 11 (see <see cref="CurrentSchemaVersion"/>).</summary>
+    private static bool UsesVersion11Features(Macro macro) =>
+        macro.HumanizePlayback || macro.ScaleCoordinatesToWindow || macro.TargetWindowTitle is not null
+        || macro.ClickJitterPx is not null || macro.DelayJitterPercent is not null
+        || macro.ReferenceWidth != 0 || macro.ReferenceHeight != 0;
 
     /// <summary>True if the step uses an option added in format 10 (see <see cref="CurrentSchemaVersion"/>).</summary>
     private static bool UsesVersion10Features(MacroStep step)

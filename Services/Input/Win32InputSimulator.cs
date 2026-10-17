@@ -70,6 +70,12 @@ public sealed class Win32InputSimulator : IInputSimulator
     private readonly Dictionary<MacroMouseButton, long> _jumpClickDown = new();
     private readonly Dictionary<MacroMouseButton, long> _jumpClickUp = new();
 
+    // Failsafe: every key / button this simulator pressed and hasn't released yet (see ReleaseAllHeldInputs).
+    private readonly HeldInputTracker _held = new();
+
+    /// <summary>What SmartMacro's simulated input is holding down right now.</summary>
+    public HeldInputTracker Held => _held;
+
     /// <param name="log">If given, unusual click conditions (window not active, cursor confined or moved by
     /// another program) are written to the log, at most once every 2 seconds.</param>
     public Win32InputSimulator(ILogService? log = null)
@@ -203,6 +209,14 @@ public sealed class Win32InputSimulator : IInputSimulator
 
     public void MouseButton(MacroMouseButton button, bool down)
     {
+        // Remember a press before sending it (so a press that half-arrived is still released), forget a release after.
+        if (down) _held.NoteButton(button, true);
+        MouseButtonCore(button, down);
+        if (!down) _held.NoteButton(button, false);
+    }
+
+    private void MouseButtonCore(MacroMouseButton button, bool down)
+    {
         var flags = (button, down) switch
         {
             (MacroMouseButton.Left, true) => MOUSEEVENTF_LEFTDOWN,
@@ -317,9 +331,42 @@ public sealed class Win32InputSimulator : IInputSimulator
         Send(MouseInput(horizontal ? MOUSEEVENTF_HWHEEL : MOUSEEVENTF_WHEEL, unchecked((uint)delta)));
     }
 
-    public void Key(int virtualKey, bool down) => Send(KeyInput(virtualKey, down));
+    public void Key(int virtualKey, bool down)
+    {
+        if (down) _held.NoteKey(virtualKey, true);
+        Send(KeyInput(virtualKey, down));
+        if (!down) _held.NoteKey(virtualKey, false);
+    }
 
     public void KeyWithScanCode(int virtualKey, int scanCode, bool extended, bool down)
+    {
+        if (down) _held.NoteScanKey(virtualKey, scanCode, extended, true);
+        KeyWithScanCodeCore(virtualKey, scanCode, extended, down);
+        if (!down) _held.NoteScanKey(virtualKey, scanCode, extended, false);
+    }
+
+    /// <summary>
+    /// Failsafe for Stop / Esc / timeouts / errors: sends a release for every key and mouse button that is still marked
+    /// as held (mouse buttons first, then keys in reverse order), so nothing stays stuck down in Windows or a game.
+    /// Every release is tried even if one fails; returns the first error, or null.
+    /// </summary>
+    public string? ReleaseAllHeldInputs()
+    {
+        if (_held.IsEmpty) return null;
+        var buttons = _held.HeldButtons.Count;
+        var keys = _held.HeldKeys.Count;
+        var error = _held.ReleaseAll(
+            button => MouseButtonCore(button, down: false),
+            key =>
+            {
+                if (key.ScanMode) KeyWithScanCodeCore(key.VirtualKey, key.ScanCode, key.Extended, down: false);
+                else Send(KeyInput(key.VirtualKey, false));
+            });
+        _log?.Info($"Input safety: released {buttons} mouse button(s) and {keys} key(s) that were still held when playback ended.");
+        return error;
+    }
+
+    private void KeyWithScanCodeCore(int virtualKey, int scanCode, bool extended, bool down)
     {
         // Unknown / unusable scan code (0, E1-prefixed keys like Pause): fall back to the virtual key.
         if (!KeyboardInputEncoder.CanUseScanCode(scanCode))

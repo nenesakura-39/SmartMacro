@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using System.Collections.Specialized;
 using SmartMacro.Core.Logging;
 using SmartMacro.Core.Models;
+using SmartMacro.Core.Playback;
 using SmartMacro.Core.Storage;
 using SmartMacro.Core.Validation;
 using SmartMacro.Core.Workflow;
@@ -45,6 +46,20 @@ public sealed class EditorViewModel : ObservableObject
     private List<StepViewModel> _selection = new(); // all selected steps (the list allows Ctrl / Shift selection)
     private bool _addAtEnd;
 
+    // Undo / Redo of structural edits (snapshots of the step list taken before each edit).
+    private readonly UndoHistory _history = new();
+
+    // Macro settings: target window + "auto-adjust coordinates", Humanize.
+    private string? _targetWindowTitle;
+    private bool _scaleCoordinates;
+    private int _referenceLeft;
+    private int _referenceTop;
+    private int _referenceWidth;
+    private int _referenceHeight;
+    private bool _humanize;
+    private int? _clickJitterPx;
+    private int? _delayJitterPercent;
+
     public EditorViewModel(
         IMacroRepository repository,
         ILogService log,
@@ -84,6 +99,330 @@ public sealed class EditorViewModel : ObservableObject
         WrapInRepeatCommand = new RelayCommand(() => WrapSelection(StepKind.Repeat), () => HasMacro && SelectedStep is not null);
         CleanUpMousePathsCommand = new RelayCommand(CleanUpMousePaths, () => HasMacro && Steps.Any(s => s.Model is MouseMoveStep));
         AddPatternCommand = new RelayCommand(p => AddPattern(p, AddAtEnd ? InsertPosition.AtEnd : InsertPosition.AfterSelected), p => HasMacro && p is QuickPattern);
+
+        UndoCommand = new RelayCommand(Undo, () => HasMacro && _history.CanUndo);
+        RedoCommand = new RelayCommand(Redo, () => HasMacro && _history.CanRedo);
+        CopySelectedStepCommand = new RelayCommand(CopySelectedSteps, () => HasMacro && SelectedStep is not null);
+        PasteStepCommand = new RelayCommand(PasteSteps, () => HasMacro);
+        RunStepCommand = new AsyncRelayCommand(RunSelectedStepAsync, HandleUnexpectedError, () => CanRunNow && SelectedStep is not null);
+        PlayFromHereCommand = new AsyncRelayCommand(PlayFromSelectedAsync, HandleUnexpectedError, () => CanRunNow && SelectedStep is not null);
+        UseCurrentSizeCommand = new RelayCommand(CaptureReference, () => HasMacro);
+        RefreshTargetWindowsCommand = new RelayCommand(RefreshTargetWindows);
+    }
+
+    // ---------------- Undo / Redo (Ctrl+Z / Ctrl+Y) ----------------
+
+    /// <summary>↶ Undo the last structural edit (add, delete, move, duplicate, wrap, clean up, paste, quick pattern).</summary>
+    public RelayCommand UndoCommand { get; }
+
+    /// <summary>↷ Redo what Undo took back.</summary>
+    public RelayCommand RedoCommand { get; }
+
+    public bool CanUndo => _history.CanUndo;
+
+    public bool CanRedo => _history.CanRedo;
+
+    public string UndoTooltip => _history.CanUndo
+        ? $"Undo (Ctrl+Z) — {_history.UndoCount} change{(_history.UndoCount == 1 ? "" : "s")} can be undone"
+        : "Undo (Ctrl+Z) — nothing to undo yet";
+
+    public string RedoTooltip => _history.CanRedo ? "Redo (Ctrl+Y)" : "Redo (Ctrl+Y) — nothing to redo";
+
+    /// <summary>The step list as a snapshot string (for Undo / Redo).</summary>
+    private string Snapshot() => StepSnapshots.Capture(Steps.Select(s => s.Model));
+
+    /// <summary>Call right before a structural edit, so it can be undone.</summary>
+    private void RecordUndo()
+    {
+        if (!HasMacro) return;
+        _history.Record(Snapshot());
+        RaiseHistoryChanged();
+    }
+
+    private void RaiseHistoryChanged()
+    {
+        OnPropertyChanged(nameof(CanUndo));
+        OnPropertyChanged(nameof(CanRedo));
+        OnPropertyChanged(nameof(UndoTooltip));
+        OnPropertyChanged(nameof(RedoTooltip));
+        System.Windows.Input.CommandManager.InvalidateRequerySuggested();
+    }
+
+    private void Undo()
+    {
+        if (!HasMacro || !_history.TryUndo(Snapshot(), out var snapshot)) return;
+        RestoreSnapshot(snapshot);
+        RaiseHistoryChanged();
+        _setStatus($"Undone.{(_history.CanUndo ? $" {_history.UndoCount} more change(s) can be undone." : "")} Ctrl+Y redoes it.", StatusKind.Info);
+    }
+
+    private void Redo()
+    {
+        if (!HasMacro || !_history.TryRedo(Snapshot(), out var snapshot)) return;
+        RestoreSnapshot(snapshot);
+        RaiseHistoryChanged();
+        _setStatus("Redone.", StatusKind.Info);
+    }
+
+    /// <summary>Puts a snapshot back into the list, keeping the selection on the same step (by ID) where possible.</summary>
+    private void RestoreSnapshot(string snapshot)
+    {
+        var selectedId = SelectedStep?.Id;
+        var selectedIndex = SelectedStep is null ? -1 : Steps.IndexOf(SelectedStep);
+        List<MacroStep> restored;
+        try
+        {
+            restored = StepSnapshots.Restore(snapshot);
+        }
+        catch (Exception ex) when (ex is System.Text.Json.JsonException or NotSupportedException)
+        {
+            _log.Error("An undo snapshot couldn't be read.", ex);
+            return;
+        }
+
+        ReplaceSteps(restored);
+        _selection.Clear();
+        SelectedStep = Steps.FirstOrDefault(s => s.Id == selectedId)
+                       ?? (Steps.Count == 0 ? null : Steps[Math.Clamp(selectedIndex, 0, Steps.Count - 1)]);
+        Touch();
+    }
+
+    // ---------------- Copy / Paste (Ctrl+C / Ctrl+V) ----------------
+
+    /// <summary>Copies the selected steps (a single If / Repeat takes its whole block) to the clipboard.</summary>
+    public RelayCommand CopySelectedStepCommand { get; }
+
+    /// <summary>Pastes copied steps after the selected step (or at the end), also from another macro.</summary>
+    public RelayCommand PasteStepCommand { get; }
+
+    private void CopySelectedSteps()
+    {
+        var selected = SelectedInOrder();
+        if (selected.Count == 0) return;
+        var models = Steps.Select(s => s.Model).ToList();
+        var indexes = StepClipboard.ExpandSelection(models, selected.Select(s => Steps.IndexOf(s)).ToList());
+        if (indexes is null)
+        {
+            _setStatus("Copy whole blocks: select from the If to its End If (or Repeat to End Repeat), or just the If / Repeat step itself.", StatusKind.Warning);
+            return;
+        }
+
+        var text = StepClipboard.Serialize(indexes.Select(i => models[i]).ToList());
+        try
+        {
+            System.Windows.Clipboard.SetText(text);
+        }
+        catch (System.Runtime.InteropServices.ExternalException ex)
+        {
+            _log.Warning("The clipboard is busy; try copying again.", ex);
+            _setStatus("The clipboard is busy (another app is using it). Try Ctrl+C again.", StatusKind.Warning);
+            return;
+        }
+
+        _setStatus(indexes.Count == 1 ? $"Copied step {indexes[0] + 1}. Press Ctrl+V to paste it here or in another macro."
+            : $"Copied {indexes.Count} steps ({indexes[0] + 1}–{indexes[^1] + 1}). Press Ctrl+V to paste them here or in another macro.", StatusKind.Info);
+    }
+
+    private void PasteSteps()
+    {
+        if (!HasMacro) return;
+        string? text = null;
+        try
+        {
+            if (System.Windows.Clipboard.ContainsText()) text = System.Windows.Clipboard.GetText();
+        }
+        catch (System.Runtime.InteropServices.ExternalException ex)
+        {
+            _log.Warning("The clipboard is busy; try pasting again.", ex);
+        }
+
+        if (!StepClipboard.TryParse(text, out var pasted, out var error))
+        {
+            _setStatus(error ?? "Nothing to paste.", StatusKind.Warning);
+            return;
+        }
+
+        RecordUndo();
+        var selectedIndex = SelectedStep is null ? -1 : Steps.IndexOf(SelectedStep);
+        var index = StepListEditing.InsertIndex(Steps.Count, selectedIndex, AddAtEnd ? InsertPosition.AtEnd : InsertPosition.AfterSelected);
+        var added = new List<StepViewModel>();
+        foreach (var model in pasted)
+        {
+            var vm = CreateStepViewModel(model);
+            Steps.Insert(index + added.Count, vm);
+            added.Add(vm);
+        }
+
+        _selection = added;
+        SelectedStep = added[0];
+        SelectStepsRequested?.Invoke(this, added);
+        Touch();
+        _setStatus(added.Count == 1 ? $"Pasted 1 step as step {index + 1}. Ctrl+Z undoes it." : $"Pasted {added.Count} steps as steps {index + 1}–{index + added.Count}. Ctrl+Z undoes it.", StatusKind.Success);
+    }
+
+    // ---------------- ▶ Run step / ⏭ Play from here ----------------
+
+    /// <summary>Set by the main window: plays one step (or its block) of a macro copy.</summary>
+    public Func<Macro, int, Task>? RunSingleStepHandler { get; set; }
+
+    /// <summary>Set by the main window: plays a macro copy from a step to the end.</summary>
+    public Func<Macro, int, Task>? PlayFromStepHandler { get; set; }
+
+    /// <summary>Set by the main window: true while nothing is recording / playing.</summary>
+    public Func<bool>? CanRunSteps { get; set; }
+
+    private bool CanRunNow => HasMacro && (CanRunSteps?.Invoke() ?? false);
+
+    /// <summary>"▶ Run step": tests only the selected step (an If / Repeat runs its whole block) once.</summary>
+    public AsyncRelayCommand RunStepCommand { get; }
+
+    /// <summary>"⏭ Play from here": plays from the selected step to the end, once.</summary>
+    public AsyncRelayCommand PlayFromHereCommand { get; }
+
+    private Task RunSelectedStepAsync()
+    {
+        if (SelectedStep is not { } step || RunSingleStepHandler is null) return Task.CompletedTask;
+        var index = Steps.IndexOf(step);
+        var macro = MacroJson.Clone(BuildMacro());
+        // Testing a step that is turned off: run it anyway (only in the copy that plays; the macro is unchanged).
+        macro.Steps[index].Enabled = true;
+        return RunSingleStepHandler(macro, index);
+    }
+
+    private Task PlayFromSelectedAsync()
+    {
+        if (SelectedStep is not { } step || PlayFromStepHandler is null) return Task.CompletedTask;
+        return PlayFromStepHandler(MacroJson.Clone(BuildMacro()), Steps.IndexOf(step));
+    }
+
+    // ---------------- Macro settings: target window, auto-adjust coordinates, Humanize ----------------
+
+    /// <summary>Open app windows for the "Target window" list (first entry = any / main screen).</summary>
+    public ObservableCollection<string> TargetWindowChoices { get; } = new();
+
+    public RelayCommand RefreshTargetWindowsCommand { get; }
+
+    /// <summary>"Use current size": remembers where the target window / main screen is now as the reference.</summary>
+    public RelayCommand UseCurrentSizeCommand { get; }
+
+    /// <summary>The window the macro is made for (part of its title); empty = any / main screen.</summary>
+    public string TargetWindowTitle
+    {
+        get => _targetWindowTitle ?? AnyWindowLabel;
+        set
+        {
+            var normalized = string.IsNullOrWhiteSpace(value) || value == AnyWindowLabel ? null : value.Trim();
+            if (_targetWindowTitle == normalized) return;
+            _targetWindowTitle = normalized;
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(TargetSummary));
+            Touch();
+        }
+    }
+
+    /// <summary>The first entry of the target list.</summary>
+    public const string AnyWindowLabel = "Any / Main screen";
+
+    /// <summary>"Auto-adjust coordinates if window moves or screen resolution changes".</summary>
+    public bool ScaleCoordinatesToWindow
+    {
+        get => _scaleCoordinates;
+        set
+        {
+            if (!SetProperty(ref _scaleCoordinates, value)) return;
+            // Turning it on without a reference: use where the target is right now.
+            if (value && (_referenceWidth <= 0 || _referenceHeight <= 0)) CaptureReference();
+            OnPropertyChanged(nameof(TargetSummary));
+            Touch();
+        }
+    }
+
+    public string ReferenceText => _referenceWidth > 0 && _referenceHeight > 0
+        ? $"Positions were picked on {_referenceWidth}×{_referenceHeight} at ({_referenceLeft}, {_referenceTop})."
+        : "Reference size: not set yet.";
+
+    /// <summary>Short text for the header button, e.g. "Roblox · auto-adjust".</summary>
+    public string TargetSummary =>
+        (string.IsNullOrEmpty(_targetWindowTitle) ? "Any screen" : _targetWindowTitle) + (_scaleCoordinates ? " · auto-adjust" : "");
+
+    /// <summary>"Humanize": small random click offsets and timing variation.</summary>
+    public bool HumanizePlayback
+    {
+        get => _humanize;
+        set
+        {
+            if (SetProperty(ref _humanize, value)) Touch();
+        }
+    }
+
+    /// <summary>Humanize: largest random click offset (px).</summary>
+    public int ClickJitterPx
+    {
+        get => _clickJitterPx ?? Macro.DefaultClickJitterPx;
+        set
+        {
+            if (_clickJitterPx == value || (_clickJitterPx is null && value == Macro.DefaultClickJitterPx)) return;
+            _clickJitterPx = value;
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(HumanizeTooltip));
+            Touch();
+        }
+    }
+
+    /// <summary>Humanize: largest random change of delays / glide times (%).</summary>
+    public int DelayJitterPercent
+    {
+        get => _delayJitterPercent ?? Macro.DefaultDelayJitterPercent;
+        set
+        {
+            if (_delayJitterPercent == value || (_delayJitterPercent is null && value == Macro.DefaultDelayJitterPercent)) return;
+            _delayJitterPercent = value;
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(HumanizeTooltip));
+            Touch();
+        }
+    }
+
+    public string HumanizeTooltip =>
+        $"Humanize: adds a subtle ±{ClickJitterPx} px random offset around click spots (kept inside what a Find step found) and ±{DelayJitterPercent} % natural variation to delays and mouse glide times, so repeated game loops don't click the exact same pixel with robotic timing. Recorded input still plays exactly as recorded.";
+
+    private void RefreshTargetWindows()
+    {
+        var current = _targetWindowTitle;
+        TargetWindowChoices.Clear();
+        TargetWindowChoices.Add(AnyWindowLabel);
+        try
+        {
+            if (_screen is Core.Vision.IScreenLayout layout)
+                foreach (var title in layout.GetWindows().Select(w => w.Title).Distinct(StringComparer.OrdinalIgnoreCase))
+                    TargetWindowChoices.Add(title);
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception)
+        {
+            _log.Warning("Could not list the open windows.", ex);
+        }
+
+        if (!string.IsNullOrEmpty(current) && !TargetWindowChoices.Contains(current)) TargetWindowChoices.Add(current);
+        OnPropertyChanged(nameof(TargetWindowTitle));
+    }
+
+    /// <summary>Stores where the target window (or the main screen) is right now as the reference rectangle.</summary>
+    private void CaptureReference()
+    {
+        if (!HasMacro) return;
+        try
+        {
+            var probe = new Macro { TargetWindowTitle = _targetWindowTitle };
+            var bounds = CoordinateScaling.CurrentTarget(probe, _screen as Core.Vision.IScreenLayout);
+            (_referenceLeft, _referenceTop, _referenceWidth, _referenceHeight) = (bounds.X, bounds.Y, bounds.Width, bounds.Height);
+            OnPropertyChanged(nameof(ReferenceText));
+            Touch();
+            _setStatus($"Reference set: {bounds.Width}×{bounds.Height} at ({bounds.X}, {bounds.Y}). Pick positions with the window where it is now; playback adjusts them if it moves or changes size.", StatusKind.Info);
+        }
+        catch (Core.Vision.SearchAreaUnavailableException ex)
+        {
+            _setStatus(ex.Message, StatusKind.Warning);
+        }
     }
 
     // ---------------- Quick patterns (1-click starter templates) ----------------
@@ -99,6 +438,7 @@ public sealed class EditorViewModel : ObservableObject
         if (!HasMacro || parameter is not QuickPattern pattern) return;
 
         var models = QuickPatterns.Build(pattern);
+        RecordUndo();
         var selectedIndex = SelectedStep is null ? -1 : Steps.IndexOf(SelectedStep);
         var index = StepListEditing.InsertIndex(Steps.Count, selectedIndex, position);
         var added = new List<StepViewModel>();
@@ -332,6 +672,15 @@ public sealed class EditorViewModel : ObservableObject
         _repeatCount = copy.RepeatCount;
         _speed = copy.Speed;
         _repeatDelayMs = copy.RepeatDelayMs;
+        _targetWindowTitle = string.IsNullOrWhiteSpace(copy.TargetWindowTitle) ? null : copy.TargetWindowTitle.Trim();
+        _scaleCoordinates = copy.ScaleCoordinatesToWindow;
+        (_referenceLeft, _referenceTop, _referenceWidth, _referenceHeight) = (copy.ReferenceLeft, copy.ReferenceTop, copy.ReferenceWidth, copy.ReferenceHeight);
+        _humanize = copy.HumanizePlayback;
+        _clickJitterPx = copy.ClickJitterPx;
+        _delayJitterPercent = copy.DelayJitterPercent;
+        _history.Clear();
+        RaiseHistoryChanged();
+        RefreshTargetWindows();
 
         ReplaceSteps(copy.Steps);
 
@@ -346,6 +695,8 @@ public sealed class EditorViewModel : ObservableObject
         _saved = null;
         _name = string.Empty;
         _description = string.Empty;
+        _history.Clear();
+        RaiseHistoryChanged();
         ReplaceSteps(Array.Empty<MacroStep>());
         Issues.Clear();
         ErrorCount = 0;
@@ -392,6 +743,15 @@ public sealed class EditorViewModel : ObservableObject
         RepeatCount = RepeatCount,
         Speed = Speed,
         RepeatDelayMs = RepeatDelayMs,
+        TargetWindowTitle = _targetWindowTitle,
+        ScaleCoordinatesToWindow = _scaleCoordinates,
+        ReferenceLeft = _referenceLeft,
+        ReferenceTop = _referenceTop,
+        ReferenceWidth = _referenceWidth,
+        ReferenceHeight = _referenceHeight,
+        HumanizePlayback = _humanize,
+        ClickJitterPx = _clickJitterPx,
+        DelayJitterPercent = _delayJitterPercent,
     };
 
     public async Task<bool> SaveAsync()
@@ -452,6 +812,7 @@ public sealed class EditorViewModel : ObservableObject
     {
         if (!HasMacro || parameter is not StepKind kind) return;
 
+        RecordUndo();
         var step = CreateStepViewModel(MacroFactory.CreateStep(kind, _defaultDelayMs()));
         var selectedIndex = SelectedStep is null ? -1 : Steps.IndexOf(SelectedStep);
         var index = StepListEditing.InsertIndex(Steps.Count, selectedIndex, position);
@@ -500,6 +861,7 @@ public sealed class EditorViewModel : ObservableObject
             return;
         }
 
+        RecordUndo();
         var opener = CreateStepViewModel(MacroFactory.CreateStep(kind));
         var closer = CreateStepViewModel(MacroFactory.CreateStep(kind == StepKind.If ? StepKind.EndIf : StepKind.EndRepeat));
         Steps.Insert(last + 1, closer);
@@ -529,12 +891,16 @@ public sealed class EditorViewModel : ObservableObject
             scope = "the selected steps";
         }
 
+        var before = Snapshot();
         var result = StepCleanup.CollapseMouseMoves(models, first, last);
         if (result.RemovedSteps <= 0)
         {
             _setStatus($"Nothing to clean up in {scope}: no runs of Delay + Move mouse steps outside drags.", StatusKind.Info);
             return;
         }
+
+        _history.Record(before);
+        RaiseHistoryChanged();
 
         var existing = new Dictionary<MacroStep, StepViewModel>(ReferenceEqualityComparer.Instance);
         foreach (var vm in Steps) existing[vm.Model] = vm;
@@ -547,7 +913,7 @@ public sealed class EditorViewModel : ObservableObject
         _selection.Clear();
         SelectedStep = keepSelected ?? Steps.ElementAtOrDefault(Math.Min(first, Steps.Count - 1));
         Touch();
-        _setStatus($"Cleaned up {result.CollapsedRuns} mouse path(s) in {scope}: {result.RemovedSteps:N0} step(s) fewer, same total timing. Discard changes undoes it.", StatusKind.Success);
+        _setStatus($"Cleaned up {result.CollapsedRuns} mouse path(s) in {scope}: {result.RemovedSteps:N0} step(s) fewer, same total timing. Ctrl+Z undoes it.", StatusKind.Success);
     }
 
     /// <summary>
@@ -577,6 +943,7 @@ public sealed class EditorViewModel : ObservableObject
             }
         }
 
+        RecordUndo();
         var firstIndex = Steps.IndexOf(selected[0]);
         foreach (var step in toRemove.OrderByDescending(s => Steps.IndexOf(s)).ToList())
             Steps.Remove(step);
@@ -591,6 +958,7 @@ public sealed class EditorViewModel : ObservableObject
     {
         if (SelectedStep is not { } step) return;
 
+        RecordUndo();
         var copy = CreateStepViewModel(MacroFactory.DuplicateStep(step.Model));
         Steps.Insert(Steps.IndexOf(step) + 1, copy);
         SelectedStep = copy;
@@ -644,6 +1012,7 @@ public sealed class EditorViewModel : ObservableObject
             return;
         }
 
+        RecordUndo();
         var moved = Steps.Skip(plan.First).Take(plan.Count).ToList();
         if (plan.NewFirst < plan.First)
         {

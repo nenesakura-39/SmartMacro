@@ -121,6 +121,11 @@ public sealed class MainViewModel : ObservableObject, IDisposable
 
         // Live step highlight: the editor marks (and scrolls to) the step that is running.
         Automation.RunningStepChanged += (_, stepId) => Editor.SetRunningStep(stepId);
+
+        // "▶ Run step" / "⏭ Play from here" in the editor play through the same automation (overlay, Esc stop, failsafe).
+        Editor.RunSingleStepHandler = (macro, index) => Automation.RunSingleStepAsync(macro, index);
+        Editor.PlayFromStepHandler = (macro, index) => Automation.PlayFromStepAsync(macro, index);
+        Editor.CanRunSteps = () => Automation.IsIdle;
     }
 
     /// <summary>Toolbar toggle: show the small click-through status pill while playing (saved in Settings).</summary>

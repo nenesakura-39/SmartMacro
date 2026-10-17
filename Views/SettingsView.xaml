@@ -6,11 +6,47 @@
              xmlns:vm="clr-namespace:SmartMacro.ViewModels"
              mc:Ignorable="d"
              d:DataContext="{d:DesignInstance Type=vm:SettingsViewModel}">
+    <UserControl.Resources>
+        <!-- One Studio inspector card: rounded #111827 card with a colored badge header. -->
+        <Style x:Key="SettingsCard" TargetType="Border" BasedOn="{StaticResource Card}">
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="Margin" Value="0,0,0,14" />
+        </Style>
+        <Style x:Key="SettingsCardHeader" TargetType="Border">
+            <Setter Property="BorderBrush" Value="{StaticResource BorderBrush}" />
+            <Setter Property="BorderThickness" Value="0,0,0,1" />
+            <Setter Property="Padding" Value="16,12" />
+        </Style>
+        <Style x:Key="SettingsCardBody" TargetType="StackPanel">
+            <Setter Property="Margin" Value="16,6,16,14" />
+        </Style>
+        <!-- A setting row: switch with a wrapping label, plus a little air between rows. -->
+        <Style x:Key="SettingSwitch" TargetType="CheckBox" BasedOn="{StaticResource ToggleSwitchCheckBoxStyle}">
+            <Setter Property="Margin" Value="0,10,0,0" />
+            <Setter Property="FontSize" Value="13" />
+        </Style>
+        <Style x:Key="SettingHelp" TargetType="TextBlock" BasedOn="{StaticResource MutedText}">
+            <Setter Property="FontSize" Value="11" />
+            <Setter Property="Margin" Value="0,3,46,0" />
+            <Setter Property="TextWrapping" Value="Wrap" />
+        </Style>
+    </UserControl.Resources>
+
     <DockPanel>
         <DockPanel DockPanel.Dock="Top" Margin="0,0,0,16">
             <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
-                <Button Command="{Binding ResetCommand}" Margin="0,0,8,0" Content="Reset to defaults" />
-                <Button Command="{Binding RevertCommand}" Margin="0,0,8,0" Content="Undo changes" />
+                <Button Style="{StaticResource GhostButton}" Command="{Binding ResetCommand}" Margin="0,0,6,0" ToolTip="Put every setting back to its default (not saved until you click Save)">
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="&#xE777;" Style="{StaticResource IconText}" />
+                        <TextBlock Text="Reset to defaults" Margin="8,0,0,0" />
+                    </StackPanel>
+                </Button>
+                <Button Style="{StaticResource GhostButton}" Command="{Binding RevertCommand}" Margin="0,0,8,0" ToolTip="Throw away the changes since the last save">
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="&#xE7A7;" Style="{StaticResource IconText}" />
+                        <TextBlock Text="Undo changes" Margin="8,0,0,0" />
+                    </StackPanel>
+                </Button>
                 <Button Style="{StaticResource PrimaryButton}" Command="{Binding SaveCommand}">
                     <StackPanel Orientation="Horizontal">
                         <TextBlock Text="&#xE74E;" Style="{StaticResource IconText}" />
@@ -25,8 +61,10 @@
         </DockPanel>
 
         <ScrollViewer VerticalScrollBarVisibility="Auto">
-            <StackPanel MaxWidth="720" HorizontalAlignment="Left">
-                <Border Style="{StaticResource Card}" Margin="0,0,0,14">
+            <StackPanel MaxWidth="760" HorizontalAlignment="Left">
+
+                <!-- ===== About ===== -->
+                <Border Style="{StaticResource SettingsCard}" Padding="16">
                     <DockPanel>
                         <Border DockPanel.Dock="Left" Width="52" Height="52" CornerRadius="12" Background="{StaticResource AccentBrush}" VerticalAlignment="Top">
                             <TextBlock Text="&#xE945;" FontFamily="{StaticResource IconFont}" FontSize="24" Foreground="White"
@@ -40,7 +78,7 @@
                             </StackPanel>
                         </Button>
                         <StackPanel Margin="16,0,16,0">
-                            <TextBlock Text="About" FontSize="11" FontWeight="SemiBold" Foreground="{StaticResource MutedTextBrush}" />
+                            <TextBlock Text="ABOUT" Style="{StaticResource SetupCardTitle}" />
                             <TextBlock Text="{Binding AppName}" FontSize="18" FontWeight="SemiBold" Margin="0,2,0,0" />
                             <TextBlock Text="{Binding VersionText}" Style="{StaticResource MutedText}" Margin="0,2,0,0" />
                             <TextBlock Text="{Binding OwnerText}" FontWeight="SemiBold" Margin="0,8,0,0" />
@@ -49,117 +87,169 @@
                     </DockPanel>
                 </Border>
 
-                <Border Style="{StaticResource Card}" Margin="0,0,0,14">
+                <!-- ===== Global Hotkeys ===== -->
+                <Border Style="{StaticResource SettingsCard}">
                     <StackPanel>
-                        <TextBlock Text="Library" Style="{StaticResource SectionTitle}" />
-                        <CheckBox Content="Ask before deleting a macro" IsChecked="{Binding ConfirmBeforeDelete}" Margin="0,14,0,0" />
-                    </StackPanel>
-                </Border>
-
-                <Border Style="{StaticResource Card}" Margin="0,0,0,14">
-                    <StackPanel>
-                        <TextBlock Text="Workflow editor" Style="{StaticResource SectionTitle}" />
-                        <TextBlock Text="Default length of new Delay steps (milliseconds)" Style="{StaticResource FieldLabel}" />
-                        <TextBox Text="{Binding DefaultDelayMs, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}" Width="160" HorizontalAlignment="Left"
-                                 AutomationProperties.Name="Default delay in milliseconds" />
-                        <TextBlock Text="{Binding DelayError}" Foreground="{StaticResource ErrorBrush}" FontSize="12" Margin="0,4,0,0"
-                                   Visibility="{Binding DelayError, Converter={StaticResource NullToVisibility}}" />
-                    </StackPanel>
-                </Border>
-
-                <Border Style="{StaticResource Card}" Margin="0,0,0,14">
-                    <StackPanel>
-                        <TextBlock Text="Recording and playback" Style="{StaticResource SectionTitle}" />
-                        <CheckBox Content="Minimize SmartMacro while recording or playing" IsChecked="{Binding MinimizeDuringRun}" Margin="0,14,0,0" />
-                        <CheckBox Content="Show mini status overlay while recording or playing (small click-through pill in the top-right corner: current step and what it's doing)" IsChecked="{Binding ShowRunOverlay}" Margin="0,10,0,0" />
-                        <TextBlock Text="Recording mode" Style="{StaticResource FieldLabel}" Margin="0,16,0,4" />
-                        <ComboBox ItemsSource="{Binding RecordingModes}" DisplayMemberPath="Label" SelectedValuePath="Value"
-                                  SelectedValue="{Binding RecordingMode}" MaxWidth="520" HorizontalAlignment="Left"
-                                  AutomationProperties.Name="Recording mode" />
-                        <TextBlock Style="{StaticResource MutedText}" FontSize="12" Margin="0,6,0,0" TextWrapping="Wrap"
-                                   Text="{Binding RecordingModeHelp}" />
-                        <CheckBox Content="Record cursor movement in editable steps (turn off to record only clicks, scrolls and keys; camera movement is always kept)" IsChecked="{Binding RecordMouseMovement}" Margin="0,12,0,0"
-                                  IsEnabled="{Binding MakesEditableSteps}" />
-                        <CheckBox Content="Keep how long each key / click was held (editable steps)" IsChecked="{Binding KeepTapHoldTime}" Margin="0,10,0,0"
-                                  IsEnabled="{Binding MakesEditableSteps}" />
-                        <CheckBox Content="Simplify mouse paths (recommended for menus and shops)" IsChecked="{Binding SimplifyMousePaths}" Margin="0,10,0,0"
-                                  IsEnabled="{Binding MakesEditableSteps}" AutomationProperties.Name="Simplify mouse paths"
-                                  ToolTip="Cursor travel between clicks isn't turned into Move mouse steps: each click already remembers where it happens. Recording 5 shop clicks gives 5 Click + Delay steps. Dragging with a button held (sliders, items) and the spot you hover before pressing a key are still kept. Turn off to keep the whole path." />
-                        <CheckBox Content="Smooth mouse movement during playback (glide instead of jumping)" IsChecked="{Binding SmoothMouseMoves}" Margin="0,10,0,0"
-                                  AutomationProperties.Name="Smooth mouse movement during playback"
-                                  ToolTip="When a Move mouse step (or a click at a position) comes right after a Wait, the cursor glides there during the last 0.2 s of the wait instead of teleporting. Menus, sliders and games then see real movement. The total time of the macro doesn't change." />
-                    </StackPanel>
-                </Border>
-
-                <Border Style="{StaticResource Card}" Margin="0,0,0,14">
-                    <StackPanel>
-                        <DockPanel>
-                            <Button DockPanel.Dock="Right" Content="Reset to defaults" Command="{Binding ResetShortcutsCommand}" Padding="10,4" FontSize="12" />
-                            <TextBlock Text="Keyboard shortcuts" Style="{StaticResource SectionTitle}" VerticalAlignment="Center" />
-                        </DockPanel>
-                        <TextBlock Style="{StaticResource MutedText}" FontSize="12" Margin="0,6,0,4"
-                                   Text="These work anywhere, even when SmartMacro is minimized. Click a box and press the new key combination (e.g. Ctrl+Alt+R). Esc is always the emergency stop while playing." />
-                        <Grid Margin="0,6,0,0">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="170" />
-                                <ColumnDefinition Width="220" />
-                            </Grid.ColumnDefinitions>
-                            <Grid.RowDefinitions>
-                                <RowDefinition Height="Auto" />
-                                <RowDefinition Height="Auto" />
-                                <RowDefinition Height="Auto" />
-                            </Grid.RowDefinitions>
-                            <TextBlock Grid.Row="0" Text="Start / stop recording" VerticalAlignment="Center" />
-                            <TextBox Grid.Row="0" Grid.Column="1" Text="{Binding RecordHotkeyText, Mode=OneWay}" Tag="Record" IsReadOnly="True"
-                                     Margin="0,4" PreviewKeyDown="HotkeyBox_PreviewKeyDown" AutomationProperties.Name="Record shortcut" Cursor="Hand" />
-                            <TextBlock Grid.Row="1" Text="Play / stop" VerticalAlignment="Center" />
-                            <TextBox Grid.Row="1" Grid.Column="1" Text="{Binding PlayHotkeyText, Mode=OneWay}" Tag="Play" IsReadOnly="True"
-                                     Margin="0,4" PreviewKeyDown="HotkeyBox_PreviewKeyDown" AutomationProperties.Name="Play shortcut" Cursor="Hand" />
-                            <TextBlock Grid.Row="2" Text="Pause / resume" VerticalAlignment="Center" />
-                            <TextBox Grid.Row="2" Grid.Column="1" Text="{Binding PauseHotkeyText, Mode=OneWay}" Tag="Pause" IsReadOnly="True"
-                                     Margin="0,4" PreviewKeyDown="HotkeyBox_PreviewKeyDown" AutomationProperties.Name="Pause shortcut" Cursor="Hand" />
-                        </Grid>
-                        <TextBlock Text="{Binding HotkeyError}" Foreground="{StaticResource ErrorBrush}" FontSize="12" Margin="0,6,0,0" TextWrapping="Wrap"
-                                   Visibility="{Binding HotkeyError, Converter={StaticResource NullToVisibility}}" />
-                    </StackPanel>
-                </Border>
-
-                <Border Style="{StaticResource Card}" Margin="0,0,0,14">
-                    <StackPanel>
-                        <TextBlock Text="Interface" Style="{StaticResource SectionTitle}" />
-                        <CheckBox Content="Show the Activity panel at the bottom of the window" IsChecked="{Binding ShowLogPanel}" Margin="0,14,0,0" />
-                    </StackPanel>
-                </Border>
-
-                <Border Style="{StaticResource Card}" Margin="0,0,0,14">
-                    <StackPanel>
-                        <TextBlock Text="Text recognition (OCR)" Style="{StaticResource SectionTitle}" />
-                        <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
-                            <TextBlock Text="&#xE73E;" Style="{StaticResource IconText}" Foreground="{StaticResource SuccessBrush}" VerticalAlignment="Top" Margin="0,2,8,0"
-                                       Visibility="{Binding IsOcrAvailable, Converter={StaticResource BoolToVisibility}}" />
-                            <TextBlock Text="&#xE7BA;" Style="{StaticResource IconText}" Foreground="{StaticResource WarningBrush}" VerticalAlignment="Top" Margin="0,2,8,0"
-                                       Visibility="{Binding IsOcrAvailable, Converter={StaticResource BoolToVisibility}, ConverterParameter=Invert}" />
-                            <TextBlock Text="{Binding OcrStatus}" TextWrapping="Wrap" MaxWidth="620" />
-                        </StackPanel>
-                        <TextBlock Style="{StaticResource MutedText}" FontSize="12" Margin="0,8,0,0"
-                                   Text="Uses the text recognition built into Windows. Screen captures are processed on this PC only and are never saved or uploaded." />
-                    </StackPanel>
-                </Border>
-
-                <Border Style="{StaticResource Card}">
-                    <StackPanel>
-                        <TextBlock Text="Data folder" Style="{StaticResource SectionTitle}" />
-                        <TextBlock Style="{StaticResource MutedText}" Margin="0,6,0,10"
-                                   Text="Macros, settings, logs and deleted macros (Trash) are stored here. Nothing is uploaded anywhere." />
-                        <DockPanel>
-                            <Button DockPanel.Dock="Right" Command="{Binding OpenDataFolderCommand}" Margin="8,0,0,0">
-                                <StackPanel Orientation="Horizontal">
-                                    <TextBlock Text="&#xE838;" Style="{StaticResource IconText}" />
-                                    <TextBlock Text="Open" Margin="8,0,0,0" />
+                        <Border Style="{StaticResource SettingsCardHeader}">
+                            <DockPanel>
+                                <Button DockPanel.Dock="Right" Style="{StaticResource GhostButton}" Content="Reset shortcuts" Command="{Binding ResetShortcutsCommand}"
+                                        Padding="10,4" FontSize="12" VerticalAlignment="Center" />
+                                <Border Width="30" Height="30" CornerRadius="8" Background="{StaticResource InputBadgeBrush}" VerticalAlignment="Center">
+                                    <TextBlock Text="&#xE765;" Style="{StaticResource IconText}" Foreground="{StaticResource InputAccentBrush}" HorizontalAlignment="Center" />
+                                </Border>
+                                <StackPanel Margin="10,0,0,0" VerticalAlignment="Center">
+                                    <TextBlock Text="Global Hotkeys" Style="{StaticResource SectionTitle}" FontSize="14" />
+                                    <TextBlock Text="Work anywhere, even when SmartMacro is minimized." Style="{StaticResource MutedText}" FontSize="11" />
                                 </StackPanel>
-                            </Button>
-                            <TextBox Text="{Binding DataFolder, Mode=OneWay}" IsReadOnly="True" Foreground="{StaticResource MutedTextBrush}" />
-                        </DockPanel>
+                            </DockPanel>
+                        </Border>
+                        <StackPanel Style="{StaticResource SettingsCardBody}">
+                            <TextBlock Style="{StaticResource SettingHelp}" Margin="0,6,0,4"
+                                       Text="Click a box and press the new key combination (e.g. Ctrl+Alt+R). Esc is always the emergency stop while playing." />
+                            <Grid Margin="0,4,0,0">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="190" />
+                                    <ColumnDefinition Width="240" />
+                                </Grid.ColumnDefinitions>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                </Grid.RowDefinitions>
+                                <TextBlock Grid.Row="0" Text="● Start / stop recording" VerticalAlignment="Center" />
+                                <TextBox Grid.Row="0" Grid.Column="1" Text="{Binding RecordHotkeyText, Mode=OneWay}" Tag="Record" IsReadOnly="True"
+                                         Margin="0,4" PreviewKeyDown="HotkeyBox_PreviewKeyDown" AutomationProperties.Name="Record shortcut" Cursor="Hand"
+                                         FontWeight="SemiBold" />
+                                <TextBlock Grid.Row="1" Text="▶ Play / stop" VerticalAlignment="Center" />
+                                <TextBox Grid.Row="1" Grid.Column="1" Text="{Binding PlayHotkeyText, Mode=OneWay}" Tag="Play" IsReadOnly="True"
+                                         Margin="0,4" PreviewKeyDown="HotkeyBox_PreviewKeyDown" AutomationProperties.Name="Play shortcut" Cursor="Hand"
+                                         FontWeight="SemiBold" />
+                                <TextBlock Grid.Row="2" Text="⏸ Pause / resume" VerticalAlignment="Center" />
+                                <TextBox Grid.Row="2" Grid.Column="1" Text="{Binding PauseHotkeyText, Mode=OneWay}" Tag="Pause" IsReadOnly="True"
+                                         Margin="0,4" PreviewKeyDown="HotkeyBox_PreviewKeyDown" AutomationProperties.Name="Pause shortcut" Cursor="Hand"
+                                         FontWeight="SemiBold" />
+                            </Grid>
+                            <TextBlock Text="{Binding HotkeyError}" Foreground="{StaticResource ErrorBrush}" FontSize="12" Margin="0,6,0,0" TextWrapping="Wrap"
+                                       Visibility="{Binding HotkeyError, Converter={StaticResource NullToVisibility}}" />
+                        </StackPanel>
+                    </StackPanel>
+                </Border>
+
+                <!-- ===== Recording Defaults ===== -->
+                <Border Style="{StaticResource SettingsCard}">
+                    <StackPanel>
+                        <Border Style="{StaticResource SettingsCardHeader}">
+                            <DockPanel>
+                                <Border Width="30" Height="30" CornerRadius="8" Background="{StaticResource RecordedBadgeBrush}" VerticalAlignment="Center">
+                                    <TextBlock Text="&#xE7C8;" Style="{StaticResource IconText}" Foreground="{StaticResource RecordedAccentBrush}" HorizontalAlignment="Center" />
+                                </Border>
+                                <StackPanel Margin="10,0,0,0" VerticalAlignment="Center">
+                                    <TextBlock Text="Recording Defaults" Style="{StaticResource SectionTitle}" FontSize="14" />
+                                    <TextBlock Text="How the Record button turns your input into steps." Style="{StaticResource MutedText}" FontSize="11" />
+                                </StackPanel>
+                            </DockPanel>
+                        </Border>
+                        <StackPanel Style="{StaticResource SettingsCardBody}">
+                            <TextBlock Text="Recording mode" Style="{StaticResource FieldLabel}" Margin="0,8,0,4" />
+                            <ComboBox ItemsSource="{Binding RecordingModes}" DisplayMemberPath="Label" SelectedValuePath="Value"
+                                      SelectedValue="{Binding RecordingMode}" MaxWidth="520" HorizontalAlignment="Left"
+                                      AutomationProperties.Name="Recording mode" />
+                            <TextBlock Style="{StaticResource SettingHelp}" Text="{Binding RecordingModeHelp}" Margin="0,6,0,0" />
+
+                            <CheckBox Style="{StaticResource SettingSwitch}" IsChecked="{Binding RecordMouseMovement}" IsEnabled="{Binding MakesEditableSteps}"
+                                      Content="Record cursor movement in editable steps"
+                                      AutomationProperties.Name="Record cursor movement" />
+                            <TextBlock Style="{StaticResource SettingHelp}" Text="Turn off to record only clicks, scrolls and keys. Camera movement is always kept." />
+                            <CheckBox Style="{StaticResource SettingSwitch}" IsChecked="{Binding KeepTapHoldTime}" IsEnabled="{Binding MakesEditableSteps}"
+                                      Content="Keep how long each key / click was held" AutomationProperties.Name="Keep hold time" />
+                            <CheckBox Style="{StaticResource SettingSwitch}" IsChecked="{Binding SimplifyMousePaths}" IsEnabled="{Binding MakesEditableSteps}"
+                                      Content="Simplify mouse paths (recommended for menus and shops)" AutomationProperties.Name="Simplify mouse paths"
+                                      ToolTip="Cursor travel between clicks isn't turned into Move mouse steps: each click already remembers where it happens. Dragging with a button held (sliders, items) and the spot you hover before pressing a key are still kept." />
+
+                            <TextBlock Text="Default length of new Delay steps (ms)" Style="{StaticResource FieldLabel}" Margin="0,14,0,4" />
+                            <TextBox Text="{Binding DefaultDelayMs, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}" Width="140" HorizontalAlignment="Left"
+                                     AutomationProperties.Name="Default delay in milliseconds" />
+                            <TextBlock Text="{Binding DelayError}" Foreground="{StaticResource ErrorBrush}" FontSize="12" Margin="0,4,0,0"
+                                       Visibility="{Binding DelayError, Converter={StaticResource NullToVisibility}}" />
+                        </StackPanel>
+                    </StackPanel>
+                </Border>
+
+                <!-- ===== Playback & Safety ===== -->
+                <Border Style="{StaticResource SettingsCard}">
+                    <StackPanel>
+                        <Border Style="{StaticResource SettingsCardHeader}">
+                            <DockPanel>
+                                <Border Width="30" Height="30" CornerRadius="8" Background="{StaticResource FeedbackBadgeBrush}" VerticalAlignment="Center">
+                                    <TextBlock Text="&#xE83D;" Style="{StaticResource IconText}" Foreground="{StaticResource FeedbackAccentBrush}" HorizontalAlignment="Center" />
+                                </Border>
+                                <StackPanel Margin="10,0,0,0" VerticalAlignment="Center">
+                                    <TextBlock Text="Playback &amp; Safety" Style="{StaticResource SectionTitle}" FontSize="14" />
+                                    <TextBlock Text="What SmartMacro does while a macro plays." Style="{StaticResource MutedText}" FontSize="11" />
+                                </StackPanel>
+                            </DockPanel>
+                        </Border>
+                        <StackPanel Style="{StaticResource SettingsCardBody}">
+                            <Border Margin="0,8,0,2" Padding="10,8" CornerRadius="6" Background="{StaticResource SuccessSoftBrush}">
+                                <TextBlock TextWrapping="Wrap" FontSize="12" Foreground="{StaticResource TextBrush}"
+                                           Text="🛡 Failsafe is always on: when playback finishes, is stopped (Esc / hotkey), times out or hits an error, every key and mouse button SmartMacro is still holding is released, so nothing stays stuck down in a game." />
+                            </Border>
+                            <CheckBox Style="{StaticResource SettingSwitch}" IsChecked="{Binding MinimizeDuringRun}"
+                                      Content="Minimize SmartMacro while recording or playing" AutomationProperties.Name="Minimize while running" />
+                            <CheckBox Style="{StaticResource SettingSwitch}" IsChecked="{Binding ShowRunOverlay}"
+                                      Content="Show mini status overlay while recording or playing" AutomationProperties.Name="Show mini status overlay" />
+                            <TextBlock Style="{StaticResource SettingHelp}" Text="A small click-through pill in the top-right corner: the current step and what it's doing." />
+                            <CheckBox Style="{StaticResource SettingSwitch}" IsChecked="{Binding SmoothMouseMoves}"
+                                      Content="Smooth mouse movement during playback (glide instead of jumping)"
+                                      AutomationProperties.Name="Smooth mouse movement during playback"
+                                      ToolTip="When a Move mouse step (or a click at a position) comes right after a Wait, the cursor glides there during the last 0.2 s of the wait instead of teleporting. The total time of the macro doesn't change." />
+
+                            <TextBlock Text="TEXT RECOGNITION (OCR)" Style="{StaticResource SetupCardTitle}" Margin="0,16,0,6" />
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="&#xE73E;" Style="{StaticResource IconText}" Foreground="{StaticResource SuccessBrush}" VerticalAlignment="Top" Margin="0,2,8,0"
+                                           Visibility="{Binding IsOcrAvailable, Converter={StaticResource BoolToVisibility}}" />
+                                <TextBlock Text="&#xE7BA;" Style="{StaticResource IconText}" Foreground="{StaticResource WarningBrush}" VerticalAlignment="Top" Margin="0,2,8,0"
+                                           Visibility="{Binding IsOcrAvailable, Converter={StaticResource BoolToVisibility}, ConverterParameter=Invert}" />
+                                <TextBlock Text="{Binding OcrStatus}" TextWrapping="Wrap" MaxWidth="660" FontSize="12" />
+                            </StackPanel>
+                            <TextBlock Style="{StaticResource SettingHelp}" Margin="0,6,0,0"
+                                       Text="Uses the text recognition built into Windows. Screen captures are processed on this PC only and are never saved or uploaded." />
+                        </StackPanel>
+                    </StackPanel>
+                </Border>
+
+                <!-- ===== Storage & Data ===== -->
+                <Border Style="{StaticResource SettingsCard}">
+                    <StackPanel>
+                        <Border Style="{StaticResource SettingsCardHeader}">
+                            <DockPanel>
+                                <Border Width="30" Height="30" CornerRadius="8" Background="{StaticResource TimingBadgeBrush}" VerticalAlignment="Center">
+                                    <TextBlock Text="&#xE8B7;" Style="{StaticResource IconText}" Foreground="{StaticResource TimingAccentBrush}" HorizontalAlignment="Center" />
+                                </Border>
+                                <StackPanel Margin="10,0,0,0" VerticalAlignment="Center">
+                                    <TextBlock Text="Storage &amp; Data" Style="{StaticResource SectionTitle}" FontSize="14" />
+                                    <TextBlock Text="Where macros, settings and logs live. Nothing is uploaded anywhere." Style="{StaticResource MutedText}" FontSize="11" />
+                                </StackPanel>
+                            </DockPanel>
+                        </Border>
+                        <StackPanel Style="{StaticResource SettingsCardBody}">
+                            <TextBlock Text="Data folder" Style="{StaticResource FieldLabel}" Margin="0,8,0,4" />
+                            <DockPanel>
+                                <Button DockPanel.Dock="Right" Command="{Binding OpenDataFolderCommand}" Margin="8,0,0,0">
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock Text="&#xE838;" Style="{StaticResource IconText}" />
+                                        <TextBlock Text="Open" Margin="8,0,0,0" />
+                                    </StackPanel>
+                                </Button>
+                                <TextBox Text="{Binding DataFolder, Mode=OneWay}" IsReadOnly="True" Foreground="{StaticResource MutedTextBrush}" />
+                            </DockPanel>
+                            <TextBlock Style="{StaticResource SettingHelp}" Margin="0,6,0,0"
+                                       Text="Macros, settings, daily logs and deleted macros (Trash) are stored here." />
+                            <CheckBox Style="{StaticResource SettingSwitch}" IsChecked="{Binding ConfirmBeforeDelete}" Margin="0,14,0,0"
+                                      Content="Ask before deleting a macro" AutomationProperties.Name="Ask before deleting a macro" />
+                            <CheckBox Style="{StaticResource SettingSwitch}" IsChecked="{Binding ShowLogPanel}"
+                                      Content="Show the Activity panel at the bottom of the window" AutomationProperties.Name="Show the Activity panel" />
+                        </StackPanel>
                     </StackPanel>
                 </Border>
             </StackPanel>

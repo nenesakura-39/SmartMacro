@@ -236,9 +236,11 @@ public sealed class VisionTools : IVisionTools
                 : "";
             _lastMatch = new ScreenPoint(bounds.CenterX, bounds.CenterY);
             text = $"Matched at ({bounds.CenterX}, {bounds.CenterY}) — {best.Score:P0} confidence (needs {step.MinSimilarityPercent}%). Searched {where}.{more}";
+            ScreenHighlightOverlay.ShowResult(frame.Bounds, bounds, found: true, $"✓ {best.Score * 100:0}% Match");
         }
         else
         {
+            ScreenHighlightOverlay.ShowResult(frame.Bounds, null, found: false, $"✗ Not found (best {result.BestScore * 100:0}%)");
             text = $"Not found in {where}. The best spot was only {result.BestScore:P0} similar (needs {step.MinSimilarityPercent}%).";
             if (result.RejectedForColor > 0)
                 text += $" {result.RejectedForColor} spot(s) had the right shape but a different color; turn on \"Ignore color\" if the color changes.";
@@ -290,12 +292,15 @@ public sealed class VisionTools : IVisionTools
             var x = frame.Bounds.X + (int)Math.Round(blob.CenterX);
             var y = frame.Bounds.Y + (int)Math.Round(blob.CenterY);
             _lastMatch = new ScreenPoint(x, y);
+            var patch = new ScreenRect(frame.Bounds.X + blob.Bounds.X, frame.Bounds.Y + blob.Bounds.Y, blob.Bounds.Width, blob.Bounds.Height);
+            ScreenHighlightOverlay.ShowResult(frame.Bounds, patch, found: true, $"✓ Color match · {blob.PixelCount:N0} px");
             text = $"Matched at ({x}, {y}) — color {color}, a patch of {blob.PixelCount:N0} pixels (green box). Searched {where}.";
             if (result.Blobs.Count > 1)
                 text += $" There are {result.Blobs.Count} separate patches of this color (orange); a macro uses the biggest. If that's wrong, pick a smaller area, lower the tolerance or raise the minimum size.";
         }
         else
         {
+            ScreenHighlightOverlay.ShowResult(frame.Bounds, null, found: false, "✗ Color not found");
             text = result.MatchingPixels > 0
                 ? $"Not found: {result.MatchingPixels:N0} pixel(s) of that color are in {where}, but no patch has at least {step.MinPixels} pixels."
                 : $"Not found: no pixels of {color} (± {step.Tolerance}) in {where}.";
@@ -438,6 +443,12 @@ public sealed class VisionTools : IVisionTools
         {
             var spot = frame.Frame.ToScreen(local);
             _lastMatch = new ScreenPoint(spot.CenterX, spot.CenterY);
+            ScreenHighlightOverlay.ShowResult(frame.Frame.Bounds, spot, found: marker.Status == MarkerStatus.Found,
+                marker.Status == MarkerStatus.Found ? $"✓ Marker at {marker.PositionPercent:0}%" : "? Marker unclear");
+        }
+        else
+        {
+            ScreenHighlightOverlay.ShowResult(frame.Frame.Bounds, null, found: false, "✗ Marker not found");
         }
 
         text = marker.Status switch

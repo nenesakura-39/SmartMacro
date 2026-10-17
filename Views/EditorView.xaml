@@ -208,6 +208,12 @@
         </ResourceDictionary>
     </UserControl.Resources>
 
+    <UserControl.InputBindings>
+        <KeyBinding Key="Z" Modifiers="Control" Command="{Binding UndoCommand}" />
+        <KeyBinding Key="Y" Modifiers="Control" Command="{Binding RedoCommand}" />
+        <KeyBinding Key="Z" Modifiers="Control+Shift" Command="{Binding RedoCommand}" />
+    </UserControl.InputBindings>
+
     <Grid>
         <!-- ============ Nothing open ============ -->
         <Border Style="{StaticResource Card}" Visibility="{Binding HasMacro, Converter={StaticResource BoolToVisibility}, ConverterParameter=Invert}">
@@ -357,6 +363,53 @@
 
                         <Border Width="1" Margin="12,2" Background="{StaticResource BorderBrush}" />
 
+                        <!-- Macro settings: target window + auto-adjust coordinates (popover), Humanize pill. -->
+                        <ToggleButton x:Name="TargetToggle" Style="{StaticResource GhostToggle}" Padding="6,2" Margin="0,0,10,0"
+                                      IsHitTestVisible="{Binding IsOpen, ElementName=TargetPopup, Converter={StaticResource InverseBool}}"
+                                      ToolTip="Target window: bind this macro to a window (e.g. Roblox) or the main screen, and optionally auto-adjust its positions when the window moves or the resolution changes."
+                                      AutomationProperties.Name="Target window settings">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="🎯" FontSize="11" />
+                                <TextBlock Text="{Binding TargetSummary}" FontSize="11" Margin="5,0,0,0" MaxWidth="150" TextTrimming="CharacterEllipsis" />
+                                <TextBlock Text=" ▾" FontSize="10" />
+                            </StackPanel>
+                        </ToggleButton>
+                        <Popup x:Name="TargetPopup" IsOpen="{Binding IsChecked, ElementName=TargetToggle, Mode=TwoWay}" StaysOpen="False" PlacementTarget="{Binding ElementName=TargetToggle}"
+                               Placement="Bottom" AllowsTransparency="True" PopupAnimation="Fade">
+                            <Border Background="{StaticResource SurfaceBrush}" BorderBrush="{StaticResource InputBorderBrush}" BorderThickness="1" CornerRadius="10"
+                                    Padding="14,12" Width="340" Margin="0,4,0,0">
+                                <StackPanel>
+                                    <TextBlock Text="TARGET WINDOW" Style="{StaticResource SetupCardTitle}" />
+                                    <DockPanel Margin="0,8,0,0">
+                                        <Button DockPanel.Dock="Right" Command="{Binding RefreshTargetWindowsCommand}" Style="{StaticResource IconButton}" Content="&#xE72C;"
+                                                Width="30" Height="28" Padding="6" FontSize="12" Margin="6,0,0,0" ToolTip="Read the list of open windows again"
+                                                AutomationProperties.Name="Refresh windows" />
+                                        <ComboBox IsEditable="True" ItemsSource="{Binding TargetWindowChoices}"
+                                                  Text="{Binding TargetWindowTitle, UpdateSourceTrigger=PropertyChanged}"
+                                                  AutomationProperties.Name="Target window"
+                                                  ToolTip="Any / Main screen, or (part of) a window title such as Roblox. Open the game first, then click refresh." />
+                                    </DockPanel>
+                                    <CheckBox Style="{StaticResource ToggleSwitchCheckBoxStyle}" Margin="0,12,0,0"
+                                              Content="Auto-adjust coordinates if window moves or screen resolution changes"
+                                              IsChecked="{Binding ScaleCoordinatesToWindow}"
+                                              ToolTip="At playback, every stored position (Move / Click / Scroll, drag ends, custom search areas, feedback bar areas) is moved and scaled from the reference size into the target window's current position and size (or the current main screen). Pictures of Find image steps aren't resized: recapture them for a very different resolution."
+                                              AutomationProperties.Name="Auto-adjust coordinates" />
+                                    <TextBlock Text="{Binding ReferenceText}" Style="{StaticResource MutedText}" FontSize="11" Margin="0,8,0,0" TextWrapping="Wrap" />
+                                    <Button Command="{Binding UseCurrentSizeCommand}" HorizontalAlignment="Left" Margin="0,8,0,0" Padding="10,5" FontSize="12"
+                                            ToolTip="Use current size: remember where the target window (or main screen) is right now as the reference. Do this with the window where it was when you picked the positions."
+                                            AutomationProperties.Name="Use current size as reference">
+                                        <StackPanel Orientation="Horizontal">
+                                            <TextBlock Text="&#xE740;" Style="{StaticResource IconText}" FontSize="12" />
+                                            <TextBlock Text="Use current size" Margin="6,0,0,0" />
+                                        </StackPanel>
+                                    </Button>
+                                </StackPanel>
+                            </Border>
+                        </Popup>
+                        <CheckBox Style="{StaticResource ToggleSwitchCheckBoxStyle}" Content="Humanize" FontSize="11" Margin="0,0,12,0"
+                                  IsChecked="{Binding HumanizePlayback}" ToolTip="{Binding HumanizeTooltip}"
+                                  AutomationProperties.Name="Humanize playback timing and clicks" />
+
                         <!-- Quick toggles for single-monitor gamers (saved in Settings straight away). -->
                         <CheckBox Style="{StaticResource ToggleSwitchCheckBoxStyle}" Content="Mini overlay" FontSize="11"
                                   IsChecked="{Binding DataContext.ShowMiniOverlay, RelativeSource={RelativeSource AncestorType=Window}}"
@@ -462,6 +515,19 @@
                                     </Border>
                                 </StackPanel>
                                 <WrapPanel HorizontalAlignment="Right" VerticalAlignment="Center">
+                                    <Button Style="{StaticResource IconButton}" Width="30" Height="28" Padding="6" FontSize="12" Content="&#xE7A7;" Command="{Binding UndoCommand}"
+                                            ToolTip="{Binding UndoTooltip}" AutomationProperties.Name="Undo" />
+                                    <Button Style="{StaticResource IconButton}" Width="30" Height="28" Padding="6" FontSize="12" Content="&#xE7A6;" Command="{Binding RedoCommand}"
+                                            ToolTip="{Binding RedoTooltip}" AutomationProperties.Name="Redo" />
+                                    <Border Width="1" Height="18" Margin="4,0" Background="{StaticResource BorderBrush}" />
+                                    <Button Style="{StaticResource GhostButton}" Command="{Binding PlayFromHereCommand}" Padding="7,4" FontSize="11"
+                                            ToolTip="Play from here: plays from the selected step to the end of the macro, once. A step inside a Repeat starts at that Repeat."
+                                            AutomationProperties.Name="Play from the selected step">
+                                        <StackPanel Orientation="Horizontal">
+                                            <TextBlock Text="⏭" FontSize="12" Foreground="{StaticResource SuccessBrush}" />
+                                            <TextBlock Text="Play from here" Margin="5,0,0,0" />
+                                        </StackPanel>
+                                    </Button>
                                     <Button Style="{StaticResource GhostButton}" Command="{Binding WrapInIfCommand}" Padding="7,4" FontSize="11"
                                             ToolTip="Put an If … End If around the selected steps (Ctrl+Shift+I; select several with Shift+click)."
                                             AutomationProperties.Name="Wrap selected steps in If">
@@ -515,6 +581,14 @@
                                      Visibility="{Binding HasSteps, Converter={StaticResource BoolToVisibility}}">
                                 <ListBox.ContextMenu>
                                     <ContextMenu>
+                                        <MenuItem Header="▶ Run step" Command="{Binding RunStepCommand}" />
+                                        <MenuItem Header="⏭ Play from here" Command="{Binding PlayFromHereCommand}" />
+                                        <Separator />
+                                        <MenuItem Header="Copy" InputGestureText="Ctrl+C" Command="{Binding CopySelectedStepCommand}" />
+                                        <MenuItem Header="Paste" InputGestureText="Ctrl+V" Command="{Binding PasteStepCommand}" />
+                                        <MenuItem Header="Undo" InputGestureText="Ctrl+Z" Command="{Binding UndoCommand}" />
+                                        <MenuItem Header="Redo" InputGestureText="Ctrl+Y" Command="{Binding RedoCommand}" />
+                                        <Separator />
                                         <MenuItem Header="Move to top" InputGestureText="Alt+Home" Command="{Binding MoveToTopCommand}" />
                                         <MenuItem Header="Move up" InputGestureText="Alt+Up" Command="{Binding MoveUpCommand}" />
                                         <MenuItem Header="Move down" InputGestureText="Alt+Down" Command="{Binding MoveDownCommand}" />
@@ -533,6 +607,9 @@
                                     <KeyBinding Key="R" Modifiers="Control+Shift" Command="{Binding WrapInRepeatCommand}" />
                                     <KeyBinding Key="I" Modifiers="Control+Shift" Command="{Binding WrapInIfCommand}" />
                                     <KeyBinding Key="D" Modifiers="Control" Command="{Binding DuplicateStepCommand}" />
+                                    <KeyBinding Key="C" Modifiers="Control" Command="{Binding CopySelectedStepCommand}" />
+                                    <KeyBinding Key="V" Modifiers="Control" Command="{Binding PasteStepCommand}" />
+                                    <KeyBinding Key="F5" Modifiers="Control" Command="{Binding RunStepCommand}" />
                                     <KeyBinding Key="Up" Modifiers="Alt" Command="{Binding MoveUpCommand}" />
                                     <KeyBinding Key="Down" Modifiers="Alt" Command="{Binding MoveDownCommand}" />
                                     <KeyBinding Key="Home" Modifiers="Alt" Command="{Binding MoveToTopCommand}" />
@@ -663,6 +740,7 @@
                                         <ColumnDefinition Width="Auto" />
                                         <ColumnDefinition Width="*" />
                                         <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="Auto" />
                                     </Grid.ColumnDefinitions>
                                     <Border Width="32" Height="32" CornerRadius="8"
                                             Background="{Binding SelectedStep.Kind, Converter={StaticResource CategoryBrush}, ConverterParameter=Badge}">
@@ -677,7 +755,16 @@
                                             </TextBlock>
                                         </Border>
                                     </StackPanel>
-                                    <CheckBox Grid.Column="2" Style="{StaticResource ToggleSwitchCheckBoxStyle}" Content="Enabled" VerticalAlignment="Center"
+                                    <Button Grid.Column="2" Style="{StaticResource GhostButton}" Command="{Binding RunStepCommand}" Padding="8,4" FontSize="11"
+                                            Margin="0,0,8,0" VerticalAlignment="Center"
+                                            ToolTip="Run step (Ctrl+F5): plays only this step right now (an If / Repeat runs its whole block), once. Esc stops it. A turned-off step runs too (just for this test)."
+                                            AutomationProperties.Name="Run this step only">
+                                        <StackPanel Orientation="Horizontal">
+                                            <TextBlock Text="▶" FontSize="11" Foreground="{StaticResource SuccessBrush}" />
+                                            <TextBlock Text="Run step" Margin="5,0,0,0" />
+                                        </StackPanel>
+                                    </Button>
+                                    <CheckBox Grid.Column="3" Style="{StaticResource ToggleSwitchCheckBoxStyle}" Content="Enabled" VerticalAlignment="Center"
                                               IsChecked="{Binding SelectedStep.Enabled}"
                                               ToolTip="Turned-off steps are skipped when the macro plays."
                                               AutomationProperties.Name="Step enabled" />

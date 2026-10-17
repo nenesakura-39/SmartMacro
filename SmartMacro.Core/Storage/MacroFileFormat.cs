@@ -4,12 +4,16 @@ using SmartMacro.Core.Models;
 namespace SmartMacro.Core.Storage;
 
 /// <summary>
-/// Reading and writing a single macro file (the library's own files and exported/imported .smartmacro files).
+/// Reading and writing a single macro file (the library's own files and exported/imported .smacro / .smartmacro files).
 /// Only known step types are accepted, so an imported file can describe actions but never contain code.
 /// </summary>
 public static class MacroFileFormat
 {
-    public const string ExportExtension = ".smartmacro";
+    /// <summary>Extension of exported / shared macro files (one self-contained file, pictures included).</summary>
+    public const string ExportExtension = ".smacro";
+
+    /// <summary>The extension older SmartMacro builds exported with (still imported).</summary>
+    public const string LegacyExportExtension = ".smartmacro";
 
     /// <summary>Largest file we'll try to read (protects against huge or wrong files).</summary>
     public const long MaxFileSizeBytes = 20 * 1024 * 1024;

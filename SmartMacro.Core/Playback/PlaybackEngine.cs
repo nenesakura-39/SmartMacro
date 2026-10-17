@@ -122,6 +122,15 @@ public sealed class PlaybackEngine
     // (only one run at a time, so a field is fine). Mouse click steps can click it.
     private (int X, int Y)? _lastFound;
 
+    // The rectangle of what was last found (empty when unknown, e.g. a colour patch's centre only). Humanize keeps a
+    // jittered click inside it.
+    private ScreenRect _lastFoundBounds;
+
+    // Humanize (per run, from the macro): random click offset (px) and timing variation (%).
+    private bool _humanize;
+    private int _clickJitterPx;
+    private int _delayJitterPercent;
+
     // Per-run playback state. Only touched by the playback flow itself (never by Pause/Stop callers).
     private HeldInput? _held;
     private TimeSpan _timelineTarget;   // clock time at which the current step / event is due
@@ -148,6 +157,41 @@ public sealed class PlaybackEngine
     }
 
     /// <summary>
+    /// The random numbers "Humanize" uses (tests set a seeded one so runs repeat exactly). Only used on the playback thread.
+    /// </summary>
+    public Random HumanizeRandom { get; set; } = new();
+
+    /// <summary>
+    /// Humanize: a duration in ms with up to ± the macro's timing variation (e.g. 1000 ms → 920…1080 ms at 8 %).
+    /// Unchanged when Humanize is off.
+    /// </summary>
+    private double Vary(double milliseconds)
+    {
+        if (!_humanize || _delayJitterPercent <= 0 || milliseconds <= 0) return milliseconds;
+        var factor = 1.0 + (HumanizeRandom.NextDouble() * 2.0 - 1.0) * _delayJitterPercent / 100.0;
+        return Math.Max(0, milliseconds * factor);
+    }
+
+    /// <summary>
+    /// Humanize: a click spot moved by up to ± the macro's click jitter in each direction. When the spot lies inside
+    /// <paramref name="bounds"/> (what a Find step / condition matched) the result stays inside it too, so a small
+    /// button is never missed. Unchanged when Humanize is off.
+    /// </summary>
+    private (int X, int Y) Jitter(int x, int y, ScreenRect bounds = default)
+    {
+        if (!_humanize || _clickJitterPx <= 0) return (x, y);
+        var jx = x + HumanizeRandom.Next(-_clickJitterPx, _clickJitterPx + 1);
+        var jy = y + HumanizeRandom.Next(-_clickJitterPx, _clickJitterPx + 1);
+        if (!bounds.IsEmpty && x >= bounds.X && x < bounds.Right && y >= bounds.Y && y < bounds.Bottom)
+        {
+            jx = Math.Clamp(jx, bounds.X, bounds.Right - 1);
+            jy = Math.Clamp(jy, bounds.Y, bounds.Bottom - 1);
+        }
+
+        return (jx, jy);
+    }
+
+    /// <summary>
     /// Release held keys and buttons while paused, and press them again on resume. On by default.
     /// </summary>
     public bool ReleaseHeldInputWhilePaused { get; set; } = true;
@@ -166,11 +210,43 @@ public sealed class PlaybackEngine
         get { lock (_gate) return _state; }
     }
 
-    public async Task<PlaybackResult> RunAsync(Macro macro, CancellationToken cancellationToken = default)
+    /// <summary>Plays the whole macro (all its repeats).</summary>
+    public Task<PlaybackResult> RunAsync(Macro macro, CancellationToken cancellationToken = default) =>
+        RunCoreAsync(macro, null, cancellationToken);
+
+    /// <summary>
+    /// "▶ Run step": plays only the step at <paramref name="stepIndex"/>, once. When that step is an If or a Repeat (or
+    /// one of its Else / End markers), its whole block runs, through its End If / End Repeat. Repeats of the macro and
+    /// the wait between repeats are ignored. Only problems in that part of the macro (and macro-wide problems) stop it.
+    /// </summary>
+    public Task<PlaybackResult> PlaySingleStepAsync(Macro macro, int stepIndex, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(macro);
+        var (start, end) = PlaybackRanges.SingleStep(macro.Steps, stepIndex);
+        return RunCoreAsync(macro, new PlaybackSpan(start, end, stepIndex), cancellationToken);
+    }
+
+    /// <summary>
+    /// "⏭ Play from here": plays from <paramref name="startStepIndex"/> to the end of the macro, once. A step inside a
+    /// Repeat starts at that Repeat (so the loop works normally); a step inside an If starts right there.
+    /// </summary>
+    public Task<PlaybackResult> PlayFromStepAsync(Macro macro, int startStepIndex, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(macro);
+        var start = PlaybackRanges.FromStep(macro.Steps, startStepIndex);
+        return RunCoreAsync(macro, new PlaybackSpan(start, macro.Steps.Count, startStepIndex), cancellationToken);
+    }
+
+    /// <summary>The part of the step list a run plays: steps [Start, End). Null span = the whole macro with its repeats.</summary>
+    private sealed record PlaybackSpan(int Start, int End, int RequestedIndex);
+
+    private async Task<PlaybackResult> RunCoreAsync(Macro macro, PlaybackSpan? span, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(macro);
 
-        var issues = MacroValidator.ValidateForExecution(macro);
+        var issues = span is null
+            ? MacroValidator.ValidateForExecution(macro)
+            : PlaybackRanges.ValidateRange(macro, span.Start, span.End);
         if (issues.HasErrors())
             throw new MacroValidationException(issues);
 
@@ -183,12 +259,18 @@ public sealed class PlaybackEngine
             _cts = cts;
             _resumeSignal = null;
             _lastFound = null;
+            _lastFoundBounds = default;
             _skipNextStep = false;
             _cursor = null;
             _glideTarget = null;
         }
 
         SetState(PlaybackState.Running);
+
+        // Humanize: small random click offsets and timing variation (off unless the macro turns it on).
+        _humanize = macro.HumanizePlayback;
+        _clickJitterPx = Math.Clamp(macro.EffectiveClickJitterPx, 0, Macro.MaxClickJitterPx);
+        _delayJitterPercent = Math.Clamp(macro.EffectiveDelayJitterPercent, 0, Macro.MaxDelayJitterPercent);
 
         var held = new HeldInput();
         _held = held;
@@ -197,15 +279,32 @@ public sealed class PlaybackEngine
         var token = cts.Token;
 
         // The validator above already refused unbalanced blocks, so this structure is always valid here.
-        var blocks = BlockStructure.Analyze(macro.Steps);
-        var run = new RunContext(macro.Steps, blocks, macro.Speed, held, new ScreenConditionEvaluator(_probes),
-            macro.RepeatCount == 0 ? null : macro.RepeatCount);
-        var repeatDelayMs = macro.RepeatDelayMs;
+        var steps = macro.Steps;
+        var blocks = BlockStructure.Analyze(steps);
+        int? totalIterations = span is not null ? 1 : macro.RepeatCount == 0 ? (int?)null : macro.RepeatCount;
+        var repeatDelayMs = span is null ? macro.RepeatDelayMs : 0;
 
         PlaybackResult result;
         string? releaseError;
+        RunContext? run = null;
         try
         {
+            // "Auto-adjust coordinates": play a copy whose positions are mapped into the target window / screen as it
+            // is right now (the same step IDs, so the editor's running-step highlight still works).
+            if (CoordinateScaling.MappingFor(macro, _layout) is { } mapping && !mapping.IsIdentity)
+            {
+                steps = CoordinateScaling.ApplyToCopy(steps, mapping);
+                var targetName = string.IsNullOrWhiteSpace(macro.TargetWindowTitle) ? "main screen" : "\"" + macro.TargetWindowTitle.Trim() + "\" window";
+                Message?.Invoke(this, $"Coordinates adjusted to the {targetName}: {mapping}.");
+            }
+
+            var current = new RunContext(steps, blocks, macro.Speed, held, new ScreenConditionEvaluator(_probes), totalIterations,
+                span?.Start ?? 0, span?.End ?? steps.Count);
+            run = current;
+
+            if (span is not null && span.Start != span.RequestedIndex)
+                Message?.Invoke(this, $"Starting at step {span.Start + 1} (the start of the block that contains step {span.RequestedIndex + 1}).");
+
             await Task.Run(async () =>
             {
                 if (!blocks.IsValid) // can't happen after validation; checked anyway so a bug can't run a broken list
@@ -215,37 +314,52 @@ public sealed class PlaybackEngine
                 _timelineShift = TimeSpan.Zero;
                 _pausedTotal = TimeSpan.Zero;
 
-                for (var iteration = 1; run.TotalIterations is null || iteration <= run.TotalIterations; iteration++)
+                for (var iteration = 1; current.TotalIterations is null || iteration <= current.TotalIterations; iteration++)
                 {
                     // Pause between loops (never before the first run or after the last one).
                     if (iteration > 1 && repeatDelayMs > 0)
                     {
-                        AdvanceTimeline(repeatDelayMs / run.Speed);
+                        AdvanceTimeline(Vary(repeatDelayMs / current.Speed));
                         await WaitForTimelineAsync(token).ConfigureAwait(false);
                     }
 
-                    run.Iteration = iteration;
-                    await RunStepsAsync(run, token).ConfigureAwait(false);
+                    current.Iteration = iteration;
+                    await RunStepsAsync(current, token).ConfigureAwait(false);
                     iterationsCompleted++;
                 }
             }, token).ConfigureAwait(false);
 
-            result = new PlaybackResult(PlaybackOutcome.Completed, iterationsCompleted, run.StepsExecuted);
+            result = new PlaybackResult(PlaybackOutcome.Completed, iterationsCompleted, current.StepsExecuted);
         }
         catch (OperationCanceledException) when (token.IsCancellationRequested)
         {
-            result = new PlaybackResult(PlaybackOutcome.Stopped, iterationsCompleted, run.StepsExecuted);
+            result = new PlaybackResult(PlaybackOutcome.Stopped, iterationsCompleted, run?.StepsExecuted ?? 0);
         }
         catch (Exception ex)
         {
-            result = new PlaybackResult(PlaybackOutcome.Failed, iterationsCompleted, run.StepsExecuted, ex.Message);
+            result = new PlaybackResult(PlaybackOutcome.Failed, iterationsCompleted, run?.StepsExecuted ?? 0, ex.Message);
         }
         finally
         {
             // Never leave keys or mouse buttons stuck down (also when stopped inside a loop or a condition check).
             releaseError = held.ReleaseAll(_input);
+
+            // Failsafe on top of that: the simulator releases anything it still thinks is down (input the engine didn't
+            // track, or a release that was interrupted by the stop / error).
+            string? failsafeError;
+            try
+            {
+                failsafeError = _input.ReleaseAllHeldInputs();
+            }
+            catch (Exception ex)
+            {
+                failsafeError = $"Could not release held input: {ex.Message}";
+            }
+
+            releaseError ??= failsafeError;
             _held = null;
             _probes = null;
+            _humanize = false;
 
             lock (_gate)
             {
@@ -431,8 +545,10 @@ public sealed class PlaybackEngine
     private sealed class RunContext
     {
         public RunContext(List<MacroStep> steps, BlockStructure blocks, double speed, HeldInput held,
-            IConditionEvaluator conditions, int? totalIterations)
+            IConditionEvaluator conditions, int? totalIterations, int start, int end)
         {
+            Start = Math.Clamp(start, 0, steps.Count);
+            End = Math.Clamp(end, Start, steps.Count);
             Steps = steps;
             Blocks = blocks;
             Speed = speed;
@@ -447,6 +563,16 @@ public sealed class PlaybackEngine
         public HeldInput Held { get; }
         public IConditionEvaluator Conditions { get; }
         public int? TotalIterations { get; }
+
+        /// <summary>First step to play (0 for a normal run).</summary>
+        public int Start { get; }
+
+        /// <summary>One past the last step to play (Steps.Count for a normal run).</summary>
+        public int End { get; }
+
+        /// <summary>True for "Run step" / "Play from here" (only part of the list plays).</summary>
+        public bool IsPartial => Start != 0 || End != Steps.Count;
+
         public int Iteration { get; set; }
         public int StepsExecuted { get; set; }
 
@@ -485,9 +611,9 @@ public sealed class PlaybackEngine
         var steps = run.Steps;
         var blocks = run.Blocks;
         var loops = new List<LoopFrame>();
-        var pc = 0;
+        var pc = run.Start;
 
-        while (pc < steps.Count)
+        while (pc < run.End)
         {
             await WaitIfPausedAsync(token).ConfigureAwait(false);
             token.ThrowIfCancellationRequested();
@@ -513,7 +639,7 @@ public sealed class PlaybackEngine
                     if (answer.IsTrue && answer.Seen && ifStep.ThenAction != FoundTextAction.None)
                     {
                         await PerformFoundActionAsync(ifStep.ThenAction, answer.X + ifStep.ThenOffsetX, answer.Y + ifStep.ThenOffsetY,
-                            ifStep.ThenHoldMs, FoundActionTiming.Default, run.Held, token).ConfigureAwait(false);
+                            ifStep.ThenHoldMs, FoundActionTiming.Default, run.Held, token, answer.Match).ConfigureAwait(false);
                         ResetTimeline();
                     }
 
@@ -560,6 +686,13 @@ public sealed class PlaybackEngine
                 case EndRepeatStep:
                 {
                     var start = blocks.StartOf(pc);
+                    if (run.IsPartial && (loops.Count == 0 || loops[^1].Start != start))
+                    {
+                        // "Play from here" started inside this loop's body: this was its one (partial) turn.
+                        pc++;
+                        break;
+                    }
+
                     if (loops.Count == 0 || loops[^1].Start != start || steps[start] is not RepeatStep repeat)
                         throw new InvalidOperationException($"End Repeat at step {pc + 1} doesn't belong to the running loop."); // can't happen after validation
 
@@ -722,7 +855,7 @@ public sealed class PlaybackEngine
     }
 
     /// <summary>The answer to a condition plus a sentence for the log.</summary>
-    private readonly record struct ConditionAnswer(bool IsTrue, string Text, bool Seen = false, int X = 0, int Y = 0);
+    private readonly record struct ConditionAnswer(bool IsTrue, string Text, bool Seen = false, int X = 0, int Y = 0, ScreenRect Match = default);
 
     /// <summary>
     /// Checks a condition, waiting up to its "keep checking for" time for it to become true (0 = look once).
@@ -746,7 +879,12 @@ public sealed class PlaybackEngine
             token.ThrowIfCancellationRequested();
 
             check = await conditions.CheckAsync(condition, timer, token).ConfigureAwait(false);
-            if (check.Seen) _lastFound = (check.X, check.Y);
+            if (check.Seen)
+            {
+                _lastFound = (check.X, check.Y);
+                _lastFoundBounds = check.Match;
+            }
+
             if (stopWhen(check) || ActiveTime - started >= timeout) break;
 
             await WaitAsync(search.CheckIntervalMs, token).ConfigureAwait(false);
@@ -755,7 +893,7 @@ public sealed class PlaybackEngine
         ResetTimeline(); // checking takes as long as it takes; start timing again from here
         var stats = timer is null ? string.Empty : " " + timer.Describe(ActiveTime - started);
         return new ConditionAnswer(check.IsTrue, $"({conditions.Describe(condition)}: {(check.IsTrue ? "true" : "false")}) {check.Details}{stats}",
-            check.Seen, check.X, check.Y);
+            check.Seen, check.X, check.Y, check.Match);
     }
 
     // ---------------- Feedback loop (Stage 4) ----------------
@@ -958,7 +1096,12 @@ public sealed class PlaybackEngine
     {
         var check = await run.Conditions.CheckAsync(condition, null, token).ConfigureAwait(false);
         stats.ConditionChecks++;
-        if (check.Seen) _lastFound = (check.X, check.Y);
+        if (check.Seen)
+        {
+            _lastFound = (check.X, check.Y);
+            _lastFoundBounds = check.Match;
+        }
+
         return check;
     }
 
@@ -972,7 +1115,7 @@ public sealed class PlaybackEngine
                 if (SmoothMouseMoves && _glideTarget is { } target && d.DurationMs > 0)
                 {
                     // Wait for the first part of the Delay, then glide to the next step's spot during the rest.
-                    var total = d.DurationMs / speed;
+                    var total = Vary(d.DurationMs / speed);
                     var glide = Math.Min(total, MaxGlideMs);
                     AdvanceTimeline(total - glide);
                     await WaitForTimelineAsync(token).ConfigureAwait(false);
@@ -984,7 +1127,7 @@ public sealed class PlaybackEngine
                 }
                 else
                 {
-                    AdvanceTimeline(d.DurationMs / speed);
+                    AdvanceTimeline(Vary(d.DurationMs / speed));
                 }
 
                 await WaitForTimelineAsync(token).ConfigureAwait(false);
@@ -996,17 +1139,21 @@ public sealed class PlaybackEngine
 
             case MouseClickStep c:
                 (int X, int Y)? start = null; // where the click happens, if known (needed for a smooth drag)
+                // Humanize moves real clicks a few pixels (never a plain Down / Up, which may belong to a recorded drag).
+                var jitters = c.Action is MouseClickAction.Click or MouseClickAction.DoubleClick or MouseClickAction.Hold;
                 if (c.UseLastFoundText)
                 {
                     var found = _lastFound ?? throw new TextNotFoundException(
                         "This click uses the last found spot, but no Find text / image / color step has found anything yet in this run.");
+                    if (jitters) found = Jitter(found.X, found.Y, _lastFoundBounds);
                     await MoveCursorAsync(found.X, found.Y, c.MoveStyle, c.MoveDurationMs, speed, onTimeline: true, token).ConfigureAwait(false);
                     start = found;
                 }
                 else if (!c.UseCurrentPosition)
                 {
-                    await MoveCursorAsync(c.X, c.Y, c.MoveStyle, c.MoveDurationMs, speed, onTimeline: true, token).ConfigureAwait(false);
-                    start = (c.X, c.Y);
+                    (int X, int Y) clickAt = jitters ? Jitter(c.X, c.Y) : (c.X, c.Y);
+                    await MoveCursorAsync(clickAt.X, clickAt.Y, c.MoveStyle, c.MoveDurationMs, speed, onTimeline: true, token).ConfigureAwait(false);
+                    start = clickAt;
                 }
                 else if (_input.TryGetCursorPosition(out var cursorX, out var cursorY))
                 {
@@ -1317,9 +1464,10 @@ public sealed class PlaybackEngine
             if (step.Goal == WaitGoal.Appear && result.Found)
             {
                 _lastFound = (result.X, result.Y);
+                _lastFoundBounds = result.Match;
                 Message?.Invoke(this, result.FoundText + Stats());
                 await PerformFoundActionAsync(step.Action, result.X + step.OffsetX, result.Y + step.OffsetY, step.ActionHoldMs,
-                    FoundActionTiming.Of(step), _held ?? throw new InvalidOperationException("Playback isn't running."), token).ConfigureAwait(false);
+                    FoundActionTiming.Of(step), _held ?? throw new InvalidOperationException("Playback isn't running."), token, result.Match).ConfigureAwait(false);
                 if (step.MoveCursorAwayAfterAction && step.Action is not (FoundTextAction.None or FoundTextAction.Move))
                 {
                     // "Park" the cursor so it (and its hover effect) doesn't cover the spot where the next button appears.
@@ -1359,7 +1507,12 @@ public sealed class PlaybackEngine
 
                 if (step.WhenNotFound is TextNotFoundBehavior.Continue or TextNotFoundBehavior.SkipNextStep)
                 {
-                    if (step.Goal == WaitGoal.Appear) _lastFound = null;
+                    if (step.Goal == WaitGoal.Appear)
+                    {
+                        _lastFound = null;
+                        _lastFoundBounds = default;
+                    }
+
                     var skip = step.WhenNotFound == TextNotFoundBehavior.SkipNextStep;
                     _skipNextStep = skip;
                     Message?.Invoke(this, message + (skip ? " Skipping the next step." : " Continuing."));
@@ -1413,9 +1566,10 @@ public sealed class PlaybackEngine
     /// clicked window can react before the next step.
     /// </summary>
     private async Task PerformFoundActionAsync(FoundTextAction action, int x, int y, int holdMs, FoundActionTiming timing, HeldInput held,
-        CancellationToken token)
+        CancellationToken token, ScreenRect matchBounds = default)
     {
         if (action == FoundTextAction.None) return;
+        if (action != FoundTextAction.Move) (x, y) = Jitter(x, y, matchBounds); // Humanize: stays inside what was found
 
         await MoveCursorAsync(x, y, timing.Style, timing.MoveMs, 1.0, onTimeline: false, token).ConfigureAwait(false);
         switch (action)
@@ -1457,7 +1611,7 @@ public sealed class PlaybackEngine
         _input.MouseButton(c.Button, true);
         held.Buttons.Add(c.Button);
 
-        var duration = TimeSpan.FromMilliseconds(Math.Max(0, c.DragDurationMs) / speed);
+        var duration = TimeSpan.FromMilliseconds(Vary(Math.Max(0, c.DragDurationMs) / speed));
         var steps = start is null ? 1 : Math.Max(1, (int)Math.Ceiling(duration / DragStepInterval));
         var stepTime = duration / steps;
         for (var i = 1; i <= steps; i++)
@@ -1605,7 +1759,7 @@ public sealed class PlaybackEngine
             return;
         }
 
-        var duration = TimeSpan.FromMilliseconds(durationMs / (speed > 0 ? speed : 1.0));
+        var duration = TimeSpan.FromMilliseconds(Vary(durationMs / (speed > 0 ? speed : 1.0)));
         var plan = MouseMotion.Plan(from, (x, y), glide, duration, GlideStepInterval);
         if (onTimeline && _clock.Elapsed - _timelineTarget > MaxTimelineLag) ResetTimeline(); // far behind: glide from "now"
 

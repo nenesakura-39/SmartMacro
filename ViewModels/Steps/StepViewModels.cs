@@ -856,8 +856,14 @@ public abstract class ScreenSearchStepViewModel : StepViewModel
         }, () => _testMatch is not null && !_isBusy);
         RefreshMonitorsCommand = new RelayCommand(RefreshMonitors);
         RefreshWindowsCommand = new RelayCommand(RefreshWindows);
+        ShowSearchAreaCommand = new RelayCommand(
+            () => TestResult = SmartMacro.Services.Vision.ScreenHighlightOverlay.ShowSearchArea(_search, _layout),
+            () => !_isBusy);
         RefreshMonitors();
     }
+
+    /// <summary>"🎯 Show search area on screen": outlines where this step looks right now, for a moment.</summary>
+    public RelayCommand ShowSearchAreaCommand { get; }
 
     // ---------------- "Where to look" ----------------
 

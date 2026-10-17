@@ -1,6 +1,8 @@
 # SmartMacro – Project Status / Handoff
 
-_Last updated: 2026-10-17 (Studio UI redesign on top of `d54c087` – new palette, pill switch / segmented controls,
+_Last updated: 2026-10-17 (Studio upgrades batch on top of `cdd0919` – failsafe release, Run step / Play from here, Undo / Redo +
+copy / paste, target window + coordinate scaling, on-screen highlight, Humanize, Studio Library / Settings / Logs: written WITHOUT a
+.NET SDK, NOT built or tested. Before it: Studio UI redesign on top of `d54c087` – new palette, pill switch / segmented controls,
 175 px sidebar, unified editor header, bottom Activity + Problems drawer, 2-column toolbox tiles, step cards, inspector
 header + pinned Test bar: written WITHOUT a .NET SDK, NOT built or tested. Before it: Next-gen QoL batch – "where to look" monitors / windows, smooth mouse glide, click timing,
 freeze-screen picker, beginner Properties cards, feedback-loop wizard, live step highlight + status pill, Quick patterns:
@@ -19,6 +21,67 @@ Developer: Riku (リク) · Brand: KuroLogic_
 | Release package | `publish\SmartMacro-1.0.0-win-x64\SmartMacro.exe` is an OLD build (made right after `159d6b3`, before Stage 1) | – | ignored by git |
 
 
+
+## Studio upgrades batch (2026-10-17, on top of `cdd0919`) – 7 items; written WITHOUT a .NET SDK: **NOT built, NOT tested**
+The AI's environment had no .NET SDK / NuGet / PyPI access (and no shell on the owner's PC), so nothing was compiled.
+Checked by script: XAML well-formed, every `StaticResource` key defined, binding names exist, C# brace balance.
+Next step for the owner: `tools\verify.cmd` (send `artifacts\build.log` / `artifacts\test.log` if anything fails),
+then `docs/STUDIO_UPGRADES_MANUAL_TESTS.md`.
+1. **Failsafe input guard**: `IInputSimulator.ReleaseAllHeldInputs()` (default interface method returning an error or null;
+   fakes do nothing). New `Core/Playback/HeldInputTracker.cs`: `HeldInputTracker` (keys incl. scan-code keys + buttons, press
+   order, thread-safe; release = buttons first, keys in reverse; every release tried) and `TrackingInputSimulator` decorator.
+   `Win32InputSimulator` tracks every press (noted before sending) / release (after) and implements the failsafe (logs
+   "Input safety: released …" only when something was left). `PlaybackEngine` `finally` calls it after its own
+   `HeldInput.ReleaseAll` on complete / stop / error (failsafe errors become the result's Warning).
+2. **Run step / Play from here**: `Core/Playback/PlaybackRanges.cs` (`SingleStep` = the step, or the whole If / Repeat block
+   for a header / Else / End marker; `FromStep` = the step, or its innermost enclosing Repeat; Else → its "otherwise" part;
+   `ValidateRange` = macro-wide + block + in-range errors only, plus "turned off / nothing enabled"). Engine
+   `PlaySingleStepAsync` / `PlayFromStepAsync` (one pass, repeat count + repeat wait ignored; `RunContext.Start/End`; an End
+   Repeat whose loop wasn't entered in a partial run just continues). `AutomationViewModel.RunSingleStepAsync /
+   PlayFromStepAsync` (same overlay / Esc / validation dialog). Editor `RunStepCommand` (inspector header "▶ Run step",
+   right-click, Ctrl+F5; a turned-off step is enabled in the played copy only) and `PlayFromHereCommand` (toolbar
+   "⏭ Play from here", right-click). Wired in `MainViewModel` (`RunSingleStepHandler`, `PlayFromStepHandler`, `CanRunSteps`).
+3. **Undo / Redo + copy / paste**: `Core/Workflow/UndoHistory.cs` (`UndoHistory` cap 50, dedupe, redo cleared by a new edit;
+   `StepSnapshots` = step list ⇄ MacroJson). Editor records a snapshot before Add, Quick pattern, Delete, Duplicate, Move /
+   drop, Wrap in If / Repeat, Clean up (only when it changed something), Paste; cleared on Load / Unload / Discard.
+   `UndoCommand` Ctrl+Z, `RedoCommand` Ctrl+Y / Ctrl+Shift+Z (UserControl level; text boxes keep their own undo), ↶ / ↷
+   toolbar buttons. `Core/Workflow/StepClipboard.cs`: clipboard text = `{format: "SmartMacro.Steps", schemaVersion,
+   steps}`; paste gives fresh IDs, refuses newer formats and partial blocks; `ExpandSelection` widens a lone If / Repeat /
+   End to its block. `CopySelectedStepCommand` Ctrl+C / `PasteStepCommand` Ctrl+V (step list + right-click), works across macros.
+4. **Target window + resolution scaling**: `Macro.TargetWindowTitle`, `ReferenceLeft/Top/Width/Height`,
+   `ScaleCoordinatesToWindow` (JSON: only written when set). `Core/Playback/CoordinateScaling.cs` (`CoordinateMapping`
+   Map / MapRect; `CurrentTarget` = window by title via `SearchArea.FindWindow` or the primary monitor; `ApplyToCopy`
+   maps Move / Click (+ drag end) / Scroll positions, custom search areas of Find steps + conditions, feedback bar areas;
+   NOT recorded input, NOT template pictures). Engine plays a mapped copy (same step IDs) and fails with "The target
+   window … isn't open" when missing. Validator: reference size required when scaling; title ≤ 260. Editor header
+   "🎯 Any screen ▾" popover (editable window list + refresh, "Auto-adjust coordinates…" switch, reference text,
+   "Use current size"; turning the switch on without a reference captures one). `ScreenInfoProvider` unchanged (already
+   lists windows / monitors).
+5. **On-screen highlight**: new `Services/Vision/ScreenHighlightOverlay.cs` (click-through, topmost, no-activate, tool
+   window, excluded from capture, physical-pixel placement + DPI scale, cyan dashed search area, green box + crosshair or
+   red box, label; holds 800 ms then fades 350 ms; one at a time; never throws). Shown by Test image / color / text /
+   feedback "Test detection now" (`VisionTools`, `FindTextTools`) and by new "🎯 Show search area on screen"
+   (`ScreenSearchStepViewModel.ShowSearchAreaCommand`, Feedback loop `ShowSearchAreaCommand`, buttons in
+   `StepEditorTemplates.xaml`). `ScreenProbe` / `ConditionCheck` got an optional `Match` rectangle.
+6. **Humanize**: `Macro.HumanizePlayback`, `ClickJitterPx?` (3), `DelayJitterPercent?` (8) (+ Effective… / Max… constants,
+   validated 0–50). Engine `HumanizeRandom` (seedable), `Vary` (delays, repeat wait, glide + drag durations) and `Jitter`
+   (Mouse click Click / Double / Hold at a position or the last found spot; Find / If "when found" clicks; clamped inside the
+   matched rectangle when the spot is inside it). Recorded input and Down / Up / Move steps are never jittered. Editor header
+   "Humanize" pill switch with tooltip.
+7. **Studio UI**: `LibraryView` = search / filter card + Studio Macro Cards (title, description, step badge, category pills
+   INPUT / VISION / OCR / FEEDBACK LOOP / LOGIC / HUMANIZE / 🎯 TARGET, "edited … ago", ▶ Play ✏ Edit 📋 Duplicate
+   📤 Export .smacro 🗑 Delete per card) + "📥 Import .smacro" header button + details inspector. Library commands take the
+   card as parameter (fallback: selection); search also matches category words. `MacroFileFormat.ExportExtension` =
+   `.smacro` (`.smartmacro` still imported). `SettingsView` = About + Global Hotkeys / Recording Defaults / Playback &
+   Safety (failsafe note, OCR status) / Storage & Data cards with `ToggleSwitchCheckBoxStyle`. `LogView` = #0D131F surface,
+   level pills (`LogPillConverter`: INFO blue, MATCH violet, DONE green, WARN amber, ERROR red), search, All / Info / Match /
+   Warn / Error filter (`LogViewModel.EntriesView`, `StringMatchConverter`), Copy Log (what's shown) / Clear Log.
+- Files: `MacroDocument.CurrentSchemaVersion = 11`, written only when a macro-level option of item 4 / 6 is used.
+- Tests: new `SmartMacro.Tests/StudioUpgradeTests.cs` (classes `ReleaseAllHeldInputsTests`, `PlayRangeTests`,
+  `UndoRedoTests`, `CoordinateScalingTests`, `HumanizeTests`). No existing test was changed.
+- Not verified: build, tests, anything at runtime (overlay on mixed DPI, popover focus, clipboard, Library card layout).
+- Known gaps: Settings text "never saved" about OCR captures still contradicts the saved test PNGs (owner approval
+  pending, unchanged); recorded-input positions are not scaled.
 
 ## Studio UI redesign (2026-10-17) – "SmartMacro Studio" look; written WITHOUT a .NET SDK: **NOT built, NOT tested**
 The AI's environment had no .NET SDK / NuGet access (and WPF can't run on Linux), so nothing was compiled. XAML files were
@@ -711,6 +774,8 @@ no .NET SDK in the AI's environment)
   csproj Company/Authors "Riku", Copyright "© 2026 Riku", README "© 2026 Riku") – change awaits owner approval.
 
 ## Next task
+- Owner: `tools\verify.cmd` for the Studio upgrades batch (never compiled; send `artifacts\build.log` /
+  `artifacts\test.log`), then `docs/STUDIO_UPGRADES_MANUAL_TESTS.md`.
 - Owner: `tools\verify.cmd` for the Studio UI redesign (XAML never compiled; send `artifacts\build.log` if it fails),
   then `docs/STUDIO_UI_MANUAL_TESTS.md`.
 - Owner: `tools\verify.cmd` for the next-gen QoL batch (never compiled; expect a few compile fixes – send

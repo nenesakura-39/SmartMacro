@@ -459,7 +459,20 @@ public sealed class AutomationViewModel : ObservableObject, IDisposable
     private Task PlayAsync() => PlayMacroAsync(_hooks.GetPlayTarget());
 
     /// <summary>Plays a specific macro (e.g. from the library's Play button). Ignored if something is already running.</summary>
-    public async Task PlayMacroAsync(Macro? macro)
+    public Task PlayMacroAsync(Macro? macro) => PlayMacroAsync(macro, null);
+
+    /// <summary>"▶ Run step": plays only the step at <paramref name="stepIndex"/> (or its whole If / Repeat block) once.</summary>
+    public Task RunSingleStepAsync(Macro macro, int stepIndex) =>
+        PlayMacroAsync(macro, new PlayRange(stepIndex, SingleStep: true));
+
+    /// <summary>"⏭ Play from here": plays from the step at <paramref name="stepIndex"/> to the end of the macro, once.</summary>
+    public Task PlayFromStepAsync(Macro macro, int stepIndex) =>
+        PlayMacroAsync(macro, new PlayRange(stepIndex, SingleStep: false));
+
+    /// <summary>Part of a macro to play (null = all of it, with its repeats).</summary>
+    private sealed record PlayRange(int StepIndex, bool SingleStep);
+
+    private async Task PlayMacroAsync(Macro? macro, PlayRange? range)
     {
         if (!IsIdle) return;
 
@@ -469,26 +482,47 @@ public sealed class AutomationViewModel : ObservableObject, IDisposable
             return;
         }
 
-        var issues = MacroValidator.ValidateForExecution(macro);
+        var checkedMacro = macro;
+        int rangeStart = 0, rangeEnd = macro.Steps.Count;
+        if (range is not null)
+        {
+            if (range.StepIndex < 0 || range.StepIndex >= macro.Steps.Count)
+            {
+                _hooks.SetStatus("Select a step first.", StatusKind.Warning);
+                return;
+            }
+
+            var (start, end) = range.SingleStep
+                ? PlaybackRanges.SingleStep(macro.Steps, range.StepIndex)
+                : (PlaybackRanges.FromStep(macro.Steps, range.StepIndex), macro.Steps.Count);
+            (rangeStart, rangeEnd) = (start, end);
+            checkedMacro = new Macro { Name = macro.Name, Steps = macro.Steps.GetRange(start, end - start) };
+        }
+
+        var issues = range is null
+            ? MacroValidator.ValidateForExecution(macro)
+            : PlaybackRanges.ValidateRange(macro, rangeStart, rangeEnd);
         if (issues.HasErrors())
         {
             var list = string.Join("\n", issues.Where(i => i.Severity == IssueSeverity.Error).Take(8).Select(i => "• " + i.DisplayText));
-            _dialogs.ShowWarning("Can't play this macro", $"Fix these problems first:\n\n{list}");
-            _hooks.SetStatus($"\"{macro.Name}\" can't play until its problems are fixed.", StatusKind.Error);
+            var what = range is null ? "this macro" : range.SingleStep ? "this step" : "from this step";
+            _dialogs.ShowWarning($"Can't play {what}", $"Fix these problems first:\n\n{list}");
+            _hooks.SetStatus($"\"{macro.Name}\" can't play {(range is null ? "" : what + " ")}until its problems are fixed.", StatusKind.Error);
             return;
         }
 
-        if (!_ocr.IsAvailable && WorkflowSteps.UsesTextRecognition(macro))
+        if (!_ocr.IsAvailable && WorkflowSteps.UsesTextRecognition(checkedMacro))
         {
             _dialogs.ShowWarning("Text recognition isn't available", $"This macro has \"Find text\" steps or text conditions, but:\n\n{_ocr.StatusText}");
             _hooks.SetStatus("Can't play: text recognition (OCR) isn't available on this PC.", StatusKind.Error);
             return;
         }
 
-        _runningMacroName = macro.Name;
+        _runningMacroName = range is null ? macro.Name
+            : range.SingleStep ? $"{macro.Name}, step {range.StepIndex + 1}" : $"{macro.Name} from step {range.StepIndex + 1}";
         _latestProgress = null;
         Mode = AutomationMode.Playing;
-        IsProgressIndeterminate = macro.RepeatCount == 0;
+        IsProgressIndeterminate = range is null && macro.RepeatCount == 0;
         ProgressValue = 0;
         ProgressText = "Starting…";
         _host.Enter(OverlayKind.Playing, OverlayText());
@@ -503,12 +537,12 @@ public sealed class AutomationViewModel : ObservableObject, IDisposable
             _log.Warning("The Esc emergency stop could not be enabled; use Ctrl+Shift+F10 or the Stop button.", ex);
         }
 
-        var run = RunPlaybackAsync(macro);
+        var run = RunPlaybackAsync(macro, range);
         _runTask = run;
         await run;
     }
 
-    private async Task RunPlaybackAsync(Macro macro)
+    private async Task RunPlaybackAsync(Macro macro, PlayRange? range)
     {
         PlaybackResult? result = null;
         try
@@ -526,7 +560,12 @@ public sealed class AutomationViewModel : ObservableObject, IDisposable
             _engine.SmoothMouseMoves = _hooks.Settings().SmoothMouseMoves;
             using (new HighResolutionTimerScope())
             {
-                result = await _engine.RunAsync(macro);
+                result = range switch
+                {
+                    null => await _engine.RunAsync(macro),
+                    { SingleStep: true } => await _engine.PlaySingleStepAsync(macro, range.StepIndex),
+                    _ => await _engine.PlayFromStepAsync(macro, range.StepIndex),
+                };
             }
 
             // Simulated keys are queued; the target app may still be processing them. If SmartMacro

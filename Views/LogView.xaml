@@ -4,27 +4,22 @@
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
              xmlns:vm="clr-namespace:SmartMacro.ViewModels"
+             xmlns:conv="clr-namespace:SmartMacro.Converters"
              mc:Ignorable="d"
              d:DataContext="{d:DesignInstance Type=vm:LogViewModel}">
+    <UserControl.Resources>
+        <conv:LogPillConverter x:Key="LogPill" />
+        <conv:StringMatchConverter x:Key="StringMatch" />
+    </UserControl.Resources>
+
     <DockPanel>
-        <DockPanel DockPanel.Dock="Top" Margin="0,0,0,16">
+        <!-- ===== Header ===== -->
+        <DockPanel DockPanel.Dock="Top" Margin="0,0,0,14">
             <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
-                <Button Command="{Binding OpenFolderCommand}" Margin="0,0,8,0" ToolTip="Open the folder with the daily log files">
+                <Button Style="{StaticResource GhostButton}" Command="{Binding OpenFolderCommand}" Margin="0,0,6,0" ToolTip="Open the folder with the daily log files">
                     <StackPanel Orientation="Horizontal">
                         <TextBlock Text="&#xE838;" Style="{StaticResource IconText}" />
                         <TextBlock Text="Open log folder" Margin="8,0,0,0" />
-                    </StackPanel>
-                </Button>
-                <Button Command="{Binding CopyCommand}" Margin="0,0,8,0" ToolTip="Copy all entries (useful for bug reports)">
-                    <StackPanel Orientation="Horizontal">
-                        <TextBlock Text="&#xE8C8;" Style="{StaticResource IconText}" />
-                        <TextBlock Text="Copy all" Margin="8,0,0,0" />
-                    </StackPanel>
-                </Button>
-                <Button Command="{Binding ClearCommand}" ToolTip="Clear this view (log files are kept)">
-                    <StackPanel Orientation="Horizontal">
-                        <TextBlock Text="&#xE74D;" Style="{StaticResource IconText}" />
-                        <TextBlock Text="Clear view" Margin="8,0,0,0" />
                     </StackPanel>
                 </Button>
             </StackPanel>
@@ -35,33 +30,105 @@
             </StackPanel>
         </DockPanel>
 
-        <Border Style="{StaticResource Card}" Padding="8">
-            <Grid>
-                <ListBox ItemsSource="{Binding Entries}" ItemContainerStyle="{StaticResource PlainListItem}"
-                         VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling">
-                    <ListBox.ItemTemplate>
-                        <DataTemplate>
-                            <Grid Margin="4,2">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="22" />
-                                    <ColumnDefinition Width="72" />
-                                    <ColumnDefinition Width="*" />
-                                </Grid.ColumnDefinitions>
-                                <TextBlock Text="{Binding Level, Converter={StaticResource LevelToGlyph}}" Style="{StaticResource IconText}" FontSize="13"
-                                           Foreground="{Binding Level, Converter={StaticResource LevelToBrush}}" VerticalAlignment="Top" Margin="0,1,0,0" />
-                                <TextBlock Grid.Column="1" Text="{Binding TimeText}" Foreground="{StaticResource MutedTextBrush}" />
-                                <StackPanel Grid.Column="2">
-                                    <TextBlock Text="{Binding Message}" TextWrapping="Wrap" />
-                                    <TextBlock Text="{Binding Details}" Foreground="{StaticResource MutedTextBrush}" FontSize="12" TextWrapping="Wrap"
-                                               Visibility="{Binding Details, Converter={StaticResource NullToVisibility}}" />
+        <!-- ===== Studio log surface ===== -->
+        <Border Style="{StaticResource Card}" Padding="0" Background="{StaticResource StepsCanvasBrush}" ClipToBounds="True">
+            <DockPanel>
+                <!-- Toolbar: search | level filter pills | count | Copy Log / Clear Log -->
+                <Border DockPanel.Dock="Top" Background="{StaticResource SurfaceBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,0,0,1"
+                        CornerRadius="10,10,0,0" Padding="10,8">
+                    <DockPanel>
+                        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                            <Border Style="{StaticResource Pill}" Margin="0,0,10,0">
+                                <TextBlock Text="{Binding CountText}" FontSize="11" Foreground="{StaticResource MutedTextBrush}" />
+                            </Border>
+                            <Button Command="{Binding CopyCommand}" Margin="0,0,6,0" Padding="10,5" FontSize="12"
+                                    ToolTip="Copy Log: copies the entries shown (oldest first) for bug reports" AutomationProperties.Name="Copy log">
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock Text="&#xE8C8;" Style="{StaticResource IconText}" FontSize="12" />
+                                    <TextBlock Text="Copy Log" Margin="6,0,0,0" />
                                 </StackPanel>
+                            </Button>
+                            <Button Style="{StaticResource DangerButton}" Command="{Binding ClearCommand}" Padding="10,5" FontSize="12"
+                                    ToolTip="Clear Log: empties this view (the daily log files are kept)" AutomationProperties.Name="Clear log">
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock Text="&#xE74D;" Style="{StaticResource IconText}" FontSize="12" />
+                                    <TextBlock Text="Clear Log" Margin="6,0,0,0" />
+                                </StackPanel>
+                            </Button>
+                        </StackPanel>
+
+                        <StackPanel Orientation="Horizontal">
+                            <Grid Width="300">
+                                <TextBox Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}" Tag="Search the log" Padding="30,6,28,6"
+                                         AutomationProperties.Name="Search the log" />
+                                <TextBlock Text="&#xE721;" Style="{StaticResource IconText}" Foreground="{StaticResource MutedTextBrush}"
+                                           HorizontalAlignment="Left" Margin="10,0,0,0" IsHitTestVisible="False" FontSize="12" />
+                                <Button Style="{StaticResource IconButton}" Content="&#xE711;" HorizontalAlignment="Right" Width="26" Height="24"
+                                        Padding="4" FontSize="9" Margin="0,0,3,0" Command="{Binding ClearSearchCommand}" ToolTip="Clear search"
+                                        Visibility="{Binding SearchText, Converter={StaticResource NullToVisibility}}" />
                             </Grid>
-                        </DataTemplate>
-                    </ListBox.ItemTemplate>
-                </ListBox>
-                <TextBlock Text="No log entries yet." Foreground="{StaticResource MutedTextBrush}" HorizontalAlignment="Center" VerticalAlignment="Center"
-                           Visibility="{Binding IsEmpty, Converter={StaticResource BoolToVisibility}}" />
-            </Grid>
+                            <Border Style="{StaticResource SegmentedContainer}" Margin="10,0,0,0" VerticalAlignment="Center"
+                                    ToolTip="Show only one kind of line: INFO (blue), MATCH (violet: something was found / a condition answered), WARN (amber), ERROR (red).">
+                                <StackPanel Orientation="Horizontal">
+                                    <RadioButton Style="{StaticResource SegmentedRadioButtonStyle}" Content="All" GroupName="LogLevel"
+                                                 IsChecked="{Binding LevelFilter, Converter={StaticResource StringMatch}, ConverterParameter=All}" />
+                                    <RadioButton Style="{StaticResource SegmentedRadioButtonStyle}" Content="Info" GroupName="LogLevel"
+                                                 IsChecked="{Binding LevelFilter, Converter={StaticResource StringMatch}, ConverterParameter=Info}" />
+                                    <RadioButton Style="{StaticResource SegmentedRadioButtonStyle}" Content="Match" GroupName="LogLevel"
+                                                 IsChecked="{Binding LevelFilter, Converter={StaticResource StringMatch}, ConverterParameter=Match}" />
+                                    <RadioButton Style="{StaticResource SegmentedRadioButtonStyle}" Content="Warn" GroupName="LogLevel"
+                                                 IsChecked="{Binding LevelFilter, Converter={StaticResource StringMatch}, ConverterParameter=Warn}" />
+                                    <RadioButton Style="{StaticResource SegmentedRadioButtonStyle}" Content="Error" GroupName="LogLevel"
+                                                 IsChecked="{Binding LevelFilter, Converter={StaticResource StringMatch}, ConverterParameter=Error}" />
+                                </StackPanel>
+                            </Border>
+                        </StackPanel>
+                    </DockPanel>
+                </Border>
+
+                <Grid>
+                    <ListBox ItemsSource="{Binding EntriesView}" ItemContainerStyle="{StaticResource PlainListItem}" Background="Transparent" BorderThickness="0"
+                             Padding="6,6,6,6" ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                             VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling"
+                             AutomationProperties.Name="Log entries">
+                        <ListBox.ItemTemplate>
+                            <DataTemplate>
+                                <Grid Margin="4,3">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="64" />
+                                        <ColumnDefinition Width="66" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Text="{Binding TimeText}" Foreground="{StaticResource SubtleTextBrush}" FontFamily="Consolas" FontSize="12"
+                                               VerticalAlignment="Top" Margin="0,2,0,0" />
+                                    <Border Grid.Column="1" Style="{StaticResource Pill}" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="0,1,0,0"
+                                            Background="{Binding Converter={StaticResource LogPill}, ConverterParameter=Soft}" MinWidth="52">
+                                        <TextBlock Text="{Binding Converter={StaticResource LogPill}, ConverterParameter=Label}" FontSize="9" FontWeight="Bold"
+                                                   HorizontalAlignment="Center"
+                                                   Foreground="{Binding Converter={StaticResource LogPill}, ConverterParameter=Brush}" />
+                                    </Border>
+                                    <StackPanel Grid.Column="2">
+                                        <TextBlock Text="{Binding Message}" TextWrapping="Wrap" FontSize="12" />
+                                        <TextBlock Text="{Binding Details}" Foreground="{StaticResource MutedTextBrush}" FontSize="11" TextWrapping="Wrap"
+                                                   FontFamily="Consolas" Margin="0,2,0,0"
+                                                   Visibility="{Binding Details, Converter={StaticResource NullToVisibility}}" />
+                                    </StackPanel>
+                                </Grid>
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                    </ListBox>
+                    <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center"
+                                Visibility="{Binding IsEmpty, Converter={StaticResource BoolToVisibility}}">
+                        <TextBlock Text="&#xE9D9;" Style="{StaticResource IconText}" FontSize="26" Foreground="{StaticResource MutedTextBrush}" HorizontalAlignment="Center" />
+                        <TextBlock Text="No log entries yet." Foreground="{StaticResource MutedTextBrush}" Margin="0,10,0,0" />
+                    </StackPanel>
+                    <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center"
+                                Visibility="{Binding IsFilteredEmpty, Converter={StaticResource BoolToVisibility}}">
+                        <TextBlock Text="No log lines match the search / filter." Foreground="{StaticResource MutedTextBrush}" Margin="0,0,0,10" />
+                        <Button Content="Clear search" Command="{Binding ClearSearchCommand}" HorizontalAlignment="Center" />
+                    </StackPanel>
+                </Grid>
+            </DockPanel>
         </Border>
     </DockPanel>
 </UserControl>

@@ -103,9 +103,11 @@ public sealed class FindTextTools : IFindTextTools
             var best = matches[0];
             var more = matches.Count > 1 ? $" ({matches.Count} matches; the first one is used)" : "";
             LastTestMatch = new ScreenPoint(best.Bounds.CenterX, best.Bounds.CenterY);
+            ScreenHighlightOverlay.ShowResult(region, best.Bounds, found: true, $"✓ {best.Similarity * 100:0}% Match");
             return $"Matched! Read text in area: '{best.Text}' at ({best.Bounds.CenterX}, {best.Bounds.CenterY}) — {best.Similarity:P0} match{more}. Searched {where}.{picture}";
         }
 
+        ScreenHighlightOverlay.ShowResult(region, null, found: false, "✗ Text not found");
         var text = read.FullText.Replace(Environment.NewLine, "  |  ");
         if (text.Length > 400) text = text[..400] + "…";
         return string.IsNullOrWhiteSpace(text)

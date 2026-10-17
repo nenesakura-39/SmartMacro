@@ -1,5 +1,6 @@
 using SmartMacro.Core.Input;
 using SmartMacro.Core.Models;
+using SmartMacro.Core.Ocr;
 using SmartMacro.Core.Validation;
 using SmartMacro.Core.Vision;
 using SmartMacro.Mvvm;
@@ -43,6 +44,12 @@ public sealed class FeedbackLoopStepViewModel : StepViewModel
     {
         _step = step;
         PickAreaCommand = new AsyncRelayCommand(PickAreaAsync, ex => TestResult = ex.Message, CanUseTools);
+        ShowSearchAreaCommand = new RelayCommand(() =>
+        {
+            var area = new ScreenRect(_step.RegionX, _step.RegionY, _step.RegionWidth, _step.RegionHeight);
+            SmartMacro.Services.Vision.ScreenHighlightOverlay.ShowResult(area, null, found: true, $"Bar area · {area.Width}×{area.Height}",
+                TimeSpan.FromMilliseconds(1600));
+        });
         PickMarkerColorCommand = new AsyncRelayCommand(() => PickColorAsync(zone: false), ex => TestResult = ex.Message, CanUseTools);
         PickZoneColorCommand = new AsyncRelayCommand(() => PickColorAsync(zone: true), ex => TestResult = ex.Message, CanUseTools);
         MeasureCommand = new AsyncRelayCommand(MeasureAsync, ex => TestResult = ex.Message, CanUseTools);
@@ -259,6 +266,9 @@ public sealed class FeedbackLoopStepViewModel : StepViewModel
     // ---------------- Tools ----------------
 
     public AsyncRelayCommand PickAreaCommand { get; }
+
+    /// <summary>"🎯 Show on screen": outlines the bar area this loop watches, for a moment.</summary>
+    public RelayCommand ShowSearchAreaCommand { get; }
     public AsyncRelayCommand PickMarkerColorCommand { get; }
     public AsyncRelayCommand PickZoneColorCommand { get; }
     public AsyncRelayCommand MeasureCommand { get; }

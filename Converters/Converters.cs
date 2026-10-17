@@ -262,3 +262,54 @@ public sealed class StepKindTemplateSelector : System.Windows.Controls.DataTempl
         return template;
     }
 }
+
+// ============ Logs page: colour-coded level pills ============
+
+/// <summary>
+/// A log entry → its pill. Parameter "Label" (default) gives the text (INFO / MATCH / DONE / WARN / ERROR), "Brush" the
+/// bright colour and "Soft" the tinted background (Info blue, Match violet, Done green, Warn amber, Error red).
+/// </summary>
+public sealed class LogPillConverter : IValueConverter
+{
+    public object Convert(object? value, Type targetType, object? parameter, CultureInfo culture)
+    {
+        if (value is not LogEntry entry) return Binding.DoNothing;
+        var category = LogViewModel.CategoryOf(entry);
+        var part = parameter as string ?? "Label";
+        if (part == "Label")
+        {
+            return category switch
+            {
+                LogCategory.Match => "MATCH",
+                LogCategory.Done => "DONE",
+                LogCategory.Warn => "WARN",
+                LogCategory.Error => "ERROR",
+                _ => "INFO",
+            };
+        }
+
+        var soft = part == "Soft";
+        var key = category switch
+        {
+            LogCategory.Match => soft ? "VisionSoftBrush" : "VisionAccentBrush",
+            LogCategory.Done => soft ? "SuccessSoftBrush" : "SuccessBrush",
+            LogCategory.Warn => soft ? "WarningSoftBrush" : "WarningBrush",
+            LogCategory.Error => soft ? "ErrorSoftBrush" : "ErrorBrush",
+            _ => soft ? "AccentSoftBrush" : "AccentBrush",
+        };
+        return Application.Current?.TryFindResource(key) as Brush ?? Brushes.Gray;
+    }
+
+    public object ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture) =>
+        throw new NotSupportedException();
+}
+
+/// <summary>Two-way "this radio button = this string value" (the Logs page level filter pills).</summary>
+public sealed class StringMatchConverter : IValueConverter
+{
+    public object Convert(object? value, Type targetType, object? parameter, CultureInfo culture) =>
+        string.Equals(value as string, parameter as string, StringComparison.Ordinal);
+
+    public object ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture) =>
+        value is true && parameter is string text ? text : Binding.DoNothing;
+}

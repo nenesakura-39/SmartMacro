@@ -49,6 +49,15 @@ public interface IInputSimulator
         y = 0;
         return false;
     }
+
+    /// <summary>
+    /// Failsafe: sends a release (key up / button up) for every key and mouse button this simulator pressed and hasn't
+    /// released yet. The playback engine calls it whenever a run ends (finished, stopped with Esc / the hotkey, timed out,
+    /// or crashed), on top of its own bookkeeping, so nothing can ever stay stuck down in Windows or a game.
+    /// Returns an error message when Windows refused one of the releases (the rest are still sent), otherwise null.
+    /// The default does nothing (simulators that don't track what they pressed, e.g. test fakes).
+    /// </summary>
+    string? ReleaseAllHeldInputs() => null;
 }
 
 /// <summary>Thrown by an input simulator when Windows refuses the input.</summary>
