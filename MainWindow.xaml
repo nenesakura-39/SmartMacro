@@ -5,6 +5,7 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:vm="clr-namespace:SmartMacro.ViewModels"
         xmlns:views="clr-namespace:SmartMacro.Views"
+        xmlns:conv="clr-namespace:SmartMacro.Converters"
         mc:Ignorable="d"
         d:DataContext="{d:DesignInstance Type=vm:MainViewModel}"
         Title="{Binding WindowTitle}"
@@ -19,6 +20,27 @@
         TextOptions.TextFormattingMode="Display">
 
     <Window.Resources>
+        <!-- Sidebar width: 175 px expanded, 60 px icon-only rail. -->
+        <conv:BoolToGridLengthConverter x:Key="SidebarWidth" />
+
+        <!-- The shared automation bar / Activity panel are only shown outside the Workflow Editor:
+             the editor has its own unified header (Record / Play) and bottom drawer (Activity + Problems). -->
+        <Style x:Key="HiddenOnEditorPage" TargetType="Border" BasedOn="{StaticResource Card}">
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding CurrentPage}" Value="Editor">
+                    <Setter Property="Visibility" Value="Collapsed" />
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+        <Style x:Key="ActivityPanelStyle" TargetType="Border" BasedOn="{StaticResource Card}">
+            <Setter Property="Visibility" Value="{Binding ShowLogPanel, Converter={StaticResource BoolToVisibility}}" />
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding CurrentPage}" Value="Editor">
+                    <Setter Property="Visibility" Value="Collapsed" />
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+
         <!-- Each page view model is shown with its view. -->
         <DataTemplate DataType="{x:Type vm:LibraryViewModel}">
             <views:LibraryView />
@@ -40,58 +62,90 @@
 
     <Grid>
         <Grid.ColumnDefinitions>
-            <ColumnDefinition Width="228" />
+            <ColumnDefinition Width="{Binding IsChecked, ElementName=SidebarToggle, Converter={StaticResource SidebarWidth}, ConverterParameter=175|60}" />
             <ColumnDefinition Width="*" />
         </Grid.ColumnDefinitions>
 
-        <!-- ============ Sidebar ============ -->
-        <Border Grid.Column="0" Background="{StaticResource SidebarBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,0,1,0">
+        <!-- ============ Sidebar (175 px, or a 60 px icon rail) ============ -->
+        <Border Grid.Column="0" Background="{StaticResource SidebarBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,0,1,0"
+                ClipToBounds="True">
             <DockPanel LastChildFill="False">
-                <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="20,22,20,26">
-                    <Border Width="36" Height="36" CornerRadius="9" Background="{StaticResource AccentBrush}">
-                        <TextBlock Text="&#xE945;" FontFamily="{StaticResource IconFont}" FontSize="18" Foreground="White"
+                <!-- Logo -->
+                <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="14,16,8,18">
+                    <Border Width="30" Height="30" CornerRadius="8" Background="{StaticResource AccentBrush}">
+                        <TextBlock Text="&#xE945;" FontFamily="{StaticResource IconFont}" FontSize="15" Foreground="White"
                                    HorizontalAlignment="Center" VerticalAlignment="Center" />
                     </Border>
-                    <StackPanel Margin="12,0,0,0" VerticalAlignment="Center">
-                        <TextBlock Text="SmartMacro" FontSize="17" FontWeight="SemiBold" />
-                        <TextBlock Text="Desktop automation" FontSize="11" Foreground="{StaticResource MutedTextBrush}" />
+                    <StackPanel Margin="10,0,0,0" VerticalAlignment="Center"
+                                Visibility="{Binding IsChecked, ElementName=SidebarToggle, Converter={StaticResource BoolToVisibility}}">
+                        <TextBlock Text="SmartMacro" FontSize="14" FontWeight="SemiBold" />
+                        <TextBlock Text="Automation studio" FontSize="10" Foreground="{StaticResource MutedTextBrush}" />
                     </StackPanel>
                 </StackPanel>
 
-                <TextBlock DockPanel.Dock="Top" Text="WORKSPACE" FontSize="11" FontWeight="SemiBold"
-                           Foreground="{StaticResource MutedTextBrush}" Margin="22,0,0,6" />
+                <TextBlock DockPanel.Dock="Top" Text="WORKSPACE" FontSize="10" FontWeight="SemiBold"
+                           Foreground="{StaticResource SubtleTextBrush}" Margin="18,0,0,4"
+                           Visibility="{Binding IsChecked, ElementName=SidebarToggle, Converter={StaticResource BoolToVisibility}}" />
 
                 <RadioButton DockPanel.Dock="Top" Style="{StaticResource NavButton}" Content="Macro Library" Tag="&#xE8F1;"
-                             GroupName="Nav" AutomationProperties.Name="Macro Library"
+                             GroupName="Nav" AutomationProperties.Name="Macro Library" ToolTip="Macro Library"
                              IsChecked="{Binding CurrentPage, Converter={StaticResource PageToBool}, ConverterParameter=Library}" />
                 <RadioButton DockPanel.Dock="Top" Style="{StaticResource NavButton}" Tag="&#xE70F;"
-                             GroupName="Nav" AutomationProperties.Name="Workflow Editor"
+                             GroupName="Nav" AutomationProperties.Name="Workflow Editor" ToolTip="Workflow Editor"
                              IsChecked="{Binding CurrentPage, Converter={StaticResource PageToBool}, ConverterParameter=Editor}">
                     <StackPanel Orientation="Horizontal">
                         <TextBlock Text="Workflow Editor" />
-                        <Ellipse Width="7" Height="7" Fill="{StaticResource WarningBrush}" Margin="8,1,0,0" VerticalAlignment="Center"
+                        <Ellipse Width="7" Height="7" Fill="{StaticResource WarningBrush}" Margin="6,1,0,0" VerticalAlignment="Center"
                                  ToolTip="Unsaved changes"
                                  Visibility="{Binding Editor.IsDirty, Converter={StaticResource BoolToVisibility}}" />
                     </StackPanel>
                 </RadioButton>
 
-                <TextBlock DockPanel.Dock="Top" Text="APP" FontSize="11" FontWeight="SemiBold"
-                           Foreground="{StaticResource MutedTextBrush}" Margin="22,18,0,6" />
+                <TextBlock DockPanel.Dock="Top" Text="APP" FontSize="10" FontWeight="SemiBold"
+                           Foreground="{StaticResource SubtleTextBrush}" Margin="18,14,0,4"
+                           Visibility="{Binding IsChecked, ElementName=SidebarToggle, Converter={StaticResource BoolToVisibility}}" />
+                <Border DockPanel.Dock="Top" Height="1" Margin="14,10,14,8" Background="{StaticResource BorderBrush}"
+                        Visibility="{Binding IsChecked, ElementName=SidebarToggle, Converter={StaticResource BoolToVisibility}, ConverterParameter=Invert}" />
 
                 <RadioButton DockPanel.Dock="Top" Style="{StaticResource NavButton}" Content="Logs" Tag="&#xE8A5;"
-                             GroupName="Nav" AutomationProperties.Name="Logs"
+                             GroupName="Nav" AutomationProperties.Name="Logs" ToolTip="Logs"
                              IsChecked="{Binding CurrentPage, Converter={StaticResource PageToBool}, ConverterParameter=Logs}" />
                 <RadioButton DockPanel.Dock="Top" Style="{StaticResource NavButton}" Content="Settings" Tag="&#xE713;"
-                             GroupName="Nav" AutomationProperties.Name="Settings"
+                             GroupName="Nav" AutomationProperties.Name="Settings" ToolTip="Settings"
                              IsChecked="{Binding CurrentPage, Converter={StaticResource PageToBool}, ConverterParameter=Settings}" />
 
-                <Border DockPanel.Dock="Bottom" Margin="14,0,14,16" Padding="12" CornerRadius="8"
-                        Background="{StaticResource SurfaceBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1">
+                <!-- Collapse / expand the sidebar -->
+                <ToggleButton x:Name="SidebarToggle" DockPanel.Dock="Bottom" IsChecked="True" Style="{StaticResource GhostToggle}"
+                              HorizontalAlignment="Left" Margin="12,0,0,10" Padding="8,5"
+                              ToolTip="Collapse or expand the sidebar" AutomationProperties.Name="Collapse or expand the sidebar">
+                    <TextBlock FontFamily="{StaticResource IconFont}" FontSize="12">
+                        <TextBlock.Style>
+                            <Style TargetType="TextBlock">
+                                <Setter Property="Text" Value="&#xE76B;" />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding IsChecked, ElementName=SidebarToggle}" Value="False">
+                                        <Setter Property="Text" Value="&#xE76C;" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </TextBlock.Style>
+                    </TextBlock>
+                </ToggleButton>
+
+                <!-- Compact footer badge: version + owner + the safety / hotkey hint -->
+                <Border DockPanel.Dock="Bottom" Margin="10,0,10,8" Padding="10,8" CornerRadius="8"
+                        Background="{StaticResource SurfaceBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1"
+                        ToolTip="{Binding Automation.EmergencyHint}"
+                        Visibility="{Binding IsChecked, ElementName=SidebarToggle, Converter={StaticResource BoolToVisibility}}">
                     <StackPanel>
-                        <TextBlock Text="{Binding VersionText}" FontSize="12" FontWeight="SemiBold" />
-                        <TextBlock Text="{Binding OwnerText}" Style="{StaticResource MutedText}" FontSize="11" Margin="0,4,0,0" />
-                        <TextBlock Style="{StaticResource MutedText}" FontSize="11" Margin="0,6,0,0"
-                                   Text="{Binding Automation.EmergencyHint}" />
+                        <StackPanel Orientation="Horizontal">
+                            <Ellipse Width="6" Height="6" Fill="{StaticResource SuccessBrush}" VerticalAlignment="Center" />
+                            <TextBlock Text="{Binding VersionText}" FontSize="11" FontWeight="SemiBold" Margin="6,0,0,0" />
+                        </StackPanel>
+                        <TextBlock Text="{Binding OwnerText}" Style="{StaticResource MutedText}" FontSize="10" Margin="0,2,0,0" />
+                        <TextBlock Foreground="{StaticResource SubtleTextBrush}" FontSize="10" Margin="0,4,0,0" TextWrapping="Wrap">
+                            <Run Text="Esc stop · " /><Run Text="{Binding Automation.RecordShortcut, Mode=OneWay}" /><Run Text=" rec · " /><Run Text="{Binding Automation.PlayShortcut, Mode=OneWay}" /><Run Text=" play" />
+                        </TextBlock>
                     </StackPanel>
                 </Border>
             </DockPanel>
@@ -106,11 +160,11 @@
                 <RowDefinition Height="Auto" />
             </Grid.RowDefinitions>
 
-            <ContentControl Grid.Row="0" Content="{Binding CurrentPageViewModel}" Focusable="False" Margin="20,14,20,8" />
+            <ContentControl Grid.Row="0" Content="{Binding CurrentPageViewModel}" Focusable="False" Margin="14,12,14,8" />
 
             <!-- Automation bar: record / play / pause / stop -->
-            <Border Grid.Row="1" Margin="20,0,20,8" Style="{StaticResource Card}" Padding="12,6" DataContext="{Binding Automation}">
-                <Grid>
+            <Border Grid.Row="1" Margin="14,0,14,8" Style="{StaticResource HiddenOnEditorPage}" Padding="12,6">
+                <Grid DataContext="{Binding Automation}">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="Auto" />
                         <ColumnDefinition Width="*" />
@@ -229,8 +283,7 @@
 
             <!-- Compact activity log -->
             <!-- Small by default (~110 px); drag the grip on its top edge to make it taller (up to 420 px). -->
-            <Border Grid.Row="2" Margin="20,0,20,8" Style="{StaticResource Card}" Padding="12,0,12,6"
-                    Visibility="{Binding ShowLogPanel, Converter={StaticResource BoolToVisibility}}">
+            <Border Grid.Row="2" Margin="14,0,14,8" Style="{StaticResource ActivityPanelStyle}" Padding="12,0,12,6">
                 <DockPanel>
                     <Thumb DockPanel.Dock="Top" Height="8" Cursor="SizeNS" DragDelta="ActivityGrip_DragDelta"
                            ToolTip="Drag to make the Activity panel taller or shorter" AutomationProperties.Name="Resize the Activity panel">
@@ -271,7 +324,7 @@
 
             <!-- Status bar -->
             <Border Grid.Row="3" Background="{StaticResource SidebarBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,1,0,0"
-                    Padding="16,6">
+                    Padding="14,4">
                 <DockPanel>
                     <TextBlock DockPanel.Dock="Right" Foreground="{StaticResource MutedTextBrush}" FontSize="12"
                                Text="{Binding Library.CountText}" VerticalAlignment="Center" />

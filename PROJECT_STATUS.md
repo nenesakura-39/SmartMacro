@@ -1,6 +1,8 @@
 # SmartMacro – Project Status / Handoff
 
-_Last updated: 2026-10-17 (Next-gen QoL batch – "where to look" monitors / windows, smooth mouse glide, click timing,
+_Last updated: 2026-10-17 (Studio UI redesign on top of `d54c087` – new palette, pill switch / segmented controls,
+175 px sidebar, unified editor header, bottom Activity + Problems drawer, 2-column toolbox tiles, step cards, inspector
+header + pinned Test bar: written WITHOUT a .NET SDK, NOT built or tested. Before it: Next-gen QoL batch – "where to look" monitors / windows, smooth mouse glide, click timing,
 freeze-screen picker, beginner Properties cards, feedback-loop wizard, live step highlight + status pill, Quick patterns:
 written WITHOUT a .NET SDK, NOT built or tested yet. Before it: live-test fix batch (owner build 670/671, one test updated,
 re-run pending); QoL batch; 8-bug fix batch 616/616.
@@ -17,6 +19,43 @@ Developer: Riku (リク) · Brand: KuroLogic_
 | Release package | `publish\SmartMacro-1.0.0-win-x64\SmartMacro.exe` is an OLD build (made right after `159d6b3`, before Stage 1) | – | ignored by git |
 
 
+
+## Studio UI redesign (2026-10-17) – "SmartMacro Studio" look; written WITHOUT a .NET SDK: **NOT built, NOT tested**
+The AI's environment had no .NET SDK / NuGet access (and WPF can't run on Linux), so nothing was compiled. XAML files were
+checked for well-formed XML, duplicate keys, every `StaticResource` key and every EditorView / MainWindow binding name
+against the C# sources. No ViewModel, Core or test file was changed. Next step for the owner: `tools\verify.cmd`
+(send `artifacts\build.log` if XAML compile errors show up), then `docs/STUDIO_UI_MANUAL_TESTS.md`.
+Files: `Themes/Colors.xaml`, `Themes/Controls.xaml`, `MainWindow.xaml` (+ caption colour in `.xaml.cs`), `Views/EditorView.xaml`,
+`Views/StepEditorTemplates.xaml`, `Converters/Converters.cs`, new `docs/STUDIO_UI_MANUAL_TESTS.md`.
+1. **Palette** (old key names kept, values changed app-wide): canvas #0B0F17, cards #111827 / border #1F2937, inputs #1E293B /
+   border `InputBorderBrush` #334155 (blue on focus), muted text #94A3B8, success now #10B981. Category brushes
+   `{Input|Timing|Vision|Logic|Feedback|Recorded}{Accent|Badge|Soft}Brush`; `StepsCanvasBrush`, `StepCardBrush`,
+   `SelectedCardBrush`, `RunningCardBrush`, `SectionCardBrush`, Record / Play brushes.
+2. **New styles** (`Controls.xaml`): `ToggleSwitchCheckBoxStyle` (38×20 pill), `SegmentedContainer` + `SegmentedRadioButtonStyle`,
+   `ToolboxTile` (52 px), `ToolboxCategoryHeader`, `StepCardItem` (invisible ListBoxItem; card draws states), `Pill`,
+   `RecordButton`, `PlayButton` (blue → green on hover), `TestActionButton` (violet), `InspectorActionBar`, `GhostToggle`,
+   `HeaderNumberBox`. `SetupCard` = #151E2E, radius 8, padding 12, margin 0,0,0,10; `SetupCardTitle` = 11 px #94A3B8 SemiBold
+   (texts written in capitals; VM-provided titles go through `UpperCase`). NavButton = compact pill.
+3. **MainWindow**: sidebar 175 px with a collapse toggle (60 px icon rail; `BoolToGridLengthConverter`), compact footer
+   badge (version, owner, "Esc stop · rec · play" hotkeys; tooltip = EmergencyHint). The shared automation bar and
+   Activity panel are hidden on the Editor page only (style DataTriggers on `CurrentPage`), still shown elsewhere.
+4. **EditorView**: one header card (name / description | saved pill, Discard, Save | ● Record, ▶ Play, Pause / Stop bound
+   to `MainViewModel.Automation` via the Window | Play n times, Speed ×, Wait ms, "Mini overlay" / "Minimize" pill
+   switches). Bottom drawer: 32 px bar (state pill, problems badge = toggle, latest log line or ProgressText while busy,
+   Open full log, Expand ▴) + 120 px Activity log | GridSplitter | Problems. Toolbox: Insert segmented pill
+   (`AddAfterSelected` / `AddAtEnd`), INPUT / VISION & AI (`StepTypeFilterConverter` on `StepTypes`), LOGIC & LOOPS
+   (`LogicStepTypes`) as 2-column tiles, QUICK PATTERNS as full-width rows. Steps: dot-grid canvas #0D131F, cards #161F30
+   with 3 px category strip + 32×32 badge, selected = blue border + glow, `IsRunning` = emerald + "▶ RUNNING", disabled =
+   0.45 + DISABLED pill, indentation 24 px / level with guide lines (`IndentLevelConverter` on `IndentLevel`; VM's
+   22 px `IndentMargin` no longer used), inline previews via `StepKindTemplateSelector` (Find image 28×28 thumbnail,
+   Find color / Feedback 16×16 swatches). Properties: sticky header (badge, title, Step N pill, Enabled switch) and a pinned
+   bottom bar "Test detection now" + result (`TestCommand` for Find steps, `TestDetectionCommand` for Feedback loop).
+   Names `StepList`, `PropertiesScroll` and all code-behind handlers unchanged.
+5. **StepEditorTemplates**: `StepHeaderTemplate` = description + problem banners only (title / Enabled moved to the
+   inspector header). In-flow Test buttons + results only show for editors embedded in conditions (`IsStandalone` false);
+   Feedback "Test detection now" and its result box moved to the pinned bar (Measure / Preview stay in the card).
+- Not verified: XAML compile, runtime look, DPI, drawer / sidebar behaviour, ElementName binding on the sidebar
+  ColumnDefinition, glow performance on long lists.
 
 ## Next-gen QoL batch (2026-10-17) – 7 upgrades; written WITHOUT a .NET SDK: **NOT built, NOT tested**
 The AI's environment had no .NET SDK and no NuGet / package access, so nothing was compiled. XAML files were checked for
@@ -672,6 +711,8 @@ no .NET SDK in the AI's environment)
   csproj Company/Authors "Riku", Copyright "© 2026 Riku", README "© 2026 Riku") – change awaits owner approval.
 
 ## Next task
+- Owner: `tools\verify.cmd` for the Studio UI redesign (XAML never compiled; send `artifacts\build.log` if it fails),
+  then `docs/STUDIO_UI_MANUAL_TESTS.md`.
 - Owner: `tools\verify.cmd` for the next-gen QoL batch (never compiled; expect a few compile fixes – send
   `artifacts\build.log` / `artifacts\test.log`), then `docs/NEXTGEN_QOL_MANUAL_TESTS.md`.
 - Owner: `tools\verify.cmd` for the live-test fix batch (never compiled; expect a few compile fixes), then

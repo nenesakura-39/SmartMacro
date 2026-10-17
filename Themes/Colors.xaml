@@ -1,48 +1,118 @@
 <ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
                     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
 
-    <!-- Dark navy / charcoal palette with blue accents and green success. -->
-    <Color x:Key="BackgroundColor">#0B1220</Color>
-    <Color x:Key="SidebarColor">#0E1626</Color>
-    <Color x:Key="SurfaceColor">#131C2E</Color>
-    <Color x:Key="SurfaceAltColor">#1A2438</Color>
-    <Color x:Key="InputColor">#0F1828</Color>
-    <Color x:Key="CharcoalColor">#1E232D</Color>
-    <Color x:Key="BorderColor">#26324A</Color>
-    <Color x:Key="HoverColor">#22304A</Color>
-    <Color x:Key="PressedColor">#2A3A58</Color>
-    <Color x:Key="TextColor">#E6EBF5</Color>
-    <Color x:Key="MutedTextColor">#8C98B0</Color>
+    <!--
+        "SmartMacro Studio" dark palette: deep obsidian canvas, slate cards with thin borders,
+        blue accent for focus / selection, and one accent colour per step category.
+        The old key names are kept so every existing view picks the new look up automatically.
+    -->
+
+    <!-- ============ Base surfaces ============ -->
+    <Color x:Key="BackgroundColor">#0B0F17</Color>      <!-- app canvas (deep obsidian) -->
+    <Color x:Key="SidebarColor">#0D121C</Color>
+    <Color x:Key="SurfaceColor">#111827</Color>         <!-- panels / cards -->
+    <Color x:Key="SurfaceAltColor">#172033</Color>      <!-- buttons, nested surfaces -->
+    <Color x:Key="InputColor">#1E293B</Color>           <!-- text boxes, drop-downs (elevated) -->
+    <Color x:Key="InputBorderColor">#334155</Color>
+    <Color x:Key="CharcoalColor">#1A2232</Color>
+    <Color x:Key="BorderColor">#1F2937</Color>          <!-- 1 px card borders -->
+    <Color x:Key="HoverColor">#1F2A3D</Color>
+    <Color x:Key="PressedColor">#27354D</Color>
+    <Color x:Key="TextColor">#E5E9F0</Color>
+    <Color x:Key="MutedTextColor">#94A3B8</Color>
+    <Color x:Key="SubtleTextColor">#64748B</Color>
     <Color x:Key="AccentColor">#3B82F6</Color>
-    <Color x:Key="AccentHoverColor">#5B97FA</Color>
+    <Color x:Key="AccentHoverColor">#60A5FA</Color>
     <Color x:Key="AccentPressedColor">#2563EB</Color>
-    <Color x:Key="SuccessColor">#22C55E</Color>
+    <Color x:Key="SuccessColor">#10B981</Color>
     <Color x:Key="WarningColor">#F59E0B</Color>
     <Color x:Key="ErrorColor">#EF4444</Color>
 
+    <!-- Workflow editor surfaces -->
+    <Color x:Key="StepsCanvasColor">#0D131F</Color>     <!-- behind the step cards -->
+    <Color x:Key="StepCardColor">#161F30</Color>        <!-- one step card -->
+    <Color x:Key="SectionCardColor">#151E2E</Color>     <!-- Properties section cards -->
+
+    <!-- ============ Step category accents (accent + solid badge background) ============ -->
+    <Color x:Key="InputAccentColor">#3B82F6</Color>     <!-- Move / Click / Scroll / Key / Type -->
+    <Color x:Key="InputBadgeColor">#1E3A8A</Color>
+    <Color x:Key="TimingAccentColor">#06B6D4</Color>    <!-- Delay -->
+    <Color x:Key="TimingBadgeColor">#164E63</Color>
+    <Color x:Key="VisionAccentColor">#8B5CF6</Color>    <!-- Find image / text / color -->
+    <Color x:Key="VisionBadgeColor">#4C1D95</Color>
+    <Color x:Key="LogicAccentColor">#F59E0B</Color>     <!-- If / Else / End If / Repeat / End Repeat -->
+    <Color x:Key="LogicBadgeColor">#78350F</Color>
+    <Color x:Key="FeedbackAccentColor">#10B981</Color>  <!-- Feedback loop (closed-loop) -->
+    <Color x:Key="FeedbackBadgeColor">#064E3B</Color>
+    <Color x:Key="RecordedAccentColor">#94A3B8</Color>  <!-- Recorded input -->
+    <Color x:Key="RecordedBadgeColor">#1E293B</Color>
+
+    <!-- ============ Brushes ============ -->
     <SolidColorBrush x:Key="BackgroundBrush" Color="{StaticResource BackgroundColor}" />
     <SolidColorBrush x:Key="SidebarBrush" Color="{StaticResource SidebarColor}" />
     <SolidColorBrush x:Key="SurfaceBrush" Color="{StaticResource SurfaceColor}" />
     <SolidColorBrush x:Key="SurfaceAltBrush" Color="{StaticResource SurfaceAltColor}" />
     <SolidColorBrush x:Key="InputBrush" Color="{StaticResource InputColor}" />
+    <SolidColorBrush x:Key="InputBorderBrush" Color="{StaticResource InputBorderColor}" />
     <SolidColorBrush x:Key="CharcoalBrush" Color="{StaticResource CharcoalColor}" />
     <SolidColorBrush x:Key="BorderBrush" Color="{StaticResource BorderColor}" />
     <SolidColorBrush x:Key="HoverBrush" Color="{StaticResource HoverColor}" />
     <SolidColorBrush x:Key="PressedBrush" Color="{StaticResource PressedColor}" />
     <SolidColorBrush x:Key="TextBrush" Color="{StaticResource TextColor}" />
     <SolidColorBrush x:Key="MutedTextBrush" Color="{StaticResource MutedTextColor}" />
+    <SolidColorBrush x:Key="SubtleTextBrush" Color="{StaticResource SubtleTextColor}" />
     <SolidColorBrush x:Key="AccentBrush" Color="{StaticResource AccentColor}" />
     <SolidColorBrush x:Key="AccentHoverBrush" Color="{StaticResource AccentHoverColor}" />
     <SolidColorBrush x:Key="AccentPressedBrush" Color="{StaticResource AccentPressedColor}" />
-    <SolidColorBrush x:Key="AccentSoftBrush" Color="#2E3B82F6" />
+    <SolidColorBrush x:Key="AccentSoftBrush" Color="#263B82F6" />
     <SolidColorBrush x:Key="SuccessBrush" Color="{StaticResource SuccessColor}" />
-    <SolidColorBrush x:Key="SuccessSoftBrush" Color="#2622C55E" />
+    <SolidColorBrush x:Key="SuccessSoftBrush" Color="#2610B981" />
     <SolidColorBrush x:Key="WarningBrush" Color="{StaticResource WarningColor}" />
     <SolidColorBrush x:Key="WarningSoftBrush" Color="#26F59E0B" />
     <SolidColorBrush x:Key="ErrorBrush" Color="{StaticResource ErrorColor}" />
     <SolidColorBrush x:Key="ErrorSoftBrush" Color="#26EF4444" />
-    <SolidColorBrush x:Key="ScrollThumbBrush" Color="#33415E" />
-    <SolidColorBrush x:Key="ScrollThumbHoverBrush" Color="#4A5B80" />
+    <SolidColorBrush x:Key="ScrollThumbBrush" Color="#2A3547" />
+    <SolidColorBrush x:Key="ScrollThumbHoverBrush" Color="#475569" />
+
+    <SolidColorBrush x:Key="StepsCanvasBrush" Color="{StaticResource StepsCanvasColor}" />
+    <SolidColorBrush x:Key="StepCardBrush" Color="{StaticResource StepCardColor}" />
+    <SolidColorBrush x:Key="StepCardBorderBrush" Color="#243045" />
+    <SolidColorBrush x:Key="SectionCardBrush" Color="{StaticResource SectionCardColor}" />
+    <SolidColorBrush x:Key="SectionHeaderBrush" Color="#94A3B8" />
+    <SolidColorBrush x:Key="SelectedTintBrush" Color="#1F3B82F6" />
+    <SolidColorBrush x:Key="RunningTintBrush" Color="#1F10B981" />
+    <SolidColorBrush x:Key="IndentGuideBrush" Color="#2A3547" />
+    <!-- Solid card colours for the selected / running step (card colour blended with ~12 % blue / emerald). -->
+    <SolidColorBrush x:Key="SelectedCardBrush" Color="#1A2B48" />
+    <SolidColorBrush x:Key="RunningCardBrush" Color="#15323A" />
+    <SolidColorBrush x:Key="DotGridBrush" Color="#1C2638" />
+
+    <!-- Record (red) and Play (vibrant blue) buttons in the editor header -->
+    <SolidColorBrush x:Key="RecordBrush" Color="#DC2626" />
+    <SolidColorBrush x:Key="RecordHoverBrush" Color="#EF4444" />
+    <SolidColorBrush x:Key="PlayBrush" Color="#2563EB" />
+    <SolidColorBrush x:Key="PlayHoverBrush" Color="#3B82F6" />
+
+    <!-- Category accent / badge brushes. StepCategoryBrushConverter looks them up as "{Category}AccentBrush",
+         "{Category}BadgeBrush" and "{Category}SoftBrush" (15 % of the accent, for tints). -->
+    <SolidColorBrush x:Key="InputAccentBrush" Color="{StaticResource InputAccentColor}" />
+    <SolidColorBrush x:Key="InputBadgeBrush" Color="{StaticResource InputBadgeColor}" />
+    <SolidColorBrush x:Key="InputSoftBrush" Color="#263B82F6" />
+    <SolidColorBrush x:Key="TimingAccentBrush" Color="{StaticResource TimingAccentColor}" />
+    <SolidColorBrush x:Key="TimingBadgeBrush" Color="{StaticResource TimingBadgeColor}" />
+    <SolidColorBrush x:Key="TimingSoftBrush" Color="#2606B6D4" />
+    <SolidColorBrush x:Key="VisionAccentBrush" Color="{StaticResource VisionAccentColor}" />
+    <SolidColorBrush x:Key="VisionBadgeBrush" Color="{StaticResource VisionBadgeColor}" />
+    <SolidColorBrush x:Key="VisionSoftBrush" Color="#268B5CF6" />
+    <SolidColorBrush x:Key="LogicAccentBrush" Color="{StaticResource LogicAccentColor}" />
+    <SolidColorBrush x:Key="LogicBadgeBrush" Color="{StaticResource LogicBadgeColor}" />
+    <SolidColorBrush x:Key="LogicSoftBrush" Color="#26F59E0B" />
+    <SolidColorBrush x:Key="FeedbackAccentBrush" Color="{StaticResource FeedbackAccentColor}" />
+    <SolidColorBrush x:Key="FeedbackBadgeBrush" Color="{StaticResource FeedbackBadgeColor}" />
+    <SolidColorBrush x:Key="FeedbackSoftBrush" Color="#2610B981" />
+    <SolidColorBrush x:Key="RecordedAccentBrush" Color="{StaticResource RecordedAccentColor}" />
+    <SolidColorBrush x:Key="RecordedBadgeBrush" Color="{StaticResource RecordedBadgeColor}" />
+    <SolidColorBrush x:Key="RecordedSoftBrush" Color="#2694A3B8" />
 
     <FontFamily x:Key="IconFont">Segoe Fluent Icons, Segoe MDL2 Assets</FontFamily>
     <FontFamily x:Key="UiFont">Segoe UI Variable Text, Segoe UI</FontFamily>

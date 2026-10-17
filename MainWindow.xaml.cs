@@ -84,8 +84,8 @@ public partial class MainWindow : Window
             var enabled = 1;
             DwmSetWindowAttribute(hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE, ref enabled, sizeof(int));
 
-            // COLORREF is 0x00BBGGRR; this is the sidebar navy #0E1626 (Windows 11 only).
-            var caption = 0x0026160E;
+            // COLORREF is 0x00BBGGRR; this is the studio canvas colour #0B0F17 (Windows 11 only).
+            var caption = 0x00170F0B;
             DwmSetWindowAttribute(hwnd, DWMWA_CAPTION_COLOR, ref caption, sizeof(int));
         }
         catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException)

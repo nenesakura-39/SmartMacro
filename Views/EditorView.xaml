@@ -5,12 +5,207 @@
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
              xmlns:vm="clr-namespace:SmartMacro.ViewModels"
              xmlns:steps="clr-namespace:SmartMacro.ViewModels.Steps"
+             xmlns:conv="clr-namespace:SmartMacro.Converters"
              xmlns:core="clr-namespace:SmartMacro.Core.Validation;assembly=SmartMacro.Core"
              mc:Ignorable="d"
              d:DataContext="{d:DesignInstance Type=vm:EditorViewModel}"
              d:DesignWidth="1100" d:DesignHeight="680">
     <UserControl.Resources>
-        <ResourceDictionary Source="StepEditorTemplates.xaml" />
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="StepEditorTemplates.xaml" />
+            </ResourceDictionary.MergedDictionaries>
+
+            <conv:StepCategoryBrushConverter x:Key="CategoryBrush" />
+            <conv:StepTypeFilterConverter x:Key="StepTypeFilter" />
+            <conv:IndentLevelConverter x:Key="IndentLevel" />
+            <conv:CountToVisibilityConverter x:Key="CountToVisibility" />
+
+            <!-- Faint dot grid behind the workflow cards ("studio" canvas). -->
+            <DrawingBrush x:Key="DotGridTile" TileMode="Tile" Viewport="0,0,18,18" ViewportUnits="Absolute" Stretch="None">
+                <DrawingBrush.Drawing>
+                    <DrawingGroup>
+                        <GeometryDrawing Brush="Transparent">
+                            <GeometryDrawing.Geometry>
+                                <RectangleGeometry Rect="0,0,18,18" />
+                            </GeometryDrawing.Geometry>
+                        </GeometryDrawing>
+                        <GeometryDrawing Brush="{StaticResource DotGridBrush}">
+                            <GeometryDrawing.Geometry>
+                                <EllipseGeometry Center="1,1" RadiusX="1" RadiusY="1" />
+                            </GeometryDrawing.Geometry>
+                        </GeometryDrawing>
+                    </DrawingGroup>
+                </DrawingBrush.Drawing>
+            </DrawingBrush>
+
+            <!-- Vertical guide lines for steps inside If / Repeat blocks: one line every 24 px (one per level). -->
+            <DrawingBrush x:Key="IndentGuideTile" TileMode="Tile" Viewport="0,0,24,8" ViewportUnits="Absolute" Stretch="None">
+                <DrawingBrush.Drawing>
+                    <DrawingGroup>
+                        <GeometryDrawing Brush="Transparent">
+                            <GeometryDrawing.Geometry>
+                                <RectangleGeometry Rect="0,0,24,8" />
+                            </GeometryDrawing.Geometry>
+                        </GeometryDrawing>
+                        <GeometryDrawing Brush="{StaticResource IndentGuideBrush}">
+                            <GeometryDrawing.Geometry>
+                                <RectangleGeometry Rect="11,0,1.5,8" />
+                            </GeometryDrawing.Geometry>
+                        </GeometryDrawing>
+                    </DrawingGroup>
+                </DrawingBrush.Drawing>
+            </DrawingBrush>
+
+            <!-- One compact toolbox tile: colour-coded icon badge above the step name. -->
+            <DataTemplate x:Key="ToolboxTileTemplate" DataType="{x:Type steps:StepTypeInfo}">
+                <Button Style="{StaticResource ToolboxTile}" ToolTip="{Binding Description}"
+                        Command="{Binding DataContext.AddStepCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                        CommandParameter="{Binding Kind}" AutomationProperties.Name="{Binding DisplayName}"
+                        Tag="{Binding DataContext, RelativeSource={RelativeSource AncestorType=UserControl}}">
+                    <Button.ContextMenu>
+                        <ContextMenu>
+                            <MenuItem Header="Add to end" Command="{Binding PlacementTarget.Tag.AddToEndCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
+                                      CommandParameter="{Binding Kind}" ToolTip="Adds this step after the last step in the workflow." />
+                            <MenuItem Header="Insert after selected" Command="{Binding PlacementTarget.Tag.InsertAfterSelectedCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
+                                      CommandParameter="{Binding Kind}" ToolTip="Adds this step right after the selected step (at the end when nothing is selected)." />
+                        </ContextMenu>
+                    </Button.ContextMenu>
+                    <StackPanel HorizontalAlignment="Center">
+                        <Border Width="22" Height="22" CornerRadius="6" HorizontalAlignment="Center"
+                                Background="{Binding Kind, Converter={StaticResource CategoryBrush}, ConverterParameter=Badge}">
+                            <TextBlock Text="{Binding Glyph}" Style="{StaticResource IconText}" FontSize="12" HorizontalAlignment="Center"
+                                       Foreground="{Binding Kind, Converter={StaticResource CategoryBrush}, ConverterParameter=Accent}" />
+                        </Border>
+                        <TextBlock Text="{Binding DisplayName}" FontSize="11" Margin="0,4,0,0" HorizontalAlignment="Center"
+                                   TextTrimming="CharacterEllipsis" />
+                    </StackPanel>
+                </Button>
+            </DataTemplate>
+
+            <ItemsPanelTemplate x:Key="TwoColumnTiles">
+                <UniformGrid Columns="2" />
+            </ItemsPanelTemplate>
+
+            <!-- Inline previews on step cards: picture thumbnail (Find image), colour swatch (Find color / Feedback loop). -->
+            <DataTemplate x:Key="ImagePreviewTemplate">
+                <Border Width="28" Height="28" CornerRadius="5" BorderThickness="1" BorderBrush="{StaticResource InputBorderBrush}"
+                        Background="{StaticResource InputBrush}" ToolTip="The picture this step looks for"
+                        Visibility="{Binding HasTemplate, Converter={StaticResource BoolToVisibility}}">
+                    <Border CornerRadius="4">
+                        <Border.Background>
+                            <ImageBrush ImageSource="{Binding TemplatePreview}" Stretch="UniformToFill" />
+                        </Border.Background>
+                    </Border>
+                </Border>
+            </DataTemplate>
+            <DataTemplate x:Key="ColorPreviewTemplate">
+                <Ellipse Width="16" Height="16" Fill="{Binding ColorBrush}" Stroke="{StaticResource InputBorderBrush}" StrokeThickness="1"
+                         ToolTip="{Binding Color}" />
+            </DataTemplate>
+            <DataTemplate x:Key="FeedbackPreviewTemplate">
+                <StackPanel Orientation="Horizontal">
+                    <Ellipse Width="16" Height="16" Fill="{Binding MarkerBrush}" Stroke="{StaticResource InputBorderBrush}" StrokeThickness="1"
+                             ToolTip="Marker color" />
+                    <Ellipse Width="16" Height="16" Fill="{Binding ZoneBrush}" Stroke="{StaticResource InputBorderBrush}" StrokeThickness="1"
+                             Margin="-5,0,0,0" ToolTip="Zone color (empty for a fixed zone)" />
+                </StackPanel>
+            </DataTemplate>
+            <conv:StepKindTemplateSelector x:Key="StepPreviewSelector"
+                                           FindImageTemplate="{StaticResource ImagePreviewTemplate}"
+                                           FindColorTemplate="{StaticResource ColorPreviewTemplate}"
+                                           FeedbackLoopTemplate="{StaticResource FeedbackPreviewTemplate}" />
+
+            <!-- Pinned bottom bar of the inspector: "Test detection now" is always one click away. -->
+            <DataTemplate x:Key="SearchActionBarTemplate">
+                <Border Style="{StaticResource InspectorActionBar}">
+                    <StackPanel>
+                        <Button Style="{StaticResource TestActionButton}" Command="{Binding TestCommand}"
+                                ToolTip="SmartMacro hides for a moment, looks once where this step would look, and shows what it found."
+                                AutomationProperties.Name="Test detection now">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="&#xE721;" Style="{StaticResource IconText}" />
+                                <TextBlock Text="Test detection now" Margin="8,0,0,0" />
+                            </StackPanel>
+                        </Button>
+                        <ScrollViewer MaxHeight="130" VerticalScrollBarVisibility="Auto">
+                            <ContentControl Content="{Binding}" ContentTemplate="{StaticResource SearchTestResultTemplate}" Focusable="False" />
+                        </ScrollViewer>
+                    </StackPanel>
+                </Border>
+            </DataTemplate>
+            <DataTemplate x:Key="FeedbackActionBarTemplate">
+                <Border Style="{StaticResource InspectorActionBar}">
+                    <StackPanel>
+                        <Button Style="{StaticResource TestActionButton}" Command="{Binding TestDetectionCommand}"
+                                ToolTip="Looks at the bar once: where the marker and the zone are, and what the loop would do right now. No input is sent."
+                                AutomationProperties.Name="Test detection now">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="&#xE721;" Style="{StaticResource IconText}" />
+                                <TextBlock Text="Test detection now" Margin="8,0,0,0" />
+                            </StackPanel>
+                        </Button>
+                        <ScrollViewer MaxHeight="130" VerticalScrollBarVisibility="Auto"
+                                      Visibility="{Binding TestResult, Converter={StaticResource NullToVisibility}}">
+                            <Border Margin="0,8,0,0" Padding="10,8" CornerRadius="6" Background="{StaticResource SurfaceAltBrush}">
+                                <StackPanel>
+                                    <TextBlock Text="{Binding TestResult}" TextWrapping="Wrap" FontSize="12" />
+                                    <Button Command="{Binding ShowMatchCommand}" HorizontalAlignment="Left" Margin="0,8,0,0" Padding="8,4" FontSize="12"
+                                            ToolTip="Moves your mouse cursor onto the marker the test found. Nothing is clicked.">
+                                        <StackPanel Orientation="Horizontal">
+                                            <TextBlock Text="&#xE7C9;" Style="{StaticResource IconText}" FontSize="12" />
+                                            <TextBlock Text="Show me (move cursor to the marker)" Margin="6,0,0,0" />
+                                        </StackPanel>
+                                    </Button>
+                                </StackPanel>
+                            </Border>
+                        </ScrollViewer>
+                    </StackPanel>
+                </Border>
+            </DataTemplate>
+            <conv:StepKindTemplateSelector x:Key="InspectorActionSelector"
+                                           ScreenSearchTemplate="{StaticResource SearchActionBarTemplate}"
+                                           FeedbackLoopTemplate="{StaticResource FeedbackActionBarTemplate}" />
+
+            <!-- Live automation state pill (● Ready / Recording / Playing / Paused). DataContext = AutomationViewModel. -->
+            <Style x:Key="StatePillStyle" TargetType="Border">
+                <Setter Property="CornerRadius" Value="10" />
+                <Setter Property="Padding" Value="8,2,10,2" />
+                <Setter Property="VerticalAlignment" Value="Center" />
+                <Setter Property="Background" Value="{StaticResource SurfaceAltBrush}" />
+                <Style.Triggers>
+                    <DataTrigger Binding="{Binding Mode}" Value="Recording">
+                        <Setter Property="Background" Value="{StaticResource ErrorSoftBrush}" />
+                    </DataTrigger>
+                    <DataTrigger Binding="{Binding Mode}" Value="Playing">
+                        <Setter Property="Background" Value="{StaticResource SuccessSoftBrush}" />
+                    </DataTrigger>
+                    <DataTrigger Binding="{Binding Mode}" Value="Paused">
+                        <Setter Property="Background" Value="{StaticResource WarningSoftBrush}" />
+                    </DataTrigger>
+                    <DataTrigger Binding="{Binding Mode}" Value="Stopping">
+                        <Setter Property="Background" Value="{StaticResource WarningSoftBrush}" />
+                    </DataTrigger>
+                </Style.Triggers>
+            </Style>
+            <Style x:Key="StateDotStyle" TargetType="Ellipse">
+                <Setter Property="Width" Value="7" />
+                <Setter Property="Height" Value="7" />
+                <Setter Property="VerticalAlignment" Value="Center" />
+                <Setter Property="Fill" Value="{StaticResource SuccessBrush}" />
+                <Style.Triggers>
+                    <DataTrigger Binding="{Binding Mode}" Value="Recording">
+                        <Setter Property="Fill" Value="{StaticResource ErrorBrush}" />
+                    </DataTrigger>
+                    <DataTrigger Binding="{Binding Mode}" Value="Paused">
+                        <Setter Property="Fill" Value="{StaticResource WarningBrush}" />
+                    </DataTrigger>
+                    <DataTrigger Binding="{Binding Mode}" Value="Stopping">
+                        <Setter Property="Fill" Value="{StaticResource WarningBrush}" />
+                    </DataTrigger>
+                </Style.Triggers>
+            </Style>
+        </ResourceDictionary>
     </UserControl.Resources>
 
     <Grid>
@@ -36,87 +231,153 @@
         <Grid Visibility="{Binding HasMacro, Converter={StaticResource BoolToVisibility}}">
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto" />
-                <RowDefinition Height="*" MinHeight="360" />
+                <RowDefinition Height="*" MinHeight="300" />
                 <RowDefinition Height="Auto" />
             </Grid.RowDefinitions>
 
-            <!-- Header: name + save (row 1), description + play settings (row 2). Kept compact so the workspace
-                 below gets most of the height, also in a smaller (non-maximized) window. -->
-            <Grid Grid.Row="0" Margin="0,0,0,8">
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="*" />
-                    <ColumnDefinition Width="Auto" />
-                </Grid.ColumnDefinitions>
-                <Grid.RowDefinitions>
-                    <RowDefinition Height="Auto" />
-                    <RowDefinition Height="Auto" />
-                </Grid.RowDefinitions>
+            <!-- ===== Unified command header: name + description | playback settings | Save, Record, Play ===== -->
+            <Border Grid.Row="0" Style="{StaticResource Card}" Padding="14,8,12,8" Margin="0,0,0,8">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" MinWidth="160" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
 
-                <DockPanel Grid.Row="0" Grid.Column="0" Margin="0,0,16,0" LastChildFill="True">
-                    <TextBlock DockPanel.Dock="Left" Text="WORKFLOW" FontSize="10" FontWeight="SemiBold" Foreground="{StaticResource MutedTextBrush}"
-                               VerticalAlignment="Center" Margin="0,0,10,0" />
-                    <TextBox Text="{Binding Name, UpdateSourceTrigger=PropertyChanged}" Tag="Macro name" FontSize="18" FontWeight="SemiBold"
-                             Background="Transparent" BorderBrush="Transparent" Padding="2,2" Margin="-4,0,0,0" MaxLength="100"
-                             AutomationProperties.Name="Macro name" />
-                </DockPanel>
+                    <!-- Row 1 left: macro name -->
+                    <DockPanel Grid.Row="0" Grid.Column="0" Margin="0,0,12,0" LastChildFill="True" VerticalAlignment="Center">
+                        <TextBlock DockPanel.Dock="Left" Text="WORKFLOW" FontSize="10" FontWeight="SemiBold" Foreground="{StaticResource SubtleTextBrush}"
+                                   VerticalAlignment="Center" Margin="0,0,8,0" />
+                        <TextBox Text="{Binding Name, UpdateSourceTrigger=PropertyChanged}" Tag="Macro name" FontSize="17" FontWeight="SemiBold"
+                                 Background="Transparent" BorderBrush="Transparent" Padding="2,1" Margin="-4,0,0,0" MaxLength="100"
+                                 AutomationProperties.Name="Macro name" />
+                    </DockPanel>
 
-                <StackPanel Grid.Row="0" Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
-                    <Border Padding="10,4" CornerRadius="12" Margin="0,0,10,0" Background="{StaticResource WarningSoftBrush}"
-                            Visibility="{Binding IsDirty, Converter={StaticResource BoolToVisibility}}">
-                        <TextBlock Text="Unsaved changes" Foreground="{StaticResource WarningBrush}" FontSize="12" />
-                    </Border>
-                    <Border Padding="10,4" CornerRadius="12" Margin="0,0,10,0" Background="{StaticResource SuccessSoftBrush}"
-                            Visibility="{Binding IsDirty, Converter={StaticResource BoolToVisibility}, ConverterParameter=Invert}">
-                        <StackPanel Orientation="Horizontal">
-                            <TextBlock Text="&#xE73E;" Style="{StaticResource IconText}" FontSize="11" Foreground="{StaticResource SuccessBrush}" />
-                            <TextBlock Text="Saved" Foreground="{StaticResource SuccessBrush}" FontSize="12" Margin="6,0,0,0" />
+                    <!-- Row 1 right: saved state, Discard, Save | Record, Play (or Pause / Stop while playing) -->
+                    <StackPanel Grid.Row="0" Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                        <Border Style="{StaticResource Pill}" Margin="0,0,8,0" Background="{StaticResource WarningSoftBrush}"
+                                Visibility="{Binding IsDirty, Converter={StaticResource BoolToVisibility}}">
+                            <TextBlock Text="Unsaved" Foreground="{StaticResource WarningBrush}" FontSize="11" FontWeight="SemiBold" />
+                        </Border>
+                        <Border Style="{StaticResource Pill}" Margin="0,0,8,0" Background="{StaticResource SuccessSoftBrush}"
+                                Visibility="{Binding IsDirty, Converter={StaticResource BoolToVisibility}, ConverterParameter=Invert}">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="&#xE73E;" Style="{StaticResource IconText}" FontSize="10" Foreground="{StaticResource SuccessBrush}" />
+                                <TextBlock Text="Saved" Foreground="{StaticResource SuccessBrush}" FontSize="11" FontWeight="SemiBold" Margin="5,0,0,0" />
+                            </StackPanel>
+                        </Border>
+                        <Button Command="{Binding RevertCommand}" Margin="0,0,6,0" Padding="10,6" ToolTip="Discard changes: throw away everything since the last save"
+                                AutomationProperties.Name="Discard changes">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="&#xE7A7;" Style="{StaticResource IconText}" FontSize="12" />
+                                <TextBlock Text="Discard" Margin="6,0,0,0" FontSize="12" />
+                            </StackPanel>
+                        </Button>
+                        <Button Command="{Binding SaveCommand}" Padding="12,6" ToolTip="Save (Ctrl+S)" AutomationProperties.Name="Save">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="&#xE74E;" Style="{StaticResource IconText}" FontSize="12" />
+                                <TextBlock Text="Save" Margin="6,0,0,0" FontSize="12" />
+                            </StackPanel>
+                        </Button>
+
+                        <Border Width="1" Margin="10,4" Background="{StaticResource BorderBrush}" />
+
+                        <!-- Automation controls: the same commands as the old middle bar (now removed on this page). -->
+                        <StackPanel Orientation="Horizontal" DataContext="{Binding DataContext.Automation, RelativeSource={RelativeSource AncestorType=Window}}">
+                            <Button Style="{StaticResource RecordButton}" Command="{Binding RecordCommand}" Margin="0,0,6,0"
+                                    ToolTip="{Binding RecordTooltip}" AutomationProperties.Name="Record"
+                                    Visibility="{Binding IsRecording, Converter={StaticResource BoolToVisibility}, ConverterParameter=Invert}">
+                                <StackPanel Orientation="Horizontal">
+                                    <Ellipse Width="9" Height="9" Fill="White" VerticalAlignment="Center" />
+                                    <TextBlock Text="Record" Margin="7,0,0,0" FontSize="12" />
+                                </StackPanel>
+                            </Button>
+                            <Button Style="{StaticResource DangerButton}" Command="{Binding StopRecordingCommand}" Margin="0,0,6,0"
+                                    ToolTip="{Binding StopRecordingTooltip}" AutomationProperties.Name="Stop recording"
+                                    Visibility="{Binding IsRecording, Converter={StaticResource BoolToVisibility}}">
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock Text="&#xE71A;" Style="{StaticResource IconText}" FontSize="12" />
+                                    <TextBlock Text="Stop recording" Margin="6,0,0,0" FontSize="12" />
+                                </StackPanel>
+                            </Button>
+                            <Button Style="{StaticResource PlayButton}" Command="{Binding PlayCommand}"
+                                    ToolTip="{Binding PlayTooltip}" AutomationProperties.Name="Play"
+                                    Visibility="{Binding IsPlaying, Converter={StaticResource BoolToVisibility}, ConverterParameter=Invert}">
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock Text="&#xE768;" Style="{StaticResource IconText}" FontSize="12" />
+                                    <TextBlock Text="Play" Margin="6,0,0,0" FontSize="12" />
+                                </StackPanel>
+                            </Button>
+                            <Button Command="{Binding PauseResumeCommand}" Margin="0,0,6,0" Padding="10,6" ToolTip="{Binding PauseTooltip}"
+                                    AutomationProperties.Name="Pause or resume"
+                                    Visibility="{Binding IsPlaying, Converter={StaticResource BoolToVisibility}}">
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock Text="&#xE769;" Style="{StaticResource IconText}" FontSize="12" />
+                                    <TextBlock Text="{Binding PauseButtonText}" Margin="6,0,0,0" FontSize="12" />
+                                </StackPanel>
+                            </Button>
+                            <Button Style="{StaticResource DangerButton}" Command="{Binding StopCommand}" Padding="10,6" ToolTip="{Binding StopTooltip}"
+                                    AutomationProperties.Name="Stop playback"
+                                    Visibility="{Binding IsPlaying, Converter={StaticResource BoolToVisibility}}">
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock Text="&#xE71A;" Style="{StaticResource IconText}" FontSize="12" />
+                                    <TextBlock Text="Stop" Margin="6,0,0,0" FontSize="12" />
+                                </StackPanel>
+                            </Button>
                         </StackPanel>
-                    </Border>
-                    <Button Command="{Binding RevertCommand}" Margin="0,0,8,0" Padding="10,5" ToolTip="Throw away changes since the last save">
-                        <StackPanel Orientation="Horizontal">
-                            <TextBlock Text="&#xE7A7;" Style="{StaticResource IconText}" />
-                            <TextBlock Text="Discard changes" Margin="8,0,0,0" />
-                        </StackPanel>
-                    </Button>
-                    <Button Style="{StaticResource PrimaryButton}" Command="{Binding SaveCommand}" Padding="12,5" ToolTip="Save (Ctrl+S)">
-                        <StackPanel Orientation="Horizontal">
-                            <TextBlock Text="&#xE74E;" Style="{StaticResource IconText}" />
-                            <TextBlock Text="Save" Margin="8,0,0,0" />
-                        </StackPanel>
-                    </Button>
-                </StackPanel>
+                    </StackPanel>
 
-                <TextBox Grid.Row="1" Grid.Column="0" Text="{Binding Description, UpdateSourceTrigger=PropertyChanged}" Tag="Add a description (optional)"
-                         Foreground="{StaticResource MutedTextBrush}" Background="Transparent" BorderBrush="Transparent" FontSize="12"
-                         Padding="2,2" Margin="-4,2,16,0" MaxLength="2000" VerticalAlignment="Center" AutomationProperties.Name="Macro description" />
+                    <!-- Row 2 left: description -->
+                    <TextBox Grid.Row="1" Grid.Column="0" Text="{Binding Description, UpdateSourceTrigger=PropertyChanged}" Tag="Add a description (optional)"
+                             Foreground="{StaticResource MutedTextBrush}" Background="Transparent" BorderBrush="Transparent" FontSize="12"
+                             Padding="2,1" Margin="-4,2,12,0" MaxLength="2000" VerticalAlignment="Center" AutomationProperties.Name="Macro description" />
 
-                <StackPanel Grid.Row="1" Grid.Column="1" Orientation="Horizontal" Margin="0,4,0,0" VerticalAlignment="Center">
-                    <TextBlock Text="Play" Foreground="{StaticResource MutedTextBrush}" VerticalAlignment="Center" FontSize="12" />
-                    <TextBox Text="{Binding RepeatCount, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}" Width="56" Margin="6,0,4,0"
-                             Padding="4,2" HorizontalContentAlignment="Center" AutomationProperties.Name="Repeat count"
-                             ToolTip="How many times to run the steps. 0 = keep repeating until you stop it." />
-                    <TextBlock Text="time(s) (0 = until stopped)" Foreground="{StaticResource MutedTextBrush}" VerticalAlignment="Center" FontSize="12" />
-                    <TextBlock Text="Speed" Foreground="{StaticResource MutedTextBrush}" VerticalAlignment="Center" Margin="16,0,0,0" FontSize="12" />
-                    <TextBox Text="{Binding Speed, UpdateSourceTrigger=LostFocus, ValidatesOnExceptions=True}" Width="48" Margin="6,0,4,0"
-                             Padding="4,2" HorizontalContentAlignment="Center" AutomationProperties.Name="Playback speed"
-                             ToolTip="Speed multiplier for delays: 2 = twice as fast, 0.5 = half speed (0.1 to 10)." />
-                    <TextBlock Text="×" Foreground="{StaticResource MutedTextBrush}" VerticalAlignment="Center" />
-                    <TextBlock Text="Wait between repeats" Foreground="{StaticResource MutedTextBrush}" VerticalAlignment="Center" Margin="16,0,0,0" FontSize="12" />
-                    <TextBox Text="{Binding RepeatDelayMs, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}" Width="64" Margin="6,0,4,0"
-                             Padding="4,2" HorizontalContentAlignment="Center" AutomationProperties.Name="Wait between repeats in milliseconds"
-                             ToolTip="Pause after each run before the next one starts (milliseconds). Not used when playing once." />
-                    <TextBlock Text="ms" Foreground="{StaticResource MutedTextBrush}" VerticalAlignment="Center" FontSize="12" />
-                </StackPanel>
-            </Grid>
+                    <!-- Row 2 right: playback settings + quick toggles -->
+                    <StackPanel Grid.Row="1" Grid.Column="1" Orientation="Horizontal" Margin="0,6,0,0" VerticalAlignment="Center" HorizontalAlignment="Right">
+                        <TextBlock Text="Play" Foreground="{StaticResource MutedTextBrush}" VerticalAlignment="Center" FontSize="12" />
+                        <TextBox Style="{StaticResource HeaderNumberBox}" Text="{Binding RepeatCount, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}"
+                                 Width="46" Margin="6,0,4,0" AutomationProperties.Name="Repeat count"
+                                 ToolTip="How many times to run the steps. 0 = keep repeating until you stop it." />
+                        <TextBlock Text="times" Foreground="{StaticResource MutedTextBrush}" VerticalAlignment="Center" FontSize="12"
+                                   ToolTip="0 = until stopped" />
+                        <TextBlock Text="Speed" Foreground="{StaticResource MutedTextBrush}" VerticalAlignment="Center" Margin="12,0,0,0" FontSize="12" />
+                        <TextBox Style="{StaticResource HeaderNumberBox}" Text="{Binding Speed, UpdateSourceTrigger=LostFocus, ValidatesOnExceptions=True}"
+                                 Width="42" Margin="6,0,2,0" AutomationProperties.Name="Playback speed"
+                                 ToolTip="Speed multiplier for delays: 2 = twice as fast, 0.5 = half speed (0.1 to 10)." />
+                        <TextBlock Text="×" Foreground="{StaticResource MutedTextBrush}" VerticalAlignment="Center" />
+                        <TextBlock Text="Wait" Foreground="{StaticResource MutedTextBrush}" VerticalAlignment="Center" Margin="12,0,0,0" FontSize="12"
+                                   ToolTip="Wait between repeats" />
+                        <TextBox Style="{StaticResource HeaderNumberBox}" Text="{Binding RepeatDelayMs, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}"
+                                 Width="54" Margin="6,0,4,0" AutomationProperties.Name="Wait between repeats in milliseconds"
+                                 ToolTip="Wait between repeats: pause after each run before the next one starts (milliseconds). Not used when playing once." />
+                        <TextBlock Text="ms" Foreground="{StaticResource MutedTextBrush}" VerticalAlignment="Center" FontSize="12" />
 
-            <!-- Toolbox | steps | properties -->
+                        <Border Width="1" Margin="12,2" Background="{StaticResource BorderBrush}" />
+
+                        <!-- Quick toggles for single-monitor gamers (saved in Settings straight away). -->
+                        <CheckBox Style="{StaticResource ToggleSwitchCheckBoxStyle}" Content="Mini overlay" FontSize="11"
+                                  IsChecked="{Binding DataContext.ShowMiniOverlay, RelativeSource={RelativeSource AncestorType=Window}}"
+                                  ToolTip="Show mini status overlay while playing: a small click-through pill in the top-right corner shows which step runs and what it's doing (e.g. &quot;Step 2/5 — Finding image…&quot;). It never takes focus from your game and closes when playback ends."
+                                  AutomationProperties.Name="Show mini status overlay while playing" />
+                        <CheckBox Style="{StaticResource ToggleSwitchCheckBoxStyle}" Content="Minimize" FontSize="11" Margin="12,0,0,0"
+                                  IsChecked="{Binding DataContext.MinimizeWhilePlaying, RelativeSource={RelativeSource AncestorType=Window}}"
+                                  ToolTip="Minimize main window while playing: SmartMacro gets out of the way on a single monitor and comes back when playback ends."
+                                  AutomationProperties.Name="Minimize main window while playing" />
+                    </StackPanel>
+                </Grid>
+            </Border>
+
+            <!-- ===== Toolbox | Workflow steps | Properties ===== -->
             <Grid Grid.Row="1">
-                <!-- The 12 px gaps are splitters: drag them to make Add step / Workflow steps / Properties wider. -->
+                <!-- The 10 px gaps are splitters: drag them to make Add step / Workflow steps / Properties wider. -->
                 <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="200" MinWidth="150" MaxWidth="420" />
-                    <ColumnDefinition Width="12" />
+                    <ColumnDefinition Width="220" MinWidth="176" MaxWidth="420" />
+                    <ColumnDefinition Width="10" />
                     <ColumnDefinition Width="*" MinWidth="280" />
-                    <ColumnDefinition Width="12" />
+                    <ColumnDefinition Width="10" />
                     <ColumnDefinition Width="360" MinWidth="280" MaxWidth="760" />
                 </Grid.ColumnDefinitions>
 
@@ -125,87 +386,59 @@
                 <GridSplitter Grid.Column="3" Style="{StaticResource PanelSplitter}" ResizeDirection="Columns" ResizeBehavior="PreviousAndNext"
                               ToolTip="Drag to resize" AutomationProperties.Name="Resize the Properties panel" />
 
-                <!-- Toolbox -->
-                <Border Grid.Column="0" Style="{StaticResource Card}" Padding="10">
+                <!-- ===== Toolbox: categorized 2-column tiles ===== -->
+                <Border Grid.Column="0" Style="{StaticResource Card}" Padding="8,10,8,6">
                     <DockPanel>
-                        <!-- Compact header: one toggle instead of two radio buttons + a hint, so the step buttons below
-                             keep their space in a small window. -->
-                        <StackPanel DockPanel.Dock="Top" Margin="2,0,0,8">
-                            <TextBlock Text="Add step" Style="{StaticResource SectionTitle}" />
-                            <CheckBox Content="Add new steps at the end" IsChecked="{Binding AddAtEnd}" FontSize="12" Margin="0,6,0,0"
-                                      ToolTip="Off: a new step goes right after the selected step (at the end when nothing is selected). On: always after the last step. Right-click a step button for the other choice."
-                                      AutomationProperties.Name="Add new steps at the end" />
+                        <StackPanel DockPanel.Dock="Top" Margin="4,0,4,0">
+                            <TextBlock Text="Add step" Style="{StaticResource SectionTitle}" FontSize="13" />
+                            <DockPanel Margin="0,8,0,0">
+                                <TextBlock DockPanel.Dock="Left" Text="Insert" FontSize="11" Foreground="{StaticResource MutedTextBrush}"
+                                           VerticalAlignment="Center" Margin="0,0,8,0" />
+                                <Border Style="{StaticResource SegmentedContainer}"
+                                        ToolTip="Where a new step goes: right after the selected step (at the end when nothing is selected), or always after the last step. Right-click a tile for the other choice.">
+                                    <UniformGrid Rows="1">
+                                        <RadioButton Style="{StaticResource SegmentedRadioButtonStyle}" Content="After selected" GroupName="InsertPlacement"
+                                                     IsChecked="{Binding AddAfterSelected}" AutomationProperties.Name="Add new steps after the selected step" />
+                                        <RadioButton Style="{StaticResource SegmentedRadioButtonStyle}" Content="At end" GroupName="InsertPlacement"
+                                                     IsChecked="{Binding AddAtEnd}" AutomationProperties.Name="Add new steps at the end" />
+                                    </UniformGrid>
+                                </Border>
+                            </DockPanel>
                         </StackPanel>
-                        <ScrollViewer VerticalScrollBarVisibility="Auto">
+                        <ScrollViewer VerticalScrollBarVisibility="Auto" Margin="0,2,0,0">
                             <StackPanel>
-                                <ItemsControl ItemsSource="{Binding StepTypes}" Focusable="False">
-                                    <ItemsControl.ItemTemplate>
-                                        <DataTemplate DataType="{x:Type steps:StepTypeInfo}">
-                                            <Button Style="{StaticResource ToolboxButton}" ToolTip="{Binding Description}"
-                                                    Command="{Binding DataContext.AddStepCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
-                                                    CommandParameter="{Binding Kind}" AutomationProperties.Name="{Binding DisplayName}"
-                                                    Tag="{Binding DataContext, RelativeSource={RelativeSource AncestorType=UserControl}}">
-                                                <Button.ContextMenu>
-                                                    <ContextMenu>
-                                                        <MenuItem Header="Add to end" Command="{Binding PlacementTarget.Tag.AddToEndCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
-                                                                  CommandParameter="{Binding Kind}" ToolTip="Adds this step after the last step in the workflow." />
-                                                        <MenuItem Header="Insert after selected" Command="{Binding PlacementTarget.Tag.InsertAfterSelectedCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
-                                                                  CommandParameter="{Binding Kind}" ToolTip="Adds this step right after the selected step (at the end when nothing is selected)." />
-                                                    </ContextMenu>
-                                                </Button.ContextMenu>
-                                                <StackPanel Orientation="Horizontal">
-                                                    <TextBlock Text="{Binding Glyph}" Style="{StaticResource IconText}" Foreground="{StaticResource AccentBrush}" Width="20" />
-                                                    <TextBlock Text="{Binding DisplayName}" Margin="8,0,0,0" />
-                                                </StackPanel>
-                                            </Button>
-                                        </DataTemplate>
-                                    </ItemsControl.ItemTemplate>
-                                </ItemsControl>
+                                <TextBlock Text="INPUT" Style="{StaticResource ToolboxCategoryHeader}" />
+                                <ItemsControl ItemsSource="{Binding StepTypes, Converter={StaticResource StepTypeFilter}, ConverterParameter=Input}" Focusable="False"
+                                              ItemsPanel="{StaticResource TwoColumnTiles}" ItemTemplate="{StaticResource ToolboxTileTemplate}" />
 
-                                <!-- Stage 3: blocks (If / Else / End If, Repeat / End Repeat) -->
-                                <TextBlock Text="Logic" Style="{StaticResource SectionTitle}" Margin="2,14,0,0" />
-                                <TextBlock Text="If and Repeat are added together with their End." Style="{StaticResource MutedText}" FontSize="11" TextWrapping="Wrap" Margin="2,3,0,8" />
-                                <ItemsControl ItemsSource="{Binding LogicStepTypes}" Focusable="False">
-                                    <ItemsControl.ItemTemplate>
-                                        <DataTemplate DataType="{x:Type steps:StepTypeInfo}">
-                                            <Button Style="{StaticResource ToolboxButton}" ToolTip="{Binding Description}"
-                                                    Command="{Binding DataContext.AddStepCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
-                                                    CommandParameter="{Binding Kind}" AutomationProperties.Name="{Binding DisplayName}"
-                                                    Tag="{Binding DataContext, RelativeSource={RelativeSource AncestorType=UserControl}}">
-                                                <Button.ContextMenu>
-                                                    <ContextMenu>
-                                                        <MenuItem Header="Add to end" Command="{Binding PlacementTarget.Tag.AddToEndCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
-                                                                  CommandParameter="{Binding Kind}" ToolTip="Adds this step after the last step in the workflow." />
-                                                        <MenuItem Header="Insert after selected" Command="{Binding PlacementTarget.Tag.InsertAfterSelectedCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
-                                                                  CommandParameter="{Binding Kind}" ToolTip="Adds this step right after the selected step (at the end when nothing is selected)." />
-                                                    </ContextMenu>
-                                                </Button.ContextMenu>
-                                                <StackPanel Orientation="Horizontal">
-                                                    <TextBlock Text="{Binding Glyph}" Style="{StaticResource IconText}" Foreground="{StaticResource AccentBrush}" Width="20" />
-                                                    <TextBlock Text="{Binding DisplayName}" Margin="8,0,0,0" />
-                                                </StackPanel>
-                                            </Button>
-                                        </DataTemplate>
-                                    </ItemsControl.ItemTemplate>
-                                </ItemsControl>
+                                <TextBlock Text="VISION &amp; AI" Style="{StaticResource ToolboxCategoryHeader}" />
+                                <ItemsControl ItemsSource="{Binding StepTypes, Converter={StaticResource StepTypeFilter}, ConverterParameter=Vision}" Focusable="False"
+                                              ItemsPanel="{StaticResource TwoColumnTiles}" ItemTemplate="{StaticResource ToolboxTileTemplate}" />
 
-                                <!-- Quick patterns: 1-click multi-step starters for common game loops -->
-                                <TextBlock Text="Quick patterns" Style="{StaticResource SectionTitle}" Margin="2,14,0,0" />
-                                <TextBlock Text="Ready-made step combinations. Insert one, then capture the images / pick the spots named in its step comments."
-                                           Style="{StaticResource MutedText}" FontSize="11" TextWrapping="Wrap" Margin="2,3,0,8" />
+                                <TextBlock Text="LOGIC &amp; LOOPS" Style="{StaticResource ToolboxCategoryHeader}"
+                                           ToolTip="If and Repeat are added together with their End." />
+                                <ItemsControl ItemsSource="{Binding LogicStepTypes}" Focusable="False"
+                                              ItemsPanel="{StaticResource TwoColumnTiles}" ItemTemplate="{StaticResource ToolboxTileTemplate}" />
+
+                                <!-- Quick patterns: 1-click multi-step starters for common game loops (full-width rows: long names). -->
+                                <TextBlock Text="QUICK PATTERNS" Style="{StaticResource ToolboxCategoryHeader}"
+                                           ToolTip="Ready-made step combinations. Insert one, then capture the images / pick the spots named in its step comments." />
                                 <ItemsControl ItemsSource="{Binding QuickPatternTypes}" Focusable="False">
                                     <ItemsControl.ItemTemplate>
                                         <DataTemplate>
-                                            <Button Style="{StaticResource ToolboxButton}" ToolTip="{Binding Description}"
+                                            <Button Style="{StaticResource ToolboxTile}" Height="Auto" MinHeight="36" Padding="8,6" HorizontalContentAlignment="Stretch"
+                                                    ToolTip="{Binding Description}"
                                                     Command="{Binding DataContext.AddPatternCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
                                                     CommandParameter="{Binding Pattern}" AutomationProperties.Name="{Binding Title}">
                                                 <Grid>
                                                     <Grid.ColumnDefinitions>
-                                                        <ColumnDefinition Width="22" />
+                                                        <ColumnDefinition Width="24" />
                                                         <ColumnDefinition Width="*" />
                                                     </Grid.ColumnDefinitions>
-                                                    <TextBlock Text="{Binding Glyph}" FontSize="13" VerticalAlignment="Top" />
-                                                    <TextBlock Grid.Column="1" Text="{Binding Title}" TextWrapping="Wrap" Margin="6,0,0,0" />
+                                                    <Border Width="22" Height="22" CornerRadius="6" Background="{StaticResource FeedbackBadgeBrush}" VerticalAlignment="Top">
+                                                        <TextBlock Text="{Binding Glyph}" FontSize="12" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                                    </Border>
+                                                    <TextBlock Grid.Column="1" Text="{Binding Title}" TextWrapping="Wrap" FontSize="11" Margin="8,0,0,0" VerticalAlignment="Center" />
                                                 </Grid>
                                             </Button>
                                         </DataTemplate>
@@ -216,52 +449,59 @@
                     </DockPanel>
                 </Border>
 
-                <!-- Steps -->
-                <Border Grid.Column="2" Style="{StaticResource Card}" Padding="8">
+                <!-- ===== Workflow steps: connected visual cards on a dot-grid canvas ===== -->
+                <Border Grid.Column="2" Style="{StaticResource Card}" Padding="0" ClipToBounds="True">
                     <DockPanel>
-                        <DockPanel DockPanel.Dock="Top" Margin="8,4,4,8">
-                            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
-                                <Button Command="{Binding WrapInIfCommand}" Padding="8,4" FontSize="12" Margin="0,0,6,0"
-                                        ToolTip="Put an If … End If around the selected steps (select several with Shift+click)."
-                                        AutomationProperties.Name="Wrap selected steps in If">
-                                    <StackPanel Orientation="Horizontal">
-                                        <TextBlock Text="&#xE8AB;" Style="{StaticResource IconText}" FontSize="12" />
-                                        <TextBlock Text="Wrap in If" Margin="6,0,0,0" />
-                                    </StackPanel>
-                                </Button>
-                                <Button Command="{Binding WrapInRepeatCommand}" Padding="8,4" FontSize="12" Margin="0,0,10,0"
-                                        ToolTip="Put a Repeat … End Repeat around the selected steps (select several with Shift+click)."
-                                        AutomationProperties.Name="Wrap selected steps in Repeat">
-                                    <StackPanel Orientation="Horizontal">
-                                        <TextBlock Text="&#xE8EE;" Style="{StaticResource IconText}" FontSize="12" />
-                                        <TextBlock Text="Wrap in Repeat" Margin="6,0,0,0" />
-                                    </StackPanel>
-                                </Button>
-                                <Button Command="{Binding CleanUpMousePathsCommand}" Padding="8,4" FontSize="12" Margin="0,0,10,0"
-                                        ToolTip="Convert recording to clean steps: long runs of recorded Delay + Move mouse steps become one Delay (+ one Move only where it's needed). Clicks keep their own positions; drags, steps with a comment and turned-off steps are kept. Select several steps to clean only those."
-                                        AutomationProperties.Name="Clean up mouse paths">
-                                    <StackPanel Orientation="Horizontal">
-                                        <TextBlock Text="&#xE7E6;" Style="{StaticResource IconText}" FontSize="12" />
-                                        <TextBlock Text="Clean up mouse paths" Margin="6,0,0,0" />
-                                    </StackPanel>
-                                </Button>
-                                <Button Style="{StaticResource IconButton}" Content="&#xE70E;" Command="{Binding MoveToTopCommand}" ToolTip="Move to top (Alt+Home). An If / Repeat moves together with its whole block." AutomationProperties.Name="Move to top" />
-                                <Button Style="{StaticResource IconButton}" Content="&#xE74A;" Command="{Binding MoveUpCommand}" ToolTip="Move up one place (Alt+Up)" AutomationProperties.Name="Move step up" />
-                                <Button Style="{StaticResource IconButton}" Content="&#xE74B;" Command="{Binding MoveDownCommand}" ToolTip="Move down one place (Alt+Down)" AutomationProperties.Name="Move step down" />
-                                <Button Style="{StaticResource IconButton}" Content="&#xE70D;" Command="{Binding MoveToBottomCommand}" ToolTip="Move to bottom (Alt+End). An If / Repeat moves together with its whole block." AutomationProperties.Name="Move to bottom" />
-                                <Button Style="{StaticResource IconButton}" Content="&#xE8C8;" Command="{Binding DuplicateStepCommand}" ToolTip="Duplicate step (Ctrl+D)" AutomationProperties.Name="Duplicate step" />
-                                <Button Style="{StaticResource IconButton}" Content="&#xE74D;" Command="{Binding DeleteStepCommand}" ToolTip="Delete step (Delete)" AutomationProperties.Name="Delete step" />
-                            </StackPanel>
-                            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                                <TextBlock Text="Workflow steps" Style="{StaticResource SectionTitle}" />
-                                <TextBlock Text="{Binding StepCountText}" Foreground="{StaticResource MutedTextBrush}" Margin="10,0,0,0" FontSize="12" VerticalAlignment="Center"
-                                           ToolTip="Drag steps to reorder them (Shift+click to select several). Right-click a step for Move to top / bottom and more." />
-                            </StackPanel>
-                        </DockPanel>
+                        <Border DockPanel.Dock="Top" BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,0,0,1" Padding="12,6,6,6">
+                            <DockPanel>
+                                <StackPanel DockPanel.Dock="Left" Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,10,0">
+                                    <TextBlock Text="Workflow steps" Style="{StaticResource SectionTitle}" FontSize="13" />
+                                    <Border Style="{StaticResource Pill}" Margin="8,0,0,0"
+                                            ToolTip="Drag steps to reorder them (Shift+click to select several). Right-click a step for Move to top / bottom and more.">
+                                        <TextBlock Text="{Binding StepCountText}" Foreground="{StaticResource MutedTextBrush}" FontSize="11" />
+                                    </Border>
+                                </StackPanel>
+                                <WrapPanel HorizontalAlignment="Right" VerticalAlignment="Center">
+                                    <Button Style="{StaticResource GhostButton}" Command="{Binding WrapInIfCommand}" Padding="7,4" FontSize="11"
+                                            ToolTip="Put an If … End If around the selected steps (Ctrl+Shift+I; select several with Shift+click)."
+                                            AutomationProperties.Name="Wrap selected steps in If">
+                                        <StackPanel Orientation="Horizontal">
+                                            <TextBlock Text="&#xE8AB;" Style="{StaticResource IconText}" FontSize="12" Foreground="{StaticResource LogicAccentBrush}" />
+                                            <TextBlock Text="Wrap in If" Margin="5,0,0,0" />
+                                        </StackPanel>
+                                    </Button>
+                                    <Button Style="{StaticResource GhostButton}" Command="{Binding WrapInRepeatCommand}" Padding="7,4" FontSize="11"
+                                            ToolTip="Put a Repeat … End Repeat around the selected steps (Ctrl+Shift+R; select several with Shift+click)."
+                                            AutomationProperties.Name="Wrap selected steps in Repeat">
+                                        <StackPanel Orientation="Horizontal">
+                                            <TextBlock Text="&#xE8EE;" Style="{StaticResource IconText}" FontSize="12" Foreground="{StaticResource LogicAccentBrush}" />
+                                            <TextBlock Text="Wrap in Repeat" Margin="5,0,0,0" />
+                                        </StackPanel>
+                                    </Button>
+                                    <Button Style="{StaticResource GhostButton}" Command="{Binding CleanUpMousePathsCommand}" Padding="7,4" FontSize="11"
+                                            ToolTip="Convert recording to clean steps: long runs of recorded Delay + Move mouse steps become one Delay (+ one Move only where it's needed). Clicks keep their own positions; drags, steps with a comment and turned-off steps are kept. Select several steps to clean only those."
+                                            AutomationProperties.Name="Clean up mouse paths">
+                                        <StackPanel Orientation="Horizontal">
+                                            <TextBlock Text="&#xE7E6;" Style="{StaticResource IconText}" FontSize="12" />
+                                            <TextBlock Text="Clean up" Margin="5,0,0,0" />
+                                        </StackPanel>
+                                    </Button>
+                                    <Border Width="1" Height="18" Margin="4,0" Background="{StaticResource BorderBrush}" />
+                                    <Button Style="{StaticResource IconButton}" Width="30" Height="28" Padding="6" FontSize="12" Content="&#xE70E;" Command="{Binding MoveToTopCommand}" ToolTip="Move to top (Alt+Home). An If / Repeat moves together with its whole block." AutomationProperties.Name="Move to top" />
+                                    <Button Style="{StaticResource IconButton}" Width="30" Height="28" Padding="6" FontSize="12" Content="&#xE74A;" Command="{Binding MoveUpCommand}" ToolTip="Move up one place (Alt+Up)" AutomationProperties.Name="Move step up" />
+                                    <Button Style="{StaticResource IconButton}" Width="30" Height="28" Padding="6" FontSize="12" Content="&#xE74B;" Command="{Binding MoveDownCommand}" ToolTip="Move down one place (Alt+Down)" AutomationProperties.Name="Move step down" />
+                                    <Button Style="{StaticResource IconButton}" Width="30" Height="28" Padding="6" FontSize="12" Content="&#xE70D;" Command="{Binding MoveToBottomCommand}" ToolTip="Move to bottom (Alt+End). An If / Repeat moves together with its whole block." AutomationProperties.Name="Move to bottom" />
+                                    <Button Style="{StaticResource IconButton}" Width="30" Height="28" Padding="6" FontSize="12" Content="&#xE8C8;" Command="{Binding DuplicateStepCommand}" ToolTip="Duplicate step (Ctrl+D)" AutomationProperties.Name="Duplicate step" />
+                                    <Button Style="{StaticResource IconButton}" Width="30" Height="28" Padding="6" FontSize="12" Content="&#xE74D;" Command="{Binding DeleteStepCommand}" ToolTip="Delete step (Delete)" AutomationProperties.Name="Delete step" />
+                                </WrapPanel>
+                            </DockPanel>
+                        </Border>
 
-                        <Grid>
+                        <Grid Background="{StaticResource StepsCanvasBrush}">
+                            <Rectangle Fill="{StaticResource DotGridTile}" IsHitTestVisible="False" />
                             <ListBox x:Name="StepList" ItemsSource="{Binding Steps}" SelectedItem="{Binding SelectedStep}"
-                                     SelectionMode="Extended"
+                                     SelectionMode="Extended" Padding="10,10,10,4"
+                                     ItemContainerStyle="{StaticResource StepCardItem}"
                                      VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling"
                                      AutomationProperties.Name="Workflow steps"
                                      SelectionChanged="StepList_SelectionChanged"
@@ -300,49 +540,99 @@
                                 </ListBox.InputBindings>
                                 <ListBox.ItemTemplate>
                                     <DataTemplate DataType="{x:Type steps:StepViewModel}">
-                                        <Border x:Name="RunningFrame" BorderThickness="2,0,0,0" BorderBrush="Transparent" Padding="4,0,0,0" CornerRadius="2">
-                                        <Grid x:Name="Row" Margin="{Binding IndentMargin}">
+                                        <Grid>
                                             <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="34" />
                                                 <ColumnDefinition Width="Auto" />
                                                 <ColumnDefinition Width="*" />
-                                                <ColumnDefinition Width="Auto" />
                                             </Grid.ColumnDefinitions>
-                                            <TextBlock Text="{Binding Number}" Foreground="{StaticResource MutedTextBrush}" FontSize="12" VerticalAlignment="Center" />
-                                            <Border Grid.Column="1" Width="30" Height="30" CornerRadius="7" Background="{StaticResource SurfaceAltBrush}">
-                                                <TextBlock Text="{Binding Glyph}" Style="{StaticResource IconText}" Foreground="{StaticResource AccentBrush}" HorizontalAlignment="Center" />
+
+                                            <!-- Indentation for steps inside If / Repeat blocks: 24 px per level with a guide line. -->
+                                            <Rectangle Grid.Column="0" Fill="{StaticResource IndentGuideTile}" Margin="0,-6,0,0"
+                                                       Width="{Binding IndentLevel, Converter={StaticResource IndentLevel}, ConverterParameter=24}" />
+
+                                            <Border x:Name="Card" Grid.Column="1" Background="{StaticResource StepCardBrush}"
+                                                    BorderBrush="{StaticResource StepCardBorderBrush}" BorderThickness="1.5" CornerRadius="8"
+                                                    SnapsToDevicePixels="True">
+                                                <Grid>
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="3" />
+                                                        <ColumnDefinition Width="*" />
+                                                    </Grid.ColumnDefinitions>
+                                                    <!-- Left accent strip in the step's category colour -->
+                                                    <Border Grid.Column="0" CornerRadius="6.5,0,0,6.5" Margin="0,0,0,0"
+                                                            Background="{Binding Kind, Converter={StaticResource CategoryBrush}, ConverterParameter=Accent}" />
+
+                                                    <Grid x:Name="Row" Grid.Column="1" Margin="8,7,10,7">
+                                                        <Grid.ColumnDefinitions>
+                                                            <ColumnDefinition Width="26" />
+                                                            <ColumnDefinition Width="Auto" />
+                                                            <ColumnDefinition Width="*" />
+                                                            <ColumnDefinition Width="Auto" />
+                                                            <ColumnDefinition Width="Auto" />
+                                                        </Grid.ColumnDefinitions>
+                                                        <TextBlock Text="{Binding Number}" Foreground="{StaticResource SubtleTextBrush}" FontSize="11"
+                                                                   VerticalAlignment="Center" HorizontalAlignment="Left" />
+                                                        <!-- 32×32 category icon badge -->
+                                                        <Border Grid.Column="1" Width="32" Height="32" CornerRadius="8"
+                                                                Background="{Binding Kind, Converter={StaticResource CategoryBrush}, ConverterParameter=Badge}">
+                                                            <TextBlock Text="{Binding Glyph}" Style="{StaticResource IconText}" HorizontalAlignment="Center"
+                                                                       Foreground="{Binding Kind, Converter={StaticResource CategoryBrush}, ConverterParameter=Accent}" />
+                                                        </Border>
+                                                        <StackPanel Grid.Column="2" Margin="10,0,8,0" VerticalAlignment="Center">
+                                                            <StackPanel Orientation="Horizontal">
+                                                                <TextBlock Text="{Binding Title}" FontWeight="SemiBold" FontSize="13" />
+                                                                <Border x:Name="DisabledTag" Style="{StaticResource Pill}" Margin="8,0,0,0" Visibility="Collapsed">
+                                                                    <TextBlock Text="DISABLED" FontSize="9" FontWeight="SemiBold" Foreground="{StaticResource MutedTextBrush}" />
+                                                                </Border>
+                                                                <Border x:Name="RunningTag" Style="{StaticResource Pill}" Margin="8,0,0,0" Background="{StaticResource SuccessSoftBrush}"
+                                                                        Visibility="Collapsed" ToolTip="Playback is running this step right now.">
+                                                                    <TextBlock Text="▶ RUNNING" FontSize="9" FontWeight="Bold" Foreground="{StaticResource SuccessBrush}" />
+                                                                </Border>
+                                                            </StackPanel>
+                                                            <TextBlock Text="{Binding Summary}" Foreground="{StaticResource MutedTextBrush}" FontSize="12" TextTrimming="CharacterEllipsis" Margin="0,2,0,0" />
+                                                            <TextBlock Text="{Binding Comment}" FontStyle="Italic" Foreground="{StaticResource SubtleTextBrush}" FontSize="11"
+                                                                       TextTrimming="CharacterEllipsis" Margin="0,2,0,0"
+                                                                       Visibility="{Binding HasComment, Converter={StaticResource BoolToVisibility}}" />
+                                                        </StackPanel>
+                                                        <!-- Inline preview: image thumbnail / colour swatch (empty for other steps) -->
+                                                        <ContentControl Grid.Column="3" Content="{Binding}" ContentTemplateSelector="{StaticResource StepPreviewSelector}"
+                                                                        Focusable="False" IsTabStop="False" VerticalAlignment="Center" Margin="0,0,6,0" />
+                                                        <Grid Grid.Column="4" VerticalAlignment="Center">
+                                                            <TextBlock Text="&#xEA39;" Style="{StaticResource IconText}" Foreground="{StaticResource ErrorBrush}"
+                                                                       ToolTip="{Binding IssueText}" Visibility="{Binding HasError, Converter={StaticResource BoolToVisibility}}" />
+                                                            <TextBlock Text="&#xE7BA;" Style="{StaticResource IconText}" Foreground="{StaticResource WarningBrush}"
+                                                                       ToolTip="{Binding IssueText}" Visibility="{Binding HasWarning, Converter={StaticResource BoolToVisibility}}" />
+                                                        </Grid>
+                                                    </Grid>
+                                                </Grid>
                                             </Border>
-                                            <StackPanel Grid.Column="2" Margin="10,0,8,0" VerticalAlignment="Center">
-                                                <StackPanel Orientation="Horizontal">
-                                                    <TextBlock Text="{Binding Title}" FontWeight="SemiBold" />
-                                                    <Border x:Name="DisabledTag" Margin="8,0,0,0" Padding="6,1" CornerRadius="4" Background="{StaticResource CharcoalBrush}" Visibility="Collapsed">
-                                                        <TextBlock Text="Disabled" FontSize="10" Foreground="{StaticResource MutedTextBrush}" />
-                                                    </Border>
-                                                    <Border x:Name="RunningTag" Margin="8,0,0,0" Padding="6,1" CornerRadius="4" Background="{StaticResource SuccessSoftBrush}"
-                                                            Visibility="Collapsed" ToolTip="Playback is running this step right now.">
-                                                        <TextBlock Text="▶ Running" FontSize="10" FontWeight="SemiBold" Foreground="{StaticResource SuccessBrush}" />
-                                                    </Border>
-                                                </StackPanel>
-                                                <TextBlock Text="{Binding Summary}" Foreground="{StaticResource MutedTextBrush}" FontSize="12" TextTrimming="CharacterEllipsis" Margin="0,2,0,0" />
-                                                <TextBlock Text="{Binding Comment}" FontStyle="Italic" Foreground="{StaticResource MutedTextBrush}" FontSize="11"
-                                                           TextTrimming="CharacterEllipsis" Margin="0,2,0,0"
-                                                           Visibility="{Binding HasComment, Converter={StaticResource BoolToVisibility}}" />
-                                            </StackPanel>
-                                            <TextBlock Grid.Column="3" Text="&#xEA39;" Style="{StaticResource IconText}" Foreground="{StaticResource ErrorBrush}"
-                                                       ToolTip="{Binding IssueText}" Visibility="{Binding HasError, Converter={StaticResource BoolToVisibility}}" />
-                                            <TextBlock Grid.Column="3" Text="&#xE7BA;" Style="{StaticResource IconText}" Foreground="{StaticResource WarningBrush}"
-                                                       ToolTip="{Binding IssueText}" Visibility="{Binding HasWarning, Converter={StaticResource BoolToVisibility}}" />
                                         </Grid>
-                                        </Border>
                                         <DataTemplate.Triggers>
+                                            <DataTrigger Binding="{Binding IsMouseOver, ElementName=Card}" Value="True">
+                                                <Setter TargetName="Card" Property="BorderBrush" Value="{StaticResource InputBorderBrush}" />
+                                            </DataTrigger>
+                                            <DataTrigger Binding="{Binding IsSelected, RelativeSource={RelativeSource AncestorType=ListBoxItem}}" Value="True">
+                                                <Setter TargetName="Card" Property="BorderBrush" Value="{StaticResource AccentBrush}" />
+                                                <Setter TargetName="Card" Property="Background" Value="{StaticResource SelectedCardBrush}" />
+                                                <Setter TargetName="Card" Property="Effect">
+                                                    <Setter.Value>
+                                                        <DropShadowEffect Color="#3B82F6" BlurRadius="12" ShadowDepth="0" Opacity="0.45" />
+                                                    </Setter.Value>
+                                                </Setter>
+                                            </DataTrigger>
                                             <DataTrigger Binding="{Binding Enabled}" Value="False">
-                                                <Setter TargetName="Row" Property="Opacity" Value="0.5" />
+                                                <Setter TargetName="Card" Property="Opacity" Value="0.45" />
                                                 <Setter TargetName="DisabledTag" Property="Visibility" Value="Visible" />
                                             </DataTrigger>
                                             <DataTrigger Binding="{Binding IsRunning}" Value="True">
-                                                <Setter TargetName="RunningFrame" Property="BorderBrush" Value="{StaticResource SuccessBrush}" />
-                                                <Setter TargetName="RunningFrame" Property="Background" Value="{StaticResource SuccessSoftBrush}" />
+                                                <Setter TargetName="Card" Property="BorderBrush" Value="{StaticResource SuccessBrush}" />
+                                                <Setter TargetName="Card" Property="Background" Value="{StaticResource RunningCardBrush}" />
                                                 <Setter TargetName="RunningTag" Property="Visibility" Value="Visible" />
+                                                <Setter TargetName="Card" Property="Effect">
+                                                    <Setter.Value>
+                                                        <DropShadowEffect Color="#10B981" BlurRadius="14" ShadowDepth="0" Opacity="0.5" />
+                                                    </Setter.Value>
+                                                </Setter>
                                             </DataTrigger>
                                         </DataTemplate.Triggers>
                                     </DataTemplate>
@@ -353,24 +643,58 @@
                                         Visibility="{Binding HasSteps, Converter={StaticResource BoolToVisibility}, ConverterParameter=Invert}">
                                 <TextBlock Text="&#xE8FD;" Style="{StaticResource IconText}" FontSize="28" Foreground="{StaticResource MutedTextBrush}" HorizontalAlignment="Center" />
                                 <TextBlock Text="This macro has no steps yet" Style="{StaticResource SectionTitle}" HorizontalAlignment="Center" Margin="0,12,0,0" />
-                                <TextBlock Text="Add steps from the panel on the left. Then drag steps to reorder them, right-click a step for more actions, and set them up on the right."
+                                <TextBlock Text="Add steps from the toolbox on the left (or press Record). Then drag steps to reorder them, right-click a step for more actions, and set them up on the right."
                                            Style="{StaticResource MutedText}" TextAlignment="Center" Margin="0,6,0,0" />
                             </StackPanel>
                         </Grid>
                     </DockPanel>
                 </Border>
 
-                <!-- Properties -->
+                <!-- ===== Properties (inspector) ===== -->
                 <Border Grid.Column="4" Style="{StaticResource Card}" Padding="0">
                     <DockPanel>
-                        <Border DockPanel.Dock="Top" BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,0,0,1" Padding="16,10,16,8">
-                            <TextBlock Text="Properties" Style="{StaticResource SectionTitle}" />
+                        <!-- Sticky inspector header: category badge, step title, Step N pill, Enabled switch -->
+                        <Border DockPanel.Dock="Top" BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,0,0,1" Padding="14,10,14,10">
+                            <Grid>
+                                <TextBlock Text="Properties" Style="{StaticResource SectionTitle}" FontSize="13" VerticalAlignment="Center"
+                                           Visibility="{Binding HasSelection, Converter={StaticResource BoolToVisibility}, ConverterParameter=Invert}" />
+                                <Grid Visibility="{Binding HasSelection, Converter={StaticResource BoolToVisibility}}">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <Border Width="32" Height="32" CornerRadius="8"
+                                            Background="{Binding SelectedStep.Kind, Converter={StaticResource CategoryBrush}, ConverterParameter=Badge}">
+                                        <TextBlock Text="{Binding SelectedStep.Glyph}" Style="{StaticResource IconText}" HorizontalAlignment="Center"
+                                                   Foreground="{Binding SelectedStep.Kind, Converter={StaticResource CategoryBrush}, ConverterParameter=Accent}" />
+                                    </Border>
+                                    <StackPanel Grid.Column="1" Margin="10,0,8,0" VerticalAlignment="Center">
+                                        <TextBlock Text="{Binding SelectedStep.Title}" Style="{StaticResource SectionTitle}" FontSize="14" TextTrimming="CharacterEllipsis" />
+                                        <Border Style="{StaticResource Pill}" HorizontalAlignment="Left" Margin="0,3,0,0" Padding="6,0,6,1">
+                                            <TextBlock FontSize="10" Foreground="{StaticResource MutedTextBrush}">
+                                                <Run Text="Step " /><Run Text="{Binding SelectedStep.Number, Mode=OneWay}" />
+                                            </TextBlock>
+                                        </Border>
+                                    </StackPanel>
+                                    <CheckBox Grid.Column="2" Style="{StaticResource ToggleSwitchCheckBoxStyle}" Content="Enabled" VerticalAlignment="Center"
+                                              IsChecked="{Binding SelectedStep.Enabled}"
+                                              ToolTip="Turned-off steps are skipped when the macro plays."
+                                              AutomationProperties.Name="Step enabled" />
+                                </Grid>
+                            </Grid>
                         </Border>
+
+                        <!-- Pinned bottom action bar: "Test detection now" for Find text / image / color and Feedback loop -->
+                        <ContentControl DockPanel.Dock="Bottom" Content="{Binding SelectedStep}" ContentTemplateSelector="{StaticResource InspectorActionSelector}"
+                                        Focusable="False" IsTabStop="False"
+                                        Visibility="{Binding HasSelection, Converter={StaticResource BoolToVisibility}}" />
+
                         <Grid>
                             <TextBlock Text="Select a step to edit its settings." Style="{StaticResource MutedText}"
                                        HorizontalAlignment="Center" VerticalAlignment="Center" Margin="16"
                                        Visibility="{Binding HasSelection, Converter={StaticResource BoolToVisibility}, ConverterParameter=Invert}" />
-                            <ScrollViewer x:Name="PropertiesScroll" VerticalScrollBarVisibility="Auto" Padding="16,10,16,28"
+                            <ScrollViewer x:Name="PropertiesScroll" VerticalScrollBarVisibility="Auto" Padding="14,10,14,20"
                                           PreviewMouseWheel="Properties_PreviewMouseWheel"
                                           Visibility="{Binding HasSelection, Converter={StaticResource BoolToVisibility}}">
                                 <ContentControl Content="{Binding SelectedStep}" Focusable="False" />
@@ -380,30 +704,135 @@
                 </Border>
             </Grid>
 
-            <!-- Problems -->
-            <!-- Problems: a one-line banner when everything is fine; the list only appears when there are problems. -->
-            <Border Grid.Row="2" Style="{StaticResource Card}" Margin="0,8,0,0" Padding="12,6">
+            <!-- ===== Bottom status & activity drawer (Problems + Activity in one place) ===== -->
+            <Border Grid.Row="2" Style="{StaticResource Card}" Margin="0,8,0,0" Padding="0">
                 <DockPanel>
-                    <StackPanel DockPanel.Dock="Top" Orientation="Horizontal">
-                        <TextBlock Text="&#xEA39;" Style="{StaticResource IconText}" Foreground="{StaticResource ErrorBrush}" Margin="0,0,8,0"
-                                   Visibility="{Binding HasErrors, Converter={StaticResource BoolToVisibility}}" />
-                        <TextBlock Text="&#xE73E;" Style="{StaticResource IconText}" Foreground="{StaticResource SuccessBrush}" Margin="0,0,8,0"
-                                   Visibility="{Binding HasIssues, Converter={StaticResource BoolToVisibility}, ConverterParameter=Invert}" />
-                        <TextBlock Text="Problems" Style="{StaticResource SectionTitle}" FontSize="12" VerticalAlignment="Center" />
-                        <TextBlock Text="{Binding ValidationSummary}" Foreground="{StaticResource MutedTextBrush}" FontSize="12" Margin="10,0,0,0" VerticalAlignment="Center" />
-                    </StackPanel>
-                    <ListBox ItemsSource="{Binding Issues}" MaxHeight="84" Margin="0,4,0,0" ItemContainerStyle="{StaticResource PlainListItem}"
-                             Visibility="{Binding HasIssues, Converter={StaticResource BoolToVisibility}}">
-                        <ListBox.ItemTemplate>
-                            <DataTemplate DataType="{x:Type core:ValidationIssue}">
+                    <!-- 32 px header: state pill | problems badge | latest activity | Open full log | Expand -->
+                    <Grid DockPanel.Dock="Top" Height="32" Margin="10,0,6,0">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+
+                        <!-- Live status pill -->
+                        <Border Grid.Column="0" Style="{StaticResource StatePillStyle}"
+                                DataContext="{Binding DataContext.Automation, RelativeSource={RelativeSource AncestorType=Window}}"
+                                AutomationProperties.LiveSetting="Polite">
+                            <StackPanel Orientation="Horizontal">
+                                <Ellipse Style="{StaticResource StateDotStyle}" />
+                                <TextBlock Text="{Binding StateText}" FontSize="11" FontWeight="SemiBold" Margin="6,0,0,0" />
+                            </StackPanel>
+                        </Border>
+
+                        <!-- Problems count badge (click it to open the drawer; same switch as "Expand") -->
+                        <ToggleButton Grid.Column="1" Style="{StaticResource GhostToggle}" Margin="6,0,0,0" Padding="2"
+                                      IsChecked="{Binding IsChecked, ElementName=DrawerToggle, Mode=TwoWay}"
+                                      ToolTip="Show the list of problems" AutomationProperties.Name="Problems">
+                            <Border Style="{StaticResource Pill}">
                                 <StackPanel Orientation="Horizontal">
-                                    <TextBlock Text="{Binding Severity, Converter={StaticResource LevelToGlyph}}" Style="{StaticResource IconText}" FontSize="12"
-                                               Foreground="{Binding Severity, Converter={StaticResource LevelToBrush}}" />
-                                    <TextBlock Text="{Binding DisplayText}" FontSize="12" Margin="8,0,0,0" TextWrapping="Wrap" />
+                                    <TextBlock Text="&#xE73E;" Style="{StaticResource IconText}" FontSize="10" Foreground="{StaticResource SuccessBrush}"
+                                               Visibility="{Binding HasIssues, Converter={StaticResource BoolToVisibility}, ConverterParameter=Invert}" />
+                                    <TextBlock Text="&#xEA39;" Style="{StaticResource IconText}" FontSize="10" Foreground="{StaticResource ErrorBrush}"
+                                               Visibility="{Binding HasErrors, Converter={StaticResource BoolToVisibility}}" />
+                                    <TextBlock Text="&#xE7BA;" Style="{StaticResource IconText}" FontSize="10" Foreground="{StaticResource WarningBrush}" Margin="3,0,0,0"
+                                               Visibility="{Binding WarningCount, Converter={StaticResource CountToVisibility}}" />
+                                    <TextBlock Text="{Binding ValidationSummary}" FontSize="11" Margin="5,0,0,0" Foreground="{StaticResource MutedTextBrush}" />
                                 </StackPanel>
-                            </DataTemplate>
-                        </ListBox.ItemTemplate>
-                    </ListBox>
+                            </Border>
+                        </ToggleButton>
+
+                        <!-- Latest activity line (or live progress while recording / playing) -->
+                        <Grid Grid.Column="2" Margin="12,0,8,0" VerticalAlignment="Center"
+                              DataContext="{Binding DataContext, RelativeSource={RelativeSource AncestorType=Window}}">
+                            <StackPanel Orientation="Horizontal" Visibility="{Binding Automation.IsIdle, Converter={StaticResource BoolToVisibility}}">
+                                <TextBlock Text="{Binding Logs.Entries[0].Level, Converter={StaticResource LevelToGlyph}, FallbackValue=''}" Style="{StaticResource IconText}"
+                                           FontSize="11" Foreground="{Binding Logs.Entries[0].Level, Converter={StaticResource LevelToBrush}, FallbackValue={StaticResource MutedTextBrush}}" />
+                                <TextBlock Text="{Binding Logs.Entries[0].Message, FallbackValue=''}" FontSize="11" Margin="6,0,0,0"
+                                           Foreground="{StaticResource MutedTextBrush}" TextTrimming="CharacterEllipsis" />
+                            </StackPanel>
+                            <TextBlock Text="{Binding Automation.ProgressText}" FontSize="11" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"
+                                       Visibility="{Binding Automation.IsIdle, Converter={StaticResource BoolToVisibility}, ConverterParameter=Invert}" />
+                        </Grid>
+
+                        <Button Grid.Column="3" Style="{StaticResource GhostButton}" Padding="8,3" FontSize="11" Content="Open full log"
+                                Command="{Binding DataContext.ShowLogsCommand, RelativeSource={RelativeSource AncestorType=Window}}" />
+                        <ToggleButton x:Name="DrawerToggle" Grid.Column="4" Style="{StaticResource GhostToggle}" IsChecked="False" Margin="2,0,0,0"
+                                      ToolTip="Show or hide the Activity log and the Problems list" AutomationProperties.Name="Expand or collapse the activity drawer">
+                            <TextBlock>
+                                <TextBlock.Style>
+                                    <Style TargetType="TextBlock">
+                                        <Setter Property="Text" Value="Expand ▴" />
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding IsChecked, ElementName=DrawerToggle}" Value="True">
+                                                <Setter Property="Text" Value="Collapse ▾" />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </TextBlock.Style>
+                            </TextBlock>
+                        </ToggleButton>
+                    </Grid>
+
+                    <!-- Progress line while playing -->
+                    <ProgressBar DockPanel.Dock="Top" Height="2" Margin="10,0,10,0" Minimum="0" Maximum="1"
+                                 DataContext="{Binding DataContext.Automation, RelativeSource={RelativeSource AncestorType=Window}}"
+                                 Value="{Binding ProgressValue, Mode=OneWay}" IsIndeterminate="{Binding IsProgressIndeterminate}"
+                                 Visibility="{Binding IsPlaying, Converter={StaticResource BoolToVisibility}}" />
+
+                    <!-- Expanded: Activity log | Problems, split with a GridSplitter -->
+                    <Grid Height="120" Margin="10,0,10,8" Visibility="{Binding IsChecked, ElementName=DrawerToggle, Converter={StaticResource BoolToVisibility}}">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="3*" MinWidth="160" />
+                            <ColumnDefinition Width="10" />
+                            <ColumnDefinition Width="2*" MinWidth="160" />
+                        </Grid.ColumnDefinitions>
+
+                        <DockPanel Grid.Column="0">
+                            <TextBlock DockPanel.Dock="Top" Text="ACTIVITY LOG" Style="{StaticResource SetupCardTitle}" FontSize="10" Margin="2,4,0,2" />
+                            <ListBox ItemsSource="{Binding DataContext.Logs.Entries, RelativeSource={RelativeSource AncestorType=Window}}"
+                                     ItemContainerStyle="{StaticResource PlainListItem}"
+                                     ScrollViewer.VerticalScrollBarVisibility="Auto" VirtualizingPanel.IsVirtualizing="True"
+                                     AutomationProperties.Name="Activity log">
+                                <ListBox.ItemTemplate>
+                                    <DataTemplate>
+                                        <StackPanel Orientation="Horizontal">
+                                            <TextBlock Text="{Binding Level, Converter={StaticResource LevelToGlyph}}" Style="{StaticResource IconText}"
+                                                       FontSize="11" Foreground="{Binding Level, Converter={StaticResource LevelToBrush}}" />
+                                            <TextBlock Text="{Binding TimeText}" Foreground="{StaticResource SubtleTextBrush}" Margin="8,0,10,0" FontSize="11" />
+                                            <TextBlock Text="{Binding Message}" FontSize="11" TextTrimming="CharacterEllipsis" />
+                                        </StackPanel>
+                                    </DataTemplate>
+                                </ListBox.ItemTemplate>
+                            </ListBox>
+                        </DockPanel>
+
+                        <GridSplitter Grid.Column="1" Style="{StaticResource PanelSplitter}" ResizeDirection="Columns" ResizeBehavior="PreviousAndNext"
+                                      ToolTip="Drag to resize" AutomationProperties.Name="Resize the Activity log and Problems lists" />
+
+                        <DockPanel Grid.Column="2">
+                            <TextBlock DockPanel.Dock="Top" Text="PROBLEMS" Style="{StaticResource SetupCardTitle}" FontSize="10" Margin="2,4,0,2" />
+                            <Grid>
+                                <TextBlock Text="No problems found. The macro can be saved and played." Style="{StaticResource MutedText}" FontSize="11" Margin="4,4,0,0"
+                                           Visibility="{Binding HasIssues, Converter={StaticResource BoolToVisibility}, ConverterParameter=Invert}" />
+                                <ListBox ItemsSource="{Binding Issues}" ItemContainerStyle="{StaticResource PlainListItem}"
+                                         ScrollViewer.VerticalScrollBarVisibility="Auto" AutomationProperties.Name="Problems"
+                                         Visibility="{Binding HasIssues, Converter={StaticResource BoolToVisibility}}">
+                                    <ListBox.ItemTemplate>
+                                        <DataTemplate DataType="{x:Type core:ValidationIssue}">
+                                            <StackPanel Orientation="Horizontal">
+                                                <TextBlock Text="{Binding Severity, Converter={StaticResource LevelToGlyph}}" Style="{StaticResource IconText}" FontSize="11"
+                                                           Foreground="{Binding Severity, Converter={StaticResource LevelToBrush}}" VerticalAlignment="Top" Margin="0,2,0,0" />
+                                                <TextBlock Text="{Binding DisplayText}" FontSize="11" Margin="8,0,0,0" TextWrapping="Wrap" />
+                                            </StackPanel>
+                                        </DataTemplate>
+                                    </ListBox.ItemTemplate>
+                                </ListBox>
+                            </Grid>
+                        </DockPanel>
+                    </Grid>
                 </DockPanel>
             </Border>
         </Grid>
