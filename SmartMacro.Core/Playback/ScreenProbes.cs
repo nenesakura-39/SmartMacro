@@ -7,11 +7,11 @@ namespace SmartMacro.Core.Playback;
 /// <summary>
 /// Result of one look at the screen. Found = the text / image / colour is there. X / Y is the spot to act on
 /// (screen pixels). FoundText describes the find for the log; MissText (starting with a space) explains a miss,
-/// e.g. what OCR read instead.
+/// e.g. what OCR read instead. Area is the screen rectangle that was searched (empty when it couldn't be searched).
 /// </summary>
-public readonly record struct ScreenProbe(bool Found, int X, int Y, string FoundText, string MissText)
+public readonly record struct ScreenProbe(bool Found, int X, int Y, string FoundText, string MissText, ScreenRect Area = default)
 {
-    public static ScreenProbe Miss(string missText) => new(false, 0, 0, string.Empty, missText);
+    public static ScreenProbe Miss(string missText, ScreenRect area = default) => new(false, 0, 0, string.Empty, missText, area);
 }
 
 /// <summary>
@@ -52,12 +52,31 @@ public sealed class ScreenProbes
     private readonly IOcrService? _ocr;
     private readonly IScreenCapture? _capture;
     private readonly IPlaybackClock _clock;
+    private readonly IScreenLayout? _layout;
 
-    public ScreenProbes(IOcrService? ocr, IScreenCapture? capture, IPlaybackClock? clock = null)
+    /// <param name="layout">Monitors and windows, for "where to look" = a monitor / an app window (null: main monitor = whole desktop).</param>
+    public ScreenProbes(IOcrService? ocr, IScreenCapture? capture, IPlaybackClock? clock = null, IScreenLayout? layout = null)
     {
         _ocr = ocr;
         _capture = capture;
         _clock = clock ?? new SystemPlaybackClock();
+        _layout = layout;
+    }
+
+    /// <summary>
+    /// The area to search right now (monitors / windows are looked up on every look, because a window can move), or null
+    /// with the reason when it can't be searched at the moment (the window isn't open, the monitor isn't connected).
+    /// </summary>
+    private (ScreenRect Area, string? Problem) ResolveArea(ScreenSearchStep step, ScreenRect virtualScreen)
+    {
+        try
+        {
+            return (SearchArea.Resolve(step, virtualScreen, _layout), null);
+        }
+        catch (SearchAreaUnavailableException ex)
+        {
+            return (default, " " + ex.Message);
+        }
     }
 
     /// <summary>
@@ -78,17 +97,18 @@ public sealed class ScreenProbes
         if (ocr is null || !ocr.IsAvailable)
             throw new OcrUnavailableException(ocr?.StatusText ?? "Text recognition (OCR) isn't available.");
 
-        var region = step.SearchFullScreen ? ocr.GetVirtualScreen() : step.Region;
         return new PreparedSearch($"\"{step.Text}\"", isTimed: false, async (_, t) =>
         {
+            var (region, problem) = ResolveArea(step, ocr.GetVirtualScreen());
+            if (problem is not null) return ScreenProbe.Miss(problem);
             var read = await ocr.ReadAsync(region, t).ConfigureAwait(false);
             var match = OcrTextMatcher.Find(read, step.Text, step.MatchMode, step.CaseSensitive, step.MinSimilarityPercent / 100.0,
                 step.NormalizeLookAlikes)
                 .FirstOrDefault();
             return match is null
-                ? ScreenProbe.Miss(DescribeLastRead(read.FullText))
+                ? ScreenProbe.Miss(DescribeLastRead(read.FullText), region)
                 : new ScreenProbe(true, match.Bounds.CenterX, match.Bounds.CenterY,
-                    $"Found \"{match.Text}\" at ({match.Bounds.CenterX}, {match.Bounds.CenterY}), {match.Similarity:P0} match.", string.Empty);
+                    $"Found \"{match.Text}\" at ({match.Bounds.CenterX}, {match.Bounds.CenterY}), {match.Similarity:P0} match.", string.Empty, region);
         });
     }
 
@@ -99,11 +119,12 @@ public sealed class ScreenProbes
             throw new InvalidOperationException($"The image of this step can't be used: {error}");
         var template = decoded!;
 
-        var region = step.SearchFullScreen ? capture.GetVirtualScreen() : step.Region;
         var options = new TemplateMatchOptions { MinScore = step.MinSimilarityPercent / 100.0, IgnoreColor = step.IgnoreColor, IgnoreEdgeFraction = step.IgnoreEdgesPercent / 100.0, MatchForeground = step.MatchForeground };
 
         return new PreparedSearch("The image", isTimed: true, async (timer, t) =>
         {
+            var (region, problem) = ResolveArea(step, capture.GetVirtualScreen());
+            if (problem is not null) return ScreenProbe.Miss(problem);
             var t0 = _clock.Elapsed;
             var frame = await capture.CaptureAsync(region, t).ConfigureAwait(false);
             var t1 = _clock.Elapsed;
@@ -111,7 +132,7 @@ public sealed class ScreenProbes
             timer?.Add(t1 - t0, _clock.Elapsed - t1);
 
             if (frame.Image.Width < template.Width || frame.Image.Height < template.Height)
-                return ScreenProbe.Miss(" The search area (on screen) is smaller than the image.");
+                return ScreenProbe.Miss(" The search area (on screen) is smaller than the image.", region);
 
             if (result.Best is not { } best)
             {
@@ -121,13 +142,13 @@ public sealed class ScreenProbes
                 if (result.BestScore >= 0.5 && !step.MatchForeground)
                     miss += " If you can see the game through the button (or the background around it changes), turn on \"Ignore background\""
                             + (step.IgnoreEdgesPercent == 0 ? $" or \"Ignore the edges\" ({FindImageStep.RecommendedIgnoreEdgesPercent} %)." : ".");
-                return ScreenProbe.Miss(miss);
+                return ScreenProbe.Miss(miss, region);
             }
 
             var bounds = frame.ToScreen(best.Bounds);
             var more = result.Matches.Count > 1 ? $" ({result.Matches.Count} matches; the best one is used)" : "";
             return new ScreenProbe(true, bounds.CenterX, bounds.CenterY,
-                $"Found the image at ({bounds.CenterX}, {bounds.CenterY}), {best.Score:P0} match{more}.", string.Empty);
+                $"Found the image at ({bounds.CenterX}, {bounds.CenterY}), {best.Score:P0} match{more}.", string.Empty, region);
         });
     }
 
@@ -137,10 +158,10 @@ public sealed class ScreenProbes
         if (!RgbColor.TryParse(step.Color, out var color))
             throw new InvalidOperationException($"\"{step.Color}\" is not a valid color. Use #RRGGBB.");
 
-        var region = step.SearchFullScreen ? capture.GetVirtualScreen() : step.Region;
-
         return new PreparedSearch($"Color {color}", isTimed: true, async (timer, t) =>
         {
+            var (region, problem) = ResolveArea(step, capture.GetVirtualScreen());
+            if (problem is not null) return ScreenProbe.Miss(problem);
             var t0 = _clock.Elapsed;
             var frame = await capture.CaptureAsync(region, t).ConfigureAwait(false);
             var t1 = _clock.Elapsed;
@@ -151,13 +172,13 @@ public sealed class ScreenProbes
             {
                 return ScreenProbe.Miss(result.MatchingPixels > 0
                     ? $" {result.MatchingPixels:N0} pixel(s) of that color were found, but no patch had at least {step.MinPixels} pixels."
-                    : " No pixels of that color were found in the search area.");
+                    : " No pixels of that color were found in the search area.", region);
             }
 
             var x = frame.Bounds.X + (int)Math.Round(blob.CenterX);
             var y = frame.Bounds.Y + (int)Math.Round(blob.CenterY);
             var more = result.Blobs.Count > 1 ? $", {result.Blobs.Count} patches; the biggest is used" : "";
-            return new ScreenProbe(true, x, y, $"Found color {color} at ({x}, {y}): {blob.PixelCount:N0} pixels{more}.", string.Empty);
+            return new ScreenProbe(true, x, y, $"Found color {color} at ({x}, {y}): {blob.PixelCount:N0} pixels{more}.", string.Empty, region);
         });
     }
 

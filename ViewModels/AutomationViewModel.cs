@@ -74,6 +74,7 @@ public sealed class AutomationViewModel : ObservableObject, IDisposable
     private volatile PlaybackProgress? _latestProgress;
     private DateTime _runStartedUtc;
     private RecordingMode _recordingMode = RecordingMode.Smart;
+    private Guid? _runningStepId;
 
     public AutomationViewModel(
         PlaybackEngine engine,
@@ -114,6 +115,12 @@ public sealed class AutomationViewModel : ObservableObject, IDisposable
         PauseResumeCommand = new RelayCommand(TogglePause, () => Mode is AutomationMode.Playing or AutomationMode.Paused);
         StopCommand = new RelayCommand(StopPlayback, () => Mode is AutomationMode.Playing or AutomationMode.Paused);
     }
+
+    /// <summary>
+    /// Raised on the UI thread when playback moves to another step (its ID), and with null when playback ends, so the
+    /// editor can highlight the running step.
+    /// </summary>
+    public event EventHandler<Guid?>? RunningStepChanged;
 
     public AsyncRelayCommand RecordCommand { get; }
     public AsyncRelayCommand StopRecordingCommand { get; }
@@ -536,6 +543,7 @@ public sealed class AutomationViewModel : ObservableObject, IDisposable
             _progressTimer.Stop();
             _emergency.Stop();
             _host.Exit();
+            SetRunningStep(null);
             Mode = AutomationMode.Idle;
             ProgressValue = 0;
             ProgressText = string.Empty;
@@ -648,16 +656,35 @@ public sealed class AutomationViewModel : ObservableObject, IDisposable
             ProgressValue = p.TotalIterations is int t && t > 0
                 ? ((p.Iteration - 1) + (double)p.StepNumber / p.StepCount) / t
                 : (double)p.StepNumber / p.StepCount;
+            SetRunningStep(p.Step.Id);
         }
 
         _host.Update(Mode == AutomationMode.Paused ? OverlayKind.Paused : OverlayKind.Playing, OverlayText());
     }
 
+    private void SetRunningStep(Guid? id)
+    {
+        if (_runningStepId == id) return;
+        _runningStepId = id;
+        RunningStepChanged?.Invoke(this, id);
+    }
+
+    /// <summary>
+    /// The floating status pill's text, e.g. "SmartMacro: Step 2/5 — Finding image \"SHAKE\" on the main monitor… (Esc to stop)".
+    /// </summary>
     private string OverlayText()
     {
-        var state = Mode == AutomationMode.Paused ? "Paused" : "Playing";
-        var progress = string.IsNullOrEmpty(ProgressText) ? "" : $"  ·  {ProgressText}";
-        return $"{state} \"{_runningMacroName}\"{progress}   —   Esc to stop";
+        if (_latestProgress is not { } p || p.StepCount == 0)
+            return Mode == AutomationMode.Paused
+                ? $"SmartMacro: Paused \"{_runningMacroName}\" ({PauseShortcut} to resume, Esc to stop)"
+                : $"SmartMacro: Starting \"{_runningMacroName}\"… (Esc to stop)";
+
+        var where = $"Step {p.StepNumber}/{p.StepCount}";
+        if (Mode == AutomationMode.Paused)
+            return $"SmartMacro: Paused at {where} ({PauseShortcut} to resume, Esc to stop)";
+
+        var loop = p.LoopText is null ? "" : $" · {p.LoopText}";
+        return $"SmartMacro: {where} — {StepDescriber.Activity(p.Step)}…{loop} (Esc to stop)";
     }
 
     private static string DescribeRepeat(int repeatCount, double speed)

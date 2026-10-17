@@ -69,6 +69,53 @@ public enum KeyModifiers
 }
 
 /// <summary>
+/// How the cursor travels to a step's target spot.
+/// Null on a step (files made before this option, and recordings) = <see cref="Instant"/>, the old behaviour.
+/// </summary>
+public enum MouseMoveStyle
+{
+    /// <summary>Jump straight there (the old behaviour). Clicks still get a tiny hover nudge before the press.</summary>
+    Instant,
+
+    /// <summary>Glide in a straight line, about 120 cursor updates per second, with a gentle start and stop.</summary>
+    SmoothGlide,
+
+    /// <summary>
+    /// Glide along a slight curve with an ease-in / ease-out speed, like a hand moving a mouse. Every point along
+    /// the way is a real mouse-move event, so sliders, scroll bars and game buttons see the cursor arrive.
+    /// </summary>
+    HumanCurve,
+}
+
+/// <summary>Defaults shared by every step that moves the cursor or clicks for you.</summary>
+public static class MouseMotionDefaults
+{
+    /// <summary>Default glide time for new Move / Click / Find steps.</summary>
+    public const int MoveDurationMs = 120;
+
+    /// <summary>
+    /// Default "click hold": how long a click keeps the button down. Games read input once per frame; 35 ms spans two
+    /// frames at 60 fps, so the press is never missed.
+    /// </summary>
+    public const int ClickHoldMs = 35;
+
+    /// <summary>Default gap between the two clicks of a double-click (0 ms was too fast for Roblox).</summary>
+    public const int DoubleClickIntervalMs = 65;
+
+    /// <summary>Default "wait after click", so the clicked window / game UI can react before the next step looks.</summary>
+    public const int PostActionDelayMs = 120;
+
+    /// <summary>Longest allowed glide.</summary>
+    public const int MaxMoveDurationMs = 5_000;
+
+    /// <summary>Longest allowed double-click gap.</summary>
+    public const int MaxDoubleClickIntervalMs = 5_000;
+
+    /// <summary>Longest allowed "wait after click".</summary>
+    public const int MaxPostActionDelayMs = 60_000;
+}
+
+/// <summary>
 /// Base class for a single workflow step.
 /// The "type" discriminator only maps to the sealed classes listed below, so a macro file
 /// can never make the app create some other arbitrary .NET type. Files describe actions, not code.
@@ -120,6 +167,13 @@ public sealed class MouseMoveStep : MacroStep
     public int X { get; set; }
     public int Y { get; set; }
 
+    /// <summary>How the cursor gets there. Null (older files, recordings) = jump straight there.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public MouseMoveStyle? MoveStyle { get; set; }
+
+    /// <summary>How long the glide takes, in ms (only for Smooth glide / Human curve).</summary>
+    public int MoveDurationMs { get; set; } = MouseMotionDefaults.MoveDurationMs;
+
     [JsonIgnore]
     public override StepKind Kind => StepKind.MouseMove;
 }
@@ -154,6 +208,35 @@ public sealed class MouseClickStep : MacroStep
 
     /// <summary>Default hold time when the user switches a click to "Hold for a duration".</summary>
     public const int DefaultHoldActionMs = 850;
+
+    /// <summary>How the cursor gets to the click spot. Null (older files, recordings) = jump straight there.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public MouseMoveStyle? MoveStyle { get; set; }
+
+    /// <summary>How long the glide to the click spot takes, in ms (only for Smooth glide / Human curve).</summary>
+    public int MoveDurationMs { get; set; } = MouseMotionDefaults.MoveDurationMs;
+
+    /// <summary>
+    /// "Click hold duration" — the same setting as <see cref="HoldMs"/> (one stored value), under the name the other
+    /// clicking steps use. New Mouse click steps start at 35 ms; 0 = instant (older files, unless recorded).
+    /// </summary>
+    [JsonIgnore]
+    public int ClickHoldMs
+    {
+        get => HoldMs;
+        set => HoldMs = value;
+    }
+
+    /// <summary>
+    /// Double click only: pause between the two clicks, in ms. 0 = back to back (older files). New steps: 65 ms.
+    /// </summary>
+    public int DoubleClickIntervalMs { get; set; }
+
+    /// <summary>
+    /// "Wait after click", in ms, after a Click / Double click / Hold (lets the app react before the next step).
+    /// 0 = no extra wait (older files and recordings, whose timing is in their Delay steps). New steps: 120 ms.
+    /// </summary>
+    public int PostActionDelayMs { get; set; }
 
     [JsonIgnore]
     public override StepKind Kind => StepKind.MouseClick;
@@ -262,8 +345,69 @@ public enum WaitGoal
 /// </summary>
 public abstract class ScreenSearchStep : MacroStep
 {
-    /// <summary>Search the whole (virtual) screen instead of a specific area.</summary>
-    public bool SearchFullScreen { get; set; } = true;
+    private bool _searchFullScreen = true;
+    private Vision.SearchScope? _scope;
+
+    /// <summary>
+    /// The original "Search the whole screen (all monitors)" switch. Still written to files (older SmartMacro builds
+    /// read it): true for every scope except <see cref="Vision.SearchScope.CustomArea"/>. Older files only have this, so
+    /// true = all monitors and false = the custom area (see <see cref="EffectiveScope"/>).
+    /// </summary>
+    public bool SearchFullScreen
+    {
+        get => _searchFullScreen;
+        set
+        {
+            _searchFullScreen = value;
+            // Turning "whole screen" off always means "my own area"; turning it on doesn't change a chosen
+            // monitor / window (files store both, and they always agree).
+            if (!value && _scope is not null) _scope = Vision.SearchScope.CustomArea;
+            else if (value && _scope == Vision.SearchScope.CustomArea) _scope = Vision.SearchScope.AllMonitors;
+        }
+    }
+
+    /// <summary>
+    /// "Where to look": main monitor, a specific monitor, an app window, a custom area or all monitors.
+    /// Null in files made before this option (then <see cref="SearchFullScreen"/> decides). New steps use the main monitor.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public Vision.SearchScope? Scope
+    {
+        get => _scope;
+        set
+        {
+            _scope = value;
+            if (value is { } scope) _searchFullScreen = scope != Vision.SearchScope.CustomArea;
+        }
+    }
+
+    /// <summary>The scope that is actually used (old files: whole screen → all monitors, otherwise the custom area).</summary>
+    [JsonIgnore]
+    public Vision.SearchScope EffectiveScope =>
+        _scope ?? (_searchFullScreen ? Vision.SearchScope.AllMonitors : Vision.SearchScope.CustomArea);
+
+    /// <summary>"Specific monitor": which one (1 = the main monitor, then left to right).</summary>
+    public int MonitorNumber { get; set; } = 1;
+
+    /// <summary>"Specific app window": (part of) the window title, e.g. "Roblox". Matched ignoring case.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? WindowTitle { get; set; }
+
+    /// <summary>How the cursor gets to what was found. Null (older files) = jump straight there.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public MouseMoveStyle? MoveStyle { get; set; }
+
+    /// <summary>How long the glide to what was found takes, in ms.</summary>
+    public int MoveDurationMs { get; set; } = MouseMotionDefaults.MoveDurationMs;
+
+    /// <summary>How long a "when found" click keeps the button down, in ms.</summary>
+    public int ClickHoldMs { get; set; } = MouseMotionDefaults.ClickHoldMs;
+
+    /// <summary>Gap between the two clicks of a "when found" double-click, in ms.</summary>
+    public int DoubleClickIntervalMs { get; set; } = MouseMotionDefaults.DoubleClickIntervalMs;
+
+    /// <summary>"Wait after click": pause after a click / hold on what was found, in ms.</summary>
+    public int PostActionDelayMs { get; set; } = MouseMotionDefaults.PostActionDelayMs;
 
     public int RegionX { get; set; }
     public int RegionY { get; set; }
@@ -299,7 +443,7 @@ public abstract class ScreenSearchStep : MacroStep
 
     public TextNotFoundBehavior WhenNotFound { get; set; } = TextNotFoundBehavior.StopMacro;
 
-    /// <summary>The search area as a rectangle (ignored when <see cref="SearchFullScreen"/> is on).</summary>
+    /// <summary>The custom search area as a rectangle (only used with <see cref="Vision.SearchScope.CustomArea"/>).</summary>
     [JsonIgnore]
     public Ocr.ScreenRect Region => new(RegionX, RegionY, RegionWidth, RegionHeight);
 }

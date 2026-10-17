@@ -1,7 +1,9 @@
 # SmartMacro – Project Status / Handoff
 
-_Last updated: 2026-10-17 (Live-test fix batch for 7 bugs found while testing `b408b36`: written WITHOUT a .NET SDK,
-NOT built or tested yet. Before it: QoL batch (owner live-tested it as `b408b36`); 8-bug fix batch built, 616/616 tests passed).
+_Last updated: 2026-10-17 (Next-gen QoL batch – "where to look" monitors / windows, smooth mouse glide, click timing,
+freeze-screen picker, beginner Properties cards, feedback-loop wizard, live step highlight + status pill, Quick patterns:
+written WITHOUT a .NET SDK, NOT built or tested yet. Before it: live-test fix batch (owner build 670/671, one test updated,
+re-run pending); QoL batch; 8-bug fix batch 616/616.
 Earlier: Stages 1–3 built, tested, manually tested by the owner. Stage 4 and Editor UX: 573/573, manual tests not done. Not released.
 Developer: Riku (リク) · Brand: KuroLogic_
 
@@ -14,6 +16,69 @@ Developer: Riku (リク) · Brand: KuroLogic_
 | Release documents (EULA, LICENSE, notices, README) | – | – | drafts; `release-docs/` not committed yet |
 | Release package | `publish\SmartMacro-1.0.0-win-x64\SmartMacro.exe` is an OLD build (made right after `159d6b3`, before Stage 1) | – | ignored by git |
 
+
+
+## Next-gen QoL batch (2026-10-17) – 7 upgrades; written WITHOUT a .NET SDK: **NOT built, NOT tested**
+The AI's environment had no .NET SDK and no NuGet / package access, so nothing was compiled. XAML files were checked for
+well-formed XML and every `StaticResource` key / step-editor binding path was checked by script against the C# sources.
+Next step for the owner: `tools\verify.cmd` (expect a few compile fixes), send the logs, then `docs/NEXTGEN_QOL_MANUAL_TESTS.md`.
+1. **"Where to look"** (`Core/Vision/ScreenLayout.cs`: `SearchScope` AllMonitors / PrimaryMonitor / Monitor / Window /
+   CustomArea, `MonitorInfo`, `WindowInfo`, `IScreenLayout`, `SearchArea.Resolve / FindWindow / NumberMonitors / Describe`):
+   - `ScreenSearchStep.Scope` (null in old files → `EffectiveScope` = AllMonitors when `SearchFullScreen`, else CustomArea),
+     `MonitorNumber` (1 = main, then left→right, top→bottom), `WindowTitle` (exact title wins, else "contains", minimized
+     only as last resort; DWM extended frame bounds, clipped to the desktop). `SearchFullScreen` is still written and kept
+     in sync (true for every scope except CustomArea) so older builds read files sensibly.
+   - `ScreenProbes` resolves the area on EVERY look (windows move); an unavailable monitor / window is a miss with a plain
+     message ("The window "Roblox" isn't open."), so the step keeps waiting until its timeout. Without a layout the main
+     monitor = whole desktop (tests / fallback). Engine ctor got optional `IScreenLayout layout` (5th parameter).
+   - App: `Services/ScreenInfoProvider` implements `IScreenLayout` (EnumDisplayMonitors + MONITORINFOEX primary flag,
+     EnumWindows: visible, titled, not cloaked / tool / owned, not SmartMacro's own process; physical-pixel scope).
+     One instance is shared by the engine, editor, VisionTools and FindTextTools ("Test detection now" uses the scope).
+   - New toolbox steps and new conditions (`MacroFactory.NewCondition`) use **Main Monitor**; `new FindImageStep()` in code
+     keeps the old whole-screen default. Validator: unknown scope, monitor 1–16, window title required (≤ 260). Colour
+     warning now for "whole monitor or more". Move-away after click: custom area / window → outside its bottom-right
+     corner; monitors → 150 px below the match.
+2. **Mouse movement + click timing**: `MouseMoveStyle` (Instant / SmoothGlide / HumanCurve) + `MoveDurationMs` (120) on
+   Move mouse, Mouse click and Find steps (null = Instant = old behaviour; recordings stay instant). Planner
+   `Core/Playback/MouseMotion.Plan` (8 ms ticks; glide = straight line + smoothstep; curve = cubic Bézier bending ≤ 12 % /
+   60 px, smootherstep, deterministic side; last point exactly on target). Engine `MoveCursorAsync`: Move / Click steps
+   glide on the timeline (÷ Speed), Find "when found" / move-away glide in real time; unknown start → jump. The old
+   Settings "smooth mouse" pre-glide skips steps that have their own style. Click timing: Find steps `ClickHoldMs` 35,
+   `DoubleClickIntervalMs` 65, `PostActionDelayMs` 120 (same as the old fixed constants, which now point at
+   `MouseMotionDefaults`); Mouse click: `HoldMs` (= `ClickHoldMs` alias), `DoubleClickIntervalMs`, `PostActionDelayMs`
+   (0 in old files / recordings; new steps 35 / 65 / 120). Timed double click when hold or gap > 0. "Instant" still gets
+   the existing Win32 hover nudge before a press.
+3. **Freeze-screen picker** (`Services/Ocr/RegionPicker.cs`, moved out of FindTextTools.cs; `Services/Vision/ScreenFreezeOptions`):
+   every Pick area / Capture image / Pick color / Pick position / feedback pick takes one GDI screenshot of the desktop and
+   shows it per monitor (banner "Screen Frozen — … [Space] … [Esc]"), optional 3 / 5 s countdown (click-through,
+   capture-excluded banner; Esc cancels), Space = hide + (countdown) + new frame, 8× magnifier (15×15 px, grid, centre
+   box, `#RRGGBB RGB(…)`, X / Y). Capture image / Pick color take their pixels from the frozen frame (`PickerResult`).
+   "Freeze:" drop-down next to the pick buttons (one shared setting, not saved).
+4. **Properties panel**: Find text / image / color = summary banner (`StepDescriber.Explain`) + cards 1. What to find /
+   2. Where to look / 3. What to do when found / 4. Search timing + collapsed `AdvancedExpander` "Advanced Tuning &
+   Movement" (accuracy, edge / see-through options, movement style, glide, click hold, wait after click, double-click
+   gap, move away, offsets). Mouse move / click got movement + timing fields. Tooltips on labels and controls. New styles
+   in `Themes/Controls.xaml`: `SetupCard`, `SetupCardTitle`, `SummaryBanner`, `AdvancedExpander`.
+5. **Feedback loop wizard**: Step 1 preset cards (`MinigameCard` / `MinigameKind`: Horizontal Bar Follower, Vertical Bar
+   Follower, Timing / Skill Check, Custom) → Step 2 bar area → Step 3 target colour + tolerance slider → Step 4 your bar /
+   zone colour + slider; rule preview card (`StepDescriber.ExplainFeedbackRules`). Old preset drop-down replaced.
+6. **Live highlight + status pill**: `AutomationViewModel.RunningStepChanged` → `EditorViewModel.SetRunningStep` →
+   `StepViewModel.IsRunning` (green "▶ Running" badge + left border, list scrolls to it; matched by step ID so it works on
+   the played copy). Pill = the existing click-through `RunOverlayWindow`, now compact in the top-right corner with
+   `SmartMacro: Step 2/5 — Finding image "SHAKE" on the main monitor… (Esc to stop)` (`StepDescriber.Activity`, a
+   step's comment is its name). Toolbar toggles "Show mini status overlay while playing" / "Minimize main window while
+   playing" save straight to settings (`SettingsViewModel.QuickSetAsync`).
+7. **Quick patterns** (`Core/Workflow/QuickPatterns.cs`, toolbox section, `EditorViewModel.AddPatternCommand`):
+   Auto-Click Dynamic Button Loop (Repeat While image, 800 ms grace, 60 s limit → Find image click + glide + 120 ms wait +
+   move away → End Repeat), Fishing Cast + Shake + Reel (Hold 800 ms → Delay 1 s → Shake loop → Feedback loop horizontal
+   follower), Shop / Menu Click & Buy (Find image click → scroll 3 notches → Mouse click). Comments say what to capture.
+- Files: `MacroDocument.CurrentSchemaVersion = 10`, written only for main monitor / monitor / window scopes, a glide
+  style, or click timing that differs from the old values. Old files load unchanged.
+- Tests: `SmartMacro.Tests/QolTests.cs` new classes `SearchScopeTests`, `MouseMotionTests`, `ClickTimingTests`,
+  `QuickPatternTests`, `PlainEnglishTests` (+ `FakeLayout`). Updated on purpose: `LiveTestFixTests` format test
+  (`CurrentSchemaVersion >= 9`). Hold-time validator warning no longer fires for Double click or the 35 ms default.
+- Not verified: anything on Windows (monitor / window enumeration, DWM bounds, frozen overlay on mixed DPI, magnifier
+  speed, countdown focus behaviour in Roblox, glide feel), and the XAML at runtime.
 
 ## Live-test fix batch (2026-10-17) – 7 bugs from the owner's live test of `b408b36`; written WITHOUT a .NET SDK: **NOT built, NOT tested**
 The AI's environment had no .NET SDK (and no package / NuGet access), so nothing was compiled. Next step for the owner:
@@ -600,6 +665,8 @@ no .NET SDK in the AI's environment)
   csproj Company/Authors "Riku", Copyright "© 2026 Riku", README "© 2026 Riku") – change awaits owner approval.
 
 ## Next task
+- Owner: `tools\verify.cmd` for the next-gen QoL batch (never compiled; expect a few compile fixes – send
+  `artifacts\build.log` / `artifacts\test.log`), then `docs/NEXTGEN_QOL_MANUAL_TESTS.md`.
 - Owner: `tools\verify.cmd` for the live-test fix batch (never compiled; expect a few compile fixes), then
   `docs/LIVE_TEST_FIXES_MANUAL_TESTS.md` (send the 📏 SHAKE confidence numbers over wood / water).
 - Owner: run `tools\verify.cmd` for the QoL batch (never compiled yet; expect a few compile fixes), then

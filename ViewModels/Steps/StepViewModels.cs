@@ -57,6 +57,7 @@ public abstract class StepViewModel : ObservableObject
     private string? _issueText;
     private bool _hasError;
     private bool _hasWarning;
+    private bool _isRunning;
 
     protected StepViewModel(MacroStep model)
     {
@@ -78,6 +79,19 @@ public abstract class StepViewModel : ObservableObject
     public string Glyph => TypeInfo.Glyph;
 
     public string Summary => StepDescriber.Describe(Model);
+
+    /// <summary>
+    /// The plain-English banner at the top of the step's properties ("Searches Main Monitor every 250 ms…"), or null
+    /// for steps that don't need one. Refreshed whenever the step changes.
+    /// </summary>
+    public virtual string? PlainSummary => null;
+
+    /// <summary>True while playback is running this step (the list shows a "▶ Running" badge and scrolls to it).</summary>
+    public bool IsRunning
+    {
+        get => _isRunning;
+        set => SetProperty(ref _isRunning, value);
+    }
 
     /// <summary>1-based position shown in the list.</summary>
     public int Number
@@ -165,8 +179,17 @@ public abstract class StepViewModel : ObservableObject
     {
         OnPropertyChanged(propertyName);
         OnPropertyChanged(nameof(Summary));
+        OnPropertyChanged(nameof(PlainSummary));
         Modified?.Invoke(this, EventArgs.Empty);
     }
+
+    /// <summary>"Movement style" choices shared by Move mouse, Mouse click and the Find steps.</summary>
+    public static IReadOnlyList<Choice<MouseMoveStyle>> MoveStyles { get; } = new[]
+    {
+        new Choice<MouseMoveStyle>(MouseMoveStyle.SmoothGlide, "Smooth Glide (straight line, recommended)"),
+        new Choice<MouseMoveStyle>(MouseMoveStyle.HumanCurve, "Human Curve (natural arc, eases in and out)"),
+        new Choice<MouseMoveStyle>(MouseMoveStyle.Instant, "Instant (jump straight there)"),
+    };
 
     public static StepViewModel Create(MacroStep step) => step switch
     {
@@ -250,6 +273,32 @@ public sealed class MouseMoveStepViewModel : StepViewModel
         get => _step.Y;
         set { if (_step.Y == value) return; _step.Y = value; NotifyChanged(); }
     }
+
+    /// <summary>How the cursor travels there (older steps: Instant).</summary>
+    public MouseMoveStyle MoveStyle
+    {
+        get => _step.MoveStyle ?? MouseMoveStyle.Instant;
+        set
+        {
+            if (_step.MoveStyle == value) return;
+            _step.MoveStyle = value;
+            NotifyChanged();
+            OnPropertyChanged(nameof(Glides));
+            OnPropertyChanged(nameof(MoveHelp));
+        }
+    }
+
+    public bool Glides => MoveStyle != MouseMoveStyle.Instant;
+
+    public int MoveDurationMs
+    {
+        get => _step.MoveDurationMs;
+        set { if (_step.MoveDurationMs == value) return; _step.MoveDurationMs = value; NotifyChanged(); }
+    }
+
+    public string MoveHelp => Glides
+        ? "The cursor glides to this spot (about 120 updates per second), so hover effects, sliders and game buttons see it arrive. Nothing is clicked."
+        : "The cursor jumps straight to this spot and nothing is clicked. Add a Mouse click step to click, or use Mouse click on its own: it can move and click in one step.";
 }
 
 public sealed class MouseClickStepViewModel : StepViewModel
@@ -342,6 +391,8 @@ public sealed class MouseClickStepViewModel : StepViewModel
             OnPropertyChanged(nameof(IsClick));
             OnPropertyChanged(nameof(UsesHoldTime));
             OnPropertyChanged(nameof(IsDrag));
+            OnPropertyChanged(nameof(IsDoubleClick));
+            OnPropertyChanged(nameof(UsesClickTiming));
             OnPropertyChanged(nameof(HoldMs));
             OnPropertyChanged(nameof(ActionHelp));
         }
@@ -349,8 +400,8 @@ public sealed class MouseClickStepViewModel : StepViewModel
 
     public bool IsClick => _step.Action == MouseClickAction.Click;
 
-    /// <summary>The hold-time box is used by Single click (recorded hold) and Hold.</summary>
-    public bool UsesHoldTime => _step.Action is MouseClickAction.Click or MouseClickAction.Hold;
+    /// <summary>The hold-time box is used by Single click (recorded hold), Double click (each click) and Hold.</summary>
+    public bool UsesHoldTime => _step.Action is MouseClickAction.Click or MouseClickAction.DoubleClick or MouseClickAction.Hold;
 
     public bool IsDrag => _step.Action == MouseClickAction.Drag;
 
@@ -367,8 +418,8 @@ public sealed class MouseClickStepViewModel : StepViewModel
         MouseClickAction.Drag => "Presses the button at the start position, glides smoothly to the end position over the drag time while holding it, then releases. Good for sliders and dragging items.",
         MouseClickAction.Down => "Only presses the button. Add a \"Release only\" step later to let go (everything held is released when the macro ends).",
         MouseClickAction.Up => "Only releases the button (pressed by an earlier \"Press down only\" step).",
-        MouseClickAction.DoubleClick => "Two quick clicks.",
-        _ => "One click. A hold time above 0 keeps the button down that long (recordings fill it in).",
+        MouseClickAction.DoubleClick => "Two quick clicks, each held for the click hold time, with the double-click gap in between.",
+        _ => "One click. The click hold keeps the button down that long (35 ms is reliable in games; recordings fill in the real time).",
     };
 
     public bool UseCurrentPosition
@@ -410,6 +461,46 @@ public sealed class MouseClickStepViewModel : StepViewModel
         get => _step.HoldMs;
         set { if (_step.HoldMs == value) return; _step.HoldMs = value; NotifyChanged(); }
     }
+
+    /// <summary>How the cursor travels to the click spot (older steps: Instant).</summary>
+    public MouseMoveStyle MoveStyle
+    {
+        get => _step.MoveStyle ?? MouseMoveStyle.Instant;
+        set
+        {
+            if (_step.MoveStyle == value) return;
+            _step.MoveStyle = value;
+            NotifyChanged();
+            OnPropertyChanged(nameof(Glides));
+        }
+    }
+
+    public bool Glides => MoveStyle != MouseMoveStyle.Instant;
+
+    public int MoveDurationMs
+    {
+        get => _step.MoveDurationMs;
+        set { if (_step.MoveDurationMs == value) return; _step.MoveDurationMs = value; NotifyChanged(); }
+    }
+
+    /// <summary>Double click: gap between the two clicks.</summary>
+    public int DoubleClickIntervalMs
+    {
+        get => _step.DoubleClickIntervalMs;
+        set { if (_step.DoubleClickIntervalMs == value) return; _step.DoubleClickIntervalMs = value; NotifyChanged(); }
+    }
+
+    public bool IsDoubleClick => _step.Action == MouseClickAction.DoubleClick;
+
+    /// <summary>"Wait after click (ms)".</summary>
+    public int PostActionDelayMs
+    {
+        get => _step.PostActionDelayMs;
+        set { if (_step.PostActionDelayMs == value) return; _step.PostActionDelayMs = value; NotifyChanged(); }
+    }
+
+    /// <summary>Hold time also applies to a timed double click.</summary>
+    public bool UsesClickTiming => _step.Action is MouseClickAction.Click or MouseClickAction.DoubleClick or MouseClickAction.Hold;
 
     public int X
     {
@@ -753,6 +844,7 @@ public abstract class ScreenSearchStepViewModel : StepViewModel
     private bool _isBusy;
     private ScreenPoint? _testMatch;
     private bool? _testFound;
+    private IScreenLayout? _layout;
 
     protected ScreenSearchStepViewModel(ScreenSearchStep step) : base(step)
     {
@@ -762,7 +854,199 @@ public abstract class ScreenSearchStepViewModel : StepViewModel
         {
             if (_testMatch is { } spot) ShowSpot(spot);
         }, () => _testMatch is not null && !_isBusy);
+        RefreshMonitorsCommand = new RelayCommand(RefreshMonitors);
+        RefreshWindowsCommand = new RelayCommand(RefreshWindows);
+        RefreshMonitors();
     }
+
+    // ---------------- "Where to look" ----------------
+
+    /// <summary>The "Where to look" choices. New steps start on the main monitor.</summary>
+    public static IReadOnlyList<Choice<SearchScope>> Scopes { get; } = new[]
+    {
+        new Choice<SearchScope>(SearchScope.PrimaryMonitor, "Main Monitor (Primary Screen)"),
+        new Choice<SearchScope>(SearchScope.Monitor, "Specific Monitor…"),
+        new Choice<SearchScope>(SearchScope.Window, "Specific App Window…"),
+        new Choice<SearchScope>(SearchScope.CustomArea, "Custom Area on Screen"),
+        new Choice<SearchScope>(SearchScope.AllMonitors, "All Monitors (Entire Desktop)"),
+    };
+
+    /// <summary>Monitors and windows from the editor (set right after creation), for the monitor / window lists.</summary>
+    public IScreenLayout? Layout
+    {
+        get => _layout;
+        set
+        {
+            _layout = value;
+            RefreshMonitors();
+            if (EffectiveScopeIsWindow) RefreshWindows();
+        }
+    }
+
+    public RelayCommand RefreshMonitorsCommand { get; }
+    public RelayCommand RefreshWindowsCommand { get; }
+
+    /// <summary>"Monitor 1 — Primary (1920×1080)", "Monitor 2 (1920×1080)", …</summary>
+    public System.Collections.ObjectModel.ObservableCollection<Choice<int>> Monitors { get; } = new();
+
+    /// <summary>Titles of the app windows open right now (front to back).</summary>
+    public System.Collections.ObjectModel.ObservableCollection<string> WindowTitles { get; } = new();
+
+    public SearchScope Scope
+    {
+        get => _search.EffectiveScope;
+        set
+        {
+            if (_search.Scope == value) return;
+            _search.Scope = value;
+            if (value == SearchScope.Monitor) RefreshMonitors();
+            if (value == SearchScope.Window) RefreshWindows();
+            NotifyChanged();
+            OnPropertyChanged(nameof(SearchFullScreen));
+            NotifyScopeChanged();
+        }
+    }
+
+    private bool EffectiveScopeIsWindow => _search.EffectiveScope == SearchScope.Window;
+
+    public bool UsesMonitor => _search.EffectiveScope == SearchScope.Monitor;
+
+    public bool UsesWindow => _search.EffectiveScope == SearchScope.Window;
+
+    public int MonitorNumber
+    {
+        get => _search.MonitorNumber;
+        set { if (_search.MonitorNumber == value || value < 1) return; _search.MonitorNumber = value; NotifyChanged(); OnPropertyChanged(nameof(ScopeHelp)); }
+    }
+
+    /// <summary>The window to search in: (part of) its title.</summary>
+    public string WindowTitle
+    {
+        get => _search.WindowTitle ?? string.Empty;
+        set
+        {
+            var normalized = string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+            if (_search.WindowTitle == normalized) return;
+            _search.WindowTitle = normalized;
+            NotifyChanged();
+            OnPropertyChanged(nameof(SelectedWindowTitle));
+            OnPropertyChanged(nameof(ScopeHelp));
+        }
+    }
+
+    /// <summary>The drop-down of open windows: choosing one fills in <see cref="WindowTitle"/>.</summary>
+    public string? SelectedWindowTitle
+    {
+        get => WindowTitles.FirstOrDefault(t => string.Equals(t, _search.WindowTitle, StringComparison.OrdinalIgnoreCase));
+        set
+        {
+            if (!string.IsNullOrWhiteSpace(value)) WindowTitle = value;
+        }
+    }
+
+    public string ScopeHelp => _search.EffectiveScope switch
+    {
+        SearchScope.PrimaryMonitor => "Only your main monitor is searched. Faster than all monitors, and it can't match something on a second screen by mistake.",
+        SearchScope.Monitor => "Only the chosen monitor is searched. Click \"Refresh monitors\" after plugging a monitor in or out.",
+        SearchScope.Window => string.IsNullOrWhiteSpace(_search.WindowTitle)
+            ? "Choose an open window (e.g. Roblox). Only the inside of that window is searched, wherever it is on screen when the step runs."
+            : $"Searches inside the window whose title contains \"{_search.WindowTitle}\", wherever it is when the step runs. If it isn't open, the step keeps checking until its time is up.",
+        SearchScope.CustomArea => "Only the area below is searched. The smaller the area, the faster the search and the fewer wrong matches.",
+        _ => "Every monitor is searched. Slowest, and it can match things on other screens (chat apps, browsers) by mistake.",
+    };
+
+    private void NotifyScopeChanged()
+    {
+        OnPropertyChanged(nameof(UsesRegion));
+        OnPropertyChanged(nameof(UsesMonitor));
+        OnPropertyChanged(nameof(UsesWindow));
+        OnPropertyChanged(nameof(ScopeHelp));
+    }
+
+    private void RefreshMonitors()
+    {
+        Monitors.Clear();
+        IReadOnlyList<MonitorInfo> monitors;
+        try
+        {
+            monitors = _layout?.GetMonitors() ?? Array.Empty<MonitorInfo>();
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception)
+        {
+            monitors = Array.Empty<MonitorInfo>();
+        }
+
+        foreach (var monitor in monitors) Monitors.Add(new Choice<int>(monitor.Number, monitor.Label));
+        // A monitor the macro was made for but that isn't connected now stays selectable (and the validator explains).
+        if (Monitors.All(m => m.Value != _search.MonitorNumber))
+            Monitors.Add(new Choice<int>(_search.MonitorNumber, $"Monitor {_search.MonitorNumber} (not connected right now)"));
+        OnPropertyChanged(nameof(MonitorNumber));
+    }
+
+    private void RefreshWindows()
+    {
+        WindowTitles.Clear();
+        IReadOnlyList<WindowInfo> windows;
+        try
+        {
+            windows = _layout?.GetWindows() ?? Array.Empty<WindowInfo>();
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception)
+        {
+            windows = Array.Empty<WindowInfo>();
+        }
+
+        foreach (var title in windows.Select(w => w.Title).Distinct(StringComparer.OrdinalIgnoreCase)) WindowTitles.Add(title);
+        OnPropertyChanged(nameof(SelectedWindowTitle));
+    }
+
+    // ---------------- Movement and click timing (Advanced) ----------------
+
+    /// <summary>How the cursor gets to what was found (older steps: Instant).</summary>
+    public MouseMoveStyle MoveStyle
+    {
+        get => _search.MoveStyle ?? MouseMoveStyle.Instant;
+        set
+        {
+            if (_search.MoveStyle == value) return;
+            _search.MoveStyle = value;
+            NotifyChanged();
+            OnPropertyChanged(nameof(Glides));
+        }
+    }
+
+    public bool Glides => MoveStyle != MouseMoveStyle.Instant;
+
+    public int MoveDurationMs
+    {
+        get => _search.MoveDurationMs;
+        set { if (_search.MoveDurationMs == value) return; _search.MoveDurationMs = value; NotifyChanged(); }
+    }
+
+    public int ClickHoldMs
+    {
+        get => _search.ClickHoldMs;
+        set { if (_search.ClickHoldMs == value) return; _search.ClickHoldMs = value; NotifyChanged(); }
+    }
+
+    public int DoubleClickIntervalMs
+    {
+        get => _search.DoubleClickIntervalMs;
+        set { if (_search.DoubleClickIntervalMs == value) return; _search.DoubleClickIntervalMs = value; NotifyChanged(); }
+    }
+
+    /// <summary>"Wait after click (ms)".</summary>
+    public int PostActionDelayMs
+    {
+        get => _search.PostActionDelayMs;
+        set { if (_search.PostActionDelayMs == value) return; _search.PostActionDelayMs = value; NotifyChanged(); }
+    }
+
+    /// <summary>"4. Search timing" in a Find step; "3. …" inside a condition (which has no "when found" card).</summary>
+    public string TimingCardTitle => IsStandalone ? "4. Search timing" : "3. Search timing";
+
+    /// <summary>The live plain-English summary banner (only for a standalone Find step, not inside a condition).</summary>
+    public override string? PlainSummary => IsStandalone ? StepDescriber.Explain(_search) : null;
 
     /// <summary>
     /// "When found" choices. Click / double / right-click / hold happen at the CENTER of what was found (plus the
@@ -830,6 +1114,7 @@ public abstract class ScreenSearchStepViewModel : StepViewModel
         protected set => SetProperty(ref _testResult, value);
     }
 
+    /// <summary>The old "whole screen" switch (all monitors on / custom area off). The editor now uses <see cref="Scope"/>.</summary>
     public bool SearchFullScreen
     {
         get => _search.SearchFullScreen;
@@ -838,11 +1123,12 @@ public abstract class ScreenSearchStepViewModel : StepViewModel
             if (_search.SearchFullScreen == value) return;
             _search.SearchFullScreen = value;
             NotifyChanged();
-            OnPropertyChanged(nameof(UsesRegion));
+            OnPropertyChanged(nameof(Scope));
+            NotifyScopeChanged();
         }
     }
 
-    public bool UsesRegion => !_search.SearchFullScreen;
+    public bool UsesRegion => _search.EffectiveScope == SearchScope.CustomArea;
 
     public int RegionX
     {
@@ -970,7 +1256,7 @@ public abstract class ScreenSearchStepViewModel : StepViewModel
     /// <summary>Sets the search area (and turns off "whole screen"), marking the macro as changed.</summary>
     protected void SetRegion(ScreenRect rect)
     {
-        _search.SearchFullScreen = false;
+        _search.Scope = SearchScope.CustomArea; // picking an area means "search here"
         _search.RegionX = rect.X;
         _search.RegionY = rect.Y;
         _search.RegionWidth = rect.Width;

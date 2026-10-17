@@ -90,8 +90,9 @@ public sealed class RunModeHost : IRunModeHost, IDisposable
 }
 
 /// <summary>
-/// The small status banner at the top of the screen. It can't be clicked or focused,
-/// so it never steals clicks or keystrokes from the macro.
+/// The compact status pill in the top-right corner of the main monitor ("● SmartMacro: Step 2/5 — Finding image…").
+/// It can't be clicked or focused, so it never steals clicks or keystrokes from the macro (or the game), it's hidden
+/// from screen captures, and it closes as soon as playback ends.
 /// </summary>
 internal sealed class RunOverlayWindow : Window
 {
@@ -116,7 +117,9 @@ internal sealed class RunOverlayWindow : Window
         _text = new TextBlock
         {
             Foreground = new SolidColorBrush(Color.FromRgb(0xE6, 0xEB, 0xF5)),
-            FontSize = 13,
+            FontSize = 12,
+            MaxWidth = 560,
+            TextTrimming = TextTrimming.CharacterEllipsis,
             FontFamily = new FontFamily("Segoe UI Variable Text, Segoe UI"),
             Margin = new Thickness(10, 0, 0, 0),
             VerticalAlignment = VerticalAlignment.Center,
@@ -127,12 +130,12 @@ internal sealed class RunOverlayWindow : Window
             Background = new SolidColorBrush(Color.FromArgb(0xEE, 0x0E, 0x16, 0x26)),
             BorderBrush = new SolidColorBrush(Color.FromRgb(0x26, 0x32, 0x4A)),
             BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(18),
-            Padding = new Thickness(16, 8, 18, 8),
+            CornerRadius = new CornerRadius(16),
+            Padding = new Thickness(12, 6, 14, 6),
             Child = new StackPanel { Orientation = Orientation.Horizontal, Children = { _dot, _text } },
         };
 
-        SizeChanged += (_, _) => PositionAtTop();
+        SizeChanged += (_, _) => PositionAtCorner();
     }
 
     public void SetStatus(OverlayKind kind, string text)
@@ -158,13 +161,14 @@ internal sealed class RunOverlayWindow : Window
 
         // Keep the banner out of screen captures so OCR doesn't read it (Windows 10 2004+; best effort).
         NativeMethods.SetWindowDisplayAffinity(hwnd, NativeMethods.WDA_EXCLUDEFROMCAPTURE);
-        PositionAtTop();
+        PositionAtCorner();
     }
 
-    private void PositionAtTop()
+    /// <summary>Top-right corner of the main monitor's work area, out of the way of most game UI.</summary>
+    private void PositionAtCorner()
     {
         var area = SystemParameters.WorkArea;
-        Left = area.Left + (area.Width - ActualWidth) / 2;
-        Top = area.Top + 10;
+        Left = area.Right - ActualWidth - 12;
+        Top = area.Top + 12;
     }
 }

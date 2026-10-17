@@ -57,7 +57,7 @@ public sealed class EditorViewModel : ObservableObject
         IFindTextTools? findTextTools = null,
         IVisionTools? visionTools = null)
     {
-        _screenTools = new ScreenTools(findTextTools, visionTools);
+        _screenTools = new ScreenTools(findTextTools, visionTools, screen as Core.Vision.IScreenLayout);
         _repository = repository;
         _log = log;
         _dialogs = dialogs;
@@ -83,6 +83,59 @@ public sealed class EditorViewModel : ObservableObject
         WrapInIfCommand = new RelayCommand(() => WrapSelection(StepKind.If), () => HasMacro && SelectedStep is not null);
         WrapInRepeatCommand = new RelayCommand(() => WrapSelection(StepKind.Repeat), () => HasMacro && SelectedStep is not null);
         CleanUpMousePathsCommand = new RelayCommand(CleanUpMousePaths, () => HasMacro && Steps.Any(s => s.Model is MouseMoveStep));
+        AddPatternCommand = new RelayCommand(p => AddPattern(p, AddAtEnd ? InsertPosition.AtEnd : InsertPosition.AfterSelected), p => HasMacro && p is QuickPattern);
+    }
+
+    // ---------------- Quick patterns (1-click starter templates) ----------------
+
+    /// <summary>The "Quick patterns" at the bottom of the Add step panel.</summary>
+    public IReadOnlyList<QuickPatternInfo> QuickPatternTypes => QuickPatterns.All;
+
+    /// <summary>Inserts the steps of the <see cref="QuickPattern"/> given as parameter (where new steps go).</summary>
+    public RelayCommand AddPatternCommand { get; }
+
+    private void AddPattern(object? parameter, InsertPosition position)
+    {
+        if (!HasMacro || parameter is not QuickPattern pattern) return;
+
+        var models = QuickPatterns.Build(pattern);
+        var selectedIndex = SelectedStep is null ? -1 : Steps.IndexOf(SelectedStep);
+        var index = StepListEditing.InsertIndex(Steps.Count, selectedIndex, position);
+        var added = new List<StepViewModel>();
+        foreach (var model in models)
+        {
+            var vm = CreateStepViewModel(model);
+            Steps.Insert(index + added.Count, vm);
+            added.Add(vm);
+        }
+
+        _selection.Clear();
+        SelectedStep = added[0];
+        Touch();
+        var info = QuickPatterns.Info(pattern);
+        _setStatus($"Added \"{info.Title}\" as steps {index + 1}–{index + added.Count}. Next: capture the images / pick the spots named in the step comments (the Problems list shows what's left).", StatusKind.Success);
+    }
+
+    // ---------------- Live step highlight while playing ----------------
+
+    private StepViewModel? _runningStep;
+
+    /// <summary>Raised when playback moves to another step of this macro (the view scrolls it into view).</summary>
+    public event EventHandler<StepViewModel>? RunningStepChanged;
+
+    /// <summary>
+    /// Marks the step playback is running right now (by step ID, so it works on the copy that plays); null clears it.
+    /// Steps of another macro (e.g. one played from the library) simply don't match.
+    /// </summary>
+    public void SetRunningStep(Guid? stepId)
+    {
+        var step = stepId is { } id ? Steps.FirstOrDefault(s => s.Id == id) : null;
+        if (ReferenceEquals(step, _runningStep)) return;
+        if (_runningStep is not null) _runningStep.IsRunning = false;
+        _runningStep = step;
+        if (step is null) return;
+        step.IsRunning = true;
+        RunningStepChanged?.Invoke(this, step);
     }
 
     public ObservableCollection<StepViewModel> Steps { get; } = new();

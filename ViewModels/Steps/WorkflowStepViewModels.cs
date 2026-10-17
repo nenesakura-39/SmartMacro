@@ -1,5 +1,6 @@
 using SmartMacro.Core.Models;
 using SmartMacro.Core.Validation;
+using SmartMacro.Core.Vision;
 using SmartMacro.Mvvm;
 using SmartMacro.Services.Ocr;
 using SmartMacro.Services.Vision;
@@ -11,13 +12,14 @@ namespace SmartMacro.ViewModels.Steps;
 /// The screen tools (Pick area, Capture image, Pick color, Test now) the editor hands to steps that look at the
 /// screen, including the search inside an If / Repeat condition and a Feedback loop (with its conditions).
 /// </summary>
-public sealed record ScreenTools(IFindTextTools? Text, IVisionTools? Vision)
+public sealed record ScreenTools(IFindTextTools? Text, IVisionTools? Vision, IScreenLayout? Layout = null)
 {
     public static ScreenTools None { get; } = new(null, null);
 
     /// <summary>Gives a step editor the tools it needs (does nothing for steps that don't use any).</summary>
     public void ApplyTo(StepViewModel step)
     {
+        if (step is ScreenSearchStepViewModel search) search.Layout = Layout; // monitor / window lists
         switch (step)
         {
             case MouseMoveStepViewModel move:
@@ -105,9 +107,13 @@ public sealed class ConditionViewModel : ObservableObject
             // Keep the area and the wait time when switching between text / image / color.
             var old = _condition.Search;
             var check = MacroCondition.CreateCheck(kind);
+            check.Scope = SearchScope.PrimaryMonitor;
             if (old is not null)
             {
                 check.SearchFullScreen = old.SearchFullScreen;
+                check.Scope = old.EffectiveScope;
+                check.MonitorNumber = old.MonitorNumber;
+                check.WindowTitle = old.WindowTitle;
                 check.RegionX = old.RegionX;
                 check.RegionY = old.RegionY;
                 check.RegionWidth = old.RegionWidth;
@@ -299,7 +305,7 @@ public sealed class RepeatStepViewModel : StepViewModel
             if (_step.Mode == value) return;
             _step.Mode = value;
             if (value != RepeatMode.Times && _step.Condition is null)
-                _step.Condition = MacroCondition.Create(ConditionKind.TextVisible);
+                _step.Condition = MacroFactory.NewCondition(ConditionKind.TextVisible);
             RebuildCondition();
             NotifyChanged();
             OnPropertyChanged(nameof(IsTimes));

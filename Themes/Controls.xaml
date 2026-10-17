@@ -728,4 +728,90 @@
         </Setter>
     </Style>
 
+    <!-- ============ Properties panel: setup cards and the "Advanced Tuning" expander ============ -->
+    <!-- One numbered "Essential Setup" section (1. What to find, 2. Where to look, ...). -->
+    <Style x:Key="SetupCard" TargetType="Border">
+        <Setter Property="Background" Value="{StaticResource SurfaceAltBrush}" />
+        <Setter Property="BorderBrush" Value="{StaticResource BorderBrush}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="CornerRadius" Value="8" />
+        <Setter Property="Padding" Value="12,10,12,12" />
+        <Setter Property="Margin" Value="0,12,0,0" />
+    </Style>
+
+    <Style x:Key="SetupCardTitle" TargetType="TextBlock">
+        <Setter Property="FontSize" Value="13" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+        <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
+        <Setter Property="TextWrapping" Value="Wrap" />
+    </Style>
+
+    <!-- The live plain-English summary at the top of a step's properties. -->
+    <Style x:Key="SummaryBanner" TargetType="Border">
+        <Setter Property="Background" Value="{StaticResource AccentSoftBrush}" />
+        <Setter Property="BorderBrush" Value="{StaticResource AccentBrush}" />
+        <Setter Property="BorderThickness" Value="1,0,0,0" />
+        <Setter Property="CornerRadius" Value="6" />
+        <Setter Property="Padding" Value="10,8" />
+        <Setter Property="Margin" Value="0,12,0,0" />
+    </Style>
+
+    <!-- Header of the collapsible "Advanced Tuning & Movement" section: full-width row with a turning chevron. -->
+    <ControlTemplate x:Key="AdvancedExpanderHeaderTemplate" TargetType="ToggleButton">
+        <Border x:Name="Bd" Background="{StaticResource SurfaceAltBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1"
+                CornerRadius="8" Padding="12,9" SnapsToDevicePixels="True">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <ContentPresenter VerticalAlignment="Center" RecognizesAccessKey="False" />
+                <TextBlock x:Name="Chevron" Grid.Column="1" Text="&#xE70D;" FontFamily="{StaticResource IconFont}" FontSize="11"
+                           VerticalAlignment="Center" Foreground="{StaticResource MutedTextBrush}" RenderTransformOrigin="0.5,0.5">
+                    <TextBlock.RenderTransform>
+                        <RotateTransform Angle="0" />
+                    </TextBlock.RenderTransform>
+                </TextBlock>
+            </Grid>
+        </Border>
+        <ControlTemplate.Triggers>
+            <Trigger Property="IsMouseOver" Value="True">
+                <Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource AccentBrush}" />
+            </Trigger>
+            <Trigger Property="IsChecked" Value="True">
+                <Setter TargetName="Chevron" Property="RenderTransform">
+                    <Setter.Value>
+                        <RotateTransform Angle="180" />
+                    </Setter.Value>
+                </Setter>
+            </Trigger>
+        </ControlTemplate.Triggers>
+    </ControlTemplate>
+
+    <Style x:Key="AdvancedExpander" TargetType="Expander">
+        <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
+        <Setter Property="Margin" Value="0,14,0,0" />
+        <Setter Property="IsExpanded" Value="False" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Expander">
+                    <StackPanel>
+                        <ToggleButton Template="{StaticResource AdvancedExpanderHeaderTemplate}" Focusable="True" Cursor="Hand"
+                                      Content="{TemplateBinding Header}" Foreground="{TemplateBinding Foreground}"
+                                      IsChecked="{Binding IsExpanded, Mode=TwoWay, RelativeSource={RelativeSource TemplatedParent}}" />
+                        <Border x:Name="ContentBorder" Visibility="Collapsed" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1,0,1,1"
+                                CornerRadius="0,0,8,8" Padding="12,4,12,12" Margin="0,-4,0,0">
+                            <ContentPresenter />
+                        </Border>
+                    </StackPanel>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsExpanded" Value="True">
+                            <Setter TargetName="ContentBorder" Property="Visibility" Value="Visible" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
 </ResourceDictionary>

@@ -188,6 +188,29 @@
                                         </DataTemplate>
                                     </ItemsControl.ItemTemplate>
                                 </ItemsControl>
+
+                                <!-- Quick patterns: 1-click multi-step starters for common game loops -->
+                                <TextBlock Text="Quick patterns" Style="{StaticResource SectionTitle}" Margin="2,14,0,0" />
+                                <TextBlock Text="Ready-made step combinations. Insert one, then capture the images / pick the spots named in its step comments."
+                                           Style="{StaticResource MutedText}" FontSize="11" TextWrapping="Wrap" Margin="2,3,0,8" />
+                                <ItemsControl ItemsSource="{Binding QuickPatternTypes}" Focusable="False">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <Button Style="{StaticResource ToolboxButton}" ToolTip="{Binding Description}"
+                                                    Command="{Binding DataContext.AddPatternCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                                    CommandParameter="{Binding Pattern}" AutomationProperties.Name="{Binding Title}">
+                                                <Grid>
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="22" />
+                                                        <ColumnDefinition Width="*" />
+                                                    </Grid.ColumnDefinitions>
+                                                    <TextBlock Text="{Binding Glyph}" FontSize="13" VerticalAlignment="Top" />
+                                                    <TextBlock Grid.Column="1" Text="{Binding Title}" TextWrapping="Wrap" Margin="6,0,0,0" />
+                                                </Grid>
+                                            </Button>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
                             </StackPanel>
                         </ScrollViewer>
                     </DockPanel>
@@ -277,6 +300,7 @@
                                 </ListBox.InputBindings>
                                 <ListBox.ItemTemplate>
                                     <DataTemplate DataType="{x:Type steps:StepViewModel}">
+                                        <Border x:Name="RunningFrame" BorderThickness="2,0,0,0" BorderBrush="Transparent" Padding="4,0,0,0" CornerRadius="2">
                                         <Grid x:Name="Row" Margin="{Binding IndentMargin}">
                                             <Grid.ColumnDefinitions>
                                                 <ColumnDefinition Width="34" />
@@ -294,6 +318,10 @@
                                                     <Border x:Name="DisabledTag" Margin="8,0,0,0" Padding="6,1" CornerRadius="4" Background="{StaticResource CharcoalBrush}" Visibility="Collapsed">
                                                         <TextBlock Text="Disabled" FontSize="10" Foreground="{StaticResource MutedTextBrush}" />
                                                     </Border>
+                                                    <Border x:Name="RunningTag" Margin="8,0,0,0" Padding="6,1" CornerRadius="4" Background="{StaticResource SuccessSoftBrush}"
+                                                            Visibility="Collapsed" ToolTip="Playback is running this step right now.">
+                                                        <TextBlock Text="▶ Running" FontSize="10" FontWeight="SemiBold" Foreground="{StaticResource SuccessBrush}" />
+                                                    </Border>
                                                 </StackPanel>
                                                 <TextBlock Text="{Binding Summary}" Foreground="{StaticResource MutedTextBrush}" FontSize="12" TextTrimming="CharacterEllipsis" Margin="0,2,0,0" />
                                                 <TextBlock Text="{Binding Comment}" FontStyle="Italic" Foreground="{StaticResource MutedTextBrush}" FontSize="11"
@@ -305,10 +333,16 @@
                                             <TextBlock Grid.Column="3" Text="&#xE7BA;" Style="{StaticResource IconText}" Foreground="{StaticResource WarningBrush}"
                                                        ToolTip="{Binding IssueText}" Visibility="{Binding HasWarning, Converter={StaticResource BoolToVisibility}}" />
                                         </Grid>
+                                        </Border>
                                         <DataTemplate.Triggers>
                                             <DataTrigger Binding="{Binding Enabled}" Value="False">
                                                 <Setter TargetName="Row" Property="Opacity" Value="0.5" />
                                                 <Setter TargetName="DisabledTag" Property="Visibility" Value="Visible" />
+                                            </DataTrigger>
+                                            <DataTrigger Binding="{Binding IsRunning}" Value="True">
+                                                <Setter TargetName="RunningFrame" Property="BorderBrush" Value="{StaticResource SuccessBrush}" />
+                                                <Setter TargetName="RunningFrame" Property="Background" Value="{StaticResource SuccessSoftBrush}" />
+                                                <Setter TargetName="RunningTag" Property="Visibility" Value="Visible" />
                                             </DataTrigger>
                                         </DataTemplate.Triggers>
                                     </DataTemplate>

@@ -118,6 +118,31 @@ public sealed class MainViewModel : ObservableObject, IDisposable
             if (e.PropertyName is nameof(LibraryViewModel.SelectedItem) or "")
                 Automation.RefreshTarget();
         };
+
+        // Live step highlight: the editor marks (and scrolls to) the step that is running.
+        Automation.RunningStepChanged += (_, stepId) => Editor.SetRunningStep(stepId);
+    }
+
+    /// <summary>Toolbar toggle: show the small click-through status pill while playing (saved in Settings).</summary>
+    public bool ShowMiniOverlay
+    {
+        get => _settings.ShowRunOverlay;
+        set
+        {
+            if (_settings.ShowRunOverlay == value) return;
+            _ = Settings.QuickSetAsync(s => s.ShowRunOverlay = value);
+        }
+    }
+
+    /// <summary>Toolbar toggle: minimize SmartMacro while playing (saved in Settings).</summary>
+    public bool MinimizeWhilePlaying
+    {
+        get => _settings.MinimizeDuringRun;
+        set
+        {
+            if (_settings.MinimizeDuringRun == value) return;
+            _ = Settings.QuickSetAsync(s => s.MinimizeDuringRun = value);
+        }
     }
 
     public LibraryViewModel Library { get; }
@@ -278,6 +303,8 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     {
         _settings = settings;
         OnPropertyChanged(nameof(ShowLogPanel));
+        OnPropertyChanged(nameof(ShowMiniOverlay));
+        OnPropertyChanged(nameof(MinimizeWhilePlaying));
         Automation?.RefreshShortcuts();
         SettingsApplied?.Invoke(this, settings);
     }

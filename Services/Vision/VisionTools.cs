@@ -104,6 +104,7 @@ public sealed class VisionTools : IVisionTools
     private readonly Window _mainWindow;
     private readonly GdiScreenCapture _capture;
     private readonly string _logsDirectory;
+    private readonly IScreenLayout? _layout;
     private Window? _preview;
     private ScreenPoint? _lastMatch;
 
@@ -111,11 +112,30 @@ public sealed class VisionTools : IVisionTools
 
     public void ShowSpot(ScreenPoint point) => NativeMethods.SetCursorPos(point.X, point.Y);
 
-    public VisionTools(Window mainWindow, GdiScreenCapture capture, string logsDirectory)
+    /// <param name="layout">Monitors and windows, so "Test detection now" searches the same place the step will.</param>
+    public VisionTools(Window mainWindow, GdiScreenCapture capture, string logsDirectory, IScreenLayout? layout = null)
     {
         _mainWindow = mainWindow;
         _capture = capture;
         _logsDirectory = logsDirectory;
+        _layout = layout;
+    }
+
+    /// <summary>
+    /// The area a test searches, and how to name it ("Main Monitor", "the \"Roblox\" window"…), or an error to show
+    /// when it can't be searched right now (the window isn't open).
+    /// </summary>
+    private (ScreenRect Area, string Where, string? Problem) TestArea(ScreenSearchStep step)
+    {
+        var where = step.EffectiveScope == SearchScope.CustomArea ? $"area {step.Region}" : SearchArea.ShortName(step);
+        try
+        {
+            return (SearchArea.Resolve(step, _capture.GetVirtualScreen(), _layout), where, null);
+        }
+        catch (SearchAreaUnavailableException ex)
+        {
+            return (default, where, ex.Message);
+        }
     }
 
     public Task<ScreenRect?> PickRegionAsync() => WhileHiddenAsync(() => RegionPicker.PickAsync(
@@ -123,25 +143,41 @@ public sealed class VisionTools : IVisionTools
 
     public Task<CapturedTemplate?> CaptureTemplateAsync() => WhileHiddenAsync(async () =>
     {
-        var picked = await RegionPicker.PickAsync(
+        var picked = await RegionPicker.PickFrozenAsync(
             "Drag a box tightly around the button or icon to find. Include only the part that always looks the same.   Esc or right-click to cancel.");
-        if (picked is not { } rect) return null;
+        if (picked is null) return null;
+
+        // Take the pixels from the frozen picture: exactly what you saw, even if the game has moved on since.
+        if (FromFrozen(picked) is { } frozenPart) return (CapturedTemplate?)new CapturedTemplate(picked.Rect, frozenPart);
 
         await Task.Delay(OverlayFadeMs);
-        var frame = _capture.Capture(rect);
+        var frame = _capture.Capture(picked.Rect);
         return (CapturedTemplate?)new CapturedTemplate(frame.Bounds, frame.Image);
     });
 
     public Task<PickedColor?> PickColorAsync() => WhileHiddenAsync(async () =>
     {
-        var picked = await RegionPicker.PickAsync(
-            "Click the color to look for (for example the moving marker or a button).   Esc or right-click to cancel.", pickPoint: true);
-        if (picked is not { } point) return null;
+        var picked = await RegionPicker.PickFrozenAsync(
+            "Click the color to look for (for example the moving marker or a button). The magnifier shows the exact pixel.   Esc or right-click to cancel.", pickPoint: true);
+        if (picked is null) return null;
+        var point = picked.Rect;
+
+        if (FromFrozen(picked) is { } frozenPixel)
+            return (PickedColor?)new PickedColor(point.X, point.Y, frozenPixel.GetPixel(0, 0));
 
         await Task.Delay(OverlayFadeMs);
         var frame = _capture.Capture(point);
         return (PickedColor?)new PickedColor(point.X, point.Y, frame.Image.GetPixel(0, 0));
     });
+
+    /// <summary>The picked rectangle cut out of the frozen screenshot (null if there was none or it doesn't cover it).</summary>
+    private static BgraImage? FromFrozen(PickerResult picked)
+    {
+        if (picked.Frozen is not { } frozen) return null;
+        var local = new ScreenRect(picked.Rect.X - frozen.Bounds.X, picked.Rect.Y - frozen.Bounds.Y, picked.Rect.Width, picked.Rect.Height);
+        if (local.X < 0 || local.Y < 0 || local.Right > frozen.Image.Width || local.Bottom > frozen.Image.Height) return null;
+        return frozen.Image.Crop(local);
+    }
 
     public Task<ScreenPoint?> PickPositionAsync() => WhileHiddenAsync(async () =>
     {
@@ -160,8 +196,8 @@ public sealed class VisionTools : IVisionTools
             return error ?? "Capture the image first.";
         var template = decoded!;
 
-        var region = step.SearchFullScreen ? _capture.GetVirtualScreen() : step.Region;
-        var where = step.SearchFullScreen ? "the whole screen" : $"area {region}";
+        var (region, where, problem) = TestArea(step);
+        if (problem is not null) return $"Can't test right now: {problem}";
         ClosePreview();
         _lastMatch = null;
 
@@ -223,8 +259,8 @@ public sealed class VisionTools : IVisionTools
         _lastMatch = null;
         if (!RgbColor.TryParse(step.Color, out var color)) return "Enter the color as #RRGGBB or pick it from the screen first.";
 
-        var region = step.SearchFullScreen ? _capture.GetVirtualScreen() : step.Region;
-        var where = step.SearchFullScreen ? "the whole screen" : $"area {region}";
+        var (region, where, problem) = TestArea(step);
+        if (problem is not null) return $"Can't test right now: {problem}";
         ClosePreview();
         _lastMatch = null;
 
@@ -274,8 +310,8 @@ public sealed class VisionTools : IVisionTools
     public async Task<string> TrackColorAsync(FindColorStep step, TimeSpan duration)
     {
         if (!RgbColor.TryParse(step.Color, out var color)) return "Enter the color as #RRGGBB or pick it from the screen first.";
-        if (step.SearchFullScreen)
-            return "Tracking needs a search area: turn off \"Search the whole screen\" and pick the bar or track the marker moves along.";
+        if (step.EffectiveScope != SearchScope.CustomArea)
+            return "Tracking needs a search area: set \"Where to look\" to \"Custom Area on Screen\" and pick the bar or track the marker moves along.";
 
         var region = step.Region;
         var orientation = region.Width >= region.Height ? BarOrientation.Horizontal : BarOrientation.Vertical;

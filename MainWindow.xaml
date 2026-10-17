@@ -174,6 +174,17 @@
                     </StackPanel>
 
                     <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
+                        <!-- Quick toggles for single-monitor gamers (saved in Settings straight away). -->
+                        <StackPanel VerticalAlignment="Center" Margin="0,0,14,0">
+                            <CheckBox Content="Show mini status overlay while playing" FontSize="11"
+                                      IsChecked="{Binding DataContext.ShowMiniOverlay, RelativeSource={RelativeSource AncestorType=Window}}"
+                                      ToolTip="Shows a small click-through pill in the top-right corner while a macro plays: which step runs and what it's doing (e.g. &quot;Step 2/5 — Finding image…&quot;). It never takes focus from your game and closes when playback ends."
+                                      AutomationProperties.Name="Show mini status overlay while playing" />
+                            <CheckBox Content="Minimize main window while playing" FontSize="11" Margin="0,2,0,0"
+                                      IsChecked="{Binding DataContext.MinimizeWhilePlaying, RelativeSource={RelativeSource AncestorType=Window}}"
+                                      ToolTip="Minimizes SmartMacro while recording or playing, so it isn't in the way on a single monitor. It comes back when playback ends."
+                                      AutomationProperties.Name="Minimize main window while playing" />
+                        </StackPanel>
                         <Button Command="{Binding RecordCommand}" Margin="0,0,8,0"
                                 ToolTip="{Binding RecordTooltip}"
                                 Visibility="{Binding IsRecording, Converter={StaticResource BoolToVisibility}, ConverterParameter=Invert}">

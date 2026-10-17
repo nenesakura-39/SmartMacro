@@ -71,7 +71,7 @@
                     <StackPanel>
                         <TextBlock Text="Recording and playback" Style="{StaticResource SectionTitle}" />
                         <CheckBox Content="Minimize SmartMacro while recording or playing" IsChecked="{Binding MinimizeDuringRun}" Margin="0,14,0,0" />
-                        <CheckBox Content="Show a status banner at the top of the screen while recording or playing" IsChecked="{Binding ShowRunOverlay}" Margin="0,10,0,0" />
+                        <CheckBox Content="Show mini status overlay while recording or playing (small click-through pill in the top-right corner: current step and what it's doing)" IsChecked="{Binding ShowRunOverlay}" Margin="0,10,0,0" />
                         <TextBlock Text="Recording mode" Style="{StaticResource FieldLabel}" Margin="0,16,0,4" />
                         <ComboBox ItemsSource="{Binding RecordingModes}" DisplayMemberPath="Label" SelectedValuePath="Value"
                                   SelectedValue="{Binding RecordingMode}" MaxWidth="520" HorizontalAlignment="Left"

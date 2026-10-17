@@ -50,18 +50,30 @@ public static class MacroFactory
         return copy;
     }
 
+    /// <summary>
+    /// A new step as the editor's toolbox adds it. New steps get the beginner-friendly defaults: Find steps and conditions
+    /// look at the main monitor only, and steps that move the mouse glide there smoothly (120 ms) and click with a 35 ms
+    /// hold, a 65 ms double-click gap and a 120 ms wait afterwards. (Steps made with <c>new</c>, older files and
+    /// recordings keep the old behaviour: whole screen, instant jumps, recorded timing.)
+    /// </summary>
     public static MacroStep CreateStep(StepKind kind, int defaultDelayMs = 500) => kind switch
     {
         StepKind.Delay => new DelayStep { DurationMs = Math.Clamp(defaultDelayMs, 0, MacroValidator.MaxDelayMs) },
-        StepKind.MouseMove => new MouseMoveStep(),
-        StepKind.MouseClick => new MouseClickStep(),
+        StepKind.MouseMove => new MouseMoveStep { MoveStyle = MouseMoveStyle.SmoothGlide },
+        StepKind.MouseClick => new MouseClickStep
+        {
+            MoveStyle = MouseMoveStyle.SmoothGlide,
+            HoldMs = MouseMotionDefaults.ClickHoldMs,
+            DoubleClickIntervalMs = MouseMotionDefaults.DoubleClickIntervalMs,
+            PostActionDelayMs = MouseMotionDefaults.PostActionDelayMs,
+        },
         StepKind.MouseScroll => new MouseScrollStep(),
         StepKind.KeyPress => new KeyPressStep(),
         StepKind.TypeText => new TypeTextStep { Text = "Hello", CharacterDelayMs = TypeTextStep.DefaultCharacterDelayMs },
-        StepKind.FindText => new FindTextStep { Text = "OK" },
-        StepKind.FindImage => new FindImageStep(),
-        StepKind.FindColor => new FindColorStep(),
-        StepKind.If => new IfStep(),
+        StepKind.FindText => WithNewSearchDefaults(new FindTextStep { Text = "OK" }),
+        StepKind.FindImage => WithNewSearchDefaults(new FindImageStep()),
+        StepKind.FindColor => WithNewSearchDefaults(new FindColorStep()),
+        StepKind.If => new IfStep { Condition = NewCondition(ConditionKind.TextVisible) },
         StepKind.Else => new ElseStep(),
         StepKind.EndIf => new EndIfStep(),
         StepKind.Repeat => new RepeatStep(),
@@ -70,6 +82,26 @@ public static class MacroFactory
         StepKind.InputSequence => throw new ArgumentException("Recorded input steps are created by recording in game mode, not added by hand.", nameof(kind)),
         _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unknown step type."),
     };
+
+    /// <summary>
+    /// A new condition for the editor (If / Repeat / Feedback loop): like <see cref="Condition.Create"/>, but it looks at
+    /// the main monitor only (new steps' default).
+    /// </summary>
+    public static Condition NewCondition(ConditionKind kind)
+    {
+        var condition = Condition.Create(kind);
+        if (condition.Search is { } search) search.Scope = Vision.SearchScope.PrimaryMonitor;
+        return condition;
+    }
+
+    /// <summary>New Find steps: main monitor, smooth glide to what was found.</summary>
+    public static T WithNewSearchDefaults<T>(T step) where T : ScreenSearchStep
+    {
+        step.Scope = Vision.SearchScope.PrimaryMonitor;
+        step.MoveStyle = MouseMoveStyle.SmoothGlide;
+        step.MoveDurationMs = MouseMotionDefaults.MoveDurationMs;
+        return step;
+    }
 
     /// <summary>Copy of a step with a fresh ID.</summary>
     public static MacroStep DuplicateStep(MacroStep step)

@@ -310,7 +310,7 @@ public class RepeatGraceAndFoundClickTests
     [Fact]
     public void New_options_need_format_9_and_round_trip()
     {
-        Assert.Equal(9, MacroDocument.CurrentSchemaVersion);
+        Assert.True(MacroDocument.CurrentSchemaVersion >= 9); // 10 since the next-gen QoL batch
         Assert.Equal(9, MacroDocument.RequiredSchemaVersion(Flow.Macro(new FindImageStep { MatchForeground = true })));
         Assert.Equal(9, MacroDocument.RequiredSchemaVersion(Flow.Macro(new FindColorStep { MoveCursorAwayAfterAction = true })));
         var withGrace = Flow.While(Flow.Green());

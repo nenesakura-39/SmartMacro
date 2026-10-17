@@ -39,8 +39,11 @@ public sealed class MacroDocument
     ///     "finish when it reaches the zone".
     /// 9 = adds "ignore background / match bright text and edges" on Find image (and image conditions),
     ///     "keep checking before leaving" on Repeat While / Until, and "move the cursor away after clicking" on Find steps.
+    /// 10 = adds "where to look" (main monitor / a specific monitor / an app window) on Find steps and conditions,
+    ///     movement styles (smooth glide / human curve) with a glide time on Move / Click / Find steps, and click timing
+    ///     (click hold, double-click gap, wait after click) on Mouse click and Find steps.
     /// </summary>
-    public const int CurrentSchemaVersion = 9;
+    public const int CurrentSchemaVersion = 10;
 
     public int SchemaVersion { get; set; }
     public Macro? Macro { get; set; }
@@ -61,6 +64,7 @@ public sealed class MacroDocument
         {
             var needed = step switch
             {
+                _ when UsesVersion10Features(step) => 10,
                 _ when UsesVersion9Features(step) => 9,
                 _ when UsesQualityOfLifeFeatures(step) => 8,
                 ScreenSearchStep { WhenNotFound: TextNotFoundBehavior.SkipNextStep } => 7,
@@ -80,6 +84,36 @@ public sealed class MacroDocument
 
         return required;
     }
+
+    /// <summary>True if the step uses an option added in format 10 (see <see cref="CurrentSchemaVersion"/>).</summary>
+    private static bool UsesVersion10Features(MacroStep step)
+    {
+        switch (step)
+        {
+            case MouseMoveStep { MoveStyle: not null and not MouseMoveStyle.Instant }:
+                return true;
+            case MouseClickStep c when c.MoveStyle is not null and not MouseMoveStyle.Instant
+                                       || c.DoubleClickIntervalMs != 0 || c.PostActionDelayMs != 0:
+                return true;
+            case ScreenSearchStep search when UsesVersion10Search(search):
+                return true;
+        }
+
+        foreach (var condition in WorkflowSteps.ConditionsOf(step))
+            if (condition.Search is { } check && UsesVersion10Search(check)) return true;
+        return false;
+    }
+
+    /// <summary>
+    /// A new "where to look" (all monitors and the custom area are what older versions already understand through
+    /// "search the whole screen"), a movement style, or click timing other than the old fixed 35 / 65 / 120 ms.
+    /// </summary>
+    private static bool UsesVersion10Search(ScreenSearchStep search) =>
+        search.Scope is Vision.SearchScope.PrimaryMonitor or Vision.SearchScope.Monitor or Vision.SearchScope.Window
+        || search.MoveStyle is not null and not MouseMoveStyle.Instant
+        || search.ClickHoldMs != MouseMotionDefaults.ClickHoldMs
+        || search.DoubleClickIntervalMs != MouseMotionDefaults.DoubleClickIntervalMs
+        || search.PostActionDelayMs != MouseMotionDefaults.PostActionDelayMs;
 
     /// <summary>True if the step uses an option added in format 9 (see <see cref="CurrentSchemaVersion"/>).</summary>
     private static bool UsesVersion9Features(MacroStep step)

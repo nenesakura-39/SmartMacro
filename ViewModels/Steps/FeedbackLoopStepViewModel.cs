@@ -13,6 +13,18 @@ namespace SmartMacro.ViewModels.Steps;
 /// which key / button to use, the safety limits and the optional done / failed conditions, plus the screen tools
 /// (Pick bar area, Pick colors, Measure loop speed, Preview without input).
 /// </summary>
+/// <summary>The kinds of minigame offered as cards in the Feedback loop's guided setup.</summary>
+public enum MinigameKind
+{
+    HorizontalFollower,
+    VerticalFollower,
+    TimingCheck,
+    Custom,
+}
+
+/// <summary>One preset card: a little picture made of characters, a title and a one-line explanation.</summary>
+public sealed record MinigameCard(MinigameKind Kind, string Picture, string Title, string Description);
+
 public sealed class FeedbackLoopStepViewModel : StepViewModel
 {
     private static readonly TimeSpan MeasureDuration = TimeSpan.FromSeconds(3);
@@ -43,6 +55,76 @@ public sealed class FeedbackLoopStepViewModel : StepViewModel
         _showAdvanced = step.Preset == FeedbackPreset.Custom;
         RebuildConditions();
     }
+
+    // ---------------- Step 1 of the guided setup: which kind of minigame ----------------
+
+    /// <summary>The visual preset cards at the top of the guided setup.</summary>
+    public static IReadOnlyList<MinigameCard> MinigameCards { get; } = new[]
+    {
+        new MinigameCard(MinigameKind.HorizontalFollower, "◀ ── [ 🐟 ] ── ▶", "Horizontal Bar Follower (Left / Right)",
+            "For fishing / reeling bars (like Fisch). Holds click when the target is to the Right of your bar; releases when it's to the Left."),
+        new MinigameCard(MinigameKind.VerticalFollower, "▲ │ [ 🐟 ] │ ▼", "Vertical Bar Follower (Up / Down)",
+            "Holds click to push your bar Up toward the target; releases to let it fall Down."),
+        new MinigameCard(MinigameKind.TimingCheck, "🎯", "Timing / Skill Check (Click When Marker Hits Zone)",
+            "Watches a moving marker and clicks the instant it enters the target zone."),
+        new MinigameCard(MinigameKind.Custom, "⚙", "Custom / Advanced",
+            "Every setting by hand: rules for before / inside / after the zone, key or mouse button, limits and stop conditions."),
+    };
+
+    /// <summary>Which card matches the step's current settings.</summary>
+    public MinigameKind Minigame => _step.Preset switch
+    {
+        FeedbackPreset.FollowTargetBar => _step.Orientation == BarOrientation.Vertical ? MinigameKind.VerticalFollower : MinigameKind.HorizontalFollower,
+        FeedbackPreset.ClickWhenInZone => MinigameKind.TimingCheck,
+        _ => MinigameKind.Custom,
+    };
+
+    /// <summary>The selected card; choosing one sets up the loop for that kind of minigame (area and colours are kept).</summary>
+    public MinigameCard? SelectedMinigame
+    {
+        get => MinigameCards.FirstOrDefault(c => c.Kind == Minigame);
+        set
+        {
+            if (value is null || value.Kind == Minigame) return;
+            switch (value.Kind)
+            {
+                case MinigameKind.HorizontalFollower:
+                    _step.Orientation = BarOrientation.Horizontal;
+                    FeedbackPresets.Apply(_step, FeedbackPreset.FollowTargetBar);
+                    break;
+                case MinigameKind.VerticalFollower:
+                    _step.Orientation = BarOrientation.Vertical;
+                    FeedbackPresets.Apply(_step, FeedbackPreset.FollowTargetBar);
+                    break;
+                case MinigameKind.TimingCheck:
+                    FeedbackPresets.Apply(_step, FeedbackPreset.ClickWhenInZone);
+                    break;
+                default:
+                    FeedbackPresets.Apply(_step, FeedbackPreset.Custom);
+                    break;
+            }
+
+            _showAdvanced = value.Kind == MinigameKind.Custom;
+            OnPropertyChanged(string.Empty); // many settings changed: refresh every field
+            NotifyChanged();
+        }
+    }
+
+    /// <summary>The plain-English rule preview card: what the loop will do when it holds / releases.</summary>
+    public override string? PlainSummary => string.Join(Environment.NewLine, StepDescriber.ExplainFeedbackRules(_step).Select(line => "• " + line));
+
+    /// <summary>Step 2's title depends on the minigame.</summary>
+    public string AreaStepTitle => _step.Orientation == BarOrientation.Vertical
+        ? "Step 2: Pick the minigame bar area (drag tightly around the up / down bar)"
+        : "Step 2: Pick the minigame bar area (drag tightly around the left / right bar)";
+
+    public string MarkerStepTitle => _step.Preset == FeedbackPreset.FollowTargetBar
+        ? "Step 3: Pick the moving target color (e.g. the fish / indicator)"
+        : "Step 3: Pick the moving marker color";
+
+    public string ZoneStepTitle => _step.Preset == FeedbackPreset.FollowTargetBar
+        ? "Step 4: Pick YOUR control bar color"
+        : "Step 4: Pick the target zone color";
 
     // ---------------- Preset (QoL: guided setup) ----------------
 
@@ -245,6 +327,8 @@ public sealed class FeedbackLoopStepViewModel : StepViewModel
             NotifyChanged();
             OnPropertyChanged(nameof(BeforeLabel));
             OnPropertyChanged(nameof(AfterLabel));
+            OnPropertyChanged(nameof(SelectedMinigame));
+            OnPropertyChanged(nameof(AreaStepTitle));
         }
     }
 
@@ -475,7 +559,7 @@ public sealed class FeedbackLoopStepViewModel : StepViewModel
         set
         {
             if (HasCompleteCondition == value) return;
-            _step.CompleteWhen = value ? MacroCondition.Create(ConditionKind.ColorVisible) : null;
+            _step.CompleteWhen = value ? MacroFactory.NewCondition(ConditionKind.ColorVisible) : null;
             RebuildConditions();
             NotifyChanged();
         }
@@ -488,7 +572,7 @@ public sealed class FeedbackLoopStepViewModel : StepViewModel
         set
         {
             if (HasFailCondition == value) return;
-            _step.FailWhen = value ? MacroCondition.Create(ConditionKind.ColorVisible) : null;
+            _step.FailWhen = value ? MacroFactory.NewCondition(ConditionKind.ColorVisible) : null;
             RebuildConditions();
             NotifyChanged();
         }

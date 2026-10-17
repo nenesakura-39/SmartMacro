@@ -75,18 +75,19 @@ public partial class App : Application
         if (!_playbackClock.HasHighResolutionTimer)
             _log.Warning("High-resolution timer isn't available on this Windows version; playback timing falls back to 1 ms steps.");
         var screenCapture = new GdiScreenCapture();
+        var screenInfo = new ScreenInfoProvider(); // monitors + app windows for "where to look"
         var automation = new AutomationServices(
-            new PlaybackEngine(new Win32InputSimulator(_log), _playbackClock, ocr, screenCapture),
+            new PlaybackEngine(new Win32InputSimulator(_log), _playbackClock, ocr, screenCapture, screenInfo),
             new WindowsInputRecorder(),
             new RawInputRecorder(),
             new SmartInputRecorder(),
             new EmergencyStopWatcher(),
             _runHost,
             ocr,
-            new FindTextTools(window, ocr, Path.Combine(paths.LogsDirectory, "last-ocr-test.png")),
-            new VisionTools(window, screenCapture, paths.LogsDirectory));
+            new FindTextTools(window, ocr, Path.Combine(paths.LogsDirectory, "last-ocr-test.png"), screenInfo),
+            new VisionTools(window, screenCapture, paths.LogsDirectory, screenInfo));
 
-        var mainViewModel = new MainViewModel(repository, settingsStore, _log, dialogs, new ScreenInfoProvider(), paths, Dispatcher, automation);
+        var mainViewModel = new MainViewModel(repository, settingsStore, _log, dialogs, screenInfo, paths, Dispatcher, automation);
         viewModel = mainViewModel;
         _mainViewModel = mainViewModel;
 

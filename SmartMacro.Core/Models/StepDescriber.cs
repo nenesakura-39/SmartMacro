@@ -31,7 +31,7 @@ public static class StepDescriber
         DelayStep d => d.DurationMs >= 1000
             ? $"Wait {d.DurationMs / 1000.0:0.###} s"
             : $"Wait {d.DurationMs} ms",
-        MouseMoveStep m => $"Move to ({m.X}, {m.Y})",
+        MouseMoveStep m => $"Move to ({m.X}, {m.Y}){MotionSuffix(m.MoveStyle, m.MoveDurationMs)}",
         MouseClickStep c => DescribeClick(c),
         MouseScrollStep s => $"Scroll {ScrollDirection(s)} {Notches(s.Delta)} {Where(s.UseCurrentPosition, s.X, s.Y)}",
         KeyPressStep k => $"{KeyVerb(k.Action)} {KeyCombo(k)}{Hold(k.Action == KeyAction.Press, k.HoldMs)}",
@@ -53,12 +53,157 @@ public static class StepDescriber
     {
         var button = $"{c.Button.ToString().ToLowerInvariant()} button";
         var where = c.UseLastFoundText ? "at the last found spot" : Where(c.UseCurrentPosition, c.X, c.Y);
+        var motion = c.UseCurrentPosition ? "" : MotionSuffix(c.MoveStyle, c.MoveDurationMs);
         return c.Action switch
         {
-            MouseClickAction.Hold => $"Hold {button} for {c.HoldMs} ms {where}",
+            MouseClickAction.Hold => $"Hold {button} for {c.HoldMs} ms {where}{motion}",
             MouseClickAction.Drag => $"Drag {button} from {(c.UseLastFoundText ? "the last found spot" : c.UseCurrentPosition ? "the cursor" : $"({c.X}, {c.Y})")} to ({c.EndX}, {c.EndY}) over {c.DragDurationMs / 1000.0:0.##} s",
-            _ => $"{ClickVerb(c.Action)} {button} {where}{Hold(c.Action == MouseClickAction.Click, c.HoldMs)}",
+            _ => $"{ClickVerb(c.Action)} {button} {where}{Hold(c.Action == MouseClickAction.Click, c.HoldMs)}{motion}",
         };
+    }
+
+    /// <summary>" (smooth glide 120 ms)" / " (human curve 120 ms)" for a styled movement; empty for instant jumps.</summary>
+    private static string MotionSuffix(MouseMoveStyle? style, int durationMs) => style switch
+    {
+        MouseMoveStyle.SmoothGlide when durationMs > 0 => $" (smooth glide {durationMs} ms)",
+        MouseMoveStyle.HumanCurve when durationMs > 0 => $" (human curve {durationMs} ms)",
+        _ => "",
+    };
+
+    /// <summary>
+    /// What a running step is doing right now, for the floating status pill, e.g. "Finding image \"SHAKE\"",
+    /// "Waiting 500 ms", "Clicking at (640, 400)". A step's comment is used as its name when it has one.
+    /// </summary>
+    public static string Activity(MacroStep step)
+    {
+        var name = string.IsNullOrWhiteSpace(step.Comment) ? null : $"\"{Preview(step.Comment)}\"";
+        return step switch
+        {
+            DelayStep d => d.DurationMs >= 1000 ? $"Waiting {d.DurationMs / 1000.0:0.#} s" : $"Waiting {d.DurationMs} ms",
+            MouseMoveStep m => $"Moving the mouse to ({m.X}, {m.Y})",
+            MouseClickStep c => c.UseLastFoundText ? "Clicking the last found spot"
+                : c.UseCurrentPosition ? "Clicking where the cursor is"
+                : $"Clicking at ({c.X}, {c.Y})",
+            MouseScrollStep => "Scrolling",
+            KeyPressStep k => $"Pressing {KeyCombo(k)}",
+            TypeTextStep => "Typing text",
+            FindTextStep t => $"Finding text \"{Preview(t.Text)}\" {Vision.SearchArea.Describe(t)}",
+            FindImageStep i => $"Finding image {name ?? (i.TemplateWidth > 0 ? $"({i.TemplateWidth}×{i.TemplateHeight})" : "")}".TrimEnd() + $" {Vision.SearchArea.Describe(i)}",
+            FindColorStep c => $"Finding color {c.Color} {Vision.SearchArea.Describe(c)}",
+            IfStep => name is null ? "Checking an If condition" : $"Checking {name}",
+            RepeatStep r => name is null ? $"Repeat loop ({DescribeRepeatMode(r)})" : $"Repeat {name}",
+            FeedbackLoopStep => name is null ? "Running the feedback loop (minigame)" : $"Feedback loop {name}",
+            InputSequenceStep => "Playing recorded input",
+            _ => DisplayName(step.Kind),
+        };
+    }
+
+    private static string DescribeRepeatMode(RepeatStep r) => r.Mode switch
+    {
+        RepeatMode.While => "while",
+        RepeatMode.Until => "until",
+        _ => $"{r.Count} times",
+    };
+
+    /// <summary>
+    /// A plain-English explanation of a Find step for the summary banner at the top of its properties, e.g.
+    /// "Searches Main Monitor every 250 ms for up to 10 s. When found: smoothly glides to its center and left-clicks
+    /// (35 ms hold), then waits 120 ms. If it's not found in time: the macro stops."
+    /// </summary>
+    public static string Explain(ScreenSearchStep f)
+    {
+        var where = Vision.SearchArea.ShortName(f);
+        var timing = f.TimeoutMs > 0
+            ? $"every {f.CheckIntervalMs} ms for up to {Seconds(f.TimeoutMs)}"
+            : "once";
+        var text = $"Searches {where} {timing}.";
+
+        if (f.Goal == WaitGoal.Disappear)
+        {
+            text += " Continues as soon as it's gone.";
+        }
+        else
+        {
+            var move = f.MoveStyle switch
+            {
+                MouseMoveStyle.SmoothGlide when f.MoveDurationMs > 0 => $"smoothly glides to its center ({f.MoveDurationMs} ms)",
+                MouseMoveStyle.HumanCurve when f.MoveDurationMs > 0 => $"moves to its center along a natural curve ({f.MoveDurationMs} ms)",
+                _ => "jumps to its center",
+            };
+            var offset = f.OffsetX != 0 || f.OffsetY != 0 ? $" (offset {f.OffsetX:+0;-0;0}, {f.OffsetY:+0;-0;0})" : "";
+            var action = f.Action switch
+            {
+                FoundTextAction.Click => $"{move}{offset} and left-clicks ({f.ClickHoldMs} ms hold), then waits {f.PostActionDelayMs} ms",
+                FoundTextAction.DoubleClick => $"{move}{offset} and double-clicks ({f.DoubleClickIntervalMs} ms apart), then waits {f.PostActionDelayMs} ms",
+                FoundTextAction.RightClick => $"{move}{offset} and right-clicks, then waits {f.PostActionDelayMs} ms",
+                FoundTextAction.Hold => $"{move}{offset} and holds the left button for {f.ActionHoldMs} ms, then waits {f.PostActionDelayMs} ms",
+                FoundTextAction.Move => $"{move}{offset} (no click)",
+                _ => "just continues with the next step",
+            };
+            var park = f.MoveCursorAwayAfterAction && f.Action is not (FoundTextAction.None or FoundTextAction.Move)
+                ? ", and moves the cursor out of the way"
+                : "";
+            text += $" When found: {action}{park}.";
+        }
+
+        text += f.WhenNotFound switch
+        {
+            TextNotFoundBehavior.Continue => f.Goal == WaitGoal.Appear ? " If it's not found in time: continues anyway." : " If it's still there: continues anyway.",
+            TextNotFoundBehavior.SkipNextStep => " If the time runs out: skips the next step.",
+            _ => f.Goal == WaitGoal.Appear ? " If it's not found in time: the macro stops." : " If it's still there: the macro stops.",
+        };
+        return text;
+    }
+
+    private static string Seconds(int ms) => ms >= 1000 ? $"{ms / 1000.0:0.#} s" : $"{ms} ms";
+
+    /// <summary>
+    /// The Feedback loop's "rule preview": what it will do, in plain sentences, e.g. "While the target is to the RIGHT of
+    /// your bar: holds the left mouse button down (your bar moves right)."
+    /// </summary>
+    public static IReadOnlyList<string> ExplainFeedbackRules(FeedbackLoopStep f)
+    {
+        var follow = f.Preset == FeedbackPreset.FollowTargetBar;
+        var marker = follow ? "the target" : "the marker";
+        var zone = follow ? "your bar" : "the target zone";
+        var horizontal = f.Orientation == Vision.BarOrientation.Horizontal;
+        var before = horizontal ? "to the LEFT of" : "ABOVE";
+        var after = horizontal ? "to the RIGHT of" : "BELOW";
+        var input = f.InputKind == FeedbackInputKind.MouseButton
+            ? $"the {f.MouseButton.ToString().ToLowerInvariant()} mouse button"
+            : $"the {VirtualKeys.GetName(f.VirtualKey)} key";
+
+        string Rule(FeedbackAction action) => action switch
+        {
+            FeedbackAction.Hold => $"holds {input} down",
+            FeedbackAction.Release => $"releases {input}",
+            FeedbackAction.Tap => $"taps {input} once",
+            FeedbackAction.Pulse => $"pulses {input} (short presses) so {zone} doesn't overshoot",
+            _ => $"leaves {input} as it is",
+        };
+
+        var lines = new List<string>
+        {
+            $"Watches the minigame bar up to {f.MaxCapturesPerSecond} times a second.",
+            $"While {marker} is {before} {zone}: {Rule(f.WhenBeforeZone)}.",
+            $"While {marker} is inside {zone}: {Rule(f.WhenInsideZone)}.",
+            $"While {marker} is {after} {zone}: {Rule(f.WhenAfterZone)}.",
+        };
+        if (follow && f.WhenBeforeZone != f.WhenAfterZone)
+        {
+            var pushes = horizontal ? "right" : "up";
+            lines.Add($"Holding pushes your bar {pushes}; releasing lets it drift back.");
+        }
+
+        if (f.FinishWhenInZone) lines.Add($"Finishes as soon as {marker} reaches {zone}.");
+        lines.Add(f.WhenTargetLost switch
+        {
+            FeedbackLostAction.ExitLoop => $"If the bar can't be seen for {Seconds(f.LostTimeoutMs)} (the minigame closed): lets go and continues with the next step.",
+            FeedbackLostAction.StopMacro => $"If the bar can't be seen for {Seconds(f.LostTimeoutMs)}: lets go and stops the macro.",
+            _ => $"If {marker} can't be seen for {Seconds(f.LostTimeoutMs)}: lets go and keeps looking.",
+        });
+        lines.Add($"Stops after {Seconds(f.MaxRuntimeMs)} at the latest. Esc stops it any time.");
+        return lines;
     }
 
     /// <summary>E.g. " → click it" for an If with a "when true" action (empty without one).</summary>
@@ -95,7 +240,7 @@ public static class StepDescriber
             FindColorStep c => $"color {c.Color} (±{c.Tolerance})",
             _ => "it",
         };
-        var where = search.SearchFullScreen ? "on screen" : $"in area ({search.RegionX}, {search.RegionY}, {search.RegionWidth}×{search.RegionHeight})";
+        var where = Vision.SearchArea.Describe(search);
         var verb = condition.Negate ? "is not" : "is";
         var wait = search.TimeoutMs > 0 ? $" (wait up to {search.TimeoutMs / 1000.0:0.#} s)" : "";
         return $"{what} {verb} {where}{wait}";
@@ -243,7 +388,7 @@ public static class StepDescriber
     private static string DescribeSearch(ScreenSearchStep f, string what)
     {
         var seconds = $"{f.TimeoutMs / 1000.0:0.#} s";
-        var where = f.SearchFullScreen ? "on screen" : $"in area ({f.RegionX}, {f.RegionY}, {f.RegionWidth}×{f.RegionHeight})";
+        var where = Vision.SearchArea.Describe(f);
         if (f.Goal == WaitGoal.Disappear)
             return f.TimeoutMs > 0 ? $"Wait up to {seconds} until {what} is gone {where}" : $"Check that {what} is not {where}";
 

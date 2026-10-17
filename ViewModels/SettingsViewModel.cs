@@ -327,6 +327,33 @@ public sealed class SettingsViewModel : ObservableObject
         _setStatus("Settings saved.", StatusKind.Success);
     }
 
+    /// <summary>
+    /// Saves one quick change right away (the toolbar's "Show mini status overlay" / "Minimize while playing" toggles),
+    /// without touching other unsaved edits on the Settings page.
+    /// </summary>
+    public async Task QuickSetAsync(Action<AppSettings> change)
+    {
+        var updated = _saved.Clone();
+        change(updated);
+        try
+        {
+            await _store.SaveAsync(updated);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            _log.Error("Saving settings failed.", ex);
+            _setStatus($"The setting couldn't be saved: {ex.Message}", StatusKind.Warning);
+            return;
+        }
+
+        _saved = updated;
+        _minimizeDuringRun = updated.MinimizeDuringRun;
+        _showRunOverlay = updated.ShowRunOverlay;
+        OnPropertyChanged(nameof(MinimizeDuringRun));
+        OnPropertyChanged(nameof(ShowRunOverlay));
+        _apply(updated.Clone());
+    }
+
     private void OpenDataFolder()
     {
         try

@@ -258,6 +258,7 @@ public static class MacroValidator
 
             case MouseMoveStep m:
                 CheckPosition(issues, m.X, m.Y, screen);
+                CheckMovement(issues, m.MoveStyle, m.MoveDurationMs);
                 break;
 
             case MouseClickStep c:
@@ -267,6 +268,11 @@ public static class MacroValidator
                     issues.Add(Error("Unknown click action.", nameof(MouseClickStep.Action)));
                 if (!c.UseCurrentPosition && !c.UseLastFoundText)
                     CheckPosition(issues, c.X, c.Y, screen);
+                CheckMovement(issues, c.MoveStyle, c.MoveDurationMs);
+                if (c.DoubleClickIntervalMs < 0 || c.DoubleClickIntervalMs > MouseMotionDefaults.MaxDoubleClickIntervalMs)
+                    issues.Add(Error($"The double-click gap must be 0 to {MouseMotionDefaults.MaxDoubleClickIntervalMs:N0} ms.", nameof(MouseClickStep.DoubleClickIntervalMs)));
+                if (c.PostActionDelayMs < 0 || c.PostActionDelayMs > MouseMotionDefaults.MaxPostActionDelayMs)
+                    issues.Add(Error($"The wait after the click must be 0 to {MouseMotionDefaults.MaxPostActionDelayMs:N0} ms.", nameof(MouseClickStep.PostActionDelayMs)));
                 if (c.Action == MouseClickAction.Hold)
                 {
                     if (c.HoldMs < 1 || c.HoldMs > MaxHoldMs)
@@ -274,7 +280,10 @@ public static class MacroValidator
                 }
                 else
                 {
-                    CheckHold(issues, c.HoldMs, c.Action == MouseClickAction.Click, nameof(MouseClickStep.HoldMs), "Click");
+                    // The click hold is used by Click and Double click. New steps start with 35 ms, which isn't worth a
+                    // warning when the user later picks another action.
+                    CheckHold(issues, c.HoldMs, c.Action is MouseClickAction.Click or MouseClickAction.DoubleClick
+                                                || c.HoldMs == MouseMotionDefaults.ClickHoldMs, nameof(MouseClickStep.HoldMs), "Click / Double click");
                 }
 
                 if (c.Action == MouseClickAction.Drag)
@@ -346,7 +355,7 @@ public static class MacroValidator
                          && TemplateMatcher.InnerArea(img.TemplateWidth, img.TemplateHeight, img.IgnoreEdgesPercent / 100.0) is null)
                     issues.Add(Warning("The image is too small to ignore its edges, so the whole image is compared. Capture a bigger area.", nameof(FindImageStep.IgnoreEdgesPercent)));
                 ValidateSearch(issues, img, screen, MinVisionCheckIntervalMs);
-                if (!img.SearchFullScreen && img.TemplateWidth > 0
+                if (img.EffectiveScope == SearchScope.CustomArea && img.TemplateWidth > 0
                     && (img.RegionWidth < img.TemplateWidth || img.RegionHeight < img.TemplateHeight))
                     issues.Add(Error("The search area is smaller than the image to find. Make the area bigger.", "Region"));
                 break;
@@ -387,8 +396,8 @@ public static class MacroValidator
                 if (c.MinPixels < 1 || c.MinPixels > MaxColorPixels)
                     issues.Add(Error($"Minimum size must be 1 to {MaxColorPixels:N0} pixels.", nameof(FindColorStep.MinPixels)));
                 ValidateSearch(issues, c, screen, MinVisionCheckIntervalMs);
-                if (c.SearchFullScreen)
-                    issues.Add(Warning("Searching the whole screen for a color often finds something else. Pick a small area if you can.", "Region"));
+                if (SearchArea.IsWholeMonitorOrMore(c))
+                    issues.Add(Warning("Searching a whole monitor (or every monitor) for a color often finds something else. Pick a small area or an app window if you can.", "Region"));
                 break;
 
             default:
@@ -748,7 +757,27 @@ public static class MacroValidator
     /// <summary>Shared checks for Find text / image / color: area, timing, goal, action, offsets.</summary>
     private static void ValidateSearch(List<ValidationIssue> issues, ScreenSearchStep f, ScreenBounds? screen, int minInterval)
     {
-        if (!f.SearchFullScreen)
+        if (f.Scope is { } scope && !Enum.IsDefined(scope))
+            issues.Add(Error("This step has an unknown \"where to look\" value. Choose where to look again.", nameof(ScreenSearchStep.Scope)));
+        else if (f.EffectiveScope == SearchScope.Monitor && (f.MonitorNumber < 1 || f.MonitorNumber > SearchArea.MaxMonitorNumber))
+            issues.Add(Error($"Choose a monitor from 1 to {SearchArea.MaxMonitorNumber}.", nameof(ScreenSearchStep.MonitorNumber)));
+        else if (f.EffectiveScope == SearchScope.Window)
+        {
+            if (string.IsNullOrWhiteSpace(f.WindowTitle))
+                issues.Add(Error("Choose the app window to search in (or type part of its title).", nameof(ScreenSearchStep.WindowTitle)));
+            else if (f.WindowTitle.Length > SearchArea.MaxWindowTitleLength)
+                issues.Add(Error($"The window title can be at most {SearchArea.MaxWindowTitleLength} characters.", nameof(ScreenSearchStep.WindowTitle)));
+        }
+
+        CheckMovement(issues, f.MoveStyle, f.MoveDurationMs);
+        if (f.ClickHoldMs < 0 || f.ClickHoldMs > MaxHoldMs)
+            issues.Add(Error($"The click hold must be 0 to {MaxHoldMs:N0} ms.", nameof(ScreenSearchStep.ClickHoldMs)));
+        if (f.DoubleClickIntervalMs < 0 || f.DoubleClickIntervalMs > MouseMotionDefaults.MaxDoubleClickIntervalMs)
+            issues.Add(Error($"The double-click gap must be 0 to {MouseMotionDefaults.MaxDoubleClickIntervalMs:N0} ms.", nameof(ScreenSearchStep.DoubleClickIntervalMs)));
+        if (f.PostActionDelayMs < 0 || f.PostActionDelayMs > MouseMotionDefaults.MaxPostActionDelayMs)
+            issues.Add(Error($"The wait after the click must be 0 to {MouseMotionDefaults.MaxPostActionDelayMs:N0} ms.", nameof(ScreenSearchStep.PostActionDelayMs)));
+
+        if (f.EffectiveScope == SearchScope.CustomArea)
         {
             if (f.RegionWidth < 5 || f.RegionHeight < 5)
                 issues.Add(Error("The search area must be at least 5×5 pixels.", "Region"));
@@ -771,6 +800,16 @@ public static class MacroValidator
             issues.Add(Warning("The \"when found\" action isn't used while waiting for something to disappear.", nameof(ScreenSearchStep.Action)));
         else if (f.Action == FoundTextAction.Hold && (f.ActionHoldMs < 1 || f.ActionHoldMs > MaxHoldMs))
             issues.Add(Error($"The hold time must be 1 to {MaxHoldMs:N0} ms.", nameof(ScreenSearchStep.ActionHoldMs)));
+    }
+
+    /// <summary>Movement style must be known; the glide time 0 to 5 s.</summary>
+    private static void CheckMovement(List<ValidationIssue> issues, MouseMoveStyle? style, int durationMs)
+    {
+        if (style is { } s && !Enum.IsDefined(s))
+            issues.Add(Error("Unknown movement style.", "MoveStyle"));
+        else if (style is MouseMoveStyle.SmoothGlide or MouseMoveStyle.HumanCurve
+                 && (durationMs < 0 || durationMs > MouseMotionDefaults.MaxMoveDurationMs))
+            issues.Add(Error($"The glide time must be 0 to {MouseMotionDefaults.MaxMoveDurationMs:N0} ms.", "MoveDurationMs"));
     }
 
     /// <summary>The stored picture must exist, decode to its stated size, and not be one flat color.</summary>

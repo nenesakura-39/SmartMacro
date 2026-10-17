@@ -23,10 +23,25 @@ public partial class EditorView : UserControl
         InitializeComponent();
         DataContextChanged += (_, _) =>
         {
-            if (_editor is not null) _editor.SelectStepsRequested -= OnSelectStepsRequested;
+            if (_editor is not null)
+            {
+                _editor.SelectStepsRequested -= OnSelectStepsRequested;
+                _editor.RunningStepChanged -= OnRunningStepChanged;
+            }
+
             _editor = DataContext as EditorViewModel;
-            if (_editor is not null) _editor.SelectStepsRequested += OnSelectStepsRequested;
+            if (_editor is not null)
+            {
+                _editor.SelectStepsRequested += OnSelectStepsRequested;
+                _editor.RunningStepChanged += OnRunningStepChanged;
+            }
         };
+    }
+
+    /// <summary>While playing: keep the running step (the one with the "▶ Running" badge) in view.</summary>
+    private void OnRunningStepChanged(object? sender, StepViewModel step)
+    {
+        if (StepList.IsVisible) StepList.ScrollIntoView(step);
     }
 
     /// <summary>
