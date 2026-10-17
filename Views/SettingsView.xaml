@@ -85,6 +85,9 @@
                         <CheckBox Content="Simplify mouse paths (recommended for menus and shops)" IsChecked="{Binding SimplifyMousePaths}" Margin="0,10,0,0"
                                   IsEnabled="{Binding MakesEditableSteps}" AutomationProperties.Name="Simplify mouse paths"
                                   ToolTip="Cursor travel between clicks isn't turned into Move mouse steps: each click already remembers where it happens. Recording 5 shop clicks gives 5 Click + Delay steps. Dragging with a button held (sliders, items) and the spot you hover before pressing a key are still kept. Turn off to keep the whole path." />
+                        <CheckBox Content="Smooth mouse movement during playback (glide instead of jumping)" IsChecked="{Binding SmoothMouseMoves}" Margin="0,10,0,0"
+                                  AutomationProperties.Name="Smooth mouse movement during playback"
+                                  ToolTip="When a Move mouse step (or a click at a position) comes right after a Wait, the cursor glides there during the last 0.2 s of the wait instead of teleporting. Menus, sliders and games then see real movement. The total time of the macro doesn't change." />
                     </StackPanel>
                 </Border>
 

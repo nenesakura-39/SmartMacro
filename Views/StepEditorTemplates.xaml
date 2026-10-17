@@ -137,23 +137,18 @@
         <StackPanel>
             <ContentControl Content="{Binding}" ContentTemplate="{StaticResource StepHeaderTemplate}" Focusable="False" Visibility="{Binding IsStandalone, Converter={StaticResource BoolToVisibility}}" />
 
-            <Grid>
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="*" />
-                    <ColumnDefinition Width="10" />
-                    <ColumnDefinition Width="*" />
-                </Grid.ColumnDefinitions>
-                <StackPanel Grid.Column="0">
+            <StackPanel>
+                <StackPanel>
                     <TextBlock Text="Button" Style="{StaticResource FieldLabel}" Margin="0,18,0,4" />
                     <ComboBox ItemsSource="{x:Static steps:MouseClickStepViewModel.Buttons}" SelectedItem="{Binding Button}" AutomationProperties.Name="Mouse button"
                               ToolTip="Which mouse button: Left (normal click), Right (context menu) or Middle (wheel button)." />
                 </StackPanel>
-                <StackPanel Grid.Column="2">
+                <StackPanel>
                     <TextBlock Text="Action type" Style="{StaticResource FieldLabel}" Margin="0,18,0,4" />
                     <ComboBox ItemsSource="{x:Static steps:MouseClickStepViewModel.Actions}" DisplayMemberPath="Label" SelectedValuePath="Value"
                               SelectedValue="{Binding Action}" AutomationProperties.Name="Click action type" />
                 </StackPanel>
-            </Grid>
+            </StackPanel>
             <TextBlock Text="{Binding ActionHelp}" Style="{StaticResource MutedText}" FontSize="11" Margin="0,4,0,0" TextWrapping="Wrap" />
 
             <StackPanel Visibility="{Binding UsesHoldTime, Converter={StaticResource BoolToVisibility}}">
@@ -189,24 +184,19 @@
         <StackPanel>
             <ContentControl Content="{Binding}" ContentTemplate="{StaticResource StepHeaderTemplate}" Focusable="False" Visibility="{Binding IsStandalone, Converter={StaticResource BoolToVisibility}}" />
 
-            <Grid Margin="0,18,0,0">
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="*" />
-                    <ColumnDefinition Width="10" />
-                    <ColumnDefinition Width="*" />
-                </Grid.ColumnDefinitions>
-                <StackPanel Grid.Column="0">
+            <StackPanel Margin="0,18,0,0">
+                <StackPanel>
                     <TextBlock Text="Direction" Style="{StaticResource FieldLabel}" Margin="0,0,0,4" />
                     <ComboBox ItemsSource="{x:Static steps:MouseScrollStepViewModel.Directions}" DisplayMemberPath="Label" SelectedValuePath="Value"
                               SelectedValue="{Binding Direction}" AutomationProperties.Name="Scroll direction"
                               ToolTip="Up / Down turn the wheel like a normal mouse. Left / Right scroll sideways (tilt wheel)." />
                 </StackPanel>
-                <StackPanel Grid.Column="2">
+                <StackPanel>
                     <TextBlock Text="Number of notches" Style="{StaticResource FieldLabel}" Margin="0,0,0,4" />
                     <TextBox Text="{Binding Notches, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}" AutomationProperties.Name="Number of notches"
                              ToolTip="How far to scroll: 1 notch = one click of a mouse wheel." />
                 </StackPanel>
-            </Grid>
+            </StackPanel>
             <TextBlock Text="{Binding AmountText}" Style="{StaticResource MutedText}" FontSize="11" Margin="0,4,0,0" TextWrapping="Wrap" />
 
             <TextBlock Text="Scroll position" Style="{StaticResource FieldLabel}" />
@@ -384,6 +374,11 @@
                     <TextBox Text="{Binding OffsetY, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}" AutomationProperties.Name="Offset Y" />
                 </StackPanel>
             </Grid>
+            <CheckBox Content="Move the cursor out of the search area after clicking (so its hover effect doesn't hide the next one)"
+                      IsChecked="{Binding MoveCursorAwayAfterAction}" Margin="0,10,0,0"
+                      Visibility="{Binding HasPointerAction, Converter={StaticResource BoolToVisibility}}"
+                      ToolTip="Useful in loops that click a button which comes back in the same spot (e.g. a game's Shake button): the cursor resting on it changes how it looks."
+                      AutomationProperties.Name="Move the cursor away after clicking" />
 
             <TextBlock Text="{Binding NotFoundLabel}" Style="{StaticResource FieldLabel}" />
             <ComboBox ItemsSource="{x:Static steps:ScreenSearchStepViewModel.NotFoundOptions}" DisplayMemberPath="Label" SelectedValuePath="Value"
@@ -493,6 +488,9 @@
                 <TextBox Text="{Binding IgnoreEdgesPercent, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}" Width="60"
                          AutomationProperties.Name="Ignore edges percent" />
             </StackPanel>
+            <CheckBox Content="Ignore background / match bright text and edges (for see-through game UI)" IsChecked="{Binding MatchForeground}" Margin="0,8,0,0"
+                      ToolTip="For buttons you can partly see through, like a white &quot;SHAKE&quot; ring over the game world: only the strokes that stand out (the white text and ring) are compared, so it still matches when water, wood or rocks show through it."
+                      AutomationProperties.Name="Ignore background and match bright text and edges" />
 
             <ContentControl Content="{Binding}" ContentTemplate="{StaticResource SearchWaitTemplate}" Focusable="False" />
             <ContentControl Content="{Binding}" ContentTemplate="{StaticResource SearchResultTemplate}" Focusable="False" Visibility="{Binding IsStandalone, Converter={StaticResource BoolToVisibility}}" />
@@ -682,23 +680,18 @@
     -->
     <DataTemplate x:Key="ConditionEditorTemplate" DataType="{x:Type steps:ConditionViewModel}">
         <StackPanel>
-            <Grid>
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="*" />
-                    <ColumnDefinition Width="10" />
-                    <ColumnDefinition Width="*" />
-                </Grid.ColumnDefinitions>
-                <StackPanel Grid.Column="0">
+            <StackPanel>
+                <StackPanel>
                     <TextBlock Text="Look for" Style="{StaticResource FieldLabel}" />
                     <ComboBox ItemsSource="{x:Static steps:ConditionViewModel.Kinds}" DisplayMemberPath="Label" SelectedValuePath="Value"
                               SelectedValue="{Binding Kind}" AutomationProperties.Name="What the condition looks for" />
                 </StackPanel>
-                <StackPanel Grid.Column="2">
+                <StackPanel>
                     <TextBlock Text="True when it" Style="{StaticResource FieldLabel}" />
                     <ComboBox ItemsSource="{x:Static steps:ConditionViewModel.NegateOptions}" DisplayMemberPath="Label" SelectedValuePath="Value"
                               SelectedValue="{Binding Negate}" AutomationProperties.Name="Is or is not on screen" />
                 </StackPanel>
-            </Grid>
+            </StackPanel>
 
             <Border Margin="0,10,0,0" Padding="10,8" CornerRadius="6" Background="{StaticResource ErrorSoftBrush}"
                     Visibility="{Binding IsDamaged, Converter={StaticResource BoolToVisibility}}">
@@ -780,6 +773,10 @@
                 <TextBlock Text="{Binding ConditionLabel}" Style="{StaticResource FieldLabel}" />
                 <ContentControl Content="{Binding Condition}" ContentTemplate="{StaticResource ConditionEditorTemplate}" Focusable="False"
                                 Visibility="{Binding Condition, Converter={StaticResource NullToVisibility}}" />
+                <TextBlock Text="Keep checking before leaving (ms)" Style="{StaticResource FieldLabel}" TextWrapping="Wrap" />
+                <TextBox Text="{Binding KeepCheckingForMs, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}" Width="100" HorizontalAlignment="Left"
+                         AutomationProperties.Name="Keep checking before leaving, in milliseconds" />
+                <TextBlock Text="{Binding KeepCheckingHint}" Style="{StaticResource MutedText}" FontSize="11" Margin="0,4,0,0" TextWrapping="Wrap" />
             </StackPanel>
 
             <TextBlock Text="Safety limits" Style="{StaticResource FieldLabel}" Margin="0,18,0,0" />
@@ -940,29 +937,22 @@
                     </StackPanel>
                 </Button>
             </Grid>
-            <Grid Margin="0,4,0,0">
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="*" />
-                    <ColumnDefinition Width="10" />
-                    <ColumnDefinition Width="*" />
-                    <ColumnDefinition Width="10" />
-                    <ColumnDefinition Width="*" />
-                </Grid.ColumnDefinitions>
-                <StackPanel Grid.Column="0">
+            <StackPanel Margin="0,4,0,0">
+                <StackPanel>
                     <TextBlock Text="Tolerance (0-255)" Style="{StaticResource FieldLabel}" />
                     <TextBox Text="{Binding MarkerTolerance, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}" AutomationProperties.Name="Marker color tolerance" />
                 </StackPanel>
-                <StackPanel Grid.Column="2">
+                <StackPanel>
                     <TextBlock Text="Min size (pixels)" Style="{StaticResource FieldLabel}" />
                     <TextBox Text="{Binding MarkerMinPixels, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}" AutomationProperties.Name="Marker minimum size" />
                 </StackPanel>
-                <StackPanel Grid.Column="4">
+                <StackPanel>
                     <TextBlock Text="Ignore jumps over (%)" Style="{StaticResource FieldLabel}" />
                     <TextBox Text="{Binding MaxJumpPercent, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}"
                              ToolTip="A jump bigger than this in one frame is ignored once, in case it was a glitch. If the marker is still there next frame, the jump is accepted."
                              AutomationProperties.Name="Glitch filter percent" />
                 </StackPanel>
-            </Grid>
+            </StackPanel>
 
             <!-- 2. The target zone -->
             <TextBlock Text="2. The target zone" Style="{StaticResource SectionTitle}" FontSize="13" Margin="0,18,0,0" />
@@ -1067,57 +1057,42 @@
 
             <!-- 5. Limits -->
             <TextBlock Text="5. Speed and safety limits" Style="{StaticResource SectionTitle}" FontSize="13" Margin="0,18,0,0" />
-            <Grid Margin="0,4,0,0">
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="*" />
-                    <ColumnDefinition Width="10" />
-                    <ColumnDefinition Width="*" />
-                </Grid.ColumnDefinitions>
-                <StackPanel Grid.Column="0">
+            <StackPanel Margin="0,4,0,0">
+                <StackPanel>
                     <TextBlock Text="Captures per second (max)" Style="{StaticResource FieldLabel}" />
                     <TextBox Text="{Binding MaxCapturesPerSecond, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}"
                              ToolTip="How often the loop looks at the bar. Use &quot;Measure loop speed&quot; to see what your PC can do." AutomationProperties.Name="Captures per second" />
                 </StackPanel>
-                <StackPanel Grid.Column="2">
+                <StackPanel>
                     <TextBlock Text="Min time between changes (ms)" Style="{StaticResource FieldLabel}" />
                     <TextBox Text="{Binding MinInputChangeMs, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}"
                              ToolTip="Presses / releases / taps are at least this far apart (games miss changes that are too quick)." AutomationProperties.Name="Minimum time between input changes" />
                 </StackPanel>
-            </Grid>
-            <Grid Margin="0,4,0,0">
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="*" />
-                    <ColumnDefinition Width="10" />
-                    <ColumnDefinition Width="*" />
-                </Grid.ColumnDefinitions>
-                <StackPanel Grid.Column="0">
+            </StackPanel>
+            <StackPanel Margin="0,4,0,0">
+                <StackPanel>
                     <TextBlock Text="Max runtime (ms)" Style="{StaticResource FieldLabel}" />
                     <TextBox Text="{Binding MaxRuntimeMs, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}" AutomationProperties.Name="Max runtime in milliseconds" />
                 </StackPanel>
-                <StackPanel Grid.Column="2">
+                <StackPanel>
                     <TextBlock Text="When the time is up" Style="{StaticResource FieldLabel}" />
                     <ComboBox ItemsSource="{x:Static steps:FeedbackLoopStepViewModel.EndOptions}" DisplayMemberPath="Label" SelectedValuePath="Value"
                               SelectedValue="{Binding WhenTimeUp}" AutomationProperties.Name="When the time is up" />
                 </StackPanel>
-            </Grid>
+            </StackPanel>
             <TextBlock Text="{Binding MaxRuntimeText}" Style="{StaticResource MutedText}" FontSize="11" Margin="0,4,0,0" />
-            <Grid Margin="0,4,0,0">
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="*" />
-                    <ColumnDefinition Width="10" />
-                    <ColumnDefinition Width="*" />
-                </Grid.ColumnDefinitions>
-                <StackPanel Grid.Column="0">
+            <StackPanel Margin="0,4,0,0">
+                <StackPanel>
                     <TextBlock Text="Target missing for (ms)" Style="{StaticResource FieldLabel}" />
                     <TextBox Text="{Binding LostTimeoutMs, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}"
                              ToolTip="Shorter gaps (a flicker, two similar patches) just keep the input as it is." AutomationProperties.Name="Target missing time in milliseconds" />
                 </StackPanel>
-                <StackPanel Grid.Column="2">
+                <StackPanel>
                     <TextBlock Text="Then" Style="{StaticResource FieldLabel}" />
                     <ComboBox ItemsSource="{x:Static steps:FeedbackLoopStepViewModel.LostActions}" DisplayMemberPath="Label" SelectedValuePath="Value"
                               SelectedValue="{Binding WhenTargetLost}" AutomationProperties.Name="When the target is missing" />
                 </StackPanel>
-            </Grid>
+            </StackPanel>
 
             <!-- 6. Stop when -->
             <TextBlock Text="6. Stop when (optional)" Style="{StaticResource SectionTitle}" FontSize="13" Margin="0,18,0,0" />

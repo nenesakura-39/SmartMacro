@@ -318,6 +318,38 @@ internal static class NativeMethods
         var hwnd = new System.Windows.Interop.WindowInteropHelper(window).Handle;
         if (hwnd != IntPtr.Zero) SetWindowDisplayAffinity(hwnd, excluded ? WDA_EXCLUDEFROMCAPTURE : WDA_NONE);
     }
+
+    private const uint LWA_ALPHA = 0x00000002;
+
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool SetLayeredWindowAttributes(IntPtr hwnd, uint crKey, byte bAlpha, uint dwFlags);
+
+    /// <summary>
+    /// Makes a top-level window fully see-through (invisible = true) or normal again, without minimizing or hiding it
+    /// (no animation, focus doesn't move). Works for any window: it is made a layered window with alpha 0 for as long
+    /// as needed; the previous extended style is returned so <see cref="RestoreWindowStyle"/> can put it back.
+    /// </summary>
+    public static long? MakeInvisible(System.Windows.Window window)
+    {
+        var hwnd = new System.Windows.Interop.WindowInteropHelper(window).Handle;
+        if (hwnd == IntPtr.Zero) return null;
+        var previous = GetWindowLongValue(hwnd, GWL_EXSTYLE);
+        // Already layered (WPF AllowsTransparency windows draw with UpdateLayeredWindow): don't touch it; capture
+        // exclusion alone keeps it out of the screenshot.
+        if ((previous & WS_EX_LAYERED) != 0) return null;
+        SetWindowLongValue(hwnd, GWL_EXSTYLE, previous | WS_EX_LAYERED);
+        SetLayeredWindowAttributes(hwnd, 0, 0, LWA_ALPHA);
+        return previous;
+    }
+
+    /// <summary>Undoes <see cref="MakeInvisible"/>.</summary>
+    public static void RestoreWindowStyle(System.Windows.Window window, long previousExStyle)
+    {
+        var hwnd = new System.Windows.Interop.WindowInteropHelper(window).Handle;
+        if (hwnd == IntPtr.Zero) return;
+        SetWindowLongValue(hwnd, GWL_EXSTYLE, previousExStyle);
+    }
     public static readonly IntPtr HWND_TOPMOST = new(-1);
     public const uint SWP_NOACTIVATE = 0x0010;
     public const uint SWP_SHOWWINDOW = 0x0040;

@@ -330,6 +330,24 @@ public sealed class RepeatStepViewModel : StepViewModel
         set { if (_step.Count == value) return; _step.Count = value; NotifyChanged(); }
     }
 
+    /// <summary>
+    /// "Keep checking before leaving (ms)": the grace window before the loop ends because its target is not seen.
+    /// Shows the automatic value until edited (800 ms for image / colour conditions, 0 for text).
+    /// </summary>
+    public int KeepCheckingForMs
+    {
+        get => _step.EffectiveKeepCheckingForMs;
+        set
+        {
+            if (_step.KeepCheckingForMs == value) return;
+            _step.KeepCheckingForMs = value;
+            NotifyChanged();
+        }
+    }
+
+    public string KeepCheckingHint =>
+        "If the target is missing for a moment (e.g. a game button that comes back 0.1–0.3 s after a click), keep looking this long before leaving the loop. 0 = leave on the first miss.";
+
     public int MaxIterations
     {
         get => _step.MaxIterations;

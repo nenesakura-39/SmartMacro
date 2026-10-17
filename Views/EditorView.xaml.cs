@@ -29,6 +29,40 @@ public partial class EditorView : UserControl
         };
     }
 
+    /// <summary>
+    /// Mouse wheel over the Properties panel always scrolls the panel. Without this, a closed drop-down (or a slider)
+    /// under the cursor grabbed the wheel and silently changed its value while the user was only scrolling past it.
+    /// An OPEN drop-down list still scrolls its own items.
+    /// </summary>
+    private void Properties_PreviewMouseWheel(object sender, MouseWheelEventArgs e)
+    {
+        if (e.Handled || sender is not ScrollViewer panel) return;
+
+        for (var node = e.OriginalSource as DependencyObject; node is not null && !ReferenceEquals(node, panel); node = ParentOf(node))
+        {
+            switch (node)
+            {
+                case ComboBox { IsDropDownOpen: true }:
+                    return; // the open list scrolls itself
+                case ComboBox:
+                case Slider:
+                    e.Handled = true;
+                    // Hand the wheel to the panel instead, as if the drop-down / slider wasn't there.
+                    panel.RaiseEvent(new MouseWheelEventArgs(e.MouseDevice, e.Timestamp, e.Delta)
+                    {
+                        RoutedEvent = UIElement.MouseWheelEvent,
+                        Source = panel,
+                    });
+                    return;
+            }
+        }
+    }
+
+    private static DependencyObject? ParentOf(DependencyObject node) =>
+        node is Visual or System.Windows.Media.Media3D.Visual3D
+            ? VisualTreeHelper.GetParent(node) ?? LogicalTreeHelper.GetParent(node)
+            : LogicalTreeHelper.GetParent(node);
+
     // Keep the selected step visible after adding, moving or duplicating steps, and tell the editor which steps
     // are selected (Shift / Ctrl+click can select several, e.g. for "Wrap in Repeat").
     private void StepList_SelectionChanged(object sender, SelectionChangedEventArgs e)

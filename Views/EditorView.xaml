@@ -36,92 +36,105 @@
         <Grid Visibility="{Binding HasMacro, Converter={StaticResource BoolToVisibility}}">
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto" />
-                <RowDefinition Height="*" />
+                <RowDefinition Height="*" MinHeight="360" />
                 <RowDefinition Height="Auto" />
             </Grid.RowDefinitions>
 
-            <!-- Header: name, description, save -->
-            <Grid Grid.Row="0" Margin="0,0,0,14">
+            <!-- Header: name + save (row 1), description + play settings (row 2). Kept compact so the workspace
+                 below gets most of the height, also in a smaller (non-maximized) window. -->
+            <Grid Grid.Row="0" Margin="0,0,0,8">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*" />
                     <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
-                <StackPanel Grid.Column="0" Margin="0,0,16,0">
-                    <TextBlock Text="WORKFLOW EDITOR" FontSize="11" FontWeight="SemiBold" Foreground="{StaticResource MutedTextBrush}" />
-                    <TextBox Text="{Binding Name, UpdateSourceTrigger=PropertyChanged}" Tag="Macro name" FontSize="20" FontWeight="SemiBold"
-                             Background="Transparent" BorderBrush="Transparent" Padding="2,4" Margin="-4,4,0,0" MaxLength="100"
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+
+                <DockPanel Grid.Row="0" Grid.Column="0" Margin="0,0,16,0" LastChildFill="True">
+                    <TextBlock DockPanel.Dock="Left" Text="WORKFLOW" FontSize="10" FontWeight="SemiBold" Foreground="{StaticResource MutedTextBrush}"
+                               VerticalAlignment="Center" Margin="0,0,10,0" />
+                    <TextBox Text="{Binding Name, UpdateSourceTrigger=PropertyChanged}" Tag="Macro name" FontSize="18" FontWeight="SemiBold"
+                             Background="Transparent" BorderBrush="Transparent" Padding="2,2" Margin="-4,0,0,0" MaxLength="100"
                              AutomationProperties.Name="Macro name" />
-                    <TextBox Text="{Binding Description, UpdateSourceTrigger=PropertyChanged}" Tag="Add a description (optional)"
-                             Foreground="{StaticResource MutedTextBrush}" Background="Transparent" BorderBrush="Transparent"
-                             Padding="2,3" Margin="-4,0,0,0" MaxLength="2000" AutomationProperties.Name="Macro description" />
-                    <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
-                        <TextBlock Text="Play" Foreground="{StaticResource MutedTextBrush}" VerticalAlignment="Center" />
-                        <TextBox Text="{Binding RepeatCount, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}" Width="64" Margin="8,0,8,0"
-                                 Padding="6,4" HorizontalContentAlignment="Center" AutomationProperties.Name="Repeat count"
-                                 ToolTip="How many times to run the steps. 0 = keep repeating until you stop it." />
-                        <TextBlock Text="time(s)  (0 = until stopped)" Foreground="{StaticResource MutedTextBrush}" VerticalAlignment="Center" />
-                        <TextBlock Text="Speed" Foreground="{StaticResource MutedTextBrush}" VerticalAlignment="Center" Margin="24,0,0,0" />
-                        <TextBox Text="{Binding Speed, UpdateSourceTrigger=LostFocus, ValidatesOnExceptions=True}" Width="56" Margin="8,0,6,0"
-                                 Padding="6,4" HorizontalContentAlignment="Center" AutomationProperties.Name="Playback speed"
-                                 ToolTip="Speed multiplier for delays: 2 = twice as fast, 0.5 = half speed (0.1 to 10)." />
-                        <TextBlock Text="×" Foreground="{StaticResource MutedTextBrush}" VerticalAlignment="Center" />
-                        <TextBlock Text="Wait between repeats" Foreground="{StaticResource MutedTextBrush}" VerticalAlignment="Center" Margin="24,0,0,0" />
-                        <TextBox Text="{Binding RepeatDelayMs, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}" Width="72" Margin="8,0,6,0"
-                                 Padding="6,4" HorizontalContentAlignment="Center" AutomationProperties.Name="Wait between repeats in milliseconds"
-                                 ToolTip="Pause after each run before the next one starts (milliseconds). Not used when playing once." />
-                        <TextBlock Text="ms" Foreground="{StaticResource MutedTextBrush}" VerticalAlignment="Center" />
-                    </StackPanel>
-                </StackPanel>
-                <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
-                    <Border Padding="10,5" CornerRadius="12" Margin="0,0,12,0" Background="{StaticResource WarningSoftBrush}"
+                </DockPanel>
+
+                <StackPanel Grid.Row="0" Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                    <Border Padding="10,4" CornerRadius="12" Margin="0,0,10,0" Background="{StaticResource WarningSoftBrush}"
                             Visibility="{Binding IsDirty, Converter={StaticResource BoolToVisibility}}">
                         <TextBlock Text="Unsaved changes" Foreground="{StaticResource WarningBrush}" FontSize="12" />
                     </Border>
-                    <Border Padding="10,5" CornerRadius="12" Margin="0,0,12,0" Background="{StaticResource SuccessSoftBrush}"
+                    <Border Padding="10,4" CornerRadius="12" Margin="0,0,10,0" Background="{StaticResource SuccessSoftBrush}"
                             Visibility="{Binding IsDirty, Converter={StaticResource BoolToVisibility}, ConverterParameter=Invert}">
                         <StackPanel Orientation="Horizontal">
                             <TextBlock Text="&#xE73E;" Style="{StaticResource IconText}" FontSize="11" Foreground="{StaticResource SuccessBrush}" />
                             <TextBlock Text="Saved" Foreground="{StaticResource SuccessBrush}" FontSize="12" Margin="6,0,0,0" />
                         </StackPanel>
                     </Border>
-                    <Button Command="{Binding RevertCommand}" Margin="0,0,8,0" ToolTip="Throw away changes since the last save">
+                    <Button Command="{Binding RevertCommand}" Margin="0,0,8,0" Padding="10,5" ToolTip="Throw away changes since the last save">
                         <StackPanel Orientation="Horizontal">
                             <TextBlock Text="&#xE7A7;" Style="{StaticResource IconText}" />
                             <TextBlock Text="Discard changes" Margin="8,0,0,0" />
                         </StackPanel>
                     </Button>
-                    <Button Style="{StaticResource PrimaryButton}" Command="{Binding SaveCommand}" ToolTip="Save (Ctrl+S)">
+                    <Button Style="{StaticResource PrimaryButton}" Command="{Binding SaveCommand}" Padding="12,5" ToolTip="Save (Ctrl+S)">
                         <StackPanel Orientation="Horizontal">
                             <TextBlock Text="&#xE74E;" Style="{StaticResource IconText}" />
                             <TextBlock Text="Save" Margin="8,0,0,0" />
                         </StackPanel>
                     </Button>
                 </StackPanel>
+
+                <TextBox Grid.Row="1" Grid.Column="0" Text="{Binding Description, UpdateSourceTrigger=PropertyChanged}" Tag="Add a description (optional)"
+                         Foreground="{StaticResource MutedTextBrush}" Background="Transparent" BorderBrush="Transparent" FontSize="12"
+                         Padding="2,2" Margin="-4,2,16,0" MaxLength="2000" VerticalAlignment="Center" AutomationProperties.Name="Macro description" />
+
+                <StackPanel Grid.Row="1" Grid.Column="1" Orientation="Horizontal" Margin="0,4,0,0" VerticalAlignment="Center">
+                    <TextBlock Text="Play" Foreground="{StaticResource MutedTextBrush}" VerticalAlignment="Center" FontSize="12" />
+                    <TextBox Text="{Binding RepeatCount, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}" Width="56" Margin="6,0,4,0"
+                             Padding="4,2" HorizontalContentAlignment="Center" AutomationProperties.Name="Repeat count"
+                             ToolTip="How many times to run the steps. 0 = keep repeating until you stop it." />
+                    <TextBlock Text="time(s) (0 = until stopped)" Foreground="{StaticResource MutedTextBrush}" VerticalAlignment="Center" FontSize="12" />
+                    <TextBlock Text="Speed" Foreground="{StaticResource MutedTextBrush}" VerticalAlignment="Center" Margin="16,0,0,0" FontSize="12" />
+                    <TextBox Text="{Binding Speed, UpdateSourceTrigger=LostFocus, ValidatesOnExceptions=True}" Width="48" Margin="6,0,4,0"
+                             Padding="4,2" HorizontalContentAlignment="Center" AutomationProperties.Name="Playback speed"
+                             ToolTip="Speed multiplier for delays: 2 = twice as fast, 0.5 = half speed (0.1 to 10)." />
+                    <TextBlock Text="×" Foreground="{StaticResource MutedTextBrush}" VerticalAlignment="Center" />
+                    <TextBlock Text="Wait between repeats" Foreground="{StaticResource MutedTextBrush}" VerticalAlignment="Center" Margin="16,0,0,0" FontSize="12" />
+                    <TextBox Text="{Binding RepeatDelayMs, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}" Width="64" Margin="6,0,4,0"
+                             Padding="4,2" HorizontalContentAlignment="Center" AutomationProperties.Name="Wait between repeats in milliseconds"
+                             ToolTip="Pause after each run before the next one starts (milliseconds). Not used when playing once." />
+                    <TextBlock Text="ms" Foreground="{StaticResource MutedTextBrush}" VerticalAlignment="Center" FontSize="12" />
+                </StackPanel>
             </Grid>
 
             <!-- Toolbox | steps | properties -->
             <Grid Grid.Row="1">
+                <!-- The 12 px gaps are splitters: drag them to make Add step / Workflow steps / Properties wider. -->
                 <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="190" />
-                    <ColumnDefinition Width="14" />
+                    <ColumnDefinition Width="200" MinWidth="150" MaxWidth="420" />
+                    <ColumnDefinition Width="12" />
                     <ColumnDefinition Width="*" MinWidth="280" />
-                    <ColumnDefinition Width="14" />
-                    <ColumnDefinition Width="330" />
+                    <ColumnDefinition Width="12" />
+                    <ColumnDefinition Width="360" MinWidth="280" MaxWidth="760" />
                 </Grid.ColumnDefinitions>
 
+                <GridSplitter Grid.Column="1" Style="{StaticResource PanelSplitter}" ResizeDirection="Columns" ResizeBehavior="PreviousAndNext"
+                              ToolTip="Drag to resize" AutomationProperties.Name="Resize the Add step panel" />
+                <GridSplitter Grid.Column="3" Style="{StaticResource PanelSplitter}" ResizeDirection="Columns" ResizeBehavior="PreviousAndNext"
+                              ToolTip="Drag to resize" AutomationProperties.Name="Resize the Properties panel" />
+
                 <!-- Toolbox -->
-                <Border Grid.Column="0" Style="{StaticResource Card}" Padding="12">
+                <Border Grid.Column="0" Style="{StaticResource Card}" Padding="10">
                     <DockPanel>
-                        <StackPanel DockPanel.Dock="Top" Margin="2,0,0,10">
+                        <!-- Compact header: one toggle instead of two radio buttons + a hint, so the step buttons below
+                             keep their space in a small window. -->
+                        <StackPanel DockPanel.Dock="Top" Margin="2,0,0,8">
                             <TextBlock Text="Add step" Style="{StaticResource SectionTitle}" />
-                            <TextBlock Text="New steps go:" Style="{StaticResource MutedText}" FontSize="11" Margin="0,6,0,2" />
-                            <RadioButton Content="After the selected step" IsChecked="{Binding AddAfterSelected}" FontSize="12" Margin="0,2,0,0"
-                                         ToolTip="Adds the new step right after the step selected in the list (at the end when nothing is selected)."
-                                         AutomationProperties.Name="Insert new steps after the selected step" />
-                            <RadioButton Content="At the end" IsChecked="{Binding AddAtEnd}" FontSize="12" Margin="0,4,0,0"
-                                         ToolTip="Adds the new step after the last step of the workflow, wherever the selection is."
-                                         AutomationProperties.Name="Add new steps at the end" />
-                            <TextBlock Text="Right-click a step button for the other choice." Style="{StaticResource MutedText}" FontSize="10" Margin="0,4,0,0" TextWrapping="Wrap" />
+                            <CheckBox Content="Add new steps at the end" IsChecked="{Binding AddAtEnd}" FontSize="12" Margin="0,6,0,0"
+                                      ToolTip="Off: a new step goes right after the selected step (at the end when nothing is selected). On: always after the last step. Right-click a step button for the other choice."
+                                      AutomationProperties.Name="Add new steps at the end" />
                         </StackPanel>
                         <ScrollViewer VerticalScrollBarVisibility="Auto">
                             <StackPanel>
@@ -316,12 +329,15 @@
                 <!-- Properties -->
                 <Border Grid.Column="4" Style="{StaticResource Card}" Padding="0">
                     <DockPanel>
-                        <TextBlock DockPanel.Dock="Top" Text="Properties" Style="{StaticResource SectionTitle}" Margin="16,14,16,4" />
+                        <Border DockPanel.Dock="Top" BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,0,0,1" Padding="16,10,16,8">
+                            <TextBlock Text="Properties" Style="{StaticResource SectionTitle}" />
+                        </Border>
                         <Grid>
                             <TextBlock Text="Select a step to edit its settings." Style="{StaticResource MutedText}"
                                        HorizontalAlignment="Center" VerticalAlignment="Center" Margin="16"
                                        Visibility="{Binding HasSelection, Converter={StaticResource BoolToVisibility}, ConverterParameter=Invert}" />
-                            <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="16,8,16,16"
+                            <ScrollViewer x:Name="PropertiesScroll" VerticalScrollBarVisibility="Auto" Padding="16,10,16,28"
+                                          PreviewMouseWheel="Properties_PreviewMouseWheel"
                                           Visibility="{Binding HasSelection, Converter={StaticResource BoolToVisibility}}">
                                 <ContentControl Content="{Binding SelectedStep}" Focusable="False" />
                             </ScrollViewer>
@@ -331,17 +347,18 @@
             </Grid>
 
             <!-- Problems -->
-            <Border Grid.Row="2" Style="{StaticResource Card}" Margin="0,14,0,0" Padding="12,10">
+            <!-- Problems: a one-line banner when everything is fine; the list only appears when there are problems. -->
+            <Border Grid.Row="2" Style="{StaticResource Card}" Margin="0,8,0,0" Padding="12,6">
                 <DockPanel>
                     <StackPanel DockPanel.Dock="Top" Orientation="Horizontal">
                         <TextBlock Text="&#xEA39;" Style="{StaticResource IconText}" Foreground="{StaticResource ErrorBrush}" Margin="0,0,8,0"
                                    Visibility="{Binding HasErrors, Converter={StaticResource BoolToVisibility}}" />
                         <TextBlock Text="&#xE73E;" Style="{StaticResource IconText}" Foreground="{StaticResource SuccessBrush}" Margin="0,0,8,0"
                                    Visibility="{Binding HasIssues, Converter={StaticResource BoolToVisibility}, ConverterParameter=Invert}" />
-                        <TextBlock Text="Problems" Style="{StaticResource SectionTitle}" FontSize="13" />
+                        <TextBlock Text="Problems" Style="{StaticResource SectionTitle}" FontSize="12" VerticalAlignment="Center" />
                         <TextBlock Text="{Binding ValidationSummary}" Foreground="{StaticResource MutedTextBrush}" FontSize="12" Margin="10,0,0,0" VerticalAlignment="Center" />
                     </StackPanel>
-                    <ListBox ItemsSource="{Binding Issues}" MaxHeight="96" Margin="0,6,0,0" ItemContainerStyle="{StaticResource PlainListItem}"
+                    <ListBox ItemsSource="{Binding Issues}" MaxHeight="84" Margin="0,4,0,0" ItemContainerStyle="{StaticResource PlainListItem}"
                              Visibility="{Binding HasIssues, Converter={StaticResource BoolToVisibility}}">
                         <ListBox.ItemTemplate>
                             <DataTemplate DataType="{x:Type core:ValidationIssue}">

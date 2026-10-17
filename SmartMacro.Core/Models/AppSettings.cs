@@ -51,6 +51,13 @@ public sealed class AppSettings
     /// </summary>
     public bool SimplifyMousePaths { get; set; } = true;
 
+    /// <summary>
+    /// Playback: a cursor jump right after a Delay glides there smoothly (~120 updates per second) during the end of
+    /// that Delay instead of teleporting, so menus, sliders and games see real movement. Total timing is unchanged.
+    /// On by default (also for settings files made before it existed).
+    /// </summary>
+    public bool SmoothMouseMoves { get; set; } = true;
+
     /// <summary>Global shortcut to start/stop recording.</summary>
     public HotkeyBinding RecordHotkey { get; set; } = HotkeyBinding.DefaultRecord;
 

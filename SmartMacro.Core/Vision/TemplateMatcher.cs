@@ -29,6 +29,14 @@ public sealed record TemplateMatchOptions
     /// compared on the inner part only; the match still reports the full template's rectangle and centre.
     /// </summary>
     public double IgnoreEdgeFraction { get; init; }
+
+    /// <summary>
+    /// Also match the picture's "foreground" only: the bright (or dark) strokes that stand out from its background,
+    /// like the white text and ring of a semi-transparent game button. The background (whatever shows through,
+    /// e.g. a wooden pier one time and water the next) doesn't count. Each spot gets the better of the normal score
+    /// and the foreground score. The colour check then only compares the foreground's colour.
+    /// </summary>
+    public bool MatchForeground { get; init; }
 }
 
 /// <summary>
@@ -86,8 +94,22 @@ public static class TemplateMatcher
         var fine = new FineTemplate(template);
         if (fine.Norm < 1e-6) return TemplateMatchResult.None; // flat template
 
+        if (options.MatchForeground)
+            return FindWithForeground(image, template, fine, options, cancellationToken);
+
+        return FindStandard(image, template, fine, options, cancellationToken);
+    }
+
+    /// <summary>The normal (whole picture, grey NCC) search.</summary>
+    private static TemplateMatchResult FindStandard(BgraImage image, BgraImage template, FineTemplate fine, TemplateMatchOptions options,
+        CancellationToken cancellationToken)
+    {
+        int width = image.Width, height = image.Height, tw = template.Width, th = template.Height;
         var scale = ChooseScale(width, height, tw, th);
         var candidateCount = Math.Max(12, options.MaxResults * 2);
+        // A small template that still had to be shrunk to 1/4 or less (a big search area) loses detail: check more
+        // candidate spots at full size so the real one isn't missed.
+        if (scale > 2 && Math.Min(tw, th) < SmallTemplateSize) candidateCount *= 3;
         var candidates = CoarseCandidates(image, template, scale, candidateCount, cancellationToken);
 
         var found = new List<VisualMatch>();
@@ -114,16 +136,39 @@ public static class TemplateMatcher
             if (score >= options.MinScore) found.Add(new VisualMatch(new ScreenRect(x, y, tw, th), score));
         }
 
-        // Best first; drop matches that overlap a better one (the same thing found twice).
+        return new TemplateMatchResult(KeepBest(found, options.MaxResults), Math.Min(1.0, best), rejectedForColor, scale);
+    }
+
+    /// <summary>Best first; drops matches that overlap a better one (the same thing found twice).</summary>
+    private static List<VisualMatch> KeepBest(IEnumerable<VisualMatch> found, int maxResults)
+    {
         var kept = new List<VisualMatch>();
         foreach (var match in found.OrderByDescending(m => m.Score))
         {
             if (kept.Any(k => Overlap(k.Bounds, match.Bounds) > 0.3)) continue;
             kept.Add(match);
-            if (kept.Count >= Math.Max(1, options.MaxResults)) break;
+            if (kept.Count >= Math.Max(1, maxResults)) break;
         }
 
-        return new TemplateMatchResult(kept, Math.Min(1.0, best), rejectedForColor, scale);
+        return kept;
+    }
+
+    /// <summary>
+    /// Runs the normal search (shape + whole-picture colour) and the foreground search, and merges both: every
+    /// spot keeps its better score. When the picture has no clear foreground (nothing stands out from its
+    /// background), only the normal search runs.
+    /// </summary>
+    private static TemplateMatchResult FindWithForeground(BgraImage image, BgraImage template, FineTemplate fine,
+        TemplateMatchOptions options, CancellationToken cancellationToken)
+    {
+        var standard = FindStandard(image, template, fine, options, cancellationToken);
+        var model = ForegroundModel.Build(template);
+        if (model is null) return standard;
+
+        var foreground = ForegroundSearch.Find(image, model, options, cancellationToken);
+        var merged = KeepBest(standard.Matches.Concat(foreground.Matches), options.MaxResults);
+        return new TemplateMatchResult(merged, Math.Max(standard.BestScore, foreground.BestScore),
+            merged.Count > 0 ? 0 : standard.RejectedForColor + foreground.RejectedForColor, Math.Max(standard.Scale, foreground.Scale));
     }
 
     /// <summary>Smallest inner part (pixels per side) an edge-ignoring search keeps, so the shape still means something.</summary>
@@ -180,26 +225,42 @@ public static class TemplateMatcher
         return Math.Sqrt(Math.Max(0, variance)) < FlatTemplateStdDev;
     }
 
+    /// <summary>
+    /// Templates smaller than this (on their short side) are never shrunk to 1/4 or less: shrinking a small picture
+    /// that much blurs thin text and 1-pixel lines away, so the coarse pass missed the real spot (a Notepad "Hi" scored
+    /// 76 % one try and 87 % the next). They use 1/2 at most.
+    /// </summary>
+    public const int SmallTemplateSize = 120;
+
+    // A small template may spend this much more than the normal budget before it is allowed to go below 1/2.
+    private const long SmallTemplateBudgetFactor = 8;
+
     /// <summary>The shrink factor (1, 2, 4 or 8) for the coarse pass.</summary>
     internal static int ChooseScale(int width, int height, int tw, int th)
     {
+        var small = Math.Min(tw, th) < SmallTemplateSize;
         var chosen = 1;
         foreach (var s in new[] { 1, 2, 4, 8 })
         {
             if (s > 1 && Math.Min(tw, th) / s < MinCoarseTemplateSize) break;
+            if (s > 2 && small && Cost(s / 2) <= CoarseBudget * SmallTemplateBudgetFactor) break;
             chosen = s;
-            long positions = (long)((width - tw) / s + 1) * ((height - th) / s + 1);
-            long cost = positions * (tw / s) * (th / s);
-            if (cost <= CoarseBudget) break;
+            if (Cost(s) <= CoarseBudget) break;
         }
 
         return chosen;
+
+        long Cost(int factor)
+        {
+            long positions = (long)((width - tw) / factor + 1) * ((height - th) / factor + 1);
+            return positions * (tw / factor) * (th / factor);
+        }
     }
 
-    private static float Gray(byte[] p, int i) => 0.114f * p[i] + 0.587f * p[i + 1] + 0.299f * p[i + 2];
+    internal static float Gray(byte[] p, int i) => 0.114f * p[i] + 0.587f * p[i + 1] + 0.299f * p[i + 2];
 
     /// <summary>Grey version of the picture, shrunk by averaging scale×scale blocks.</summary>
-    private static float[] GrayDownscaled(BgraImage image, int scale, out int width, out int height)
+    internal static float[] GrayDownscaled(BgraImage image, int scale, out int width, out int height)
     {
         width = image.Width / scale;
         height = image.Height / scale;
@@ -276,7 +337,16 @@ public static class TemplateMatcher
             }
         }
 
-        // Local peaks (3×3), best first. A bounded heap keeps memory small on big screens.
+        result.AddRange(PickPeaks(scores, px, py, tw, th, count));
+        return result;
+    }
+
+    /// <summary>
+    /// The best local peaks (3×3) of a score map, best first, kept at least half a template apart so repeated items
+    /// each get a slot. A bounded heap keeps memory small on big screens.
+    /// </summary>
+    internal static List<(int X, int Y)> PickPeaks(float[] scores, int px, int py, int tw, int th, int count)
+    {
         var heap = new PriorityQueue<(int X, int Y), float>();
         var limit = count * 4;
         for (var y = 0; y < py; y++)
@@ -294,12 +364,12 @@ public static class TemplateMatcher
         while (heap.TryDequeue(out var spot, out var score)) peaks.Add((spot.X, spot.Y, score));
         peaks.Sort((a, b) => b.Score.CompareTo(a.Score));
 
-        // Keep peaks apart by at least half a template, so repeated items each get a slot.
+        var result = new List<(int X, int Y)>();
         var minDx = Math.Max(1, tw / 2);
         var minDy = Math.Max(1, th / 2);
         foreach (var peak in peaks)
         {
-            if (result.Any(c => Math.Abs(c.Item1 - peak.X) < minDx && Math.Abs(c.Item2 - peak.Y) < minDy)) continue;
+            if (result.Any(c => Math.Abs(c.X - peak.X) < minDx && Math.Abs(c.Y - peak.Y) < minDy)) continue;
             result.Add((peak.X, peak.Y));
             if (result.Count >= count) break;
         }
@@ -307,7 +377,7 @@ public static class TemplateMatcher
         return result;
     }
 
-    private static bool IsPeak(float[] scores, int px, int py, int x, int y, float v)
+    internal static bool IsPeak(float[] scores, int px, int py, int x, int y, float v)
     {
         for (var dy = -1; dy <= 1; dy++)
         {
@@ -376,7 +446,7 @@ public static class TemplateMatcher
     }
 
     /// <summary>Summed-area tables (sum and sum of squares), (width+1)×(height+1), for O(1) box sums.</summary>
-    private static (double[] Sum, double[] SumSq) Integrals(float[] values, int width, int height)
+    internal static (double[] Sum, double[] SumSq) Integrals(float[] values, int width, int height)
     {
         var iw = width + 1;
         var sum = new double[iw * (height + 1)];
@@ -397,7 +467,7 @@ public static class TemplateMatcher
         return (sum, sumSq);
     }
 
-    private static double Box(double[] table, int iw, int x, int y, int w, int h) =>
+    internal static double Box(double[] table, int iw, int x, int y, int w, int h) =>
         table[(y + h) * iw + x + w] - table[y * iw + x + w] - table[(y + h) * iw + x] + table[y * iw + x];
 
     /// <summary>Dot product using SIMD where available.</summary>
@@ -418,7 +488,7 @@ public static class TemplateMatcher
     }
 
     /// <summary>How much two rectangles overlap (intersection ÷ smaller area), 0..1.</summary>
-    private static double Overlap(ScreenRect a, ScreenRect b)
+    internal static double Overlap(ScreenRect a, ScreenRect b)
     {
         var i = a.Intersect(b);
         if (i.IsEmpty) return 0;

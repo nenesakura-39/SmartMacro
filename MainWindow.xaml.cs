@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Runtime.InteropServices;
 using System.Windows;
+using System.Windows.Controls.Primitives;
 using System.Windows.Interop;
 using SmartMacro.ViewModels;
 
@@ -17,6 +18,17 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+    }
+
+    /// <summary>Smallest / largest height of the Activity list when dragging its grip.</summary>
+    private const double MinActivityHeight = 40;
+    private const double MaxActivityHeight = 420;
+
+    // Dragging the grip on top of the Activity panel: up = taller, down = shorter.
+    private void ActivityGrip_DragDelta(object sender, DragDeltaEventArgs e)
+    {
+        var height = double.IsNaN(ActivityList.Height) ? ActivityList.ActualHeight : ActivityList.Height;
+        ActivityList.Height = Math.Clamp(height - e.VerticalChange, MinActivityHeight, MaxActivityHeight);
     }
 
     protected override void OnSourceInitialized(EventArgs e)

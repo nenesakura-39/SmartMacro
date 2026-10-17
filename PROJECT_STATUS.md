@@ -1,7 +1,8 @@
 # SmartMacro – Project Status / Handoff
 
-_Last updated: 2026-10-17 (QoL batch: written WITHOUT a .NET SDK, NOT built or tested yet. Before it: 8-bug fix batch built, 616/616 tests passed, manual re-test pending). Earlier: Stages 1–3: built, automated tests passed, manually tested by the owner. Stage 4 (feedback
-loops) and the Editor UX task: built, automated tests passed (573/573), **manual tests NOT done yet**. Not released.
+_Last updated: 2026-10-17 (Live-test fix batch for 7 bugs found while testing `b408b36`: written WITHOUT a .NET SDK,
+NOT built or tested yet. Before it: QoL batch (owner live-tested it as `b408b36`); 8-bug fix batch built, 616/616 tests passed).
+Earlier: Stages 1–3 built, tested, manually tested by the owner. Stage 4 and Editor UX: 573/573, manual tests not done. Not released.
 Developer: Riku (リク) · Brand: KuroLogic_
 
 ## Current status at a glance (2026-10-16)
@@ -13,6 +14,74 @@ Developer: Riku (リク) · Brand: KuroLogic_
 | Release documents (EULA, LICENSE, notices, README) | – | – | drafts; `release-docs/` not committed yet |
 | Release package | `publish\SmartMacro-1.0.0-win-x64\SmartMacro.exe` is an OLD build (made right after `159d6b3`, before Stage 1) | – | ignored by git |
 
+
+## Live-test fix batch (2026-10-17) – 7 bugs from the owner's live test of `b408b36`; written WITHOUT a .NET SDK: **NOT built, NOT tested**
+The AI's environment had no .NET SDK (and no package / NuGet access), so nothing was compiled. Next step for the owner:
+`tools\verify.cmd`, send the logs if anything fails, then `docs/LIVE_TEST_FIXES_MANUAL_TESTS.md`.
+The matcher maths for bug 4 was checked with a NumPy port of the new C# code (same thresholds) on the test scenes:
+see-through button over water → normal search rejected (colour), foreground search 100 % at the right spot; plain water
+→ best 0 %; yellow strokes → rejected unless "Ignore color"; thin "Hi" on a 1424×777 area → exact at scale 1/2.
+1. **Windowed layout** (`MainWindow.xaml`, `Views/EditorView.xaml`): window 1340×860 (min 1024×680); editor header is
+   two compact rows; workspace row `*` with MinHeight 360; Problems is a one-line banner (list only with problems, max
+   84 px); toolbox "New steps go" radio pair → one checkbox "Add new steps at the end" (bound to `AddAtEnd`);
+   GridSplitters (style `PanelSplitter` in `Themes/Controls.xaml`) between Add step | Workflow steps | Properties
+   (200 / * / 360 px, min/max limits); Activity list 72 px (~110 px panel) with a drag grip (`Thumb`,
+   `MainWindow.ActivityGrip_DragDelta`, 40–420 px). Margins of page / automation bar reduced.
+2. **Properties text** (`Themes/Controls.xaml`, `Views/StepEditorTemplates.xaml`): CheckBox / RadioButton templates use a
+   Grid + wrapping TextBlock (long labels wrap); `FieldLabel` wraps; 2-column grids that held drop-downs or long labels
+   are stacked full-width (Mouse click Button/Action, Scroll Direction/Notches, condition Look for/True when it,
+   feedback marker tolerance row, Captures/Min change, Max runtime/When time is up, Target missing/Then); Properties
+   header has its own bar, ScrollViewer padding 16,10,16,28. No fixed heights were found on the condition card.
+3. **Wheel over drop-downs** (`Views/EditorView.xaml.cs`): `Properties_PreviewMouseWheel` on the Properties ScrollViewer:
+   wheel over a closed ComboBox or a Slider is handled and re-raised as MouseWheel on the ScrollViewer; open drop-downs
+   scroll their list.
+4. **Find image** (`Core/Vision/TemplateMatcher.cs`, new `Core/Vision/ForegroundMatcher.cs`):
+   - Templates < 120 px on their short side never use a 1/4 (or smaller) coarse pass unless 1/2 would cost > 8× the
+     normal budget (320 M multiply-adds; e.g. a 103×85 template on a full 1920×1080 screen still uses 1/4 for speed –
+     a picked search area avoids that). When a small template still goes to 1/4, 3× more candidates are refined.
+   - New `TemplateMatchOptions.MatchForeground` / `FindImageStep.MatchForeground` (checkbox "Ignore background / match
+     bright text and edges (for see-through game UI)", also inside image conditions): Otsu threshold on the template;
+     the side (bright / dark) farthest from the template's border is the foreground (needs 2–75 % of pixels, ≥ 25 grey
+     levels contrast, self-score ≥ 0.6). Score = correlation between the foreground mask and the screen's grey levels,
+     signed, divided by the template's own score (template = 100 %). Coarse pass (1/2 or 1/4 by a 60 M budget) + exact
+     refine; colour check compares the foreground pixels' average colour only. Each spot gets the better of the normal
+     and the foreground score. Miss texts suggest the option.
+5. **Fisch SHAKE loop** (`Core/Playback/PlaybackEngine.cs`, `Services/Input/Win32InputSimulator.cs`):
+   - `RepeatStep.KeepCheckingForMs` (null = automatic: 800 ms for image / colour conditions, 0 for text; editor field
+     "Keep checking before leaving (ms)", 0–60,000): only when the loop would end because the target is NOT seen
+     (While "is on screen", Until "is NOT on screen") the condition is re-checked (every "check every") for up to that long
+     and the loop continues as soon as the target is back. Seeing the target is trusted at once. Log says
+     "(kept checking for 800 ms)".
+   - "When found" clicks (Find steps and If "when true"): button held `FoundClickHoldMs` 35 ms (tracked; Stop releases),
+     double-click gap `DoubleClickGapMs` 65 ms, post-action delay `ClickSettleMs` 100 → 120 ms.
+   - New `ScreenSearchStep.MoveCursorAwayAfterAction` (checkbox under the offsets): after the click / hold the cursor
+     moves just outside the search area's bottom-right corner (+8 px), or 150 px below the match for whole-screen searches.
+   - Win32: every press after an absolute cursor move gets a relative hover nudge (+2,+2 then −2,−2 over ~15 ms) and an
+     exact absolute move back + 20 ms settle (releases after a drag get the old 1 px absolute nudge, no wiggle); such
+     "clicks on a jumped-to spot" keep the button down ≥ 35 ms and a second press within 65 ms (double-click) waits for
+     the gap. Feedback loops / recorded game input pressing in place are not affected.
+6. **Smooth playback** (`PlaybackEngine`, `Core/Recording/MousePathSimplifier.cs`, Settings):
+   - `PlaybackEngine.SmoothMouseMoves` (app: `AppSettings.SmoothMouseMoves`, default on, checkbox in Settings; off in
+     the engine by default so old tests keep exact calls): a Delay followed by a Move / Click-at-position / Scroll-at-
+     position uses its last ≤ 200 ms to glide there (8 ms steps, ease in/out) from the last absolute position the engine
+     set (or the real cursor). Total time unchanged. Unknown start → no glide.
+   - Drags: `DragStepInterval` 16 → 8 ms (~120 Hz).
+   - Simplifier: while a button is held, tolerance ≤ 1 px and a point at least every 50 ms (reversals kept as before);
+     free movement unchanged.
+7. **Test detection hides SmartMacro** (`Services/Vision/VisionTools.cs`, `NativeMethods.MakeInvisible`): Test image /
+   Test color / feedback "Test detection now" make SmartMacro and its owned windows layered alpha 0 + excluded from
+   capture for 150 ms (`TestHideMs`), capture, then restore before the result window opens (no minimize, focus stays).
+   Pick / Capture / Measure / Preview / Track still minimize as before.
+- Files: `MacroDocument.CurrentSchemaVersion = 9`, written only for MatchForeground (step or image condition),
+  MoveCursorAwayAfterAction, or an explicit KeepCheckingForMs. Old files load unchanged (automatic grace applies to
+  image / colour While loops – that IS a behaviour change for old macros, intended).
+- Tests: new `SmartMacro.Tests/LiveTestFixTests.cs` (scale choice, thin text, see-through button normal vs foreground,
+  plain water, foreground colour check, patterned icon, Find image click over water, Repeat grace while / until / 0 /
+  timing, validation, found-click hold + double-click gap timing, move away (full screen / area), format 9 round trip +
+  old files, smooth glide timing / off / unknown start / click, drag simplifier density). Updated on purpose:
+  `QolTests.Drag_glides…` (8 ms steps → 20 moves), `QolTests` format test (CurrentSchemaVersion ≥ 8),
+  `BugFixTests.Slider_drag…` (drag keeps 4–40 points instead of ≤ 4).
+- Not verified: build, tests, any of it in Roblox / Windows (layered-window hiding, wheel re-routing, GridSplitter feel).
 
 ## QoL batch (2026-10-17) – written by the AI WITHOUT a .NET SDK: **NOT built, NOT tested yet**
 The AI's environment had no .NET SDK and no package access, so nothing below was compiled. Next step for the owner:
@@ -531,6 +600,8 @@ no .NET SDK in the AI's environment)
   csproj Company/Authors "Riku", Copyright "© 2026 Riku", README "© 2026 Riku") – change awaits owner approval.
 
 ## Next task
+- Owner: `tools\verify.cmd` for the live-test fix batch (never compiled; expect a few compile fixes), then
+  `docs/LIVE_TEST_FIXES_MANUAL_TESTS.md` (send the 📏 SHAKE confidence numbers over wood / water).
 - Owner: run `tools\verify.cmd` for the QoL batch (never compiled yet; expect a few compile fixes), then
   `docs/QOL_MANUAL_TESTS.md`.
 - Owner: manual re-test of the 8-bug fix batch (list above), then commit it together with the Editor UX changes.

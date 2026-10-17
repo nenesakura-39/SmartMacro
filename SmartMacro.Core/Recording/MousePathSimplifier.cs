@@ -1,3 +1,5 @@
+using SmartMacro.Core.Models;
+
 namespace SmartMacro.Core.Recording;
 
 /// <summary>
@@ -10,18 +12,32 @@ namespace SmartMacro.Core.Recording;
 /// - every spot the cursor rested at for <c>restMs</c> or more,
 /// - whatever Ramer–Douglas–Peucker needs between those anchors to stay within <c>tolerancePx</c> of the real path.
 /// Everything else is dropped. Times of kept points don't change, so the Delay steps keep the original timing.
+///
+/// Drags (a mouse button is held during the stretch) are NOT simplified aggressively: sliders, scrollbars and
+/// drag-and-drop follow the exact path, so there the tolerance is at most <see cref="DragTolerancePx"/> and a point
+/// is kept at least every <see cref="DragKeepEveryMs"/> (playback glides between them).
 /// </summary>
 public static class MousePathSimplifier
 {
+    /// <summary>Largest path tolerance used while a button is held (pixels).</summary>
+    public const int DragTolerancePx = 1;
+
+    /// <summary>While a button is held, a point is kept at least this often (ms), so drags never turn into jumps.</summary>
+    public const int DragKeepEveryMs = 50;
+
     public static List<RawInputEvent> Simplify(List<RawInputEvent> events, int tolerancePx, int restMs)
     {
         ArgumentNullException.ThrowIfNull(events);
         var keep = new bool[events.Count];
+        var held = new HashSet<MacroMouseButton>();
         var i = 0;
         while (i < events.Count)
         {
-            if (events[i].Kind != RawInputKind.MouseMove)
+            var e = events[i];
+            if (e.Kind != RawInputKind.MouseMove)
             {
+                if (e.Kind == RawInputKind.MouseDown) held.Add(e.Button);
+                else if (e.Kind == RawInputKind.MouseUp) held.Remove(e.Button);
                 keep[i] = true;
                 i++;
                 continue;
@@ -29,7 +45,10 @@ public static class MousePathSimplifier
 
             var start = i;
             while (i < events.Count && events[i].Kind == RawInputKind.MouseMove) i++;
-            MarkStretch(events, start, i - 1, keep, Math.Max(0, tolerancePx), restMs);
+            var dragging = held.Count > 0;
+            var tolerance = Math.Max(0, tolerancePx);
+            MarkStretch(events, start, i - 1, keep, dragging ? Math.Min(tolerance, DragTolerancePx) : tolerance, restMs,
+                dragging ? DragKeepEveryMs : 0);
         }
 
         var result = new List<RawInputEvent>(events.Count);
@@ -41,9 +60,22 @@ public static class MousePathSimplifier
         return result;
     }
 
-    private static void MarkStretch(List<RawInputEvent> events, int first, int last, bool[] keep, int tolerance, int restMs)
+    private static void MarkStretch(List<RawInputEvent> events, int first, int last, bool[] keep, int tolerance, int restMs,
+        int keepEveryMs)
     {
         var anchors = new SortedSet<int> { first, last };
+
+        // Drags: never leave a gap longer than keepEveryMs between kept points.
+        if (keepEveryMs > 0)
+        {
+            var lastKeptTime = events[first].TimeMs;
+            for (var k = first + 1; k <= last; k++)
+            {
+                if (events[k].TimeMs - lastKeptTime < keepEveryMs) continue;
+                anchors.Add(k);
+                lastKeptTime = events[k].TimeMs;
+            }
+        }
 
         // Direction reversals per axis. Hand jitter of a pixel or two isn't a reversal: the cursor must come back
         // by more than the tolerance from the extreme point before that point counts.

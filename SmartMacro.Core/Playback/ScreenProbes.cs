@@ -100,7 +100,7 @@ public sealed class ScreenProbes
         var template = decoded!;
 
         var region = step.SearchFullScreen ? capture.GetVirtualScreen() : step.Region;
-        var options = new TemplateMatchOptions { MinScore = step.MinSimilarityPercent / 100.0, IgnoreColor = step.IgnoreColor, IgnoreEdgeFraction = step.IgnoreEdgesPercent / 100.0 };
+        var options = new TemplateMatchOptions { MinScore = step.MinSimilarityPercent / 100.0, IgnoreColor = step.IgnoreColor, IgnoreEdgeFraction = step.IgnoreEdgesPercent / 100.0, MatchForeground = step.MatchForeground };
 
         return new PreparedSearch("The image", isTimed: true, async (timer, t) =>
         {
@@ -118,8 +118,9 @@ public sealed class ScreenProbes
                 var miss = $" The best similarity was {result.BestScore:P0} (needs {step.MinSimilarityPercent}%).";
                 if (result.RejectedForColor > 0)
                     miss += $" {result.RejectedForColor} spot(s) had the right shape but a different color (turn on \"Ignore color\" if the color changes).";
-                if (step.IgnoreEdgesPercent == 0 && result.BestScore >= 0.5)
-                    miss += $" If the background around it changes (round buttons, game UI), try \"Ignore the edges\" ({FindImageStep.RecommendedIgnoreEdgesPercent} %).";
+                if (result.BestScore >= 0.5 && !step.MatchForeground)
+                    miss += " If you can see the game through the button (or the background around it changes), turn on \"Ignore background\""
+                            + (step.IgnoreEdgesPercent == 0 ? $" or \"Ignore the edges\" ({FindImageStep.RecommendedIgnoreEdgesPercent} %)." : ".");
                 return ScreenProbe.Miss(miss);
             }
 

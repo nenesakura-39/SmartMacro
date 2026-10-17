@@ -34,6 +34,23 @@ public sealed class Win32InputSimulator : IInputSimulator
     /// the last move was handled at the old position, so a slider dragged back to 50 % stayed at 80 %.
     /// </summary>
     internal const double ButtonSettleMs = 20;
+
+    /// <summary>
+    /// Relative "hover nudge" before a click at a spot the cursor jumped to: +2,+2 then back, spread over this long.
+    /// Roblox (and other Raw Input UIs) only update hover / MouseEnter from real relative movement; without it the 3rd
+    /// click on a re-spawned button was ignored until the user wiggled the mouse.
+    /// </summary>
+    internal const double HoverNudgeMs = 15;
+    internal const int HoverNudgePx = 2;
+
+    /// <summary>
+    /// A click at a spot the cursor jumped to keeps the button down at least this long (games read input once per frame).
+    /// Only the missing part is waited for, and only for such clicks (feedback loops pressing in place aren't touched).
+    /// </summary>
+    internal const double MinClickHoldMs = 35;
+
+    /// <summary>Minimum gap between the two clicks of a double-click on such a spot (0 ms was too fast for Roblox).</summary>
+    internal const double MinDoubleClickGapMs = 65;
     private const uint MAPVK_VK_TO_VSC = 0;
     private const int DiagnosticIntervalMs = 2000;
     private static readonly int InputSize = Marshal.SizeOf<INPUT>();
@@ -48,6 +65,10 @@ public sealed class Win32InputSimulator : IInputSimulator
     private long _lastMoveTimestamp;
     private int _lastMoveX;
     private int _lastMoveY;
+
+    // Per button: when a "click at a jumped-to spot" was pressed / released (Stopwatch timestamps, 0 = none).
+    private readonly Dictionary<MacroMouseButton, long> _jumpClickDown = new();
+    private readonly Dictionary<MacroMouseButton, long> _jumpClickUp = new();
 
     /// <param name="log">If given, unusual click conditions (window not active, cursor confined or moved by
     /// another program) are written to the log, at most once every 2 seconds.</param>
@@ -123,27 +144,50 @@ public sealed class Win32InputSimulator : IInputSimulator
     }
 
     /// <summary>
-    /// Before a button press / release that follows a cursor jump: nudge the cursor 1 px and back (two more real
-    /// mouse-move events, so apps that only look at movement events — Roblox, DirectInput games — pick up the final
-    /// spot), then make sure the cursor has rested at the target for <see cref="ButtonSettleMs"/>. Waits only for
-    /// what's missing: recordings that already paused there aren't slowed down. Double-click timing is untouched
-    /// (no move between its clicks).
+    /// Before a button press / release that follows a cursor jump: a relative hover nudge (+2,+2 and back over
+    /// <see cref="HoverNudgeMs"/>; real movement events, so Roblox / DirectInput / Raw Input UIs register hover at the
+    /// final spot), an exact absolute move back onto the target, and a rest of <see cref="ButtonSettleMs"/>.
+    /// Returns true when it did this (the click is a "click on a jumped-to spot").
     /// </summary>
-    private void SettleBeforeButton()
+    private bool SettleBeforeButton(bool hoverNudge = true)
     {
-        if (!_movedSinceButton) return;
+        if (!_movedSinceButton) return false;
         _movedSinceButton = false;
 
         var x = _lastMoveX;
         var y = _lastMoveY;
-        var sinceMoveMs = (Stopwatch.GetTimestamp() - _lastMoveTimestamp) * 1000.0 / Stopwatch.Frequency;
-        if (sinceMoveMs >= ButtonSettleMs) return; // already rested there long enough
 
-        SendAbsoluteMove(x + (x > int.MinValue ? -1 : 1), y);
+        // Hover nudge: a tiny RELATIVE wiggle (+2,+2 then back) spread over ~15 ms, so the app gets real movement
+        // events at the spot (MouseEnter / hover), even when the cursor arrived long ago or by a jump.
+        // Not before a release: the button is held then (end of a drag) and the wiggle would move the slider.
+        if (hoverNudge)
+        {
+            Send(RelativeMove(HoverNudgePx, HoverNudgePx));
+            PreciseSleep(HoverNudgeMs / 2);
+            Send(RelativeMove(-HoverNudgePx, -HoverNudgePx));
+            PreciseSleep(HoverNudgeMs / 2);
+        }
+        else
+        {
+            SendAbsoluteMove(x + (x > int.MinValue ? -1 : 1), y);
+        }
+
+        // Pointer acceleration can make the way back differ by a pixel: land exactly on the target again.
         SendAbsoluteMove(x, y);
         SetCursorPos(x, y);
+        _lastMoveTimestamp = Stopwatch.GetTimestamp() - (long)(HoverNudgeMs * Stopwatch.Frequency / 1000.0);
         PreciseSleepUntil(_lastMoveTimestamp, ButtonSettleMs);
+        return true;
     }
+
+    private static INPUT RelativeMove(int dx, int dy) => new()
+    {
+        type = INPUT_MOUSE,
+        U = new InputUnion
+        {
+            mi = new MOUSEINPUT { dx = dx, dy = dy, dwFlags = MOUSEEVENTF_MOVE, dwExtraInfo = SmartMacroInputTag },
+        },
+    };
 
     /// <summary>
     /// Relative movement through SendInput (MOUSEEVENTF_MOVE without ABSOLUTE). Games that read raw mouse input
@@ -154,14 +198,7 @@ public sealed class Win32InputSimulator : IInputSimulator
     {
         if (dx == 0 && dy == 0) return;
         _movedSinceButton = false; // relative (camera) movement: never nudge the cursor, that would turn the camera
-        Send(new INPUT
-        {
-            type = INPUT_MOUSE,
-            U = new InputUnion
-            {
-                mi = new MOUSEINPUT { dx = dx, dy = dy, dwFlags = MOUSEEVENTF_MOVE, dwExtraInfo = SmartMacroInputTag },
-            },
-        });
+        Send(RelativeMove(dx, dy));
     }
 
     public void MouseButton(MacroMouseButton button, bool down)
@@ -176,9 +213,36 @@ public sealed class Win32InputSimulator : IInputSimulator
             (MacroMouseButton.Middle, false) => MOUSEEVENTF_MIDDLEUP,
             _ => throw new ArgumentOutOfRangeException(nameof(button)),
         };
-        SettleBeforeButton();
-        if (down) DiagnoseClickTarget(button);
+        var jumped = SettleBeforeButton(hoverNudge: down);
+        if (down)
+        {
+            // Second click of a double-click on a jumped-to spot: leave a real gap between the clicks.
+            if (!jumped && _jumpClickUp.TryGetValue(button, out var lastUp) && lastUp != 0
+                && (Stopwatch.GetTimestamp() - lastUp) * 1000.0 / Stopwatch.Frequency < MinDoubleClickGapMs)
+            {
+                PreciseSleepUntil(lastUp, MinDoubleClickGapMs);
+                jumped = true; // this press belongs to the same "click on a spot", so it is held long enough too
+            }
+
+            DiagnoseClickTarget(button);
+            Send(MouseInput(flags, 0));
+            _jumpClickDown[button] = jumped ? Stopwatch.GetTimestamp() : 0;
+            _jumpClickUp[button] = 0;
+            return;
+        }
+
+        // Release of a click on a jumped-to spot: keep the button down at least MinClickHoldMs.
+        if (_jumpClickDown.TryGetValue(button, out var pressedAt) && pressedAt != 0)
+        {
+            PreciseSleepUntil(pressedAt, MinClickHoldMs);
+            _jumpClickDown[button] = 0;
+            Send(MouseInput(flags, 0));
+            _jumpClickUp[button] = Stopwatch.GetTimestamp();
+            return;
+        }
+
         Send(MouseInput(flags, 0));
+        _jumpClickUp[button] = 0;
     }
 
     /// <summary>

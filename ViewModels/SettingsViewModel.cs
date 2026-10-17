@@ -28,6 +28,7 @@ public sealed class SettingsViewModel : ObservableObject
     private RecordingMode _recordingMode;
     private bool _keepTapHoldTime;
     private bool _simplifyMousePaths;
+    private bool _smoothMouseMoves;
     private HotkeyBinding _recordHotkey = HotkeyBinding.DefaultRecord;
     private HotkeyBinding _playHotkey = HotkeyBinding.DefaultPlay;
     private HotkeyBinding _pauseHotkey = HotkeyBinding.DefaultPause;
@@ -238,6 +239,13 @@ public sealed class SettingsViewModel : ObservableObject
         set { if (SetProperty(ref _simplifyMousePaths, value)) IsDirty = true; }
     }
 
+    /// <summary>"Smooth mouse movement during playback" (glide instead of jumping).</summary>
+    public bool SmoothMouseMoves
+    {
+        get => _smoothMouseMoves;
+        set { if (SetProperty(ref _smoothMouseMoves, value)) IsDirty = true; }
+    }
+
     public bool IsDirty
     {
         get => _isDirty;
@@ -273,6 +281,7 @@ public sealed class SettingsViewModel : ObservableObject
         _recordingMode = settings.RecordingMode;
         _keepTapHoldTime = settings.KeepTapHoldTime;
         _simplifyMousePaths = settings.SimplifyMousePaths;
+        _smoothMouseMoves = settings.SmoothMouseMoves;
         _recordHotkey = settings.RecordHotkey;
         _playHotkey = settings.PlayHotkey;
         _pauseHotkey = settings.PauseHotkey;
@@ -295,6 +304,7 @@ public sealed class SettingsViewModel : ObservableObject
             RecordingMode = RecordingMode,
             KeepTapHoldTime = KeepTapHoldTime,
             SimplifyMousePaths = SimplifyMousePaths,
+            SmoothMouseMoves = SmoothMouseMoves,
             RecordHotkey = RecordHotkey,
             PlayHotkey = PlayHotkey,
             PauseHotkey = PauseHotkey,

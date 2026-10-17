@@ -155,11 +155,11 @@ public class ClickHoldAndDragTests
         Assert.Equal("move 100,50", calls[^2]);
         Assert.Equal("mouse Left up", calls[^1]);
 
-        // 160 ms in 16 ms steps: 10 moves after the press, evenly spaced along the line.
+        // 160 ms in 8 ms steps (~120 per second since the live-test fixes): 20 moves after the press, evenly spaced.
         var moves = calls.Skip(2).Take(calls.Count - 3).ToList();
-        Assert.Equal(10, moves.Count);
-        Assert.Equal("move 10,5", moves[0]);
-        Assert.Equal("move 50,25", moves[4]);
+        Assert.Equal(20, moves.Count);
+        Assert.Equal("move 5,2", moves[0]);   // 2.5 rounds to even
+        Assert.Equal("move 50,25", moves[9]);
         Assert.Equal(160, (input.Times[^1] - input.Times[1]).TotalMilliseconds, precision: 3);
     }
 
@@ -379,7 +379,7 @@ public class QolFileFormatTests
     [Fact]
     public void New_options_need_format_8_and_old_macros_keep_their_format()
     {
-        Assert.Equal(8, MacroDocument.CurrentSchemaVersion);
+        Assert.True(MacroDocument.CurrentSchemaVersion >= 8); // 9 since the live-test fixes
         Assert.Equal(8, MacroDocument.RequiredSchemaVersion(Flow.Macro(new FindColorStep { Action = FoundTextAction.Hold })));
         Assert.Equal(8, MacroDocument.RequiredSchemaVersion(Flow.Macro(new IfStep { Condition = Flow.Green(), ThenAction = FoundTextAction.Click }, new EndIfStep())));
         Assert.Equal(8, MacroDocument.RequiredSchemaVersion(Flow.Macro(new MouseClickStep { Action = MouseClickAction.Hold, HoldMs = 5 })));

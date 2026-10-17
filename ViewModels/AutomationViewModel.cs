@@ -516,6 +516,7 @@ public sealed class AutomationViewModel : ObservableObject, IDisposable
 
             _runStartedUtc = DateTime.UtcNow;
             _progressTimer.Start();
+            _engine.SmoothMouseMoves = _hooks.Settings().SmoothMouseMoves;
             using (new HighResolutionTimerScope())
             {
                 result = await _engine.RunAsync(macro);

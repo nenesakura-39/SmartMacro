@@ -413,6 +413,8 @@ public static class MacroValidator
 
         if (r.MaxDurationMs < 0 || r.MaxDurationMs > MaxLoopDurationMs)
             issues.Add(Error($"Max time must be 0 (no time limit) to {MaxLoopDurationMs:N0} ms (24 hours).", nameof(RepeatStep.MaxDurationMs)));
+        if (r.KeepCheckingForMs is < 0 or > RepeatStep.MaxKeepCheckingForMs)
+            issues.Add(Error($"\"Keep checking before leaving\" must be 0 to {RepeatStep.MaxKeepCheckingForMs:N0} ms.", nameof(RepeatStep.KeepCheckingForMs)));
 
         if (r.Mode == RepeatMode.Times)
         {

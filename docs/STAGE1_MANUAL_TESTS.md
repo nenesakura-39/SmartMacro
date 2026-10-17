@@ -20,7 +20,7 @@ app or game accepts it. These manual tests are what actually confirm Stage 1. Ti
 
 | # | Do this | Expected |
 |---|---------|----------|
-| A1 | Open Notepad. Press Ctrl+Shift+F9, click inside Notepad, type `hello world`, press Enter, stop with Ctrl+Shift+F9. | A new macro opens with **only normal steps** (Click, Press, Move, Delay). No "Recorded input" step. Log says `0 camera / relative part(s)`. |
+|  A1 | Open Notepad. Press Ctrl+Shift+F9, click inside Notepad, type `hello world`, press Enter, stop with Ctrl+Shift+F9. | A new macro opens with **only normal steps** (Click, Press, Move, Delay). No "Recorded input" step. Log says `0 camera / relative part(s)`. |
 | A2 | Clear Notepad, press Play. | Same text appears, clicked in the same place, at about the same speed. |
 | A3 | Record: move the mouse around slowly, double-click a word, scroll the wheel 3 notches, select text by dragging. | Normal steps only (drag = Press / Move / Release). Play it back → same result. |
 | A4 | Record while typing a lot, then moving the mouse right after typing. | Still normal steps only. (Windows hides the cursor while you type; SmartMacro must ignore that short moment.) |

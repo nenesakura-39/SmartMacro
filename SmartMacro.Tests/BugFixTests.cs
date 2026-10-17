@@ -299,7 +299,8 @@ public class BugFixTests
         var moves = steps.OfType<MouseMoveStep>().Select(m => m.X).ToList();
         Assert.Contains(580, moves);                // the extreme of the drag
         Assert.Equal(500, moves[^1]);               // back at 50 % before the release
-        Assert.True(moves.Count <= 4, string.Join(",", moves));
+        // Drags are no longer thinned hard (live-test fix): at least one point every 50 ms, still far fewer than recorded.
+        Assert.InRange(moves.Count, 4, 40);
         var up = Assert.IsType<MouseClickStep>(steps[^1]);
         Assert.Equal((MouseClickAction.Up, 500, 400), (up.Action, up.X, up.Y));
         Assert.Equal((int)(t + 16), steps.OfType<DelayStep>().Sum(d => d.DurationMs));

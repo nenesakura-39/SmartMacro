@@ -291,6 +291,12 @@ public abstract class ScreenSearchStep : MacroStep
 
     public const int DefaultActionHoldMs = 500;
 
+    /// <summary>
+    /// After a click / hold on what was found: move the cursor out of the search area, so a hover effect or the cursor
+    /// itself doesn't cover the next thing to find (a game button that re-appears in the same spot). Off by default.
+    /// </summary>
+    public bool MoveCursorAwayAfterAction { get; set; }
+
     public TextNotFoundBehavior WhenNotFound { get; set; } = TextNotFoundBehavior.StopMacro;
 
     /// <summary>The search area as a rectangle (ignored when <see cref="SearchFullScreen"/> is on).</summary>
@@ -358,6 +364,14 @@ public sealed class FindImageStep : ScreenSearchStep
 
     /// <summary>Recommended value for round buttons / game UI.</summary>
     public const int RecommendedIgnoreEdgesPercent = 15;
+
+    /// <summary>
+    /// "Ignore background / match bright text and edges": also compare only the picture's foreground (the strokes
+    /// that stand out, like the white text and ring of a semi-transparent game button), so it still matches when a
+    /// different scene shows through it. Each spot gets the better of the normal and the foreground score.
+    /// Off for older files.
+    /// </summary>
+    public bool MatchForeground { get; set; }
 
     [JsonIgnore]
     public override StepKind Kind => StepKind.FindImage;

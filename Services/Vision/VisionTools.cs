@@ -169,7 +169,7 @@ public sealed class VisionTools : IVisionTools
         TimeSpan captureTime;
         try
         {
-            (frame, captureTime) = await WhileHiddenAsync(() => Task.FromResult(TimedCapture(region)));
+            (frame, captureTime) = await WhileInvisibleAsync(() => Task.FromResult(TimedCapture(region)));
         }
         catch (Exception ex)
         {
@@ -179,7 +179,7 @@ public sealed class VisionTools : IVisionTools
         if (frame.Image.Width < template.Width || frame.Image.Height < template.Height)
             return $"The search area on screen ({frame.Bounds.Width}×{frame.Bounds.Height}) is smaller than the image ({template.Width}×{template.Height}). Make the area bigger.";
 
-        var options = new TemplateMatchOptions { MinScore = step.MinSimilarityPercent / 100.0, IgnoreColor = step.IgnoreColor, IgnoreEdgeFraction = step.IgnoreEdgesPercent / 100.0, MaxResults = 10 };
+        var options = new TemplateMatchOptions { MinScore = step.MinSimilarityPercent / 100.0, IgnoreColor = step.IgnoreColor, IgnoreEdgeFraction = step.IgnoreEdgesPercent / 100.0, MatchForeground = step.MatchForeground, MaxResults = 10 };
         var watch = Stopwatch.StartNew();
         var result = await Task.Run(() => TemplateMatcher.Find(frame.Image, template, options));
         var searchTime = watch.Elapsed;
@@ -208,6 +208,8 @@ public sealed class VisionTools : IVisionTools
                 text += $" {result.RejectedForColor} spot(s) had the right shape but a different color; turn on \"Ignore color\" if the color changes.";
             if (result.BestScore >= 0.6 && result.RejectedForColor == 0)
                 text += " If the right thing is on screen, lower the match accuracy a little (or capture the image again).";
+            if (!step.MatchForeground && result.BestScore >= 0.5)
+                text += " If you can see the game through the button (a different background shows inside it), turn on \"Ignore background\".";
         }
 
         text += " " + timing;
@@ -230,7 +232,7 @@ public sealed class VisionTools : IVisionTools
         TimeSpan captureTime;
         try
         {
-            (frame, captureTime) = await WhileHiddenAsync(() => Task.FromResult(TimedCapture(region)));
+            (frame, captureTime) = await WhileInvisibleAsync(() => Task.FromResult(TimedCapture(region)));
         }
         catch (Exception ex)
         {
@@ -386,7 +388,7 @@ public sealed class VisionTools : IVisionTools
         try
         {
             var sensor = new FeedbackSensor(copy, _capture);
-            frame = await WhileHiddenAsync(() => Task.Run(() => sensor.ReadAsync(CancellationToken.None)));
+            frame = await WhileInvisibleAsync(() => Task.Run(() => sensor.ReadAsync(CancellationToken.None)));
         }
         catch (Exception ex)
         {
@@ -842,6 +844,40 @@ public sealed class VisionTools : IVisionTools
         window.Closed += (_, _) => { if (ReferenceEquals(_preview, window)) _preview = null; };
         _preview = window;
         window.Show();
+    }
+
+    /// <summary>How long SmartMacro stays invisible before a "Test detection now" screenshot.</summary>
+    public const int TestHideMs = 150;
+
+    /// <summary>
+    /// For "Test detection now": SmartMacro (and its open tool windows) turn fully see-through and are excluded from
+    /// capture for <see cref="TestHideMs"/>, the screenshot is taken, and everything is visible again before the
+    /// result window opens. Unlike minimizing there is no animation and the app behind doesn't get focus (so a game's
+    /// hover state isn't disturbed), and the editor's own picture of the image can never be what is found.
+    /// </summary>
+    private async Task<T> WhileInvisibleAsync<T>(Func<Task<T>> action)
+    {
+        var hidden = new List<(Window Window, long Style)>();
+        foreach (Window window in Application.Current.Windows)
+        {
+            if (!window.IsVisible || (!ReferenceEquals(window, _mainWindow) && !ReferenceEquals(window.Owner, _mainWindow))) continue;
+            NativeMethods.SetExcludedFromCapture(window, true);
+            if (NativeMethods.MakeInvisible(window) is { } style) hidden.Add((window, style));
+        }
+
+        try
+        {
+            await Task.Delay(TestHideMs); // let the desktop compositor show what's behind
+            return await action();
+        }
+        finally
+        {
+            foreach (var (window, style) in hidden)
+            {
+                NativeMethods.RestoreWindowStyle(window, style);
+                NativeMethods.SetExcludedFromCapture(window, false);
+            }
+        }
     }
 
     private async Task<T> WhileHiddenAsync<T>(Func<Task<T>> action)

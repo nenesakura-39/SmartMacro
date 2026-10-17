@@ -172,6 +172,34 @@ public sealed class RepeatStep : MacroStep
     /// <summary>What happens when a safety limit is reached.</summary>
     public LoopLimitBehavior WhenLimitReached { get; set; } = LoopLimitBehavior.StopMacro;
 
+    /// <summary>
+    /// Grace window (ms) before While / Until ends because its target is NOT seen: the condition is checked again for
+    /// up to this long and the loop only ends if the target stays away. Covers short gaps, like a game button that
+    /// re-appears 100-250 ms after it was clicked. Null = automatic (<see cref="DefaultKeepCheckingForMs"/> for image
+    /// and colour conditions, 0 for text, whose reads are slow). 0 = end on the first miss (the old behaviour).
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? KeepCheckingForMs { get; set; }
+
+    /// <summary>Automatic grace window for image / colour conditions.</summary>
+    public const int DefaultKeepCheckingForMs = 800;
+
+    /// <summary>Largest allowed grace window.</summary>
+    public const int MaxKeepCheckingForMs = 60_000;
+
+    /// <summary>The grace window that is actually used (see <see cref="KeepCheckingForMs"/>).</summary>
+    [JsonIgnore]
+    public int EffectiveKeepCheckingForMs => KeepCheckingForMs
+        ?? (Condition?.Kind is ConditionKind.ImageVisible or ConditionKind.ColorVisible ? DefaultKeepCheckingForMs : 0);
+
+    /// <summary>
+    /// True when the loop ends because its target is not seen: While "… is on screen" or Until "… is NOT on screen".
+    /// Only then the grace window applies (a target that IS seen is trusted right away).
+    /// </summary>
+    [JsonIgnore]
+    public bool EndsWhenTargetMissing => Condition is { } c
+        && ((Mode == RepeatMode.While && !c.Negate) || (Mode == RepeatMode.Until && c.Negate));
+
     [JsonIgnore]
     public override StepKind Kind => StepKind.Repeat;
 }

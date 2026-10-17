@@ -37,8 +37,10 @@ public sealed class MacroDocument
     /// 8 = adds quality-of-life options: "hold the left button on it" as a Find step's "when found" action, a "when true"
     ///     action on If steps, Hold / Drag mouse click actions, and feedback loop presets, pulse rule and
     ///     "finish when it reaches the zone".
+    /// 9 = adds "ignore background / match bright text and edges" on Find image (and image conditions),
+    ///     "keep checking before leaving" on Repeat While / Until, and "move the cursor away after clicking" on Find steps.
     /// </summary>
-    public const int CurrentSchemaVersion = 8;
+    public const int CurrentSchemaVersion = 9;
 
     public int SchemaVersion { get; set; }
     public Macro? Macro { get; set; }
@@ -59,6 +61,7 @@ public sealed class MacroDocument
         {
             var needed = step switch
             {
+                _ when UsesVersion9Features(step) => 9,
                 _ when UsesQualityOfLifeFeatures(step) => 8,
                 ScreenSearchStep { WhenNotFound: TextNotFoundBehavior.SkipNextStep } => 7,
                 FindImageStep { IgnoreEdgesPercent: not 0 } => 7,
@@ -76,6 +79,17 @@ public sealed class MacroDocument
         }
 
         return required;
+    }
+
+    /// <summary>True if the step uses an option added in format 9 (see <see cref="CurrentSchemaVersion"/>).</summary>
+    private static bool UsesVersion9Features(MacroStep step)
+    {
+        if (step is FindImageStep { MatchForeground: true }) return true;
+        if (step is ScreenSearchStep { MoveCursorAwayAfterAction: true }) return true;
+        if (step is RepeatStep { KeepCheckingForMs: not null }) return true;
+        foreach (var condition in WorkflowSteps.ConditionsOf(step))
+            if (condition.Check is FindImageStep { MatchForeground: true }) return true;
+        return false;
     }
 
     /// <summary>True if the step uses an option added in format 8 (see <see cref="CurrentSchemaVersion"/>).</summary>

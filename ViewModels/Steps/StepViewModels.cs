@@ -925,6 +925,13 @@ public abstract class ScreenSearchStepViewModel : StepViewModel
         set { if (_search.ActionHoldMs == value) return; _search.ActionHoldMs = value; NotifyChanged(); }
     }
 
+    /// <summary>"Move the cursor away after clicking" (so its hover effect doesn't hide the next thing to find).</summary>
+    public bool MoveCursorAwayAfterAction
+    {
+        get => _search.MoveCursorAwayAfterAction;
+        set { if (_search.MoveCursorAwayAfterAction == value) return; _search.MoveCursorAwayAfterAction = value; NotifyChanged(); }
+    }
+
     public int OffsetX
     {
         get => _search.OffsetX;
@@ -1145,6 +1152,13 @@ public sealed class FindImageStepViewModel : ScreenSearchStepViewModel
     {
         get => _step.IgnoreColor;
         set { if (_step.IgnoreColor == value) return; _step.IgnoreColor = value; NotifyChanged(); }
+    }
+
+    /// <summary>"Ignore background / match bright text and edges" (see-through game UI).</summary>
+    public bool MatchForeground
+    {
+        get => _step.MatchForeground;
+        set { if (_step.MatchForeground == value) return; _step.MatchForeground = value; NotifyChanged(); }
     }
 
     /// <summary>"Ignore the edges (%)": 0 = compare the whole picture.</summary>

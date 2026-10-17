@@ -9,7 +9,7 @@
         d:DataContext="{d:DesignInstance Type=vm:MainViewModel}"
         Title="{Binding WindowTitle}"
         Icon="pack://application:,,,/Assets/SmartMacro.ico"
-        Width="1280" Height="800" MinWidth="980" MinHeight="620"
+        Width="1340" Height="860" MinWidth="1024" MinHeight="680"
         WindowStartupLocation="CenterScreen"
         Background="{StaticResource BackgroundBrush}"
         Foreground="{StaticResource TextBrush}"
@@ -106,10 +106,10 @@
                 <RowDefinition Height="Auto" />
             </Grid.RowDefinitions>
 
-            <ContentControl Grid.Row="0" Content="{Binding CurrentPageViewModel}" Focusable="False" Margin="24,20,24,12" />
+            <ContentControl Grid.Row="0" Content="{Binding CurrentPageViewModel}" Focusable="False" Margin="20,14,20,8" />
 
             <!-- Automation bar: record / play / pause / stop -->
-            <Border Grid.Row="1" Margin="24,0,24,12" Style="{StaticResource Card}" Padding="14,10" DataContext="{Binding Automation}">
+            <Border Grid.Row="1" Margin="20,0,20,8" Style="{StaticResource Card}" Padding="12,6" DataContext="{Binding Automation}">
                 <Grid>
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="Auto" />
@@ -217,15 +217,32 @@
             </Border>
 
             <!-- Compact activity log -->
-            <Border Grid.Row="2" Margin="24,0,24,12" Style="{StaticResource Card}" Padding="12,8"
+            <!-- Small by default (~110 px); drag the grip on its top edge to make it taller (up to 420 px). -->
+            <Border Grid.Row="2" Margin="20,0,20,8" Style="{StaticResource Card}" Padding="12,0,12,6"
                     Visibility="{Binding ShowLogPanel, Converter={StaticResource BoolToVisibility}}">
                 <DockPanel>
-                    <DockPanel DockPanel.Dock="Top" Margin="2,0,0,4">
+                    <Thumb DockPanel.Dock="Top" Height="8" Cursor="SizeNS" DragDelta="ActivityGrip_DragDelta"
+                           ToolTip="Drag to make the Activity panel taller or shorter" AutomationProperties.Name="Resize the Activity panel">
+                        <Thumb.Template>
+                            <ControlTemplate TargetType="Thumb">
+                                <Border Background="Transparent">
+                                    <Border x:Name="Grip" Width="36" Height="3" CornerRadius="2" Background="{StaticResource BorderBrush}"
+                                            HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                </Border>
+                                <ControlTemplate.Triggers>
+                                    <Trigger Property="IsMouseOver" Value="True">
+                                        <Setter TargetName="Grip" Property="Background" Value="{StaticResource AccentBrush}" />
+                                    </Trigger>
+                                </ControlTemplate.Triggers>
+                            </ControlTemplate>
+                        </Thumb.Template>
+                    </Thumb>
+                    <DockPanel DockPanel.Dock="Top" Margin="2,0,0,2">
                         <TextBlock Text="Activity" Style="{StaticResource SectionTitle}" FontSize="12" VerticalAlignment="Center" />
-                        <Button DockPanel.Dock="Right" HorizontalAlignment="Right" Style="{StaticResource GhostButton}" Padding="8,2"
+                        <Button DockPanel.Dock="Right" HorizontalAlignment="Right" Style="{StaticResource GhostButton}" Padding="8,0"
                                 FontSize="12" Content="Open full log" Command="{Binding ShowLogsCommand}" />
                     </DockPanel>
-                    <ListBox ItemsSource="{Binding Logs.Entries}" Height="96" ItemContainerStyle="{StaticResource PlainListItem}"
+                    <ListBox x:Name="ActivityList" ItemsSource="{Binding Logs.Entries}" Height="72" ItemContainerStyle="{StaticResource PlainListItem}"
                              ScrollViewer.VerticalScrollBarVisibility="Auto" VirtualizingPanel.IsVirtualizing="True">
                         <ListBox.ItemTemplate>
                             <DataTemplate>

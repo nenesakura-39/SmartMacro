@@ -70,8 +70,40 @@ public sealed class PlaybackEngine
     /// <summary>If playback is more than this far behind schedule, it skips ahead instead of catching up.</summary>
     public static readonly TimeSpan MaxTimelineLag = TimeSpan.FromMilliseconds(250);
 
-    /// <summary>Short pause after clicking found text / an image so the clicked window can take focus before the next step.</summary>
-    public const int ClickSettleMs = 100;
+    /// <summary>
+    /// Pause after clicking found text / an image / a colour ("post-action delay") so the clicked window (or game UI)
+    /// can react before the next step looks at the screen again.
+    /// </summary>
+    public const int ClickSettleMs = 120;
+
+    /// <summary>
+    /// How long a "when found" click keeps the button down. Games read input once per frame; a press and release in
+    /// the same instant was sometimes ignored by Roblox (a 60 fps frame is ~16 ms, so 35 ms spans two frames).
+    /// </summary>
+    public const int FoundClickHoldMs = 35;
+
+    /// <summary>Gap between the two clicks of a "when found" double-click (0 ms was too fast for Roblox).</summary>
+    public const int DoubleClickGapMs = 65;
+
+    /// <summary>
+    /// Smooth mouse movement: a cursor jump made by a Move mouse step (or a click / scroll at a position) that comes
+    /// right after a Delay glides there during the end of that Delay (up to <see cref="MaxGlideMs"/>, one move every
+    /// <see cref="GlideStepInterval"/>), instead of teleporting. Total timing doesn't change. The app turns this on
+    /// from Settings; off by default (tests and callers that want exact jumps).
+    /// </summary>
+    public bool SmoothMouseMoves { get; set; }
+
+    /// <summary>Longest glide before a cursor jump (ms of the preceding Delay that is used for gliding).</summary>
+    public const int MaxGlideMs = 200;
+
+    /// <summary>Time between cursor updates while gliding or dragging (~120 per second).</summary>
+    public static readonly TimeSpan GlideStepInterval = TimeSpan.FromMilliseconds(8);
+
+    // Where the engine last put the cursor with an absolute move (null = unknown, e.g. after relative / camera moves).
+    private (int X, int Y)? _cursor;
+
+    // Set just before a Delay step runs: the spot the next step jumps to (for the smooth glide), or null.
+    private (int X, int Y)? _glideTarget;
 
     /// <summary>How often the progress text is refreshed while a feedback loop runs.</summary>
     private static readonly TimeSpan FeedbackProgressInterval = TimeSpan.FromMilliseconds(250);
@@ -145,6 +177,8 @@ public sealed class PlaybackEngine
             _resumeSignal = null;
             _lastFound = null;
             _skipNextStep = false;
+            _cursor = null;
+            _glideTarget = null;
         }
 
         SetState(PlaybackState.Running);
@@ -548,6 +582,8 @@ public sealed class PlaybackEngine
                     _skipNextStep = false;
                     if (step.Enabled)
                     {
+                        // Smooth mouse: a Delay right before a cursor jump glides there (see SmoothMouseMoves).
+                        _glideTarget = step is DelayStep && pc + 1 < steps.Count ? JumpTargetOf(steps[pc + 1]) : null;
                         Report(run, pc, loops);
                         await ExecuteStepAsync(step, run.Speed, run.Held, token).ConfigureAwait(false);
                         run.StepsExecuted++;
@@ -643,13 +679,23 @@ public sealed class PlaybackEngine
 
         if (condition is null) return true; // Times: no condition to check
 
-        var answer = await EvaluateConditionAsync(run, condition, token).ConfigureAwait(false);
+        // When the loop would end because its target is NOT seen (While "… is on screen", Until "… is NOT on screen"),
+        // a single missed frame isn't trusted: the target may just be re-spawning (a game button that appears again
+        // 100-250 ms after a click). Keep looking for up to the grace window and only end when it stays away.
+        bool KeepGoing(bool isTrue) => repeat.Mode == RepeatMode.While ? isTrue : !isTrue;
+        var grace = repeat.EndsWhenTargetMissing ? repeat.EffectiveKeepCheckingForMs : 0;
+        var answer = grace > 0
+            ? await EvaluateConditionAsync(run, condition, token,
+                stopWhen: c => KeepGoing(c.IsTrue),
+                window: TimeSpan.FromMilliseconds(Math.Max(grace, condition.Search!.TimeoutMs))).ConfigureAwait(false)
+            : await EvaluateConditionAsync(run, condition, token).ConfigureAwait(false);
         frame.LastCheckAt = ActiveTime;
 
-        var keepGoing = repeat.Mode == RepeatMode.While ? answer.IsTrue : !answer.IsTrue;
+        var keepGoing = KeepGoing(answer.IsTrue);
         if (!keepGoing)
         {
             var reason = repeat.Mode == RepeatMode.While ? "its condition is false" : "its condition is true";
+            if (grace > 0) reason += $" (kept checking for {grace} ms)";
             Message?.Invoke(this, $"Repeat (step {number}) finished after {Turns(turns)}: {reason}. {answer.Text}");
         }
 
@@ -676,11 +722,13 @@ public sealed class PlaybackEngine
     /// Uses the same detection as the Find steps; paused time doesn't count; Pause / Stop / Esc work between and during
     /// checks. When the condition sees its text / image / colour, that spot becomes the "last found" spot for clicks.
     /// </summary>
-    private async Task<ConditionAnswer> EvaluateConditionAsync(RunContext run, Condition condition, CancellationToken token)
+    private async Task<ConditionAnswer> EvaluateConditionAsync(RunContext run, Condition condition, CancellationToken token,
+        Func<ConditionCheck, bool>? stopWhen = null, TimeSpan? window = null)
     {
         var conditions = run.Conditions;
         var search = condition.Search ?? throw new InvalidOperationException("This condition has no valid search settings. The macro may be damaged.");
-        var timeout = TimeSpan.FromMilliseconds(search.TimeoutMs);
+        var timeout = window ?? TimeSpan.FromMilliseconds(search.TimeoutMs);
+        stopWhen ??= c => c.IsTrue;
         var timer = conditions.NewTimer(condition);
         var started = ActiveTime;
 
@@ -692,7 +740,7 @@ public sealed class PlaybackEngine
 
             check = await conditions.CheckAsync(condition, timer, token).ConfigureAwait(false);
             if (check.Seen) _lastFound = (check.X, check.Y);
-            if (check.IsTrue || ActiveTime - started >= timeout) break;
+            if (stopWhen(check) || ActiveTime - started >= timeout) break;
 
             await WaitAsync(search.CheckIntervalMs, token).ConfigureAwait(false);
         }
@@ -914,12 +962,29 @@ public sealed class PlaybackEngine
         switch (step)
         {
             case DelayStep d:
-                AdvanceTimeline(d.DurationMs / speed);
+                if (SmoothMouseMoves && _glideTarget is { } target && d.DurationMs > 0)
+                {
+                    // Wait for the first part of the Delay, then glide to the next step's spot during the rest.
+                    var total = d.DurationMs / speed;
+                    var glide = Math.Min(total, MaxGlideMs);
+                    AdvanceTimeline(total - glide);
+                    await WaitForTimelineAsync(token).ConfigureAwait(false);
+                    var before = _timelineTarget;
+                    await GlideAsync(target, TimeSpan.FromMilliseconds(glide), token).ConfigureAwait(false);
+                    // Whatever the glide didn't use (it skipped, or rounding) is still waited for.
+                    var used = (_timelineTarget - before).TotalMilliseconds;
+                    AdvanceTimeline(glide - used);
+                }
+                else
+                {
+                    AdvanceTimeline(d.DurationMs / speed);
+                }
+
                 await WaitForTimelineAsync(token).ConfigureAwait(false);
                 break;
 
             case MouseMoveStep m:
-                _input.MoveMouse(m.X, m.Y);
+                MoveTo(m.X, m.Y);
                 break;
 
             case MouseClickStep c:
@@ -928,12 +993,12 @@ public sealed class PlaybackEngine
                 {
                     var found = _lastFound ?? throw new TextNotFoundException(
                         "This click uses the last found spot, but no Find text / image / color step has found anything yet in this run.");
-                    _input.MoveMouse(found.X, found.Y);
+                    MoveTo(found.X, found.Y);
                     start = found;
                 }
                 else if (!c.UseCurrentPosition)
                 {
-                    _input.MoveMouse(c.X, c.Y);
+                    MoveTo(c.X, c.Y);
                     start = (c.X, c.Y);
                 }
                 else if (_input.TryGetCursorPosition(out var cursorX, out var cursorY))
@@ -983,7 +1048,7 @@ public sealed class PlaybackEngine
                 break;
 
             case MouseScrollStep s:
-                if (!s.UseCurrentPosition) _input.MoveMouse(s.X, s.Y);
+                if (!s.UseCurrentPosition) MoveTo(s.X, s.Y);
                 await ScrollInNotchesAsync(s.Delta, s.Horizontal, token).ConfigureAwait(false);
                 break;
 
@@ -1065,7 +1130,7 @@ public sealed class PlaybackEngine
     private async Task PlaySequenceAsync(InputSequenceStep step, double speed, HeldInput held, CancellationToken token)
     {
         var events = step.Events;
-        if (step.MoveCursorToStart) _input.MoveMouse(step.StartX, step.StartY);
+        if (step.MoveCursorToStart) MoveTo(step.StartX, step.StartY);
 
         var segments = step.HasMouseSegments ? step.MouseSegments! : null;
         var segmentIndex = 0;
@@ -1111,7 +1176,7 @@ public sealed class PlaybackEngine
                         {
                             if (cursorSent != (e.X, e.Y))
                             {
-                                _input.MoveMouse(e.X, e.Y);
+                                MoveTo(e.X, e.Y);
                                 cursorSent = (e.X, e.Y);
                             }
                         }
@@ -1119,13 +1184,14 @@ public sealed class PlaybackEngine
                         {
                             _input.MoveMouseRelative(e.Dx, e.Dy);
                             cursorSent = null; // the cursor (if visible) has moved by an unknown number of pixels
+                            _cursor = null;
                         }
 
                         break;
                     case InputEventKind.MouseDown:
                         if (usePosition)
                         {
-                            _input.MoveMouse(e.X, e.Y);
+                            MoveTo(e.X, e.Y);
                             cursorSent = (e.X, e.Y);
                         }
 
@@ -1136,7 +1202,7 @@ public sealed class PlaybackEngine
                         // Only if the cursor isn't already there (normally the last move put it there).
                         if (usePosition && cursorSent != (e.X, e.Y))
                         {
-                            _input.MoveMouse(e.X, e.Y);
+                            MoveTo(e.X, e.Y);
                             cursorSent = (e.X, e.Y);
                         }
 
@@ -1147,7 +1213,7 @@ public sealed class PlaybackEngine
                     case InputEventKind.HorizontalWheel:
                         if (usePosition)
                         {
-                            _input.MoveMouse(e.X, e.Y);
+                            MoveTo(e.X, e.Y);
                             cursorSent = (e.X, e.Y);
                         }
 
@@ -1235,6 +1301,12 @@ public sealed class PlaybackEngine
                 Message?.Invoke(this, result.FoundText + Stats());
                 await PerformFoundActionAsync(step.Action, result.X + step.OffsetX, result.Y + step.OffsetY, step.ActionHoldMs,
                     _held ?? throw new InvalidOperationException("Playback isn't running."), token).ConfigureAwait(false);
+                if (step.MoveCursorAwayAfterAction && step.Action is not (FoundTextAction.None or FoundTextAction.Move))
+                {
+                    var (awayX, awayY) = AwaySpot(step, result.X, result.Y);
+                    MoveTo(awayX, awayY);
+                }
+
                 return;
             }
 
@@ -1281,6 +1353,17 @@ public sealed class PlaybackEngine
         }
     }
 
+    /// <summary>How far below the clicked spot the cursor goes when the step searches the whole screen.</summary>
+    public const int MoveAwayDistance = 150;
+
+    /// <summary>
+    /// Where "move the cursor away after clicking" puts the cursor: just outside the bottom-right corner of the search
+    /// area, or (whole-screen search) <see cref="MoveAwayDistance"/> pixels below the spot that was found.
+    /// </summary>
+    internal static (int X, int Y) AwaySpot(ScreenSearchStep step, int foundX, int foundY) => step.SearchFullScreen
+        ? (foundX, foundY + MoveAwayDistance)
+        : (step.RegionX + step.RegionWidth + 8, step.RegionY + step.RegionHeight + 8);
+
     /// <summary>
     /// The "when found" action of a Find step (and the "when true" action of an If) at a spot on screen (offset already
     /// added): move there, click / double-click / right-click, or hold the left button for <paramref name="holdMs"/>.
@@ -1291,18 +1374,19 @@ public sealed class PlaybackEngine
     {
         if (action == FoundTextAction.None) return;
 
-        _input.MoveMouse(x, y);
+        MoveTo(x, y);
         switch (action)
         {
             case FoundTextAction.Click:
-                Click(MacroMouseButton.Left);
+                await HeldClickAsync(MacroMouseButton.Left, held, token).ConfigureAwait(false);
                 break;
             case FoundTextAction.DoubleClick:
-                Click(MacroMouseButton.Left);
-                Click(MacroMouseButton.Left);
+                await HeldClickAsync(MacroMouseButton.Left, held, token).ConfigureAwait(false);
+                await WaitAsync(DoubleClickGapMs, token).ConfigureAwait(false);
+                await HeldClickAsync(MacroMouseButton.Left, held, token).ConfigureAwait(false);
                 break;
             case FoundTextAction.RightClick:
-                Click(MacroMouseButton.Right);
+                await HeldClickAsync(MacroMouseButton.Right, held, token).ConfigureAwait(false);
                 break;
             case FoundTextAction.Hold:
                 _input.MouseButton(MacroMouseButton.Left, true);
@@ -1316,8 +1400,8 @@ public sealed class PlaybackEngine
         if (action != FoundTextAction.Move) await WaitAsync(ClickSettleMs, token).ConfigureAwait(false);
     }
 
-    /// <summary>Time between cursor updates while dragging (about 60 per second, smooth enough for sliders).</summary>
-    public static readonly TimeSpan DragStepInterval = TimeSpan.FromMilliseconds(16);
+    /// <summary>Time between cursor updates while dragging (about 120 per second, so sliders follow smoothly).</summary>
+    public static readonly TimeSpan DragStepInterval = TimeSpan.FromMilliseconds(8);
 
     /// <summary>
     /// Drag: press at the start, move the cursor to (EndX, EndY) in small even steps over DragDurationMs (on the
@@ -1344,16 +1428,80 @@ public sealed class PlaybackEngine
             if (start is { } from && i < steps)
             {
                 var t = i / (double)steps;
-                _input.MoveMouse((int)Math.Round(from.X + (c.EndX - from.X) * t), (int)Math.Round(from.Y + (c.EndY - from.Y) * t));
+                MoveTo((int)Math.Round(from.X + (c.EndX - from.X) * t), (int)Math.Round(from.Y + (c.EndY - from.Y) * t));
             }
             else
             {
-                _input.MoveMouse(c.EndX, c.EndY); // always end exactly on the target
+                MoveTo(c.EndX, c.EndY); // always end exactly on the target
             }
         }
 
         _input.MouseButton(c.Button, false);
         held.Buttons.Remove(c.Button);
+    }
+
+    /// <summary>Absolute cursor move; remembers the spot so a later glide knows where it starts.</summary>
+    private void MoveTo(int x, int y)
+    {
+        _input.MoveMouse(x, y);
+        _cursor = (x, y);
+    }
+
+    /// <summary>Where a step jumps the cursor to before acting (null if it doesn't move the cursor to a fixed spot).</summary>
+    private static (int X, int Y)? JumpTargetOf(MacroStep? step) => step switch
+    {
+        MouseMoveStep { Enabled: true } m => (m.X, m.Y),
+        MouseClickStep { Enabled: true, UseLastFoundText: false, UseCurrentPosition: false } c => (c.X, c.Y),
+        MouseScrollStep { Enabled: true, UseCurrentPosition: false } s => (s.X, s.Y),
+        _ => null,
+    };
+
+    /// <summary>
+    /// Smooth mouse movement (see <see cref="SmoothMouseMoves"/>): glides the cursor from where it is to
+    /// <paramref name="target"/> over <paramref name="duration"/> (on the timeline, so the time is taken out of the
+    /// Delay that comes before the jump). Does nothing when the start is unknown or the jump is tiny.
+    /// </summary>
+    private async Task GlideAsync((int X, int Y) target, TimeSpan duration, CancellationToken token)
+    {
+        (int X, int Y) from;
+        if (_cursor is { } known) from = known;
+        else if (_input.TryGetCursorPosition(out var cx, out var cy)) from = (cx, cy);
+        else return;
+        if (Math.Abs(target.X - from.X) + Math.Abs(target.Y - from.Y) < 3) return;
+
+        var steps = Math.Max(1, (int)Math.Floor(duration / GlideStepInterval));
+        var stepTime = duration / steps;
+        for (var i = 1; i <= steps; i++)
+        {
+            _timelineTarget += stepTime;
+            await WaitForTimelineAsync(token).ConfigureAwait(false);
+            var t = i / (double)steps;
+            // Ease in and out, like a hand: slow start, fast middle, slow arrival.
+            var e = t * t * (3 - 2 * t);
+            MoveTo((int)Math.Round(from.X + (target.X - from.X) * e), (int)Math.Round(from.Y + (target.Y - from.Y) * e));
+        }
+    }
+
+    /// <summary>
+    /// A click for "when found" actions: press, keep it down <see cref="FoundClickHoldMs"/> (tracked, so Stop releases
+    /// it), release. Games that read input once per frame then always see the press.
+    /// </summary>
+    private async Task HeldClickAsync(MacroMouseButton button, HeldInput held, CancellationToken token)
+    {
+        _input.MouseButton(button, true);
+        held.Buttons.Add(button);
+        try
+        {
+            await WaitAsync(FoundClickHoldMs, token).ConfigureAwait(false);
+        }
+        finally
+        {
+            if (!token.IsCancellationRequested)
+            {
+                _input.MouseButton(button, false);
+                held.Buttons.Remove(button);
+            }
+        }
     }
 
     private void Click(MacroMouseButton button)
