@@ -22,6 +22,18 @@ Developer: Riku (リク) · Brand: KuroLogic_
 
 
 
+## KuroLogic studio brand (2026-10-17)
+- Brand kit in `tools/brand/` (vector SVG sources + README with palette / fonts): mark = obsidian hexagon with a circuit-node
+  "K" (titanium spine, cyan → violet logic arms ending in nodes, glow); lockup = mark + "Kuro" (Inter Display ExtraBold,
+  white) "Logic" (Inter Display Light, cyan → violet gradient), gradient rule, "SOFTWARE STUDIO · クロロジック".
+  Rendered with headless Chromium at 2×: `Assets/KuroLogic-Logo.png` (dark UI), `KuroLogic-Logo-Light.png`,
+  `KuroLogic-Mark-1024.png`, `KuroLogic-Banner-1920x1080.png`. The owner's Gemini reference image never arrived in the
+  chat, so this is an original design (not a copy of it).
+- App: Settings → About now has a KuroLogic band under the SmartMacro info (obsidian / violet gradient, the KuroLogic logo
+  76 px high, "A KUROLOGIC PRODUCT – Made by KuroLogic, the independent software studio of Riku (リク)").
+  `SmartMacro.csproj` adds `<Resource Include="Assets\KuroLogic-Logo.png" />` (pack URI in `Views/SettingsView.xaml`).
+- Not verified: build / runtime look in WPF (the band was checked as an HTML mock-up).
+
 ## New brand icon + logo (2026-10-17) – "Cybernetic Vision Core + Hyper-Velocity Cursor"; icon generated, app code NOT built
 - `tools/generate-icon.py` (Python 3 + Pillow + NumPy; run from the repo root: `python tools/generate-icon.py`) draws the icon
   from vector shapes at ≥ 1024 px and scales down with Lanczos: squircle (24 % corners) with a radial deep-space gradient

@@ -27,6 +27,8 @@
 
   <ItemGroup>
     <Resource Include="Assets\SmartMacro.ico" />
+    <!-- KuroLogic studio logo, shown in Settings → About (source: tools/brand/kurologic-logo.svg). -->
+    <Resource Include="Assets\KuroLogic-Logo.png" />
   </ItemGroup>
 
   <ItemGroup>

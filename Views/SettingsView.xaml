@@ -64,26 +64,49 @@
         <ScrollViewer VerticalScrollBarVisibility="Auto">
             <StackPanel MaxWidth="760" HorizontalAlignment="Left">
 
-                <!-- ===== About ===== -->
-                <Border Style="{StaticResource SettingsCard}" Padding="16">
-                    <DockPanel>
-                        <!-- Brand mark (same vector logo as the sidebar and the app icon, Views/BrandLogo.xaml) -->
-                        <views:BrandLogo DockPanel.Dock="Left" Width="60" Height="60" VerticalAlignment="Top" Margin="-4,-4,0,0" />
-                        <Button DockPanel.Dock="Right" Command="{Binding CopyDiagnosticsCommand}" VerticalAlignment="Top"
-                                ToolTip="Copies version, Windows, screen and OCR info plus the recent log, for bug reports">
-                            <StackPanel Orientation="Horizontal">
-                                <TextBlock Text="&#xE8C8;" Style="{StaticResource IconText}" />
-                                <TextBlock Text="Copy diagnostics" Margin="8,0,0,0" />
+                <!-- ===== About: SmartMacro + the KuroLogic studio brand ===== -->
+                <Border Style="{StaticResource SettingsCard}">
+                    <StackPanel>
+                        <DockPanel Margin="16,16,16,14">
+                            <!-- Brand mark (same vector logo as the sidebar and the app icon, Views/BrandLogo.xaml) -->
+                            <views:BrandLogo DockPanel.Dock="Left" Width="60" Height="60" VerticalAlignment="Top" Margin="-4,-4,0,0" />
+                            <Button DockPanel.Dock="Right" Command="{Binding CopyDiagnosticsCommand}" VerticalAlignment="Top"
+                                    ToolTip="Copies version, Windows, screen and OCR info plus the recent log, for bug reports">
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock Text="&#xE8C8;" Style="{StaticResource IconText}" />
+                                    <TextBlock Text="Copy diagnostics" Margin="8,0,0,0" />
+                                </StackPanel>
+                            </Button>
+                            <StackPanel Margin="16,0,16,0">
+                                <TextBlock Text="ABOUT" Style="{StaticResource SetupCardTitle}" />
+                                <TextBlock Text="{Binding AppName}" FontSize="18" FontWeight="SemiBold" Margin="0,2,0,0" />
+                                <TextBlock Text="{Binding VersionText}" Style="{StaticResource MutedText}" Margin="0,2,0,0" />
+                                <TextBlock Text="{Binding OwnerText}" FontWeight="SemiBold" Margin="0,8,0,0" />
+                                <TextBlock Text="{Binding Tagline}" Style="{StaticResource MutedText}" FontSize="12" Margin="0,4,0,0" />
                             </StackPanel>
-                        </Button>
-                        <StackPanel Margin="16,0,16,0">
-                            <TextBlock Text="ABOUT" Style="{StaticResource SetupCardTitle}" />
-                            <TextBlock Text="{Binding AppName}" FontSize="18" FontWeight="SemiBold" Margin="0,2,0,0" />
-                            <TextBlock Text="{Binding VersionText}" Style="{StaticResource MutedText}" Margin="0,2,0,0" />
-                            <TextBlock Text="{Binding OwnerText}" FontWeight="SemiBold" Margin="0,8,0,0" />
-                            <TextBlock Text="{Binding Tagline}" Style="{StaticResource MutedText}" FontSize="12" Margin="0,4,0,0" />
-                        </StackPanel>
-                    </DockPanel>
+                        </DockPanel>
+
+                        <!-- KuroLogic brand band: obsidian studio surface with the KuroLogic logo (Assets/KuroLogic-Logo.png) -->
+                        <Border CornerRadius="0,0,10,10" BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,1,0,0" ClipToBounds="True">
+                            <Border.Background>
+                                <RadialGradientBrush Center="0.3,0.5" GradientOrigin="0.3,0.5" RadiusX="0.75" RadiusY="1.6">
+                                    <GradientStop Color="#2A1B5E" Offset="0" />
+                                    <GradientStop Color="#0E1022" Offset="0.55" />
+                                    <GradientStop Color="#05070D" Offset="1" />
+                                </RadialGradientBrush>
+                            </Border.Background>
+                            <DockPanel Margin="14,10,18,10">
+                                <StackPanel DockPanel.Dock="Right" VerticalAlignment="Center" HorizontalAlignment="Right" MaxWidth="260">
+                                    <TextBlock Text="A KUROLOGIC PRODUCT" Style="{StaticResource SetupCardTitle}" HorizontalAlignment="Right" />
+                                    <TextBlock Text="Made by KuroLogic, the independent software studio of Riku (リク)."
+                                               Style="{StaticResource MutedText}" FontSize="11" TextAlignment="Right" TextWrapping="Wrap" Margin="0,4,0,0" />
+                                </StackPanel>
+                                <Image Source="pack://application:,,,/Assets/KuroLogic-Logo.png" Height="76" HorizontalAlignment="Left"
+                                       Stretch="Uniform" RenderOptions.BitmapScalingMode="HighQuality"
+                                       AutomationProperties.Name="KuroLogic logo" ToolTip="KuroLogic · Software Studio" />
+                            </DockPanel>
+                        </Border>
+                    </StackPanel>
                 </Border>
 
                 <!-- ===== Global Hotkeys ===== -->
