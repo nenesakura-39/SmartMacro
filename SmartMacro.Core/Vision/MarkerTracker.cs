@@ -47,9 +47,11 @@ public sealed class MarkerTracker
     private double? _last;
     private double? _pendingJump;
 
-    public MarkerTracker(RgbColor color, int tolerance, BarOrientation orientation, int minPixels = 3, double maxJumpPercent = 35)
+    public MarkerTracker(RgbColor color, int tolerance, BarOrientation orientation, int minPixels = 3, double maxJumpPercent = 35,
+        RgbColor? secondaryColor = null)
     {
         Color = color;
+        SecondaryColor = secondaryColor;
         Tolerance = Math.Clamp(tolerance, 0, 255);
         Orientation = orientation;
         MinPixels = Math.Max(1, minPixels);
@@ -57,6 +59,7 @@ public sealed class MarkerTracker
     }
 
     public RgbColor Color { get; }
+    public RgbColor? SecondaryColor { get; init; }
     public int Tolerance { get; }
     public BarOrientation Orientation { get; }
     public int MinPixels { get; }
@@ -74,7 +77,7 @@ public sealed class MarkerTracker
     public MarkerReading Update(BgraImage frame, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(frame);
-        var result = ColorFinder.Find(frame, Color, Tolerance, MinPixels, maxResults: 5, cancellationToken);
+        var result = ColorFinder.Find(frame, Color, SecondaryColor, Tolerance, MinPixels, maxResults: 5, cancellationToken);
         if (result.Largest is not { } main)
         {
             _pendingJump = null;

@@ -36,6 +36,7 @@ public sealed class FeedbackSensor
     private readonly IPlaybackClock _clock;
     private readonly MarkerTracker _tracker;
     private readonly RgbColor _zoneColor;
+    private readonly RgbColor? _secondaryZoneColor;
 
     /// <summary>Throws <see cref="InvalidOperationException"/> when a colour can't be read (the validator reports it first).</summary>
     public FeedbackSensor(FeedbackLoopStep step, IScreenCapture capture, IPlaybackClock? clock = null)
@@ -46,10 +47,29 @@ public sealed class FeedbackSensor
 
         if (!RgbColor.TryParse(step.MarkerColor, out var markerColor))
             throw new InvalidOperationException($"The marker color \"{step.MarkerColor}\" is not valid. Use #RRGGBB.");
-        _tracker = new MarkerTracker(markerColor, step.MarkerTolerance, step.Orientation, step.MarkerMinPixels, step.MaxJumpPercent);
+        RgbColor? secondaryMarkerColor = null;
+        if (step.UseSecondaryMarkerColor)
+        {
+            var secText = string.IsNullOrWhiteSpace(step.SecondaryMarkerColor) ? "#FFFFFF" : step.SecondaryMarkerColor;
+            if (!RgbColor.TryParse(secText, out var parsedSecMarker))
+                throw new InvalidOperationException($"The second marker color \"{step.SecondaryMarkerColor}\" is not valid. Use #RRGGBB.");
+            secondaryMarkerColor = parsedSecMarker;
+        }
 
-        if (step.ZoneMode == FeedbackZoneMode.DetectedByColor && !RgbColor.TryParse(step.ZoneColor, out _zoneColor))
-            throw new InvalidOperationException($"The zone color \"{step.ZoneColor}\" is not valid. Use #RRGGBB.");
+        _tracker = new MarkerTracker(markerColor, step.MarkerTolerance, step.Orientation, step.MarkerMinPixels, step.MaxJumpPercent, secondaryMarkerColor);
+
+        if (step.ZoneMode == FeedbackZoneMode.DetectedByColor)
+        {
+            if (!RgbColor.TryParse(step.ZoneColor, out _zoneColor))
+                throw new InvalidOperationException($"The zone color \"{step.ZoneColor}\" is not valid. Use #RRGGBB.");
+            if (step.UseSecondaryZoneColor)
+            {
+                var secZoneText = string.IsNullOrWhiteSpace(step.SecondaryZoneColor) ? "#FFFFFF" : step.SecondaryZoneColor;
+                if (!RgbColor.TryParse(secZoneText, out var parsedSecZone))
+                    throw new InvalidOperationException($"The second zone color \"{step.SecondaryZoneColor}\" is not valid. Use #RRGGBB.");
+                _secondaryZoneColor = parsedSecZone;
+            }
+        }
     }
 
     /// <summary>Captures and reads one frame. Throws if the bar area is not (completely) on screen.</summary>
@@ -74,13 +94,44 @@ public sealed class FeedbackSensor
         {
             // The marker can sit on top of the zone and cut it in two: bridge gaps up to the marker's size.
             var markerSize = marker.Bounds is { } b ? (_step.Orientation == BarOrientation.Horizontal ? b.Width : b.Height) : 0;
-            zone = ZoneFinder.Find(frame.Image, _zoneColor, _step.ZoneTolerance, _step.ZoneMinPixels, _step.Orientation,
+            zone = ZoneFinder.Find(frame.Image, _zoneColor, _secondaryZoneColor, _step.ZoneTolerance, _step.ZoneMinPixels, _step.Orientation,
                 markerSize + 2, cancellationToken);
+            if (_secondaryZoneColor is { } secZone)
+            {
+                marker = ApplySmartOverlap(frame.Image, _step.Orientation, marker, zone, secZone, _step.ZoneTolerance, _step.ZoneMinPixels, cancellationToken);
+            }
         }
 
         var t2 = _clock.Elapsed;
         var observation = new FeedbackObservation(marker.Status, marker.PositionPercent, zone.Found, zone.StartPercent, zone.EndPercent);
         return new FeedbackFrame(frame, marker, zone, observation, t1 - t0, t2 - t1);
+    }
+
+    /// <summary>
+    /// Smart Overlap Handling: when the control bar has an active/overlapping 2nd colour (e.g. White in Roblox Fisch)
+    /// and that active colour is present on screen while the primary target is occluded or partially occluded by the bar,
+    /// use the centroid of the active bar region so the controller knows the bar is aligned with the target instead of
+    /// declaring "Target missing".
+    /// </summary>
+    public static MarkerReading ApplySmartOverlap(BgraImage barImage, BarOrientation orientation, MarkerReading marker,
+        ZoneReading zone, RgbColor secondaryZoneColor, int zoneTolerance, int zoneMinPixels, CancellationToken cancellationToken = default)
+    {
+        if (!zone.Found) return marker;
+        var activeZone = ZoneFinder.Find(barImage, secondaryZoneColor, null, zoneTolerance, zoneMinPixels, orientation, 2, cancellationToken);
+        if (!activeZone.Found) return marker;
+
+        var occluded = marker.Status != MarkerStatus.Found
+                       || (marker.Bounds is { } mb && activeZone.Bounds is { } zb && TouchingOrOverlapping(mb, zb));
+        if (!occluded) return marker;
+
+        var centroid = (activeZone.StartPercent + activeZone.EndPercent) * 0.5;
+        return new MarkerReading(MarkerStatus.Found, centroid, 1.0, 1, activeZone.Bounds);
+    }
+
+    private static bool TouchingOrOverlapping(Ocr.ScreenRect a, Ocr.ScreenRect b)
+    {
+        var expanded = new Ocr.ScreenRect(b.X - 2, b.Y - 2, b.Width + 4, b.Height + 4);
+        return a.IntersectsWith(expanded);
     }
 }
 

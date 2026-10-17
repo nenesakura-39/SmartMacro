@@ -181,7 +181,7 @@ public sealed class Win32InputSimulator : IInputSimulator
         // Pointer acceleration can make the way back differ by a pixel: land exactly on the target again.
         SendAbsoluteMove(x, y);
         SetCursorPos(x, y);
-        _lastMoveTimestamp = Stopwatch.GetTimestamp() - (long)(HoverNudgeMs * Stopwatch.Frequency / 1000.0);
+        _lastMoveTimestamp = Stopwatch.GetTimestamp();
         PreciseSleepUntil(_lastMoveTimestamp, ButtonSettleMs);
         return true;
     }

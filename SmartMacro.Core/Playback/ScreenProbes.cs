@@ -120,7 +120,14 @@ public sealed class ScreenProbes
             throw new InvalidOperationException($"The image of this step can't be used: {error}");
         var template = decoded!;
 
-        var options = new TemplateMatchOptions { MinScore = step.MinSimilarityPercent / 100.0, IgnoreColor = step.IgnoreColor, IgnoreEdgeFraction = step.IgnoreEdgesPercent / 100.0, MatchForeground = step.MatchForeground };
+        var options = new TemplateMatchOptions
+        {
+            MinScore = step.MinSimilarityPercent / 100.0,
+            IgnoreColor = step.IgnoreColor,
+            IgnoreEdgeFraction = step.IgnoreEdgesPercent / 100.0,
+            MatchForeground = step.MatchForeground,
+            AdaptToLighting = step.AdaptToLighting,
+        };
 
         return new PreparedSearch("The image", isTimed: true, async (timer, t) =>
         {
@@ -158,15 +165,24 @@ public sealed class ScreenProbes
         var capture = RequireCapture();
         if (!RgbColor.TryParse(step.Color, out var color))
             throw new InvalidOperationException($"\"{step.Color}\" is not a valid color. Use #RRGGBB.");
+        RgbColor? secondaryColor = null;
+        if (step.UseSecondaryColor)
+        {
+            var secText = string.IsNullOrWhiteSpace(step.SecondaryColor) ? "#FFFFFF" : step.SecondaryColor;
+            if (!RgbColor.TryParse(secText, out var parsedSecondary))
+                throw new InvalidOperationException($"\"{step.SecondaryColor}\" is not a valid second color. Use #RRGGBB.");
+            secondaryColor = parsedSecondary;
+        }
 
-        return new PreparedSearch($"Color {color}", isTimed: true, async (timer, t) =>
+        var what = secondaryColor is { } sec ? $"Color {color} or {sec}" : $"Color {color}";
+        return new PreparedSearch(what, isTimed: true, async (timer, t) =>
         {
             var (region, problem) = ResolveArea(step, capture.GetVirtualScreen());
             if (problem is not null) return ScreenProbe.Miss(problem);
             var t0 = _clock.Elapsed;
             var frame = await capture.CaptureAsync(region, t).ConfigureAwait(false);
             var t1 = _clock.Elapsed;
-            var result = ColorFinder.Find(frame.Image, color, step.Tolerance, step.MinPixels, maxResults: 20, t);
+            var result = ColorFinder.Find(frame.Image, color, secondaryColor, step.Tolerance, step.MinPixels, maxResults: 20, t);
             timer?.Add(t1 - t0, _clock.Elapsed - t1);
 
             if (result.Largest is not { } blob)
@@ -180,7 +196,7 @@ public sealed class ScreenProbes
             var y = frame.Bounds.Y + (int)Math.Round(blob.CenterY);
             var more = result.Blobs.Count > 1 ? $", {result.Blobs.Count} patches; the biggest is used" : "";
             var patch = new ScreenRect(frame.Bounds.X + blob.Bounds.X, frame.Bounds.Y + blob.Bounds.Y, blob.Bounds.Width, blob.Bounds.Height);
-            return new ScreenProbe(true, x, y, $"Found color {color} at ({x}, {y}): {blob.PixelCount:N0} pixels{more}.", string.Empty, region, patch);
+            return new ScreenProbe(true, x, y, $"Found {what.ToLowerInvariant()} at ({x}, {y}): {blob.PixelCount:N0} pixels{more}.", string.Empty, region, patch);
         });
     }
 

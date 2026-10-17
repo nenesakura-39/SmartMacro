@@ -106,12 +106,13 @@
             <TextBox Text="{Binding DurationMs, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}" AutomationProperties.Name="Wait time in milliseconds" />
             <TextBlock Text="{Binding SecondsText}" Style="{StaticResource MutedText}" FontSize="12" Margin="0,4,0,0" />
 
-            <TextBlock Text="Quick set" Style="{StaticResource FieldLabel}" />
-            <UniformGrid Columns="4">
-                <Button Content="100 ms" Command="{Binding SetDurationCommand}" CommandParameter="100" Padding="4,6" Margin="0,0,4,0" />
-                <Button Content="500 ms" Command="{Binding SetDurationCommand}" CommandParameter="500" Padding="4,6" Margin="2,0,2,0" />
-                <Button Content="1 s" Command="{Binding SetDurationCommand}" CommandParameter="1000" Padding="4,6" Margin="2,0,2,0" />
-                <Button Content="5 s" Command="{Binding SetDurationCommand}" CommandParameter="5000" Padding="4,6" Margin="4,0,0,0" />
+            <TextBlock Text="Quick add" Style="{StaticResource FieldLabel}" />
+            <UniformGrid Columns="5">
+                <Button Content="+100ms" Command="{Binding AddDurationCommand}" CommandParameter="+100" Padding="4,6" Margin="0,0,3,0" />
+                <Button Content="+500ms" Command="{Binding AddDurationCommand}" CommandParameter="+500" Padding="4,6" Margin="2,0,2,0" />
+                <Button Content="+1s" Command="{Binding AddDurationCommand}" CommandParameter="+1000" Padding="4,6" Margin="2,0,2,0" />
+                <Button Content="+5s" Command="{Binding AddDurationCommand}" CommandParameter="+5000" Padding="4,6" Margin="2,0,2,0" />
+                <Button Content="Reset (0)" Command="{Binding ResetDurationCommand}" Padding="4,6" Margin="3,0,0,0" />
             </UniformGrid>
 
             <ContentControl Content="{Binding}" ContentTemplate="{StaticResource StepFooterTemplate}" Focusable="False" Visibility="{Binding IsStandalone, Converter={StaticResource BoolToVisibility}}" />
@@ -162,6 +163,13 @@
                 <TextBox Text="{Binding HoldMs, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}"
                          AutomationProperties.Name="Hold time in milliseconds"
                          ToolTip="How long the button stays down. Click / double click: 35 ms is reliable in games (0 = instant; recordings fill in how long you held it). Hold for a duration: e.g. 850 for a casting meter." />
+                <UniformGrid Columns="5" Margin="0,6,0,0">
+                    <Button Content="+100ms" Command="{Binding AddDurationCommand}" CommandParameter="+100" Padding="4,6" Margin="0,0,3,0" />
+                    <Button Content="+500ms" Command="{Binding AddDurationCommand}" CommandParameter="+500" Padding="4,6" Margin="2,0,2,0" />
+                    <Button Content="+1s" Command="{Binding AddDurationCommand}" CommandParameter="+1000" Padding="4,6" Margin="2,0,2,0" />
+                    <Button Content="+5s" Command="{Binding AddDurationCommand}" CommandParameter="+5000" Padding="4,6" Margin="2,0,2,0" />
+                    <Button Content="Reset (0)" Command="{Binding ResetDurationCommand}" Padding="4,6" Margin="3,0,0,0" />
+                </UniformGrid>
             </StackPanel>
 
             <TextBlock Text="Where to click" Style="{StaticResource FieldLabel}" Margin="0,18,0,4" />
@@ -271,6 +279,13 @@
             <TextBlock Text="Hold the key for (ms, Press only)" Style="{StaticResource FieldLabel}" />
             <TextBox Text="{Binding HoldMs, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}" IsEnabled="{Binding IsPress}"
                      AutomationProperties.Name="Hold time in milliseconds" />
+            <UniformGrid Columns="5" Margin="0,6,0,0" IsEnabled="{Binding IsPress}">
+                <Button Content="+100ms" Command="{Binding AddDurationCommand}" CommandParameter="+100" Padding="4,6" Margin="0,0,3,0" />
+                <Button Content="+500ms" Command="{Binding AddDurationCommand}" CommandParameter="+500" Padding="4,6" Margin="2,0,2,0" />
+                <Button Content="+1s" Command="{Binding AddDurationCommand}" CommandParameter="+1000" Padding="4,6" Margin="2,0,2,0" />
+                <Button Content="+5s" Command="{Binding AddDurationCommand}" CommandParameter="+5000" Padding="4,6" Margin="2,0,2,0" />
+                <Button Content="Reset (0)" Command="{Binding ResetDurationCommand}" Padding="4,6" Margin="3,0,0,0" />
+            </UniformGrid>
             <TextBlock Style="{StaticResource MutedText}" FontSize="11" Margin="0,4,0,0"
                        Text="0 = instant tap. Recordings fill in how long you actually held the key (e.g. a short W tap in a game)." />
 
@@ -474,6 +489,13 @@
                              ToolTip="Pause between two looks at the screen. 250 ms is quick; lower values use more CPU." AutomationProperties.Name="Check interval in milliseconds" />
                 </StackPanel>
             </Grid>
+            <UniformGrid Columns="5" Margin="0,6,0,0">
+                <Button Content="+100ms" Command="{Binding AddDurationCommand}" CommandParameter="+100" Padding="4,6" Margin="0,0,3,0" />
+                <Button Content="+500ms" Command="{Binding AddDurationCommand}" CommandParameter="+500" Padding="4,6" Margin="2,0,2,0" />
+                <Button Content="+1s" Command="{Binding AddDurationCommand}" CommandParameter="+1000" Padding="4,6" Margin="2,0,2,0" />
+                <Button Content="+5s" Command="{Binding AddDurationCommand}" CommandParameter="+5000" Padding="4,6" Margin="2,0,2,0" />
+                <Button Content="Reset (0)" Command="{Binding ResetDurationCommand}" Padding="4,6" Margin="3,0,0,0" />
+            </UniformGrid>
         </StackPanel>
     </DataTemplate>
 
@@ -723,7 +745,10 @@
                              ToolTip="How similar a spot must be. 90 is a good start; lower it a little if the image glows or animates, raise it if wrong things match." />
                     <TextBlock Style="{StaticResource MutedText}" FontSize="11" Margin="0,4,0,0" TextWrapping="Wrap"
                                Text="&quot;Test detection now&quot; shows the best similarity it saw." />
-                    <CheckBox Content="Ignore color (match the shape only)" IsChecked="{Binding IgnoreColor}" Margin="0,10,0,0"
+                    <CheckBox Content="Adapt to Day/Night lighting changes" IsChecked="{Binding AdaptToLighting}" Margin="0,10,0,0"
+                              ToolTip="Uses Zero-Mean Normalized Cross-Correlation (ZNCC) and normalized chroma so a button captured during the daytime still matches when the game world gets darker, brighter, or tinted at night."
+                              AutomationProperties.Name="Adapt to Day/Night lighting changes" />
+                    <CheckBox Content="Ignore color (match the shape only)" IsChecked="{Binding IgnoreColor}" Margin="0,8,0,0"
                               ToolTip="Normally a match must also have about the same colors, so a grey disabled button doesn't match a green one." AutomationProperties.Name="Ignore color" />
                     <CheckBox Content="Transparent Game UI / Edge Mode: ignore the edges (round buttons)" IsChecked="{Binding IgnoreEdges}" Margin="0,8,0,0"
                               ToolTip="Only the inner part of the picture is compared, so a changing background in the corners (a 3D game scene behind a round button) doesn't stop the match."
@@ -791,6 +816,32 @@
                         </Button>
                         <ComboBox Style="{StaticResource FreezeComboBox}" Margin="0,0,0,6" />
                     </WrapPanel>
+                    <CheckBox Content="+ Add 2nd Color" IsChecked="{Binding UseSecondaryColor}" Margin="0,8,0,0"
+                              ToolTip="Match pixels that have EITHER the primary color OR this 2nd color (useful for buttons or indicators that alternate between two colors)."
+                              AutomationProperties.Name="+ Add 2nd Color" />
+                    <StackPanel Visibility="{Binding UseSecondaryColor, Converter={StaticResource BoolToVisibility}}" Margin="0,6,0,0">
+                        <TextBlock Text="2nd Color (#RRGGBB)" Style="{StaticResource FieldLabel}" />
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="10" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="10" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <Border Grid.Column="0" Width="30" Height="30" CornerRadius="6" Background="{Binding SecondaryColorBrush}"
+                                    BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" ToolTip="A swatch of the 2nd color." />
+                            <TextBox Grid.Column="2" Text="{Binding SecondaryColor, UpdateSourceTrigger=PropertyChanged}" MaxLength="7" Tag="#FFFFFF"
+                                     AutomationProperties.Name="2nd Color to find" />
+                            <Button Grid.Column="4" Command="{Binding PickSecondaryColorCommand}" ToolTip="Pick the 2nd color from the screen."
+                                    AutomationProperties.Name="Pick 2nd color from screen">
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock Text="&#xEF3C;" Style="{StaticResource IconText}" />
+                                    <TextBlock Text="Pick 2nd color" Margin="8,0,0,0" />
+                                </StackPanel>
+                            </Button>
+                        </Grid>
+                    </StackPanel>
                     <TextBlock Text="Tolerance (0-255)" Style="{StaticResource FieldLabel}"
                                ToolTip="How far each of red, green and blue may differ. About 20-40 is typical." />
                     <TextBox Text="{Binding Tolerance, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}" Width="80" HorizontalAlignment="Left"
@@ -1153,7 +1204,7 @@
                                    ToolTip="The color of the thing that moves on its own (the fish, the indicator, the moving marker)." />
                         <WrapPanel Margin="0,8,0,0">
                             <Border Width="30" Height="30" CornerRadius="6" Background="{Binding MarkerBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1"
-                                    Margin="0,0,10,6" ToolTip="{Binding MarkerColor}" />
+                                     Margin="0,0,10,6" ToolTip="{Binding MarkerColor}" />
                             <Button Command="{Binding PickMarkerColorCommand}" Margin="0,0,8,6"
                                     ToolTip="SmartMacro hides and the screen freezes; click the moving target. The magnifier shows the exact pixel." AutomationProperties.Name="Pick moving target color">
                                 <StackPanel Orientation="Horizontal">
@@ -1162,6 +1213,22 @@
                                 </StackPanel>
                             </Button>
                             <ComboBox Style="{StaticResource FreezeComboBox}" Margin="0,0,0,6" />
+                        </WrapPanel>
+                        <CheckBox Content="+ Add 2nd Target Color (optional)" IsChecked="{Binding UseSecondaryMarkerColor}" Margin="0,6,0,0"
+                                  ToolTip="Optional 2nd color for the moving target (e.g. if the fish or indicator changes color or glows)."
+                                  AutomationProperties.Name="+ Add 2nd Target Color (optional)" />
+                        <WrapPanel Margin="0,6,0,0" Visibility="{Binding UseSecondaryMarkerColor, Converter={StaticResource BoolToVisibility}}">
+                            <Border Width="30" Height="30" CornerRadius="6" Background="{Binding SecondaryMarkerBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1"
+                                    Margin="0,0,10,6" ToolTip="{Binding SecondaryMarkerColor}" />
+                            <TextBox Text="{Binding SecondaryMarkerColor, UpdateSourceTrigger=PropertyChanged}" Width="96" MaxLength="7" Tag="#FFFFFF"
+                                     Margin="0,0,8,6" AutomationProperties.Name="2nd Target Color" />
+                            <Button Command="{Binding PickSecondaryMarkerColorCommand}" Margin="0,0,8,6"
+                                    ToolTip="Pick the 2nd target color from screen." AutomationProperties.Name="Pick 2nd target color">
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock Text="&#xEF3C;" Style="{StaticResource IconText}" />
+                                    <TextBlock Text="Pick 2nd color" Margin="8,0,0,0" />
+                                </StackPanel>
+                            </Button>
                         </WrapPanel>
                         <TextBlock Style="{StaticResource FieldLabel}" ToolTip="How far each of red, green and blue may differ from the picked color. 20-40 is typical; raise it if the target flickers.">
                             <Run Text="Color tolerance: " /><Run Text="{Binding MarkerTolerance, Mode=OneWay}" />
@@ -1189,6 +1256,22 @@
                                     </StackPanel>
                                 </Button>
                                 <ComboBox Style="{StaticResource FreezeComboBox}" Margin="0,0,0,6" />
+                            </WrapPanel>
+                            <CheckBox Content="+ Add 2nd Bar Color (when overlapping / active, e.g. White)" IsChecked="{Binding UseSecondaryZoneColor}" Margin="0,6,0,0"
+                                      ToolTip="In games like Fisch, the Control Bar turns White when overlapping the fish. Adding that active color here keeps the bar and target locked even when overlapping."
+                                      AutomationProperties.Name="+ Add 2nd Bar Color (when overlapping / active, e.g. White)" />
+                            <WrapPanel Margin="0,6,0,0" Visibility="{Binding UseSecondaryZoneColor, Converter={StaticResource BoolToVisibility}}">
+                                <Border Width="30" Height="30" CornerRadius="6" Background="{Binding SecondaryZoneBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1"
+                                        Margin="0,0,10,6" ToolTip="{Binding SecondaryZoneColor}" />
+                                <TextBox Text="{Binding SecondaryZoneColor, UpdateSourceTrigger=PropertyChanged}" Width="96" MaxLength="7" Tag="#FFFFFF"
+                                         Margin="0,0,8,6" AutomationProperties.Name="2nd Bar Color" />
+                                <Button Command="{Binding PickSecondaryZoneColorCommand}" Margin="0,0,8,6"
+                                        ToolTip="Pick the 2nd bar color (when overlapping/active) from screen." AutomationProperties.Name="Pick 2nd bar color">
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock Text="&#xEF3C;" Style="{StaticResource IconText}" />
+                                        <TextBlock Text="Pick 2nd color" Margin="8,0,0,0" />
+                                    </StackPanel>
+                                </Button>
                             </WrapPanel>
                             <TextBlock Style="{StaticResource FieldLabel}" ToolTip="How far each of red, green and blue may differ from the picked color.">
                                 <Run Text="Color tolerance: " /><Run Text="{Binding ZoneTolerance, Mode=OneWay}" />
@@ -1301,6 +1384,28 @@
                     </StackPanel>
                 </Button>
             </Grid>
+            <CheckBox Content="+ Add 2nd Target Color (optional)" IsChecked="{Binding UseSecondaryMarkerColor}" Margin="0,8,0,0"
+                      ToolTip="Optional 2nd color for the moving target."
+                      AutomationProperties.Name="+ Add 2nd Target Color (optional)" />
+            <Grid Margin="0,6,0,0" Visibility="{Binding UseSecondaryMarkerColor, Converter={StaticResource BoolToVisibility}}">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="10" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="10" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <Border Grid.Column="0" Width="30" Height="30" CornerRadius="6" Background="{Binding SecondaryMarkerBrush}"
+                        BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" />
+                <TextBox Grid.Column="2" Text="{Binding SecondaryMarkerColor, UpdateSourceTrigger=PropertyChanged}" MaxLength="7" Tag="#FFFFFF"
+                         AutomationProperties.Name="2nd Marker color" />
+                <Button Grid.Column="4" Command="{Binding PickSecondaryMarkerColorCommand}" ToolTip="SmartMacro hides, then you click the 2nd marker color.">
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="&#xEF3C;" Style="{StaticResource IconText}" />
+                        <TextBlock Text="Pick 2nd color" Margin="8,0,0,0" />
+                    </StackPanel>
+                </Button>
+            </Grid>
             <StackPanel Margin="0,4,0,0">
                 <StackPanel>
                     <TextBlock Text="Tolerance (0-255)" Style="{StaticResource FieldLabel}" />
@@ -1355,6 +1460,28 @@
                         <StackPanel Orientation="Horizontal">
                             <TextBlock Text="&#xEF3C;" Style="{StaticResource IconText}" />
                             <TextBlock Text="Pick from screen" Margin="8,0,0,0" />
+                        </StackPanel>
+                    </Button>
+                </Grid>
+                <CheckBox Content="+ Add 2nd Bar Color (when overlapping / active, e.g. White)" IsChecked="{Binding UseSecondaryZoneColor}" Margin="0,8,0,0"
+                          ToolTip="In games like Fisch, the Control Bar turns White when overlapping the fish. Adding that active color here keeps the bar and target locked even when overlapping."
+                          AutomationProperties.Name="+ Add 2nd Bar Color (when overlapping / active, e.g. White)" />
+                <Grid Margin="0,6,0,0" Visibility="{Binding UseSecondaryZoneColor, Converter={StaticResource BoolToVisibility}}">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="10" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="10" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <Border Grid.Column="0" Width="30" Height="30" CornerRadius="6" Background="{Binding SecondaryZoneBrush}"
+                            BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" />
+                    <TextBox Grid.Column="2" Text="{Binding SecondaryZoneColor, UpdateSourceTrigger=PropertyChanged}" MaxLength="7" Tag="#FFFFFF"
+                             AutomationProperties.Name="2nd Zone color" />
+                    <Button Grid.Column="4" Command="{Binding PickSecondaryZoneColorCommand}" ToolTip="SmartMacro hides, then you click the 2nd zone/bar color.">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="&#xEF3C;" Style="{StaticResource IconText}" />
+                            <TextBlock Text="Pick 2nd color" Margin="8,0,0,0" />
                         </StackPanel>
                     </Button>
                 </Grid>

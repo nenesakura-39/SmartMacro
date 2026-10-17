@@ -67,6 +67,12 @@ public sealed class SmartRecordingOptions
     /// "Recorded input" step instead of becoming a few separate Move / Delay steps.
     /// </summary>
     public int AbsorbShortCursorPartUs { get; init; } = 300_000;
+
+    /// <summary>
+    /// Exact 1:1 / Rhythm mode: keeps the entire recording as a single sub-ms locked <see cref="InputSequenceStep"/>
+    /// with zero simplification.
+    /// </summary>
+    public bool ExactTimeline { get; init; }
 }
 
 /// <summary>What a smart recording turned into, for the log and the status bar.</summary>
@@ -290,6 +296,9 @@ public static class SmartRecordingConverter
     /// </summary>
     private static List<Chunk> BuildChunks(List<CapturedInputEvent> events, MouseMovementMode[] modes, SmartRecordingOptions options)
     {
+        if (options.ExactTimeline)
+            return new List<Chunk> { new(0, events.Count - 1, Relative: true) };
+
         var atoms = new List<Chunk>();
         var keys = new HashSet<(int, int, bool)>();
         var buttons = new HashSet<MacroMouseButton>();
@@ -381,7 +390,7 @@ public static class SmartRecordingConverter
                 y = e.Y;
             }
 
-            var ms = e.TimeUs / 1000;
+            var ms = (e.TimeUs + 500) / 1000;
             switch (e.Kind)
             {
                 case InputEventKind.MouseMove:
@@ -416,6 +425,7 @@ public static class SmartRecordingConverter
             KeepHoldTime = options.KeepHoldTime,
             SimplifyMousePath = options.SimplifyMousePath,
             CollapseMousePaths = options.CollapseMousePaths,
+            MaxTapDurationMs = options.KeepHoldTime ? MacroValidator.MaxHoldMs : 500,
         });
         if (steps.Count == 0) return false;
 

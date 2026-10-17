@@ -459,16 +459,29 @@ public sealed class EditorViewModel : ObservableObject
     // ---------------- Live step highlight while playing ----------------
 
     private StepViewModel? _runningStep;
+    private long _lastRunningStepTickMs;
 
     /// <summary>Raised when playback moves to another step of this macro (the view scrolls it into view).</summary>
     public event EventHandler<StepViewModel>? RunningStepChanged;
 
     /// <summary>
     /// Marks the step playback is running right now (by step ID, so it works on the copy that plays); null clears it.
-    /// Steps of another macro (e.g. one played from the library) simply don't match.
+    /// Steps of another macro (e.g. one played from the library) simply don't match. Throttled to at most ~20 Hz so
+    /// rapid step transitions never stall the UI dispatcher or playback threads.
     /// </summary>
     public void SetRunningStep(Guid? stepId)
     {
+        if (stepId is not null)
+        {
+            var now = Environment.TickCount64;
+            if (_runningStep is not null && now - _lastRunningStepTickMs < 50) return;
+            _lastRunningStepTickMs = now;
+        }
+        else
+        {
+            _lastRunningStepTickMs = 0;
+        }
+
         var step = stepId is { } id ? Steps.FirstOrDefault(s => s.Id == id) : null;
         if (ReferenceEquals(step, _runningStep)) return;
         if (_runningStep is not null) _runningStep.IsRunning = false;
@@ -598,6 +611,7 @@ public sealed class EditorViewModel : ObservableObject
             {
                 if (value is not null && (value.Model is IfStep or ElseStep or RepeatStep || value.IndentLevel > 0))
                     AddAtEnd = false;
+                UpdateBlockPartnerHighlights();
                 OnPropertyChanged(nameof(HasSelection));
             }
         }
@@ -1102,6 +1116,9 @@ public sealed class EditorViewModel : ObservableObject
 
         for (var i = 0; i < Steps.Count; i++) Steps[i].Number = i + 1;
 
+        var blocks = BlockStructure.Analyze(Steps.Select(s => s.Model).ToList());
+        UpdateBlockPairing(blocks);
+
         OnPropertyChanged(nameof(HasSteps));
         OnPropertyChanged(nameof(StepCountText)); // also re-checks Move up/down availability
     }
@@ -1130,11 +1147,72 @@ public sealed class EditorViewModel : ObservableObject
 
         // Indent the steps inside If / Repeat blocks (also when the blocks don't match up yet).
         var blocks = BlockStructure.Analyze(Steps.Select(s => s.Model).ToList());
-        for (var i = 0; i < Steps.Count; i++) Steps[i].IndentLevel = blocks.Depth[i];
+        UpdateBlockPairing(blocks);
 
         ErrorCount = issues.Count(i => i.Severity == IssueSeverity.Error);
         WarningCount = issues.Count(i => i.Severity == IssueSeverity.Warning);
         OnPropertyChanged(nameof(HasIssues));
+    }
+
+    private void UpdateBlockPairing(BlockStructure blocks)
+    {
+        for (var i = 0; i < Steps.Count; i++)
+        {
+            var depth = blocks.Depth[i];
+            Steps[i].IndentLevel = depth;
+            Steps[i].SetBlockInfo(null, 0, Math.Max(0, depth - 1), null, null);
+        }
+
+        var ifCounter = 0;
+        var repeatCounter = 0;
+        var groupCounter = 0;
+
+        for (var i = 0; i < Steps.Count; i++)
+        {
+            var depth = blocks.Depth[i];
+            switch (Steps[i].Model)
+            {
+                case IfStep:
+                {
+                    ifCounter++;
+                    groupCounter++;
+                    var groupKey = groupCounter;
+                    Steps[i].SetBlockInfo(ifCounter, groupKey, depth, $"#{ifCounter}", $"If #{ifCounter}");
+                    var elseIdx = blocks.ElseOf(i);
+                    if (elseIdx >= 0 && elseIdx < Steps.Count)
+                        Steps[elseIdx].SetBlockInfo(ifCounter, groupKey, depth, $"#{ifCounter}", $"Else #{ifCounter}");
+                    var endIdx = blocks.EndOf(i);
+                    if (endIdx >= 0 && endIdx < Steps.Count)
+                        Steps[endIdx].SetBlockInfo(ifCounter, groupKey, depth, $"#{ifCounter}", $"End If #{ifCounter}");
+                    break;
+                }
+                case RepeatStep:
+                {
+                    repeatCounter++;
+                    groupCounter++;
+                    var groupKey = groupCounter;
+                    Steps[i].SetBlockInfo(repeatCounter, groupKey, depth, $"#{repeatCounter}", $"Repeat #{repeatCounter}");
+                    var endIdx = blocks.EndOf(i);
+                    if (endIdx >= 0 && endIdx < Steps.Count)
+                        Steps[endIdx].SetBlockInfo(repeatCounter, groupKey, depth, $"#{repeatCounter}", $"End Repeat #{repeatCounter}");
+                    break;
+                }
+            }
+        }
+
+        UpdateBlockPartnerHighlights();
+    }
+
+    private void UpdateBlockPartnerHighlights()
+    {
+        var key = _selectedStep?.BlockGroupKey ?? 0;
+        var hasKey = key > 0;
+        foreach (var step in Steps)
+        {
+            step.IsBlockPartnerHighlighted = hasKey
+                && !ReferenceEquals(step, _selectedStep)
+                && step.BlockGroupKey == key;
+        }
     }
 
     private ScreenBounds? TryGetScreen()

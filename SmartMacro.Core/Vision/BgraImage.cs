@@ -142,6 +142,9 @@ public readonly record struct RgbColor(byte R, byte G, byte B)
         Math.Max(Math.Abs(R - other.R), Math.Max(Math.Abs(G - other.G), Math.Abs(B - other.B)));
 
     public override string ToString() => $"#{R:X2}{G:X2}{B:X2}";
+
+    public static implicit operator string(RgbColor color) => color.ToString();
+    public static implicit operator RgbColor(string? text) => TryParse(text, out var color) ? color : default;
 }
 
 /// <summary>

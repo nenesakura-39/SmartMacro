@@ -52,8 +52,67 @@ public static class StepTypeCatalog
 /// </summary>
 public abstract class StepViewModel : ObservableObject
 {
+    private static readonly System.Windows.Media.Brush[] DepthAccentBrushes =
+    {
+        CreateFrozenBrush(0x3B, 0x82, 0xF6), // Depth 0: Blue
+        CreateFrozenBrush(0xA8, 0x55, 0xF7), // Depth 1: Purple
+        CreateFrozenBrush(0x14, 0xB8, 0xA6), // Depth 2: Teal
+        CreateFrozenBrush(0xF5, 0x9E, 0x0B), // Depth 3: Amber
+    };
+
+    private static readonly System.Windows.Media.Brush[] DepthBadgeBrushes =
+    {
+        CreateFrozenBrush(0x2E, 0x3B, 0x82, 0xF6), // Depth 0: Soft Blue
+        CreateFrozenBrush(0x2E, 0xA8, 0x55, 0xF7), // Depth 1: Soft Purple
+        CreateFrozenBrush(0x2E, 0x14, 0xB8, 0xA6), // Depth 2: Soft Teal
+        CreateFrozenBrush(0x2E, 0xF5, 0x9E, 0x0B), // Depth 3: Soft Amber
+    };
+
+    private static System.Windows.Media.Brush CreateFrozenBrush(byte r, byte g, byte b)
+    {
+        var brush = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(r, g, b));
+        brush.Freeze();
+        return brush;
+    }
+
+    private static System.Windows.Media.Brush CreateFrozenBrush(byte a, byte r, byte g, byte b)
+    {
+        var brush = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromArgb(a, r, g, b));
+        brush.Freeze();
+        return brush;
+    }
+
+    internal static bool TryParseAdditiveMs(object? parameter, out int ms)
+    {
+        ms = 0;
+        if (parameter is int i)
+        {
+            ms = i;
+            return true;
+        }
+        if (parameter is null) return false;
+        var s = parameter.ToString()!.Trim().TrimStart('+');
+        if (s.EndsWith("ms", StringComparison.OrdinalIgnoreCase))
+            s = s[..^2].Trim();
+        else if (s.EndsWith("s", StringComparison.OrdinalIgnoreCase))
+        {
+            if (double.TryParse(s[..^1].Trim(), System.Globalization.CultureInfo.InvariantCulture, out var sec))
+            {
+                ms = (int)Math.Round(sec * 1000);
+                return true;
+            }
+        }
+        return int.TryParse(s, System.Globalization.CultureInfo.InvariantCulture, out ms);
+    }
+
     private int _number;
     private int _indentLevel;
+    private int? _blockPairId;
+    private int _blockGroupKey;
+    private int _blockDepth;
+    private string? _blockBadgeText;
+    private string? _blockFullBadgeText;
+    private bool _isBlockPartnerHighlighted;
     private string? _issueText;
     private bool _hasError;
     private bool _hasWarning;
@@ -115,6 +174,74 @@ public abstract class StepViewModel : ObservableObject
 
     /// <summary>True for If / Else / End If / Repeat / End Repeat.</summary>
     public bool IsBlockStep => WorkflowSteps.IsBlockStep(Model);
+
+    /// <summary>1-based block pair number for If/Else/EndIf or Repeat/EndRepeat (null for non-block steps).</summary>
+    public int? BlockPairId
+    {
+        get => _blockPairId;
+        internal set => SetProperty(ref _blockPairId, value);
+    }
+
+    /// <summary>Unique identifier shared by all steps in the same If/Else/EndIf or Repeat/EndRepeat pair (0 if none).</summary>
+    public int BlockGroupKey
+    {
+        get => _blockGroupKey;
+        internal set => SetProperty(ref _blockGroupKey, value);
+    }
+
+    /// <summary>0-based nesting depth of this block (used to select the depth accent color).</summary>
+    public int BlockDepth
+    {
+        get => _blockDepth;
+        internal set
+        {
+            if (SetProperty(ref _blockDepth, value))
+            {
+                OnPropertyChanged(nameof(BlockAccentBrush));
+                OnPropertyChanged(nameof(BlockBadgeBackgroundBrush));
+            }
+        }
+    }
+
+    /// <summary>Short pill badge text shown on block steps, e.g. "#1", "#2".</summary>
+    public string? BlockBadgeText
+    {
+        get => _blockBadgeText;
+        internal set
+        {
+            if (SetProperty(ref _blockBadgeText, value))
+                OnPropertyChanged(nameof(HasBlockBadge));
+        }
+    }
+
+    /// <summary>Full block badge text, e.g. "If #1", "Else #1", "End If #1", "Repeat #1", "End Repeat #1".</summary>
+    public string? BlockFullBadgeText
+    {
+        get => _blockFullBadgeText;
+        internal set => SetProperty(ref _blockFullBadgeText, value);
+    }
+
+    public bool HasBlockBadge => !string.IsNullOrEmpty(_blockBadgeText);
+
+    /// <summary>True when a partner block step (e.g. matching If / Else / End If or Repeat / End Repeat) is selected.</summary>
+    public bool IsBlockPartnerHighlighted
+    {
+        get => _isBlockPartnerHighlighted;
+        internal set => SetProperty(ref _isBlockPartnerHighlighted, value);
+    }
+
+    public System.Windows.Media.Brush BlockAccentBrush => DepthAccentBrushes[Math.Abs(_blockDepth) % DepthAccentBrushes.Length];
+
+    public System.Windows.Media.Brush BlockBadgeBackgroundBrush => DepthBadgeBrushes[Math.Abs(_blockDepth) % DepthBadgeBrushes.Length];
+
+    internal void SetBlockInfo(int? pairId, int groupKey, int depth, string? badgeText, string? fullBadgeText)
+    {
+        BlockPairId = pairId;
+        BlockGroupKey = groupKey;
+        BlockDepth = depth;
+        BlockBadgeText = badgeText;
+        BlockFullBadgeText = fullBadgeText;
+    }
 
     /// <summary>
     /// False when this editor is shown inside an If / Repeat condition. Then the parts that conditions don't use
@@ -218,13 +345,18 @@ public sealed class DelayStepViewModel : StepViewModel
     public DelayStepViewModel(DelayStep step) : base(step)
     {
         _step = step;
-        SetDurationCommand = new RelayCommand(p =>
+        AddDurationCommand = new RelayCommand(p =>
         {
-            if (p is not null && int.TryParse(p.ToString(), out var ms)) DurationMs = ms;
+            if (TryParseAdditiveMs(p, out var ms))
+                DurationMs = ms == 0 ? 0 : Math.Max(0, DurationMs) + ms;
         });
+        ResetDurationCommand = new RelayCommand(_ => DurationMs = 0);
+        SetDurationCommand = AddDurationCommand;
     }
 
     public RelayCommand SetDurationCommand { get; }
+    public RelayCommand AddDurationCommand { get; }
+    public RelayCommand ResetDurationCommand { get; }
 
     public int DurationMs
     {
@@ -313,7 +445,18 @@ public sealed class MouseClickStepViewModel : StepViewModel
             () => _step.EndX, v => _step.EndX = v,
             () => _step.EndY, v => _step.EndY = v,
             () => NotifyChanged(nameof(EndPoint)));
+        AddDurationCommand = new RelayCommand(p =>
+        {
+            if (TryParseAdditiveMs(p, out var ms))
+                HoldMs = ms == 0 ? 0 : Math.Max(0, HoldMs) + ms;
+        });
+        ResetDurationCommand = new RelayCommand(_ => HoldMs = 0);
+        SetDurationCommand = AddDurationCommand;
     }
+
+    public RelayCommand SetDurationCommand { get; }
+    public RelayCommand AddDurationCommand { get; }
+    public RelayCommand ResetDurationCommand { get; }
 
     public static IReadOnlyList<MacroMouseButton> Buttons { get; } = Enum.GetValues<MacroMouseButton>();
 
@@ -734,7 +877,21 @@ public sealed class KeyPressStepViewModel : StepViewModel
 {
     private readonly KeyPressStep _step;
 
-    public KeyPressStepViewModel(KeyPressStep step) : base(step) => _step = step;
+    public KeyPressStepViewModel(KeyPressStep step) : base(step)
+    {
+        _step = step;
+        AddDurationCommand = new RelayCommand(p =>
+        {
+            if (TryParseAdditiveMs(p, out var ms))
+                HoldMs = ms == 0 ? 0 : Math.Max(0, HoldMs) + ms;
+        });
+        ResetDurationCommand = new RelayCommand(_ => HoldMs = 0);
+        SetDurationCommand = AddDurationCommand;
+    }
+
+    public RelayCommand SetDurationCommand { get; }
+    public RelayCommand AddDurationCommand { get; }
+    public RelayCommand ResetDurationCommand { get; }
 
     public static IReadOnlyList<KeyInfo> Keys => VirtualKeys.All;
 
@@ -859,8 +1016,19 @@ public abstract class ScreenSearchStepViewModel : StepViewModel
         ShowSearchAreaCommand = new RelayCommand(
             () => TestResult = SmartMacro.Services.Vision.ScreenHighlightOverlay.ShowSearchArea(_search, _layout),
             () => !_isBusy);
+        AddDurationCommand = new RelayCommand(p =>
+        {
+            if (TryParseAdditiveMs(p, out var ms))
+                TimeoutMs = ms == 0 ? 0 : Math.Max(0, TimeoutMs) + ms;
+        });
+        ResetDurationCommand = new RelayCommand(_ => TimeoutMs = 0);
+        SetDurationCommand = AddDurationCommand;
         RefreshMonitors();
     }
+
+    public RelayCommand SetDurationCommand { get; }
+    public RelayCommand AddDurationCommand { get; }
+    public RelayCommand ResetDurationCommand { get; }
 
     /// <summary>"🎯 Show search area on screen": outlines where this step looks right now, for a moment.</summary>
     public RelayCommand ShowSearchAreaCommand { get; }
@@ -1446,6 +1614,13 @@ public sealed class FindImageStepViewModel : ScreenSearchStepViewModel
         set { if (_step.IgnoreColor == value) return; _step.IgnoreColor = value; NotifyChanged(); }
     }
 
+    /// <summary>Adapt to Day/Night lighting changes (Zero-Mean Normalized Cross-Correlation + normalized chroma).</summary>
+    public bool AdaptToLighting
+    {
+        get => _step.AdaptToLighting;
+        set { if (_step.AdaptToLighting == value) return; _step.AdaptToLighting = value; NotifyChanged(); }
+    }
+
     /// <summary>"Ignore background / match bright text and edges" (see-through game UI).</summary>
     public bool MatchForeground
     {
@@ -1547,11 +1722,13 @@ public sealed class FindColorStepViewModel : ScreenSearchStepViewModel
     {
         _step = step;
         PickColorCommand = new AsyncRelayCommand(PickColorAsync, ex => TestResult = ex.Message, () => _tools is not null && !IsBusy);
+        PickSecondaryColorCommand = new AsyncRelayCommand(PickSecondaryColorAsync, ex => TestResult = ex.Message, () => _tools is not null && !IsBusy);
         TestCommand = new AsyncRelayCommand(TestAsync, ex => TestResult = ex.Message, () => _tools is not null && !IsBusy);
         TrackCommand = new AsyncRelayCommand(TrackAsync, ex => TestResult = ex.Message, () => _tools is not null && !IsBusy);
     }
 
     public AsyncRelayCommand PickColorCommand { get; }
+    public AsyncRelayCommand PickSecondaryColorCommand { get; }
     public AsyncRelayCommand TestCommand { get; }
     public AsyncRelayCommand TrackCommand { get; }
 
@@ -1589,6 +1766,50 @@ public sealed class FindColorStepViewModel : ScreenSearchStepViewModel
         }
     }
 
+    public bool UseSecondaryColor
+    {
+        get => _step.UseSecondaryColor;
+        set
+        {
+            if (_step.UseSecondaryColor == value) return;
+            _step.UseSecondaryColor = value;
+            if (value && string.IsNullOrWhiteSpace(_step.SecondaryColor))
+                _step.SecondaryColor = "#FFFFFF";
+            NotifyChanged();
+            OnPropertyChanged(nameof(SecondaryColor));
+            OnPropertyChanged(nameof(SecondaryColorBrush));
+        }
+    }
+
+    public string SecondaryColor
+    {
+        get => _step.SecondaryColor ?? string.Empty;
+        set
+        {
+            value = (value ?? string.Empty).Trim();
+            if (_step.SecondaryColor == value) return;
+            _step.SecondaryColor = string.IsNullOrEmpty(value) ? null : value;
+            if (!string.IsNullOrEmpty(value) && !_step.UseSecondaryColor)
+            {
+                _step.UseSecondaryColor = true;
+                OnPropertyChanged(nameof(UseSecondaryColor));
+            }
+            NotifyChanged();
+            OnPropertyChanged(nameof(SecondaryColorBrush));
+        }
+    }
+
+    public System.Windows.Media.Brush SecondaryColorBrush
+    {
+        get
+        {
+            if (!RgbColor.TryParse(_step.SecondaryColor, out var c)) return System.Windows.Media.Brushes.Transparent;
+            var brush = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(c.R, c.G, c.B));
+            brush.Freeze();
+            return brush;
+        }
+    }
+
     public int Tolerance
     {
         get => _step.Tolerance;
@@ -1616,6 +1837,22 @@ public sealed class FindColorStepViewModel : ScreenSearchStepViewModel
 
         Color = picked.Color.ToString();
         TestResult = $"Color {picked.Color} picked at ({picked.X}, {picked.Y}). Click \"Test now\" to see what matches.";
+    });
+
+    private Task PickSecondaryColorAsync() => RunBusyAsync(async () =>
+    {
+        if (_tools is null) return;
+        var picked = await _tools.PickColorAsync();
+        if (picked is null)
+        {
+            TestResult = "Picking the 2nd color was cancelled.";
+            return;
+        }
+
+        _step.UseSecondaryColor = true;
+        OnPropertyChanged(nameof(UseSecondaryColor));
+        SecondaryColor = picked.Color.ToString();
+        TestResult = $"2nd color {picked.Color} picked at ({picked.X}, {picked.Y}). Click \"Test now\" to see what matches.";
     });
 
     private Task TestAsync() => RunBusyAsync(async () =>

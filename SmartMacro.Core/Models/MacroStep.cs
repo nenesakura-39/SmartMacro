@@ -517,6 +517,24 @@ public sealed class FindImageStep : ScreenSearchStep
     /// </summary>
     public bool MatchForeground { get; set; }
 
+    /// <summary>
+    /// True (default) to adapt to Day/Night lighting and brightness changes using zero-mean illumination-normalized
+    /// matching.
+    /// </summary>
+    [JsonIgnore]
+    public bool AdaptToLighting { get; set; } = true;
+
+    /// <summary>
+    /// Serialized only when turned off so existing macros keep their exact default JSON and schema version.
+    /// </summary>
+    [JsonPropertyName("disableLightingAdaptation")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public bool DisableLightingAdaptation
+    {
+        get => !AdaptToLighting;
+        set => AdaptToLighting = !value;
+    }
+
     [JsonIgnore]
     public override StepKind Kind => StepKind.FindImage;
 }
@@ -535,6 +553,14 @@ public sealed class FindColorStep : ScreenSearchStep
 
     /// <summary>The colour to look for, written as "#RRGGBB".</summary>
     public string Color { get; set; } = "#FF0000";
+
+    /// <summary>True when a 2nd colour should also be matched.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public bool UseSecondaryColor { get; set; }
+
+    /// <summary>Optional 2nd colour to look for, written as "#RRGGBB".</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? SecondaryColor { get; set; }
 
     /// <summary>Allowed difference per red / green / blue channel (0 = exact, 255 = anything).</summary>
     public int Tolerance { get; set; } = 24;

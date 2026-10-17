@@ -188,7 +188,7 @@ internal sealed class ForegroundModel
     }
 
     /// <summary>Is the average colour of the foreground pixels at (x, y) close to the template's foreground colour?</summary>
-    public bool SameColor(BgraImage image, int x, int y, int maxDifference)
+    public bool SameColor(BgraImage image, int x, int y, int maxDifference, bool adaptToLighting = true)
     {
         double b = 0, g = 0, r = 0;
         var p = image.Pixels;
@@ -202,8 +202,7 @@ internal sealed class ForegroundModel
         }
 
         var c = (double)Full.Count;
-        var diff = Math.Max(Math.Abs(b / c - MeanB), Math.Max(Math.Abs(g / c - MeanG), Math.Abs(r / c - MeanR)));
-        return diff <= maxDifference;
+        return TemplateMatcher.IsSameColor(r / c, g / c, b / c, MeanR, MeanG, MeanB, maxDifference, adaptToLighting);
     }
 
     /// <summary>Otsu's method: the grey level that best splits the values into two groups.</summary>
@@ -581,7 +580,7 @@ internal static class ForegroundSearch
             var (x, y, score) = Refine(image, model.Full, cx * scale, cy * scale, radius);
             if (score <= 0 || !checkedSpots.Add((x, y))) continue;
 
-            if (!options.IgnoreColor && !model.SameColor(image, x, y, options.MaxMeanColorDifference))
+            if (!options.IgnoreColor && !model.SameColor(image, x, y, options.MaxMeanColorDifference, options.AdaptToLighting))
             {
                 if (score >= options.MinScore) rejectedForColor++;
                 continue;

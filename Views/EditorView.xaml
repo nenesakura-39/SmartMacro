@@ -301,6 +301,12 @@
                                     <TextBlock Text="Record" Margin="7,0,0,0" FontSize="12" />
                                 </StackPanel>
                             </Button>
+                            <ComboBox ItemsSource="{Binding RecordingModes}" DisplayMemberPath="Label" SelectedValuePath="Value"
+                                      SelectedValue="{Binding RecordingMode, Mode=TwoWay}"
+                                      MinWidth="190" MaxWidth="250" Padding="8,5" FontSize="11.5" Margin="0,0,6,0" VerticalAlignment="Center"
+                                      ToolTip="Quick Recording Mode selector: switch between Smart, Desktop &amp; UI, 3D Game / FPS, and Exact 1:1 / Rhythm without leaving the editor."
+                                      AutomationProperties.Name="Recording mode"
+                                      Visibility="{Binding IsRecording, Converter={StaticResource BoolToVisibility}, ConverterParameter=Invert}" />
                             <Button Style="{StaticResource DangerButton}" Command="{Binding StopRecordingCommand}" Margin="0,0,6,0"
                                     ToolTip="{Binding StopRecordingTooltip}" AutomationProperties.Name="Stop recording"
                                     Visibility="{Binding IsRecording, Converter={StaticResource BoolToVisibility}}">
@@ -623,20 +629,24 @@
                                                 <ColumnDefinition Width="*" />
                                             </Grid.ColumnDefinitions>
 
-                                            <!-- Indentation for steps inside If / Repeat blocks: 24 px per level with a guide line. -->
-                                            <Rectangle Grid.Column="0" Fill="{StaticResource IndentGuideTile}" Margin="0,-6,0,0"
-                                                       Width="{Binding IndentLevel, Converter={StaticResource IndentLevel}, ConverterParameter=24}" />
+                                            <!-- Indentation for steps inside If / Repeat blocks: 24 px per level with a guide line and depth accent bar. -->
+                                            <Grid Grid.Column="0" Margin="0,-6,0,0"
+                                                  Width="{Binding IndentLevel, Converter={StaticResource IndentLevel}, ConverterParameter=24}">
+                                                <Rectangle Fill="{StaticResource IndentGuideTile}" IsHitTestVisible="False" />
+                                                <Border Width="2.5" HorizontalAlignment="Right" Margin="0,2,5,2" CornerRadius="1"
+                                                        Background="{Binding BlockAccentBrush}" Opacity="0.65" IsHitTestVisible="False" />
+                                            </Grid>
 
                                             <Border x:Name="Card" Grid.Column="1" Background="{StaticResource StepCardBrush}"
                                                     BorderBrush="{StaticResource StepCardBorderBrush}" BorderThickness="1.5" CornerRadius="8"
                                                     SnapsToDevicePixels="True">
                                                 <Grid>
                                                     <Grid.ColumnDefinitions>
-                                                        <ColumnDefinition Width="3" />
+                                                        <ColumnDefinition Width="3.5" />
                                                         <ColumnDefinition Width="*" />
                                                     </Grid.ColumnDefinitions>
-                                                    <!-- Left accent strip in the step's category colour -->
-                                                    <Border Grid.Column="0" CornerRadius="6.5,0,0,6.5" Margin="0,0,0,0"
+                                                    <!-- Left accent strip in the step's category colour (or nesting depth colour for block markers) -->
+                                                    <Border x:Name="AccentStrip" Grid.Column="0" CornerRadius="6.5,0,0,6.5" Margin="0,0,0,0"
                                                             Background="{Binding Kind, Converter={StaticResource CategoryBrush}, ConverterParameter=Accent}" />
 
                                                     <Grid x:Name="Row" Grid.Column="1" Margin="8,7,10,7">
@@ -650,14 +660,30 @@
                                                         <TextBlock Text="{Binding Number}" Foreground="{StaticResource SubtleTextBrush}" FontSize="11"
                                                                    VerticalAlignment="Center" HorizontalAlignment="Left" />
                                                         <!-- 32×32 category icon badge -->
-                                                        <Border Grid.Column="1" Width="32" Height="32" CornerRadius="8"
+                                                        <Border x:Name="IconBadge" Grid.Column="1" Width="32" Height="32" CornerRadius="8"
                                                                 Background="{Binding Kind, Converter={StaticResource CategoryBrush}, ConverterParameter=Badge}">
-                                                            <TextBlock Text="{Binding Glyph}" Style="{StaticResource IconText}" HorizontalAlignment="Center"
+                                                            <TextBlock x:Name="IconGlyph" Text="{Binding Glyph}" Style="{StaticResource IconText}" HorizontalAlignment="Center"
                                                                        Foreground="{Binding Kind, Converter={StaticResource CategoryBrush}, ConverterParameter=Accent}" />
                                                         </Border>
                                                         <StackPanel Grid.Column="2" Margin="10,0,8,0" VerticalAlignment="Center">
                                                             <StackPanel Orientation="Horizontal">
-                                                                <TextBlock Text="{Binding Title}" FontWeight="SemiBold" FontSize="13" />
+                                                                <TextBlock Text="{Binding Title}" FontWeight="SemiBold" FontSize="13" VerticalAlignment="Center" />
+                                                                <Border x:Name="BlockPairBadge" CornerRadius="6" Padding="7,1,7,2" Margin="8,0,0,0"
+                                                                        Background="{Binding BlockBadgeBackgroundBrush}"
+                                                                        BorderBrush="{Binding BlockAccentBrush}" BorderThickness="1"
+                                                                        VerticalAlignment="Center"
+                                                                        Visibility="{Binding HasBlockBadge, Converter={StaticResource BoolToVisibility}}"
+                                                                        ToolTip="Block pair badge: matching If / Else / End If or Repeat / End Repeat share the same badge number and depth color.">
+                                                                    <TextBlock Text="{Binding BlockFullBadgeText}" FontSize="10.5" FontWeight="Bold"
+                                                                               Foreground="{Binding BlockAccentBrush}" />
+                                                                </Border>
+                                                                <Border x:Name="PartnerTag" Style="{StaticResource Pill}" Margin="6,0,0,0"
+                                                                        Background="{Binding BlockBadgeBackgroundBrush}"
+                                                                        Visibility="{Binding IsBlockPartnerHighlighted, Converter={StaticResource BoolToVisibility}}"
+                                                                        ToolTip="Matching block partner of the selected step.">
+                                                                    <TextBlock Text="⇄ MATCHING PAIR" FontSize="9" FontWeight="SemiBold"
+                                                                               Foreground="{Binding BlockAccentBrush}" />
+                                                                </Border>
                                                                 <Border x:Name="DisabledTag" Style="{StaticResource Pill}" Margin="8,0,0,0" Visibility="Collapsed">
                                                                     <TextBlock Text="DISABLED" FontSize="9" FontWeight="SemiBold" Foreground="{StaticResource MutedTextBrush}" />
                                                                 </Border>
@@ -685,6 +711,15 @@
                                             </Border>
                                         </Grid>
                                         <DataTemplate.Triggers>
+                                            <DataTrigger Binding="{Binding HasBlockBadge}" Value="True">
+                                                <Setter TargetName="AccentStrip" Property="Background" Value="{Binding BlockAccentBrush}" />
+                                                <Setter TargetName="IconBadge" Property="Background" Value="{Binding BlockBadgeBackgroundBrush}" />
+                                                <Setter TargetName="IconGlyph" Property="Foreground" Value="{Binding BlockAccentBrush}" />
+                                            </DataTrigger>
+                                            <DataTrigger Binding="{Binding IsBlockPartnerHighlighted}" Value="True">
+                                                <Setter TargetName="Card" Property="BorderBrush" Value="{Binding BlockAccentBrush}" />
+                                                <Setter TargetName="Card" Property="Background" Value="{Binding BlockBadgeBackgroundBrush}" />
+                                            </DataTrigger>
                                             <DataTrigger Binding="{Binding IsMouseOver, ElementName=Card}" Value="True">
                                                 <Setter TargetName="Card" Property="BorderBrush" Value="{StaticResource InputBorderBrush}" />
                                             </DataTrigger>

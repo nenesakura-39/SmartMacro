@@ -26,6 +26,11 @@ public enum RecordingMode
     /// See <see cref="SmartRecordingConverter"/>.
     /// </summary>
     Smart,
+
+    /// <summary>
+    /// Exact 1:1 / Rhythm mode: zero simplification, sub-ms lock, exact 1:1 event timeline.
+    /// </summary>
+    Rhythm,
 }
 
 /// <summary>
@@ -95,9 +100,12 @@ public static class GameRecordingConverter
 {
     /// <summary>
     /// Widest window (µs) in which relative mouse samples may be merged into one event. Keeps camera movement in
-    /// fine-grained slices (≤ 8 ms, about one frame at 120 fps) so turns in 3D games play back like they were made.
+    /// fine-grained slices (≤ 4 ms) so fast turns and flicks in 3D games play back without camera clamping or drift.
     /// </summary>
-    public const int MaxMoveCoalesceUs = 8_000;
+    public const int MaxMoveCoalesceUs = 4_000;
+
+    /// <summary>Maximum combined |dx| + |dy| allowed when coalescing consecutive relative mouse moves.</summary>
+    public const int MaxCoalescedMoveDelta = 25;
 
     /// <summary>Recorder cap, leaving room under the validator limit for the releases added at the end.</summary>
     public const int MaxRecordedEvents = MacroValidator.MaxSequenceEvents - 1_000;
@@ -133,13 +141,15 @@ public static class GameRecordingConverter
                 {
                     if (e.Dx == 0 && e.Dy == 0) break;
 
-                    // Optional lossless merge with the previous move (sum, never drop), in slices of at most 8 ms.
+                    // Optional lossless merge with the previous move (sum, never drop), in slices of at most 4 ms and ≤ 25 px.
                     if (coalesceUs > 0 && output.Count > 0 && output[^1].Kind == InputEventKind.MouseMove
                         && time - moveGroupStart <= coalesceUs)
                     {
                         var prev = output[^1];
                         long sx = (long)prev.Dx + e.Dx, sy = (long)prev.Dy + e.Dy;
-                        if (Math.Abs(sx) <= MacroValidator.MaxRelativeMove && Math.Abs(sy) <= MacroValidator.MaxRelativeMove)
+                        if (Math.Abs(sx) + Math.Abs(sy) <= MaxCoalescedMoveDelta
+                            && Math.Abs(sx) <= MacroValidator.MaxRelativeMove
+                            && Math.Abs(sy) <= MacroValidator.MaxRelativeMove)
                         {
                             output[^1] = prev with { Dx = (int)sx, Dy = (int)sy };
                             break;

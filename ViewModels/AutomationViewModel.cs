@@ -39,6 +39,8 @@ public sealed class AutomationHooks
 
     public required Func<AppSettings> Settings { get; init; }
 
+    public Action<RecordingMode>? SetRecordingMode { get; init; }
+
     public required Action<string, StatusKind> SetStatus { get; init; }
 }
 
@@ -128,6 +130,19 @@ public sealed class AutomationViewModel : ObservableObject, IDisposable
     public RelayCommand PauseResumeCommand { get; }
     public RelayCommand StopCommand { get; }
 
+    public static IReadOnlyList<Steps.Choice<RecordingMode>> RecordingModes => SettingsViewModel.ToolbarRecordingModes;
+
+    public RecordingMode RecordingMode
+    {
+        get => _hooks.Settings().RecordingMode;
+        set
+        {
+            if (_hooks.Settings().RecordingMode == value) return;
+            _hooks.SetRecordingMode?.Invoke(value);
+            OnPropertyChanged();
+        }
+    }
+
     // Shortcuts come from Settings (they can be customized).
     public string RecordShortcut => _hooks.Settings().RecordHotkey.ToString();
     public string PlayShortcut => _hooks.Settings().PlayHotkey.ToString();
@@ -144,7 +159,7 @@ public sealed class AutomationViewModel : ObservableObject, IDisposable
     /// <summary>Call after the shortcut settings change so labels and tooltips update.</summary>
     public void RefreshShortcuts()
     {
-        foreach (var name in new[] { nameof(RecordShortcut), nameof(PlayShortcut), nameof(PauseShortcut), nameof(RecordTooltip),
+        foreach (var name in new[] { nameof(RecordingMode), nameof(RecordShortcut), nameof(PlayShortcut), nameof(PauseShortcut), nameof(RecordTooltip),
                      nameof(StopRecordingTooltip), nameof(PlayTooltip), nameof(PauseTooltip), nameof(StopTooltip), nameof(EmergencyHint) })
             OnPropertyChanged(name);
     }
@@ -244,7 +259,10 @@ public sealed class AutomationViewModel : ObservableObject, IDisposable
             switch (_recordingMode)
             {
                 case RecordingMode.Game: _gameRecorder.Stop(); break;
-                case RecordingMode.Smart: _smartRecorder.Stop(); break;
+                case RecordingMode.Smart:
+                case RecordingMode.Rhythm:
+                    _smartRecorder.Stop();
+                    break;
                 default: _recorder.Stop(); break;
             }
 
@@ -286,6 +304,7 @@ public sealed class AutomationViewModel : ObservableObject, IDisposable
         {
             RecordingMode.Game => $"Recording (game mode)…   {RecordShortcut} to stop",
             RecordingMode.Desktop => $"Recording (desktop mode)…   {RecordShortcut} to stop",
+            RecordingMode.Rhythm => $"Recording (exact 1:1 / rhythm)…   {RecordShortcut} to stop",
             _ => $"Recording…   {RecordShortcut} to stop",
         });
 
@@ -298,7 +317,10 @@ public sealed class AutomationViewModel : ObservableObject, IDisposable
             switch (_recordingMode)
             {
                 case RecordingMode.Game: _gameRecorder.Start(); break;
-                case RecordingMode.Smart: _smartRecorder.Start(); break;
+                case RecordingMode.Smart:
+                case RecordingMode.Rhythm:
+                    _smartRecorder.Start();
+                    break;
                 default: _recorder.Start(); break;
             }
         }
@@ -317,6 +339,7 @@ public sealed class AutomationViewModel : ObservableObject, IDisposable
         {
             RecordingMode.Game => $"Recording in game mode (relative mouse + exact key timing)… press {RecordShortcut} to finish.",
             RecordingMode.Desktop => $"Recording in desktop mode… press {RecordShortcut} (or the Stop button) to finish.",
+            RecordingMode.Rhythm => $"Recording in exact 1:1 / rhythm mode (zero simplification, sub-ms lock)… press {RecordShortcut} to finish.",
             _ => $"Recording… press {RecordShortcut} to finish.",
         }, StatusKind.Info);
     }
@@ -331,7 +354,7 @@ public sealed class AutomationViewModel : ObservableObject, IDisposable
             return;
         }
 
-        if (_recordingMode == RecordingMode.Smart)
+        if (_recordingMode is RecordingMode.Smart or RecordingMode.Rhythm)
         {
             await StopSmartRecordingAsync();
             return;
@@ -344,13 +367,15 @@ public sealed class AutomationViewModel : ObservableObject, IDisposable
         Mode = AutomationMode.Idle;
         ProgressText = string.Empty;
 
+        var settings = _hooks.Settings();
         var options = new RecordingOptions
         {
-            RecordMouseMoves = _hooks.Settings().RecordMouseMovement,
-            KeepHoldTime = _hooks.Settings().KeepTapHoldTime,
-            TrimTrailingKeys = _hooks.Settings().RecordHotkey.AllKeys(),
+            RecordMouseMoves = settings.RecordMouseMovement,
+            KeepHoldTime = settings.KeepTapHoldTime,
+            TrimTrailingKeys = settings.RecordHotkey.AllKeys(),
             SimplifyMousePath = true, // a few meaningful Move steps instead of one every 30 ms
-            CollapseMousePaths = _hooks.Settings().SimplifyMousePaths, // clicks / drags only, no hover paths
+            CollapseMousePaths = false, // Desktop-only mode keeps simplified mouse paths so pure movements & oscillations work
+            MaxTapDurationMs = settings.KeepTapHoldTime ? MacroValidator.MaxHoldMs : 500,
         };
         var steps = RecordingConverter.Convert(raw, options);
 
@@ -418,12 +443,15 @@ public sealed class AutomationViewModel : ObservableObject, IDisposable
         ProgressText = string.Empty;
 
         var settings = _hooks.Settings();
+        var isRhythm = _recordingMode == RecordingMode.Rhythm;
         var options = new SmartRecordingOptions
         {
             TrimTrailingKeys = settings.RecordHotkey.AllKeys(),
-            RecordMouseMoves = settings.RecordMouseMovement,
-            KeepHoldTime = settings.KeepTapHoldTime,
-            CollapseMousePaths = settings.SimplifyMousePaths,
+            RecordMouseMoves = isRhythm || settings.RecordMouseMovement,
+            KeepHoldTime = isRhythm || settings.KeepTapHoldTime,
+            SimplifyMousePath = !isRhythm,
+            CollapseMousePaths = !isRhythm && settings.SimplifyMousePaths,
+            ExactTimeline = isRhythm,
             StartX = _smartRecorder.StartX,
             StartY = _smartRecorder.StartY,
         };
@@ -677,7 +705,7 @@ public sealed class AutomationViewModel : ObservableObject, IDisposable
             var count = _recordingMode switch
             {
                 RecordingMode.Game => _gameRecorder.EventCount,
-                RecordingMode.Smart => _smartRecorder.EventCount,
+                RecordingMode.Smart or RecordingMode.Rhythm => _smartRecorder.EventCount,
                 _ => _recorder.EventCount,
             };
             ProgressText = $"{count:N0} input events · {seconds:0} s";

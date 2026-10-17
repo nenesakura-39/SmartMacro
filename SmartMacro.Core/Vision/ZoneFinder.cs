@@ -30,10 +30,14 @@ public static class ZoneFinder
     /// plus a little, so a marker covering the middle of the zone doesn't split it.
     /// </param>
     public static ZoneReading Find(BgraImage frame, RgbColor color, int tolerance, int minPixels, BarOrientation orientation,
+        int bridgeGapPixels = 2, CancellationToken cancellationToken = default) =>
+        Find(frame, color, null, tolerance, minPixels, orientation, bridgeGapPixels, cancellationToken);
+
+    public static ZoneReading Find(BgraImage frame, RgbColor color, RgbColor? secondaryColor, int tolerance, int minPixels, BarOrientation orientation,
         int bridgeGapPixels = 2, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(frame);
-        var result = ColorFinder.Find(frame, color, tolerance, minPixels, maxResults: 20, cancellationToken);
+        var result = ColorFinder.Find(frame, color, secondaryColor, tolerance, minPixels, maxResults: 20, cancellationToken);
         if (result.Largest is not { } main) return ZoneReading.Missing;
 
         var horizontal = orientation == BarOrientation.Horizontal;

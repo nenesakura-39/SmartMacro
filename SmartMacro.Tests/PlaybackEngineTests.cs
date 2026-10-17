@@ -20,6 +20,8 @@ internal sealed class FakeInput : IInputSimulator
     public Exception? ThrowOn { get; set; }
     public string? ThrowWhen { get; set; }
 
+    public int ReleaseAllCount { get; private set; }
+
     public void MoveMouse(int x, int y) => Add($"move {x},{y}");
     public void MoveMouseRelative(int dx, int dy) => Add($"rel {dx},{dy}");
     public void KeyWithScanCode(int virtualKey, int scanCode, bool extended, bool down) =>
@@ -28,6 +30,11 @@ internal sealed class FakeInput : IInputSimulator
     public void Scroll(int delta, bool horizontal) => Add($"scroll {delta}{(horizontal ? " h" : "")}");
     public void Key(int virtualKey, bool down) => Add($"key {virtualKey} {(down ? "down" : "up")}");
     public void TypeCharacters(string text) => Add($"type {text.Replace("\n", "\\n")}");
+    public string? ReleaseAllHeldInputs()
+    {
+        ReleaseAllCount++;
+        return null;
+    }
 
     private void Add(string call)
     {

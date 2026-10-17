@@ -213,7 +213,7 @@ public sealed class VisionTools : IVisionTools
         if (frame.Image.Width < template.Width || frame.Image.Height < template.Height)
             return $"The search area on screen ({frame.Bounds.Width}×{frame.Bounds.Height}) is smaller than the image ({template.Width}×{template.Height}). Make the area bigger.";
 
-        var options = new TemplateMatchOptions { MinScore = step.MinSimilarityPercent / 100.0, IgnoreColor = step.IgnoreColor, IgnoreEdgeFraction = step.IgnoreEdgesPercent / 100.0, MatchForeground = step.MatchForeground, MaxResults = 10 };
+        var options = new TemplateMatchOptions { MinScore = step.MinSimilarityPercent / 100.0, IgnoreColor = step.IgnoreColor, AdaptToLighting = step.AdaptToLighting, IgnoreEdgeFraction = step.IgnoreEdgesPercent / 100.0, MatchForeground = step.MatchForeground, MaxResults = 10 };
         var watch = Stopwatch.StartNew();
         var result = await Task.Run(() => TemplateMatcher.Find(frame.Image, template, options));
         var searchTime = watch.Elapsed;
@@ -258,6 +258,7 @@ public sealed class VisionTools : IVisionTools
     {
         _lastMatch = null;
         if (!RgbColor.TryParse(step.Color, out var color)) return "Enter the color as #RRGGBB or pick it from the screen first.";
+        RgbColor? secondaryColor = step.UseSecondaryColor && RgbColor.TryParse(step.SecondaryColor, out var sc) ? sc : null;
 
         var (region, where, problem) = TestArea(step);
         if (problem is not null) return $"Can't test right now: {problem}";
@@ -276,7 +277,7 @@ public sealed class VisionTools : IVisionTools
         }
 
         var watch = Stopwatch.StartNew();
-        var result = await Task.Run(() => ColorFinder.Find(frame.Image, color, step.Tolerance, step.MinPixels, maxResults: 10));
+        var result = await Task.Run(() => ColorFinder.Find(frame.Image, color, secondaryColor, step.Tolerance, step.MinPixels, maxResults: 10));
         var searchTime = watch.Elapsed;
 
         var picture = frame.Image.Clone();
@@ -745,7 +746,8 @@ public sealed class VisionTools : IVisionTools
 
     private async Task<TrackSummary> TrackAsync(ScreenRect region, RgbColor color, FindColorStep step, BarOrientation orientation, TimeSpan duration)
     {
-        var tracker = new MarkerTracker(color, step.Tolerance, orientation, Math.Max(1, step.MinPixels));
+        RgbColor? secondaryColor = step.UseSecondaryColor && RgbColor.TryParse(step.SecondaryColor, out var sc) ? sc : null;
+        var tracker = new MarkerTracker(color, step.Tolerance, orientation, Math.Max(1, step.MinPixels), secondaryColor: secondaryColor);
         var watch = Stopwatch.StartNew();
         int frames = 0, found = 0, ambiguous = 0, lost = 0, ignored = 0;
         double? min = null, max = null;

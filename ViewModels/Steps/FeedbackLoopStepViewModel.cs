@@ -50,8 +50,10 @@ public sealed class FeedbackLoopStepViewModel : StepViewModel
             SmartMacro.Services.Vision.ScreenHighlightOverlay.ShowResult(area, null, found: true, $"Bar area · {area.Width}×{area.Height}",
                 TimeSpan.FromMilliseconds(1600));
         });
-        PickMarkerColorCommand = new AsyncRelayCommand(() => PickColorAsync(zone: false), ex => TestResult = ex.Message, CanUseTools);
-        PickZoneColorCommand = new AsyncRelayCommand(() => PickColorAsync(zone: true), ex => TestResult = ex.Message, CanUseTools);
+        PickMarkerColorCommand = new AsyncRelayCommand(() => PickColorAsync(zone: false, secondary: false), ex => TestResult = ex.Message, CanUseTools);
+        PickSecondaryMarkerColorCommand = new AsyncRelayCommand(() => PickColorAsync(zone: false, secondary: true), ex => TestResult = ex.Message, CanUseTools);
+        PickZoneColorCommand = new AsyncRelayCommand(() => PickColorAsync(zone: true, secondary: false), ex => TestResult = ex.Message, CanUseTools);
+        PickSecondaryZoneColorCommand = new AsyncRelayCommand(() => PickColorAsync(zone: true, secondary: true), ex => TestResult = ex.Message, CanUseTools);
         MeasureCommand = new AsyncRelayCommand(MeasureAsync, ex => TestResult = ex.Message, CanUseTools);
         PreviewCommand = new AsyncRelayCommand(PreviewAsync, ex => TestResult = ex.Message, CanUseTools);
         TestDetectionCommand = new AsyncRelayCommand(TestDetectionAsync, ex => TestResult = ex.Message, CanUseTools);
@@ -270,7 +272,9 @@ public sealed class FeedbackLoopStepViewModel : StepViewModel
     /// <summary>"🎯 Show on screen": outlines the bar area this loop watches, for a moment.</summary>
     public RelayCommand ShowSearchAreaCommand { get; }
     public AsyncRelayCommand PickMarkerColorCommand { get; }
+    public AsyncRelayCommand PickSecondaryMarkerColorCommand { get; }
     public AsyncRelayCommand PickZoneColorCommand { get; }
+    public AsyncRelayCommand PickSecondaryZoneColorCommand { get; }
     public AsyncRelayCommand MeasureCommand { get; }
     public AsyncRelayCommand PreviewCommand { get; }
 
@@ -357,6 +361,41 @@ public sealed class FeedbackLoopStepViewModel : StepViewModel
 
     public System.Windows.Media.Brush MarkerBrush => ToBrush(_step.MarkerColor);
 
+    public bool UseSecondaryMarkerColor
+    {
+        get => _step.UseSecondaryMarkerColor;
+        set
+        {
+            if (_step.UseSecondaryMarkerColor == value) return;
+            _step.UseSecondaryMarkerColor = value;
+            if (value && string.IsNullOrWhiteSpace(_step.SecondaryMarkerColor))
+                _step.SecondaryMarkerColor = "#FFFFFF";
+            NotifyChanged();
+            OnPropertyChanged(nameof(SecondaryMarkerColor));
+            OnPropertyChanged(nameof(SecondaryMarkerBrush));
+        }
+    }
+
+    public string SecondaryMarkerColor
+    {
+        get => _step.SecondaryMarkerColor ?? string.Empty;
+        set
+        {
+            value = (value ?? string.Empty).Trim();
+            if (_step.SecondaryMarkerColor == value) return;
+            _step.SecondaryMarkerColor = string.IsNullOrEmpty(value) ? null : value;
+            if (!string.IsNullOrEmpty(value) && !_step.UseSecondaryMarkerColor)
+            {
+                _step.UseSecondaryMarkerColor = true;
+                OnPropertyChanged(nameof(UseSecondaryMarkerColor));
+            }
+            NotifyChanged();
+            OnPropertyChanged(nameof(SecondaryMarkerBrush));
+        }
+    }
+
+    public System.Windows.Media.Brush SecondaryMarkerBrush => ToBrush(_step.SecondaryMarkerColor);
+
     public int MarkerTolerance
     {
         get => _step.MarkerTolerance;
@@ -420,6 +459,41 @@ public sealed class FeedbackLoopStepViewModel : StepViewModel
     }
 
     public System.Windows.Media.Brush ZoneBrush => ToBrush(_step.ZoneColor);
+
+    public bool UseSecondaryZoneColor
+    {
+        get => _step.UseSecondaryZoneColor;
+        set
+        {
+            if (_step.UseSecondaryZoneColor == value) return;
+            _step.UseSecondaryZoneColor = value;
+            if (value && string.IsNullOrWhiteSpace(_step.SecondaryZoneColor))
+                _step.SecondaryZoneColor = "#FFFFFF";
+            NotifyChanged();
+            OnPropertyChanged(nameof(SecondaryZoneColor));
+            OnPropertyChanged(nameof(SecondaryZoneBrush));
+        }
+    }
+
+    public string SecondaryZoneColor
+    {
+        get => _step.SecondaryZoneColor ?? string.Empty;
+        set
+        {
+            value = (value ?? string.Empty).Trim();
+            if (_step.SecondaryZoneColor == value) return;
+            _step.SecondaryZoneColor = string.IsNullOrEmpty(value) ? null : value;
+            if (!string.IsNullOrEmpty(value) && !_step.UseSecondaryZoneColor)
+            {
+                _step.UseSecondaryZoneColor = true;
+                OnPropertyChanged(nameof(UseSecondaryZoneColor));
+            }
+            NotifyChanged();
+            OnPropertyChanged(nameof(SecondaryZoneBrush));
+        }
+    }
+
+    public System.Windows.Media.Brush SecondaryZoneBrush => ToBrush(_step.SecondaryZoneColor);
 
     public int ZoneTolerance
     {
@@ -666,7 +740,7 @@ public sealed class FeedbackLoopStepViewModel : StepViewModel
         TestResult = $"Bar area set to {rect}; direction: {(_step.Orientation == BarOrientation.Horizontal ? "left ↔ right" : "up ↕ down")}. Next: pick the marker color.";
     });
 
-    private Task PickColorAsync(bool zone) => RunBusyAsync(async vision =>
+    private Task PickColorAsync(bool zone, bool secondary) => RunBusyAsync(async vision =>
     {
         var picked = await vision.PickColorAsync();
         if (picked is null)
@@ -677,13 +751,33 @@ public sealed class FeedbackLoopStepViewModel : StepViewModel
 
         if (zone)
         {
-            ZoneColor = picked.Color.ToString();
-            TestResult = $"Zone color {picked.Color} picked at ({picked.X}, {picked.Y}). Use \"Preview\" to see the zone it finds.";
+            if (secondary)
+            {
+                _step.UseSecondaryZoneColor = true;
+                OnPropertyChanged(nameof(UseSecondaryZoneColor));
+                SecondaryZoneColor = picked.Color.ToString();
+                TestResult = $"2nd bar/zone color {picked.Color} picked at ({picked.X}, {picked.Y}). Use \"Preview\" to see the zone it finds.";
+            }
+            else
+            {
+                ZoneColor = picked.Color.ToString();
+                TestResult = $"Zone color {picked.Color} picked at ({picked.X}, {picked.Y}). Use \"Preview\" to see the zone it finds.";
+            }
         }
         else
         {
-            MarkerColor = picked.Color.ToString();
-            TestResult = $"Marker color {picked.Color} picked at ({picked.X}, {picked.Y}). Use \"Measure loop speed\" or \"Preview\" to check it.";
+            if (secondary)
+            {
+                _step.UseSecondaryMarkerColor = true;
+                OnPropertyChanged(nameof(UseSecondaryMarkerColor));
+                SecondaryMarkerColor = picked.Color.ToString();
+                TestResult = $"2nd target/marker color {picked.Color} picked at ({picked.X}, {picked.Y}). Use \"Measure loop speed\" or \"Preview\" to check it.";
+            }
+            else
+            {
+                MarkerColor = picked.Color.ToString();
+                TestResult = $"Marker color {picked.Color} picked at ({picked.X}, {picked.Y}). Use \"Measure loop speed\" or \"Preview\" to check it.";
+            }
         }
     });
 
@@ -716,7 +810,8 @@ public sealed class FeedbackLoopStepViewModel : StepViewModel
     {
         var problems = MacroValidator.ValidateStep(_step)
             .Where(i => i.Severity == IssueSeverity.Error && i.Property is "Region"
-                or nameof(FeedbackLoopStep.MarkerColor) or nameof(FeedbackLoopStep.ZoneColor)
+                or nameof(FeedbackLoopStep.MarkerColor) or nameof(FeedbackLoopStep.SecondaryMarkerColor)
+                or nameof(FeedbackLoopStep.ZoneColor) or nameof(FeedbackLoopStep.SecondaryZoneColor)
                 or nameof(FeedbackLoopStep.MarkerTolerance) or nameof(FeedbackLoopStep.ZoneTolerance)
                 or nameof(FeedbackLoopStep.MarkerMinPixels) or nameof(FeedbackLoopStep.ZoneMinPixels)
                 or nameof(FeedbackLoopStep.ZoneStartPercent))

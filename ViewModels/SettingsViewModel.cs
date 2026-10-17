@@ -189,14 +189,15 @@ public sealed class SettingsViewModel : ObservableObject
         set { if (SetProperty(ref _recordMouseMovement, value)) IsDirty = true; }
     }
 
-    public IReadOnlyList<Choice<RecordingMode>> RecordingModes => RecordingModeChoices;
-
-    private static readonly Choice<RecordingMode>[] RecordingModeChoices =
+    public static IReadOnlyList<Choice<RecordingMode>> ToolbarRecordingModes { get; } = new[]
     {
-        new Choice<RecordingMode>(RecordingMode.Smart, "Smart (recommended): cursor clicks and camera movement in one recording"),
-        new Choice<RecordingMode>(RecordingMode.Desktop, "Advanced – Desktop only: editable steps with screen positions"),
-        new Choice<RecordingMode>(RecordingMode.Game, "Advanced – Game only: relative mouse + exact key timing"),
+        new Choice<RecordingMode>(RecordingMode.Smart, "✨ Smart (Auto-detect UI & Game)"),
+        new Choice<RecordingMode>(RecordingMode.Desktop, "🖥 Desktop & UI (Smooth cursor & clicks)"),
+        new Choice<RecordingMode>(RecordingMode.Game, "🎮 3D Game / FPS (High-precision camera & WASD)"),
+        new Choice<RecordingMode>(RecordingMode.Rhythm, "🎵 Exact 1:1 / Rhythm (Zero simplification, sub-ms lock)"),
     };
+
+    public IReadOnlyList<Choice<RecordingMode>> RecordingModes => ToolbarRecordingModes;
 
     public RecordingMode RecordingMode
     {
@@ -214,7 +215,7 @@ public sealed class SettingsViewModel : ObservableObject
     public bool IsDesktopRecording => _recordingMode == RecordingMode.Desktop;
 
     /// <summary>Desktop and Smart recordings make editable steps, so the movement / hold-time options apply.</summary>
-    public bool MakesEditableSteps => _recordingMode != RecordingMode.Game;
+    public bool MakesEditableSteps => _recordingMode is RecordingMode.Desktop or RecordingMode.Smart;
 
     public string RecordingModeHelp => _recordingMode switch
     {
@@ -222,6 +223,8 @@ public sealed class SettingsViewModel : ObservableObject
             "Desktop only (fallback): records with Windows hooks into editable steps with screen positions. It can't record camera turning in games that lock the cursor.",
         RecordingMode.Game =>
             "Game only (fallback): records what the mouse and keyboard report (Raw Input) as one \"Recorded input\" step with relative mouse movement and exact key timing. Menu clicks aren't moved to screen positions.",
+        RecordingMode.Rhythm =>
+            "Exact 1:1 / Rhythm: keeps every event on one sub-millisecond locked timeline with zero path simplification.",
         _ =>
             "One Record button for everything. SmartMacro keeps both the cursor position and the relative mouse movement for every mouse event. Parts where the cursor moves freely become editable steps (clicks, keys, delays). Parts where a game hides or locks the cursor (camera turning) become a \"Recorded input\" step that plays relative movement. Detection isn't perfect, so you can change each part in the editor. Games may still play back differently (frame rate, physics, network), and some ignore simulated input.",
     };
@@ -328,13 +331,25 @@ public sealed class SettingsViewModel : ObservableObject
     }
 
     /// <summary>
-    /// Saves one quick change right away (the toolbar's "Show mini status overlay" / "Minimize while playing" toggles),
+    /// Saves one quick change right away (the toolbar's "Show mini status overlay" / "Minimize while playing" / RecordingMode),
     /// without touching other unsaved edits on the Settings page.
     /// </summary>
     public async Task QuickSetAsync(Action<AppSettings> change)
     {
         var updated = _saved.Clone();
         change(updated);
+        _saved = updated;
+        _minimizeDuringRun = updated.MinimizeDuringRun;
+        _showRunOverlay = updated.ShowRunOverlay;
+        _recordingMode = updated.RecordingMode;
+        OnPropertyChanged(nameof(MinimizeDuringRun));
+        OnPropertyChanged(nameof(ShowRunOverlay));
+        OnPropertyChanged(nameof(RecordingMode));
+        OnPropertyChanged(nameof(IsDesktopRecording));
+        OnPropertyChanged(nameof(MakesEditableSteps));
+        OnPropertyChanged(nameof(RecordingModeHelp));
+        _apply(updated.Clone());
+
         try
         {
             await _store.SaveAsync(updated);
@@ -343,15 +358,7 @@ public sealed class SettingsViewModel : ObservableObject
         {
             _log.Error("Saving settings failed.", ex);
             _setStatus($"The setting couldn't be saved: {ex.Message}", StatusKind.Warning);
-            return;
         }
-
-        _saved = updated;
-        _minimizeDuringRun = updated.MinimizeDuringRun;
-        _showRunOverlay = updated.ShowRunOverlay;
-        OnPropertyChanged(nameof(MinimizeDuringRun));
-        OnPropertyChanged(nameof(ShowRunOverlay));
-        _apply(updated.Clone());
     }
 
     private void OpenDataFolder()

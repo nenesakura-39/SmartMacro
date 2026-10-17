@@ -414,6 +414,8 @@ public static class MacroValidator
             case FindColorStep c:
                 if (!RgbColor.TryParse(c.Color, out _))
                     issues.Add(Error("Enter the color as #RRGGBB (for example #FF0000 for red), or pick it from the screen.", nameof(FindColorStep.Color)));
+                if (c.UseSecondaryColor && !RgbColor.TryParse(string.IsNullOrWhiteSpace(c.SecondaryColor) ? "#FFFFFF" : c.SecondaryColor, out _))
+                    issues.Add(Error("Enter the second color as #RRGGBB (for example #FFFFFF for white), or pick it from the screen.", nameof(FindColorStep.SecondaryColor)));
                 if (c.Tolerance < 0 || c.Tolerance > 255)
                     issues.Add(Error("Tolerance must be 0 to 255.", nameof(FindColorStep.Tolerance)));
                 else if (c.Tolerance > 100)
@@ -531,6 +533,8 @@ public static class MacroValidator
         // Observe: the marker.
         if (!RgbColor.TryParse(f.MarkerColor, out var marker))
             issues.Add(Error("Enter the marker color as #RRGGBB, or pick it from the screen.", nameof(FeedbackLoopStep.MarkerColor)));
+        if (f.UseSecondaryMarkerColor && !RgbColor.TryParse(string.IsNullOrWhiteSpace(f.SecondaryMarkerColor) ? "#FFFFFF" : f.SecondaryMarkerColor, out _))
+            issues.Add(Error("Enter the second marker color as #RRGGBB, or pick it from the screen.", nameof(FeedbackLoopStep.SecondaryMarkerColor)));
         CheckTolerance(issues, f.MarkerTolerance, nameof(FeedbackLoopStep.MarkerTolerance), "marker");
         if (f.MarkerMinPixels < 1 || f.MarkerMinPixels > MaxColorPixels)
             issues.Add(Error($"The marker's minimum size must be 1 to {MaxColorPixels:N0} pixels.", nameof(FeedbackLoopStep.MarkerMinPixels)));
@@ -551,6 +555,8 @@ public static class MacroValidator
                 issues.Add(Error("Enter the zone color as #RRGGBB, or pick it from the screen.", nameof(FeedbackLoopStep.ZoneColor)));
             else if (RgbColor.TryParse(f.MarkerColor, out _) && Overlaps(marker, f.MarkerTolerance, zone, f.ZoneTolerance))
                 issues.Add(Warning("The marker and zone colors are so close (with their tolerances) that one can be mistaken for the other. Lower a tolerance or pick more different colors.", nameof(FeedbackLoopStep.ZoneColor)));
+            if (f.UseSecondaryZoneColor && !RgbColor.TryParse(string.IsNullOrWhiteSpace(f.SecondaryZoneColor) ? "#FFFFFF" : f.SecondaryZoneColor, out _))
+                issues.Add(Error("Enter the second zone color as #RRGGBB, or pick it from the screen.", nameof(FeedbackLoopStep.SecondaryZoneColor)));
             CheckTolerance(issues, f.ZoneTolerance, nameof(FeedbackLoopStep.ZoneTolerance), "zone");
             if (f.ZoneMinPixels < 1 || f.ZoneMinPixels > MaxColorPixels)
                 issues.Add(Error($"The zone's minimum size must be 1 to {MaxColorPixels:N0} pixels.", nameof(FeedbackLoopStep.ZoneMinPixels)));

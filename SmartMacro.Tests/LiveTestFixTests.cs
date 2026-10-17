@@ -415,3 +415,172 @@ public class SmoothMouseTests
         Assert.True(MousePathSimplifier.Simplify(free, 3, 120).Count <= 4);
     }
 }
+
+public class Commit6852889RegressionTests
+{
+    private const int W = 0x57;
+
+    [Fact]
+    public async Task Holding_W_for_1000ms_emits_repeated_KeyDown_pulses_before_final_KeyUp()
+    {
+        var clock = new FakeClock();
+        var input = new FakeInput { Clock = clock };
+        var macro = new Macro
+        {
+            Name = "Hold W",
+            Steps = { new KeyPressStep { VirtualKey = W, Action = KeyAction.Press, HoldMs = 1000 } },
+        };
+
+        var result = await new PlaybackEngine(input, clock).RunAsync(macro);
+
+        Assert.Equal(PlaybackOutcome.Completed, result.Outcome);
+        Assert.Equal("key 87 down", input.Calls[0]);
+        Assert.Equal("key 87 up", input.Calls[^1]);
+        // All intermediate calls must be repeated KeyDown pulses with no KeyUp in between.
+        var intermediate = input.Calls.Skip(1).SkipLast(1).ToList();
+        Assert.True(intermediate.Count >= 20, $"Expected >= 20 repeat KeyDown pulses, got {intermediate.Count}");
+        Assert.All(intermediate, call => Assert.Equal("key 87 down", call));
+        Assert.Equal(1000.0, clock.Elapsed.TotalMilliseconds, precision: 2);
+    }
+
+    [Fact]
+    public void Left_Right_Left_Right_mouse_movement_in_DesktopOnly_mode_preserves_all_reversals_and_coordinates()
+    {
+        // Simulate moving the cursor: (100, 500) -> (400, 500) -> (100, 500) -> (400, 500) -> (100, 500)
+        // followed by pressing the stop hotkey (Ctrl+Shift+F9).
+        var raw = new List<RawInputEvent>();
+        long t = 0;
+        int[] waypoints = { 100, 400, 100, 400, 100 };
+        for (var seg = 0; seg < waypoints.Length - 1; seg++)
+        {
+            var from = waypoints[seg];
+            var to = waypoints[seg + 1];
+            var step = from < to ? 10 : -10;
+            for (var x = from; x != to; x += step)
+            {
+                raw.Add(new RawInputEvent(t, RawInputKind.MouseMove, x, 500));
+                t += 8;
+            }
+        }
+        raw.Add(new RawInputEvent(t, RawInputKind.MouseMove, 100, 500));
+        // Stop hotkey at the end
+        raw.Add(new RawInputEvent(t + 20, RawInputKind.KeyDown, VirtualKey: 0xA2));
+        raw.Add(new RawInputEvent(t + 30, RawInputKind.KeyDown, VirtualKey: 0xA0));
+        raw.Add(new RawInputEvent(t + 40, RawInputKind.KeyDown, VirtualKey: 0x78));
+
+        var steps = RecordingConverter.Convert(raw, new RecordingOptions
+        {
+            RecordMouseMoves = true,
+            SimplifyMousePath = true,
+            CollapseMousePaths = true, // Even with CollapseMousePaths on, pure mouse moves must not be discarded
+            TrimTrailingKeys = new[] { 0x11, 0xA2, 0x10, 0xA0, 0x78 },
+        });
+
+        var moves = steps.OfType<MouseMoveStep>().ToList();
+        Assert.True(moves.Count >= 5, $"Expected at least 5 move points for L-R-L-R oscillation, got {moves.Count}");
+        Assert.Equal(100, moves[0].X);
+        Assert.Equal(400, moves[1].X);
+        Assert.Equal(100, moves[2].X);
+        Assert.Equal(400, moves[3].X);
+        Assert.Equal(100, moves[^1].X);
+    }
+
+    [Fact]
+    public async Task Rhythm_game_200_key_presses_over_10_seconds_with_overlapping_keys_has_under_5ms_total_error()
+    {
+        // 6-key rhythm game (Q, W, E, R, T, Y) with 200 notes across 10,000 ms, including overlapping chords/streams.
+        int[] rhythmKeys = { 0x51, 0x57, 0x45, 0x52, 0x54, 0x59 };
+        int[] scanCodes = { 0x10, 0x11, 0x12, 0x13, 0x14, 0x15 };
+        var captured = new List<CapturedInputEvent>();
+        var expectedEvents = new List<(long TimeUs, int Vk, bool Down)>();
+
+        for (var i = 0; i < 200; i++)
+        {
+            var keyIdx = i % rhythmKeys.Length;
+            var vk = rhythmKeys[keyIdx];
+            var sc = scanCodes[keyIdx];
+            // Notes spaced every 50 ms (0 ms .. 9950 ms); every 3rd note holds 65 ms so it overlaps the next note!
+            var downUs = i * 50_000L;
+            var holdUs = (i % 3 == 0 && i < 199) ? 65_000L : 35_000L;
+            var upUs = downUs + holdUs;
+            if (i == 199) upUs = 10_000_000L; // last release at exactly 10,000 ms
+
+            expectedEvents.Add((downUs, vk, true));
+            expectedEvents.Add((upUs, vk, false));
+        }
+
+        foreach (var ev in expectedEvents.OrderBy(e => e.TimeUs).ThenBy(e => e.Down ? 1 : 0))
+        {
+            var sc = scanCodes[Array.IndexOf(rhythmKeys, ev.Vk)];
+            captured.Add(new CapturedInputEvent(ev.Down
+                ? InputEvent.KeyDown(ev.TimeUs, ev.Vk, sc)
+                : InputEvent.KeyUp(ev.TimeUs, ev.Vk, sc)));
+        }
+
+        var converted = SmartRecordingConverter.Convert(captured);
+        var clock = new FakeClock();
+        var input = new FakeInput { Clock = clock };
+        var macro = new Macro { Name = "Rhythm 200", Steps = converted.Steps };
+
+        var result = await new PlaybackEngine(input, clock).RunAsync(macro);
+
+        Assert.Equal(PlaybackOutcome.Completed, result.Outcome);
+        Assert.Equal(400, input.Calls.Count);
+        var totalTimelineErrorMs = Math.Abs(clock.Elapsed.TotalMilliseconds - 10_000.0);
+        Assert.True(totalTimelineErrorMs < 5.0, $"Expected < 5 ms total timeline error, got {totalTimelineErrorMs:F3} ms");
+    }
+
+    [Fact]
+    public async Task ReleaseAllHeldInputs_is_called_at_the_end_of_each_repeat_iteration()
+    {
+        var clock = new FakeClock();
+        var input = new FakeInput { Clock = clock };
+        var macro = new Macro
+        {
+            Name = "Infinite Loop Sim",
+            RepeatCount = 3,
+            Steps =
+            {
+                new KeyPressStep { VirtualKey = W, Action = KeyAction.Down },
+                new DelayStep { DurationMs = 50 },
+            },
+        };
+
+        var result = await new PlaybackEngine(input, clock).RunAsync(macro);
+
+        Assert.Equal(PlaybackOutcome.Completed, result.Outcome);
+        Assert.Equal(3, result.IterationsCompleted);
+        // ReleaseAllHeldInputs is called at the end of each of the 3 iterations plus the final finally block.
+        Assert.True(input.ReleaseAllCount >= 3, $"Expected ReleaseAllHeldInputs >= 3 times, got {input.ReleaseAllCount}");
+        // And the held W key is released at the end of every iteration before the next iteration starts.
+        Assert.Equal(
+            new[] { "key 87 down", "key 87 up", "key 87 down", "key 87 up", "key 87 down", "key 87 up" },
+            input.Calls);
+    }
+
+    [Fact]
+    public async Task Fast_camera_flick_in_InputSequenceStep_is_subdivided_losslessly()
+    {
+        var step = new InputSequenceStep
+        {
+            Events = new List<InputEvent> { InputEvent.Move(0, 120, -45) },
+        };
+        var input = new FakeInput();
+
+        await new PlaybackEngine(input, new FakeClock()).RunAsync(Flow.Macro(step));
+
+        Assert.True(input.Calls.Count >= 5, $"Expected fast flick to be subdivided into >= 5 micro-steps, got {input.Calls.Count}");
+        int sumDx = 0, sumDy = 0;
+        foreach (var call in input.Calls)
+        {
+            var parts = call.Substring("rel ".Length).Split(',');
+            var dx = int.Parse(parts[0]);
+            var dy = int.Parse(parts[1]);
+            Assert.True(Math.Abs(dx) <= 30 && Math.Abs(dy) <= 30, $"Micro-step ({dx}, {dy}) exceeded 30px");
+            sumDx += dx;
+            sumDy += dy;
+        }
+        Assert.Equal((120, -45), (sumDx, sumDy));
+    }
+}
+

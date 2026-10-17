@@ -101,6 +101,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
                 BeforeRecording = () => Editor.ConfirmLeaveAsync(),
                 RecordingFinished = SaveRecordingAsync,
                 Settings = () => _settings,
+                SetRecordingMode = mode => RecordingMode = mode,
                 SetStatus = SetStatus,
             });
 
@@ -126,6 +127,19 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         Editor.RunSingleStepHandler = (macro, index) => Automation.RunSingleStepAsync(macro, index);
         Editor.PlayFromStepHandler = (macro, index) => Automation.PlayFromStepAsync(macro, index);
         Editor.CanRunSteps = () => Automation.IsIdle;
+    }
+
+    public static IReadOnlyList<Steps.Choice<RecordingMode>> RecordingModes => SettingsViewModel.ToolbarRecordingModes;
+
+    /// <summary>Toolbar selector: recording mode (saved in Settings immediately).</summary>
+    public RecordingMode RecordingMode
+    {
+        get => _settings.RecordingMode;
+        set
+        {
+            if (_settings.RecordingMode == value) return;
+            _ = Settings.QuickSetAsync(s => s.RecordingMode = value);
+        }
     }
 
     /// <summary>Toolbar toggle: show the small click-through status pill while playing (saved in Settings).</summary>
@@ -310,6 +324,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(ShowLogPanel));
         OnPropertyChanged(nameof(ShowMiniOverlay));
         OnPropertyChanged(nameof(MinimizeWhilePlaying));
+        OnPropertyChanged(nameof(RecordingMode));
         Automation?.RefreshShortcuts();
         SettingsApplied?.Invoke(this, settings);
     }

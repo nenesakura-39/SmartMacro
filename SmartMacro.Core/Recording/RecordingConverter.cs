@@ -141,7 +141,8 @@ public static class RecordingConverter
             if (accounted is long acc)
             {
                 var gap = time - acc;
-                if (gap >= options.MinDelayMs)
+                var minDelay = keysDown.Count > 0 && options.MinDelayMs <= 15 ? 1 : options.MinDelayMs;
+                if (gap >= minDelay)
                 {
                     steps.Add(new DelayStep { DurationMs = (int)Math.Min(gap, MacroValidator.MaxDelayMs) });
                     accounted = time;
@@ -205,7 +206,7 @@ public static class RecordingConverter
 
                 case RawInputKind.MouseDown:
                 {
-                    var up = FindPartner(events, i, RawInputKind.MouseUp, e.Button, 0, skipMoves: true);
+                    var up = FindPartner(events, i, RawInputKind.MouseUp, e.Button, 0, skipMoves: true, out _);
                     if (up >= 0
                         && events[up].TimeMs - e.TimeMs <= options.MaxTapDurationMs
                         && Distance(e, events[up]) <= options.MaxClickDistance)
@@ -259,13 +260,13 @@ public static class RecordingConverter
                 {
                     if (!VirtualKeys.IsValid(e.VirtualKey)) break;
 
-                    // Auto-repeat (key already down) is kept as extra "Hold down" steps.
+                    // Auto-repeat (key already down) is kept as extra "Hold down" steps unless collapsed into a single Press step.
                     if (!keysDown.Contains(e.VirtualKey))
                     {
-                        // Only a tap if nothing that gets recorded happens in between. Before, mouse moves during a
-                        // tap were moved after the release and squashed to no delay, and the hold time was lost.
-                        var up = FindPartner(events, i, RawInputKind.KeyUp, default, e.VirtualKey, skipMoves: !options.RecordMouseMoves);
-                        if (up >= 0 && events[up].TimeMs - e.TimeMs <= options.MaxTapDurationMs)
+                        // Only a tap/hold if nothing else that gets recorded happens in between.
+                        var up = FindPartner(events, i, RawInputKind.KeyUp, default, e.VirtualKey, skipMoves: !options.RecordMouseMoves, out var hadAutoRepeat);
+                        var maxHold = hadAutoRepeat && options.KeepHoldTime ? MacroValidator.MaxHoldMs : options.MaxTapDurationMs;
+                        if (up >= 0 && events[up].TimeMs - e.TimeMs <= maxHold)
                         {
                             Emit(new KeyPressStep
                                 {
@@ -273,8 +274,12 @@ public static class RecordingConverter
                                     HoldMs = HoldFor(e.TimeMs, events[up].TimeMs),
                                 },
                                 e.TimeMs, events[up].TimeMs);
-                            consumed[i] = true;
-                            consumed[up] = true;
+                            for (var k = i; k <= up; k++)
+                            {
+                                if (k == i || k == up || (events[k].Kind == RawInputKind.KeyDown && events[k].VirtualKey == e.VirtualKey))
+                                    consumed[k] = true;
+                            }
+
                             break;
                         }
 
@@ -309,11 +314,14 @@ public static class RecordingConverter
     /// <summary>
     /// Drops cursor movement made while no mouse button is held, except the last position before a key event (the spot
     /// the cursor hovered on while a key was pressed). Clicks and wheel turns carry their own position, so nothing is
-    /// lost for them. Movement while a button is held (drags) is untouched. Times of the remaining events don't change,
-    /// so the dropped time simply becomes part of the next Delay step.
+    /// lost for them. Movement while a button is held (drags) is untouched. If the recording contains only cursor
+    /// movement (no clicks, wheel turns, or keys), all movement is preserved so pure mouse-move recordings aren't emptied.
     /// </summary>
     internal static List<RawInputEvent> CollapseFreeMoves(List<RawInputEvent> events)
     {
+        if (events.All(e => e.Kind == RawInputKind.MouseMove))
+            return events;
+
         var result = new List<RawInputEvent>(events.Count);
         var held = new HashSet<MacroMouseButton>();
         var i = 0;
@@ -344,8 +352,9 @@ public static class RecordingConverter
     /// Finds the matching release for a press when nothing else happens in between (mouse movement is
     /// allowed only when <paramref name="skipMoves"/> is true). Anything else in between means it isn't a simple tap.
     /// </summary>
-    private static int FindPartner(List<RawInputEvent> events, int start, RawInputKind partnerKind, MacroMouseButton button, int virtualKey, bool skipMoves)
+    private static int FindPartner(List<RawInputEvent> events, int start, RawInputKind partnerKind, MacroMouseButton button, int virtualKey, bool skipMoves, out bool hadAutoRepeat)
     {
+        hadAutoRepeat = false;
         for (var j = start + 1; j < events.Count; j++)
         {
             var e = events[j];
@@ -353,6 +362,12 @@ public static class RecordingConverter
             {
                 if (skipMoves) continue;
                 return -1;
+            }
+
+            if (partnerKind == RawInputKind.KeyUp && e.Kind == RawInputKind.KeyDown && e.VirtualKey == virtualKey)
+            {
+                hadAutoRepeat = true;
+                continue;
             }
 
             var matches = partnerKind == RawInputKind.MouseUp
@@ -368,15 +383,22 @@ public static class RecordingConverter
     {
         if (trimKeys.Count == 0) return;
 
-        while (events.Count > 0)
+        var cut = events.Count;
+        for (var j = events.Count - 1; j >= 0; j--)
         {
-            var last = events[^1];
-            var isTrimmableKey = (last.Kind is RawInputKind.KeyDown or RawInputKind.KeyUp) && trimKeys.Contains(last.VirtualKey);
-            if (last.Kind == RawInputKind.MouseMove || isTrimmableKey)
-                events.RemoveAt(events.Count - 1);
-            else
-                break;
+            var e = events[j];
+            if (e.Kind is RawInputKind.KeyDown or RawInputKind.KeyUp && trimKeys.Contains(e.VirtualKey))
+            {
+                cut = j;
+                continue;
+            }
+
+            if (e.Kind == RawInputKind.MouseMove) continue;
+            break;
         }
+
+        if (cut < events.Count)
+            events.RemoveRange(cut, events.Count - cut);
     }
 
     private static double Distance(RawInputEvent a, RawInputEvent b)

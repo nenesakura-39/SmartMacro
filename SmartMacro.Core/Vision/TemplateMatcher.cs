@@ -37,6 +37,13 @@ public sealed record TemplateMatchOptions
     /// and the foreground score. The colour check then only compares the foreground's colour.
     /// </summary>
     public bool MatchForeground { get; init; }
+
+    /// <summary>
+    /// True (default) to use Zero-Mean Normalized Cross-Correlation (ZNCC) and illumination-normalized colour
+    /// comparison so daytime captures still match darkened, brightened or night-tinted screens without turning off
+    /// colour verification.
+    /// </summary>
+    public bool AdaptToLighting { get; init; } = true;
 }
 
 /// <summary>
@@ -128,7 +135,7 @@ public static class TemplateMatcher
             var (x, y, score) = Refine(image, fine, cx * scale, cy * scale, radius);
             if (score <= 0 || !checkedSpots.Add((x, y))) continue;
 
-            if (!options.IgnoreColor && !fine.SameColor(image, x, y, options.MaxMeanColorDifference))
+            if (!options.IgnoreColor && !fine.SameColor(image, x, y, options.MaxMeanColorDifference, options.AdaptToLighting))
             {
                 // Only count spots that would have matched by shape (so the hint to the user is meaningful).
                 if (score >= options.MinScore) rejectedForColor++;
@@ -183,7 +190,7 @@ public static class TemplateMatcher
             var score = fine.ScoreSampled(image, x, y);
             if (score <= 0) continue;
 
-            if (!options.IgnoreColor && !fine.SameColor(image, x, y, options.MaxMeanColorDifference))
+            if (!options.IgnoreColor && !fine.SameColor(image, x, y, options.MaxMeanColorDifference, options.AdaptToLighting))
             {
                 if (score >= options.MinScore) rejectedForColor++;
                 continue;
@@ -895,7 +902,7 @@ public static class TemplateMatcher
         }
 
         /// <summary>Is the average colour of the spot at (x, y) close to the template's?</summary>
-        public bool SameColor(BgraImage image, int x, int y, int maxDifference)
+        public bool SameColor(BgraImage image, int x, int y, int maxDifference, bool adaptToLighting = true)
         {
             double b = 0, g = 0, r = 0;
             var p = image.Pixels;
@@ -916,8 +923,37 @@ public static class TemplateMatcher
             }
 
             var n = (double)count;
-            var diff = Math.Max(Math.Abs(b / n - MeanB), Math.Max(Math.Abs(g / n - MeanG), Math.Abs(r / n - MeanR)));
-            return diff <= maxDifference;
+            return IsSameColor(r / n, g / n, b / n, MeanR, MeanG, MeanB, maxDifference, adaptToLighting);
         }
+    }
+
+    internal static bool IsSameColor(double candR, double candG, double candB, double tplR, double tplG, double tplB,
+        int maxDifference, bool adaptToLighting)
+    {
+        var rawDiff = Math.Max(Math.Abs(candB - tplB), Math.Max(Math.Abs(candG - tplG), Math.Abs(candR - tplR)));
+        if (rawDiff <= maxDifference) return true;
+        if (!adaptToLighting) return false;
+
+        // Zero-mean / illumination-normalized chroma comparison: subtract local mean luminance so day/night
+        // brightness shifts (additive and multiplicative dimming) don't reject matching UI elements, while still
+        // rejecting elements of a genuinely different colour.
+        var tplLum = (tplR + tplG + tplB) / 3.0;
+        var candLum = (candR + candG + candB) / 3.0;
+        double cTplR = tplR - tplLum, cTplG = tplG - tplLum, cTplB = tplB - tplLum;
+        double cCandR = candR - candLum, cCandG = candG - candLum, cCandB = candB - candLum;
+
+        var unscaledDiff = Math.Max(Math.Abs(cCandB - cTplB), Math.Max(Math.Abs(cCandG - cTplG), Math.Abs(cCandR - cTplR)));
+        if (unscaledDiff <= maxDifference) return true;
+
+        if (tplLum > 10.0 && candLum > 10.0)
+        {
+            var scale = Math.Clamp(tplLum / candLum, 0.35, 2.85);
+            var scaledDiff = Math.Max(
+                Math.Abs(cCandB * scale - cTplB),
+                Math.Max(Math.Abs(cCandG * scale - cTplG), Math.Abs(cCandR * scale - cTplR)));
+            if (scaledDiff <= maxDifference) return true;
+        }
+
+        return false;
     }
 }

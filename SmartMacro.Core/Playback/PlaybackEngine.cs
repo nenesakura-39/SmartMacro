@@ -1,3 +1,4 @@
+using SmartMacro.Core.Input;
 using SmartMacro.Core.Models;
 using SmartMacro.Core.Ocr;
 using SmartMacro.Core.Validation;
@@ -324,7 +325,15 @@ public sealed class PlaybackEngine
                     }
 
                     current.Iteration = iteration;
+                    _cursor = null;
+                    _glideTarget = null;
                     await RunStepsAsync(current, token).ConfigureAwait(false);
+                    if (current.TotalIterations is null || iteration < current.TotalIterations)
+                    {
+                        held.ReleaseAll(_input);
+                        try { _input.ReleaseAllHeldInputs(); } catch { }
+                    }
+
                     iterationsCompleted++;
                 }
             }, token).ConfigureAwait(false);
@@ -1223,7 +1232,7 @@ public sealed class PlaybackEngine
                 {
                     case KeyAction.Press when k.HoldMs > 0:
                     {
-                        // Keep the key down for the recorded time, e.g. a 120 ms W tap in a game.
+                        // Keep the key down for the recorded time, e.g. a 120 ms W tap in a game, or a 2 s hold in Notepad.
                         var modifiers = ModifierKeys(k.Modifiers);
                         foreach (var vk in modifiers)
                         {
@@ -1233,8 +1242,33 @@ public sealed class PlaybackEngine
 
                         _input.Key(k.VirtualKey, true);
                         held.Keys.Add(new HeldKey(k.VirtualKey));
-                        AdvanceTimeline(k.HoldMs / speed);
-                        await WaitForTimelineAsync(token).ConfigureAwait(false);
+
+                        // Synthetic SendInput does not trigger OS hardware typematic auto-repeat. For non-modifier keys
+                        // held >= 300 ms, wait the standard ~250 ms typematic delay and then emit repeated KeyDown
+                        // pulses every ~33 ms (~30 Hz) without intermediate KeyUp, followed by a single KeyUp at the end.
+                        if (k.HoldMs >= 300 && !VirtualKeys.IsModifier(k.VirtualKey))
+                        {
+                            const int typematicDelayMs = 250;
+                            const int typematicRepeatMs = 33;
+                            var elapsedHoldMs = Math.Min(typematicDelayMs, k.HoldMs);
+                            AdvanceTimeline(elapsedHoldMs / speed);
+                            await WaitForTimelineAsync(token).ConfigureAwait(false);
+
+                            while (elapsedHoldMs < k.HoldMs)
+                            {
+                                _input.Key(k.VirtualKey, true);
+                                var stepMs = Math.Min(typematicRepeatMs, k.HoldMs - elapsedHoldMs);
+                                AdvanceTimeline(stepMs / speed);
+                                await WaitForTimelineAsync(token).ConfigureAwait(false);
+                                elapsedHoldMs += stepMs;
+                            }
+                        }
+                        else
+                        {
+                            AdvanceTimeline(k.HoldMs / speed);
+                            await WaitForTimelineAsync(token).ConfigureAwait(false);
+                        }
+
                         _input.Key(k.VirtualKey, false);
                         held.Keys.Remove(new HeldKey(k.VirtualKey));
                         for (var i = modifiers.Count - 1; i >= 0; i--)
@@ -1348,7 +1382,7 @@ public sealed class PlaybackEngine
                         }
                         else if (e.Dx != 0 || e.Dy != 0)
                         {
-                            _input.MoveMouseRelative(e.Dx, e.Dy);
+                            SendRelativeMoveLossless(e.Dx, e.Dy);
                             cursorSent = null; // the cursor (if visible) has moved by an unknown number of pixels
                             _cursor = null;
                         }
@@ -1432,6 +1466,33 @@ public sealed class PlaybackEngine
     {
         if (key.ScanCode == 0 && !key.Extended) _input.Key(key.VirtualKey, down);
         else _input.KeyWithScanCode(key.VirtualKey, key.ScanCode, key.Extended, down);
+    }
+
+    private void SendRelativeMoveLossless(int dx, int dy)
+    {
+        const int maxSingleStepDelta = 30;
+        const int targetSliceDelta = 25;
+        var maxAxis = Math.Max(Math.Abs(dx), Math.Abs(dy));
+        if (maxAxis <= maxSingleStepDelta)
+        {
+            _input.MoveMouseRelative(dx, dy);
+            return;
+        }
+
+        var slices = (maxAxis + targetSliceDelta - 1) / targetSliceDelta;
+        var prevX = 0;
+        var prevY = 0;
+        for (var s = 1; s <= slices; s++)
+        {
+            var curX = (int)Math.Round((double)dx * s / slices);
+            var curY = (int)Math.Round((double)dy * s / slices);
+            var stepDx = curX - prevX;
+            var stepDy = curY - prevY;
+            if (stepDx != 0 || stepDy != 0)
+                _input.MoveMouseRelative(stepDx, stepDy);
+            prevX = curX;
+            prevY = curY;
+        }
     }
 
     // ---------------- Screen search (Find text / image / color) ----------------

@@ -31,6 +31,10 @@ public static class ColorFinder
     /// <param name="minPixels">Patches smaller than this are ignored (removes single stray pixels).</param>
     /// <param name="maxResults">How many of the biggest patches to return.</param>
     public static ColorSearchResult Find(BgraImage image, RgbColor color, int tolerance, int minPixels = 1, int maxResults = 20,
+        CancellationToken cancellationToken = default) =>
+        Find(image, color, null, tolerance, minPixels, maxResults, cancellationToken);
+
+    public static ColorSearchResult Find(BgraImage image, RgbColor color, RgbColor? secondaryColor, int tolerance, int minPixels = 1, int maxResults = 20,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(image);
@@ -40,13 +44,16 @@ public static class ColorFinder
 
         int width = image.Width, height = image.Height;
         var p = image.Pixels;
+        var hasSecondary = secondaryColor is not null;
+        int sr = secondaryColor?.R ?? 0, sg = secondaryColor?.G ?? 0, sb = secondaryColor?.B ?? 0;
 
         // 0 = no match, 1 = match not visited yet, 2 = visited.
         var mask = new byte[width * height];
         var matching = 0;
         for (int j = 0, i = 0; j < mask.Length; j++, i += 4)
         {
-            if (Math.Abs(p[i] - color.B) <= tolerance && Math.Abs(p[i + 1] - color.G) <= tolerance && Math.Abs(p[i + 2] - color.R) <= tolerance)
+            if ((Math.Abs(p[i] - color.B) <= tolerance && Math.Abs(p[i + 1] - color.G) <= tolerance && Math.Abs(p[i + 2] - color.R) <= tolerance)
+                || (hasSecondary && Math.Abs(p[i] - sb) <= tolerance && Math.Abs(p[i + 1] - sg) <= tolerance && Math.Abs(p[i + 2] - sr) <= tolerance))
             {
                 mask[j] = 1;
                 matching++;

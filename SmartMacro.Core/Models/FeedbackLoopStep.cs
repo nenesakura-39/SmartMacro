@@ -130,6 +130,14 @@ public sealed class FeedbackLoopStep : MacroStep
     /// <summary>Colour of the moving marker, "#RRGGBB".</summary>
     public string MarkerColor { get; set; } = "#FF0000";
 
+    /// <summary>True when a 2nd target/marker colour should also be matched.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public bool UseSecondaryMarkerColor { get; set; }
+
+    /// <summary>Optional 2nd colour of the moving marker, "#RRGGBB".</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? SecondaryMarkerColor { get; set; }
+
     /// <summary>Allowed difference per red / green / blue channel for the marker colour (0-255).</summary>
     public int MarkerTolerance { get; set; } = 24;
 
@@ -149,6 +157,15 @@ public sealed class FeedbackLoopStep : MacroStep
 
     /// <summary>Detected zone: its colour, tolerance and minimum size.</summary>
     public string ZoneColor { get; set; } = "#FFFFFF";
+
+    /// <summary>True when the control bar / zone has a 2nd colour (e.g. when overlapping / active).</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public bool UseSecondaryZoneColor { get; set; }
+
+    /// <summary>Optional 2nd colour of the control bar / target zone ("#RRGGBB", e.g. "#FFFFFF" when active/overlapping).</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? SecondaryZoneColor { get; set; }
+
     public int ZoneTolerance { get; set; } = 24;
     public int ZoneMinPixels { get; set; } = 20;
 
