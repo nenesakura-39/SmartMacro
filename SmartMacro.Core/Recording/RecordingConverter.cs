@@ -36,6 +36,11 @@ public interface IInputRecorder
     /// <summary>True when the event limit was hit and further input was ignored.</summary>
     bool LimitReached { get; }
 
+    /// <summary>Where the cursor was when recording started (physical pixels).</summary>
+    int StartX => 0;
+
+    int StartY => 0;
+
     void Start();
 
     /// <summary>Stops recording and returns everything captured, oldest first.</summary>
@@ -98,6 +103,12 @@ public sealed class RecordingOptions
     /// <summary>If the mouse moved more than this between down and up, it's a drag, not a click.</summary>
     public int MaxClickDistance { get; init; } = 4;
 
+    /// <summary>Optional initial cursor coordinate at t = 0 so repeated runs reset to the starting point.</summary>
+    public int? StartX { get; init; }
+
+    /// <summary>Optional initial cursor coordinate at t = 0 so repeated runs reset to the starting point.</summary>
+    public int? StartY { get; init; }
+
     /// <summary>
     /// Keys to strip from the end of the recording (e.g. the hotkey used to stop recording).
     /// </summary>
@@ -120,6 +131,17 @@ public static class RecordingConverter
 
         var events = rawEvents.ToList();
         TrimTrailing(events, options.TrimTrailingKeys);
+        if (events.Count > 0
+            && options.RecordMouseMoves
+            && !options.CollapseMousePaths
+            && options.StartX is int sx
+            && options.StartY is int sy
+            && events.Any(e => e.Kind == RawInputKind.MouseMove)
+            && (events[0].Kind != RawInputKind.MouseMove || events[0].X != sx || events[0].Y != sy))
+        {
+            events.Insert(0, new RawInputEvent(Math.Min(0, events[0].TimeMs), RawInputKind.MouseMove, X: sx, Y: sy));
+        }
+
         var simplified = options.SimplifyMousePath && options.RecordMouseMoves;
         if (simplified) events = MousePathSimplifier.Simplify(events, options.PathTolerancePx, options.RestMs);
         if (options.CollapseMousePaths && options.RecordMouseMoves) events = CollapseFreeMoves(events);

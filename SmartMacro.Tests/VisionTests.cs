@@ -311,7 +311,11 @@ public class TemplateMatcherTests
         var best = Assert.IsType<VisualMatch>(result.Best);
         Assert.Equal(new ScreenRect(613, 277, templateWidth, templateHeight), best.Bounds);
         Assert.True(best.Score > 0.98, $"score {best.Score}");
-        Assert.True(sw.Elapsed.TotalMilliseconds < 20.0, $"expected < 20ms, took {sw.Elapsed.TotalMilliseconds:F2}ms");
+        // Updated on purpose (live-test fix of 538326c): the old < 20 ms goal was only reachable by sampling every 4th
+        // pixel, which lost 1-pixel lines (a 301×288 Tic-Tac-Toe grid scored 0 %). Every pixel now counts (FFT coarse
+        // pass + 1/2 and full-size checks); this bound only catches a pathologically slow search in a Debug test run.
+        Assert.True(sw.Elapsed.TotalMilliseconds < LineArtTemplateTests.LargeSearchBudgetMs,
+            $"expected < {LineArtTemplateTests.LargeSearchBudgetMs} ms, took {sw.Elapsed.TotalMilliseconds:F2}ms");
     }
 
     [Fact]
@@ -345,7 +349,256 @@ public class TemplateMatcherTests
         var best = Assert.IsType<VisualMatch>(result.Best);
         Assert.Equal(new ScreenRect(500, 300, 520, 420), best.Bounds);
         Assert.True(best.Score >= 0.9, $"score {best.Score}");
-        Assert.True(sw.Elapsed.TotalMilliseconds < 20.0, $"expected < 20ms, took {sw.Elapsed.TotalMilliseconds:F2}ms");
+        // Updated on purpose (live-test fix of 538326c): the old < 20 ms goal was only reachable by sampling every 4th
+        // pixel, which lost 1-pixel lines (a 301×288 Tic-Tac-Toe grid scored 0 %). Every pixel now counts (FFT coarse
+        // pass + 1/2 and full-size checks); this bound only catches a pathologically slow search in a Debug test run.
+        Assert.True(sw.Elapsed.TotalMilliseconds < LineArtTemplateTests.LargeSearchBudgetMs,
+            $"expected < {LineArtTemplateTests.LargeSearchBudgetMs} ms, took {sw.Elapsed.TotalMilliseconds:F2}ms");
+    }
+}
+
+/// <summary>
+/// The friend's live-test bug on 538326c: an If step looking for a 301×288 capture of a Tic-Tac-Toe grid (thin white
+/// "#" lines on black) said "Not found in Main Monitor. The best spot was only 0% similar (needs 90%)" while the exact
+/// grid was on screen. Cause: templates over 300 px used a stride-sampled path (every 4th pixel, a 32×32 "anchor"
+/// patch, 2-point samples per 4×4 block) that skipped the 1-pixel lines. These tests use the same picture.
+/// </summary>
+public class LineArtTemplateTests
+{
+    /// <summary>Generous time limit for one large-template search in a Debug test run (it is much faster in Release).</summary>
+    internal const double LargeSearchBudgetMs = 1500;
+
+    /// <summary>A 301×288 black picture with a 1-pixel white "#" (two vertical and two horizontal lines).</summary>
+    internal static BgraImage TicTacToeGrid(int width = 301, int height = 288)
+    {
+        var grid = TestImages.Solid(width, height, RgbColor.Black);
+        foreach (var x in new[] { width / 3, 2 * width / 3 }) grid.FillRectangle(new ScreenRect(x, 0, 1, height), RgbColor.White);
+        foreach (var y in new[] { height / 3, 2 * height / 3 }) grid.FillRectangle(new ScreenRect(0, y, width, 1), RgbColor.White);
+        return grid;
+    }
+
+    /// <summary>
+    /// A 1920×1080 black screen with the grid at (x, y). Alpha stays 0 everywhere, like a GDI screen capture, while
+    /// a decoded template has alpha 255: alpha must never count.
+    /// </summary>
+    internal static BgraImage BlackScreenWith(BgraImage picture, int x, int y, int width = 1920, int height = 1080)
+    {
+        var screen = BgraImage.Create(width, height);
+        for (var row = 0; row < picture.Height; row++)
+        {
+            for (var col = 0; col < picture.Width; col++)
+            {
+                var c = picture.GetPixel(col, row);
+                var i = ((y + row) * width + x + col) * 4;
+                screen.Pixels[i] = c.B;
+                screen.Pixels[i + 1] = c.G;
+                screen.Pixels[i + 2] = c.R;
+                screen.Pixels[i + 3] = 0;
+            }
+        }
+
+        return screen;
+    }
+
+    /// <summary>The grid as it comes out of a macro file (TemplateCodec), i.e. exactly what an If step searches for.</summary>
+    internal static BgraImage StoredGrid()
+    {
+        var grid = TicTacToeGrid();
+        Assert.True(TemplateCodec.TryDecode(TemplateCodec.Encode(grid), grid.Width, grid.Height, out var decoded, out var error), error);
+        return decoded!;
+    }
+
+    [Theory]
+    [InlineData(811, 397, true)]
+    [InlineData(811, 397, false)]
+    [InlineData(812, 398, true)]
+    [InlineData(813, 399, false)]
+    [InlineData(814, 400, true)]
+    [InlineData(0, 0, false)]
+    [InlineData(1619, 792, true)] // touching the bottom-right corner of the screen
+    public void Tic_tac_toe_grid_is_found_on_a_black_1080p_screen(int x, int y, bool adaptToLighting)
+    {
+        var template = StoredGrid();
+        var screen = BlackScreenWith(template, x, y);
+
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        var result = TemplateMatcher.Find(screen, template, new TemplateMatchOptions { MinScore = 0.9, AdaptToLighting = adaptToLighting });
+        sw.Stop();
+
+        var best = Assert.IsType<VisualMatch>(result.Best);
+        Assert.Equal(new ScreenRect(x, y, 301, 288), best.Bounds);
+        Assert.True(best.Score >= 0.95, $"score {best.Score}");
+        Assert.True(result.BestScore >= 0.95, $"best score {result.BestScore}");
+        Assert.True(sw.Elapsed.TotalMilliseconds < LargeSearchBudgetMs * 2, $"took {sw.Elapsed.TotalMilliseconds:F0} ms");
+    }
+
+    [Theory]
+    [InlineData(false, 0)]
+    [InlineData(true, 0)]
+    [InlineData(false, 15)]
+    [InlineData(true, 15)]
+    public void Tic_tac_toe_grid_is_found_with_background_and_edge_options(bool matchForeground, int ignoreEdgesPercent)
+    {
+        var template = StoredGrid();
+        var screen = BlackScreenWith(template, 813, 399);
+
+        var result = TemplateMatcher.Find(screen, template, new TemplateMatchOptions
+        {
+            MinScore = 0.9,
+            MatchForeground = matchForeground,
+            IgnoreEdgeFraction = ignoreEdgesPercent / 100.0,
+        });
+
+        var best = Assert.IsType<VisualMatch>(result.Best);
+        Assert.Equal(new ScreenRect(813, 399, 301, 288), best.Bounds);
+        Assert.True(best.Score >= 0.95, $"score {best.Score}");
+    }
+
+    [Fact]
+    public void Tic_tac_toe_grid_is_found_on_a_busy_screen()
+    {
+        var template = StoredGrid();
+        var screen = TestImages.Blocky(1920, 1080, seed: 41);
+        TestImages.Paste(screen, template, 777, 401);
+
+        var result = TemplateMatcher.Find(screen, template);
+
+        var best = Assert.IsType<VisualMatch>(result.Best);
+        Assert.Equal(new ScreenRect(777, 401, 301, 288), best.Bounds);
+        Assert.True(best.Score >= 0.95, $"score {best.Score}");
+    }
+
+    [Fact]
+    public void A_blank_black_screen_does_not_match_the_mostly_black_grid()
+    {
+        // The direct colour comparison must not call an empty black area "98 % similar" just because the grid is
+        // 98 % black pixels.
+        var template = StoredGrid();
+        var screen = BgraImage.Create(1920, 1080);
+        screen.FillRectangle(new ScreenRect(600, 500, 1, 200), RgbColor.White); // one stray line elsewhere
+
+        var result = TemplateMatcher.Find(screen, template);
+
+        Assert.Empty(result.Matches);
+        Assert.True(result.BestScore < 0.6, $"best score {result.BestScore}");
+    }
+
+    [Fact]
+    public void Direct_comparison_ignores_alpha_and_never_returns_nan()
+    {
+        Assert.Equal(1.0, TemplateMatcher.CombinedScore(double.NaN, 1.0));
+        Assert.Equal(0.0, TemplateMatcher.CombinedScore(double.NaN, double.PositiveInfinity));
+        Assert.Equal(0.97, TemplateMatcher.CombinedScore(0.97, 0.2), 6);
+
+        // Same colours, different alpha (GDI 0 vs decoded 255): an exact match on a small template too.
+        var icon = TestImages.Icon(40, 30, seed: 5);
+        var screen = BlackScreenWith(icon, 70, 50, 300, 200);
+        var result = TemplateMatcher.Find(screen, icon, new TemplateMatchOptions { MinScore = 0.99 });
+        Assert.Equal(new ScreenRect(70, 50, 40, 30), result.Best?.Bounds);
+        Assert.True(result.Best!.Score >= 0.999, $"score {result.Best.Score}");
+    }
+
+    [Fact]
+    public void The_fft_correlation_equals_the_direct_sum()
+    {
+        var random = new Random(3);
+        const int mw = 37, mh = 23, kw = 9, kh = 6;
+        var map = Enumerable.Range(0, mw * mh).Select(_ => (float)random.Next(256)).ToArray();
+        var kernel = Enumerable.Range(0, kw * kh).Select(_ => (float)(random.NextDouble() - 0.5)).ToArray();
+
+        var fft = FftCorrelator.CorrelateValid(map, mw, mh, kernel, kw, kh);
+
+        var px = mw - kw + 1;
+        var py = mh - kh + 1;
+        Assert.Equal(px * py, fft.Length);
+        for (var y = 0; y < py; y++)
+        {
+            for (var x = 0; x < px; x++)
+            {
+                double direct = 0;
+                for (var j = 0; j < kh; j++)
+                    for (var i = 0; i < kw; i++)
+                        direct += kernel[j * kw + i] * map[(y + j) * mw + x + i];
+                Assert.Equal(direct, fft[y * px + x], 0.05);
+            }
+        }
+    }
+
+    [Fact]
+    public void Coarse_pass_never_shrinks_below_a_quarter()
+    {
+        Assert.True(TemplateMatcher.ChooseScale(3840, 2160, 301, 288) <= TemplateMatcher.MaxCoarseScale);
+        Assert.True(TemplateMatcher.ChooseScale(3840, 1080, 250, 250) <= TemplateMatcher.MaxCoarseScale);
+        Assert.Equal(4, TemplateMatcher.ChooseScale(1920, 1080, 301, 288));
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task If_condition_finds_the_grid_on_the_main_monitor(bool adaptToLighting)
+    {
+        var grid = TicTacToeGrid();
+        var condition = new Condition
+        {
+            Check = new FindImageStep
+            {
+                TemplateWidth = grid.Width,
+                TemplateHeight = grid.Height,
+                TemplateData = TemplateCodec.Encode(grid),
+                MinSimilarityPercent = 90,
+                AdaptToLighting = adaptToLighting,
+                Scope = SearchScope.PrimaryMonitor,
+                TimeoutMs = 0,
+            },
+        };
+        var evaluator = new ScreenConditionEvaluator(new ScreenProbes(null, new FakeCapture(BlackScreenWith(grid, 813, 399)), new FakeClock()));
+
+        var check = await evaluator.CheckAsync(condition, evaluator.NewTimer(condition), CancellationToken.None);
+
+        Assert.True(check.Seen, check.Details);
+        Assert.True(check.IsTrue);
+        Assert.Equal((813 + 150, 399 + 144), (check.X, check.Y));
+        Assert.Equal(new ScreenRect(813, 399, 301, 288), check.Match);
+    }
+
+    [Fact]
+    public async Task If_step_takes_the_true_branch_when_the_grid_is_on_screen()
+    {
+        var grid = TicTacToeGrid();
+        var condition = new Condition
+        {
+            Check = new FindImageStep
+            {
+                TemplateWidth = grid.Width,
+                TemplateHeight = grid.Height,
+                TemplateData = TemplateCodec.Encode(grid),
+                MinSimilarityPercent = 90,
+                Scope = SearchScope.PrimaryMonitor,
+                TimeoutMs = 0,
+            },
+        };
+        var input = new FakeInput();
+        var engine = new PlaybackEngine(input, new FakeClock(), capture: new FakeCapture(BlackScreenWith(grid, 812, 398)));
+
+        var result = await engine.RunAsync(Flow.Macro(
+            Flow.If(condition), Flow.Move(1), new ElseStep(), Flow.Move(2), new EndIfStep()));
+
+        Assert.Equal(PlaybackOutcome.Completed, result.Outcome);
+        Assert.Equal(new[] { "move 1,0" }, input.Calls);
+    }
+
+    [Fact]
+    public void Tests_and_playback_build_the_same_match_settings()
+    {
+        var step = new FindImageStep { MinSimilarityPercent = 85, IgnoreColor = true, IgnoreEdgesPercent = 15, MatchForeground = true, AdaptToLighting = false };
+
+        var options = ScreenProbes.ImageMatchOptions(step);
+
+        Assert.Equal(0.85, options.MinScore, 6);
+        Assert.True(options.IgnoreColor);
+        Assert.Equal(0.15, options.IgnoreEdgeFraction, 6);
+        Assert.True(options.MatchForeground);
+        Assert.False(options.AdaptToLighting);
     }
 }
 

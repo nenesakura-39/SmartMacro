@@ -18,9 +18,11 @@ public enum OverlayKind
 /// <summary>What the app does with its windows while recording or playing.</summary>
 public interface IRunModeHost
 {
-    void Enter(OverlayKind kind, string text);
+    /// <param name="counter">Optional run counter shown in bold in front of the text, e.g. "Run #3 / ∞".</param>
+    void Enter(OverlayKind kind, string text, string? counter = null);
 
-    void Update(OverlayKind kind, string text);
+    /// <param name="counter">Optional run counter shown in bold in front of the text, e.g. "Run #3 / ∞".</param>
+    void Update(OverlayKind kind, string text, string? counter = null);
 
     void Exit();
 }
@@ -43,7 +45,7 @@ public sealed class RunModeHost : IRunModeHost, IDisposable
         _settings = settings;
     }
 
-    public void Enter(OverlayKind kind, string text)
+    public void Enter(OverlayKind kind, string text, string? counter = null)
     {
         var settings = _settings();
         _minimizedByUs = false;
@@ -60,14 +62,14 @@ public sealed class RunModeHost : IRunModeHost, IDisposable
         if (settings.ShowRunOverlay)
         {
             _overlay ??= new RunOverlayWindow();
-            _overlay.SetStatus(kind, text);
+            _overlay.SetStatus(kind, text, counter);
             _overlay.Show();
         }
     }
 
-    public void Update(OverlayKind kind, string text)
+    public void Update(OverlayKind kind, string text, string? counter = null)
     {
-        if (_overlay is { IsVisible: true }) _overlay.SetStatus(kind, text);
+        if (_overlay is { IsVisible: true }) _overlay.SetStatus(kind, text, counter);
     }
 
     public void Exit()
@@ -90,13 +92,15 @@ public sealed class RunModeHost : IRunModeHost, IDisposable
 }
 
 /// <summary>
-/// The compact status pill in the top-right corner of the main monitor ("● SmartMacro: Step 2/5 — Finding image…").
+/// The compact status pill in the top-right corner of the main monitor ("● Run #3 / ∞ | Step 2/5 — Finding image…").
 /// It can't be clicked or focused, so it never steals clicks or keystrokes from the macro (or the game), it's hidden
 /// from screen captures, and it closes as soon as playback ends.
 /// </summary>
 internal sealed class RunOverlayWindow : Window
 {
     private readonly TextBlock _text;
+    private readonly TextBlock _counter;
+    private readonly TextBlock _separator;
     private readonly Ellipse _dot;
 
     public RunOverlayWindow()
@@ -114,6 +118,26 @@ internal sealed class RunOverlayWindow : Window
         Title = "SmartMacro status";
 
         _dot = new Ellipse { Width = 10, Height = 10, VerticalAlignment = VerticalAlignment.Center };
+        // "Run #3 / ∞" in bold cyan, never trimmed, so the run number stays readable even when the activity text is long.
+        _counter = new TextBlock
+        {
+            Foreground = new SolidColorBrush(Color.FromRgb(0x67, 0xE8, 0xF9)),
+            FontSize = 12,
+            FontWeight = FontWeights.SemiBold,
+            FontFamily = new FontFamily("Segoe UI Variable Text, Segoe UI"),
+            Margin = new Thickness(10, 0, 0, 0),
+            VerticalAlignment = VerticalAlignment.Center,
+            Visibility = Visibility.Collapsed,
+        };
+        _separator = new TextBlock
+        {
+            Text = "|",
+            Foreground = new SolidColorBrush(Color.FromRgb(0x64, 0x74, 0x8B)),
+            FontSize = 12,
+            Margin = new Thickness(8, 0, 0, 0),
+            VerticalAlignment = VerticalAlignment.Center,
+            Visibility = Visibility.Collapsed,
+        };
         _text = new TextBlock
         {
             Foreground = new SolidColorBrush(Color.FromRgb(0xE6, 0xEB, 0xF5)),
@@ -133,14 +157,19 @@ internal sealed class RunOverlayWindow : Window
             BorderThickness = new Thickness(1),
             CornerRadius = new CornerRadius(16),
             Padding = new Thickness(8, 5, 14, 5),
-            Child = new StackPanel { Orientation = Orientation.Horizontal, Children = { new Views.BrandLogo { Width = 20, Height = 20, Margin = new Thickness(0, 0, 8, 0), VerticalAlignment = VerticalAlignment.Center }, _dot, _text } },
+            Child = new StackPanel { Orientation = Orientation.Horizontal, Children = { new Views.BrandLogo { Width = 20, Height = 20, Margin = new Thickness(0, 0, 8, 0), VerticalAlignment = VerticalAlignment.Center }, _dot, _counter, _separator, _text } },
         };
 
         SizeChanged += (_, _) => PositionAtCorner();
     }
 
-    public void SetStatus(OverlayKind kind, string text)
+    public void SetStatus(OverlayKind kind, string text, string? counter = null)
     {
+        var hasCounter = !string.IsNullOrEmpty(counter);
+        _counter.Text = counter ?? string.Empty;
+        _counter.Visibility = hasCounter ? Visibility.Visible : Visibility.Collapsed;
+        _separator.Visibility = hasCounter ? Visibility.Visible : Visibility.Collapsed;
+        _text.Margin = new Thickness(hasCounter ? 8 : 10, 0, 0, 0);
         _text.Text = text;
         _dot.Fill = kind switch
         {

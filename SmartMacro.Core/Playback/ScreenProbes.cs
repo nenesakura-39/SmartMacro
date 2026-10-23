@@ -119,15 +119,7 @@ public sealed class ScreenProbes
         if (!TemplateCodec.TryDecode(step.TemplateData, step.TemplateWidth, step.TemplateHeight, out var decoded, out var error))
             throw new InvalidOperationException($"The image of this step can't be used: {error}");
         var template = decoded!;
-
-        var options = new TemplateMatchOptions
-        {
-            MinScore = step.MinSimilarityPercent / 100.0,
-            IgnoreColor = step.IgnoreColor,
-            IgnoreEdgeFraction = step.IgnoreEdgesPercent / 100.0,
-            MatchForeground = step.MatchForeground,
-            AdaptToLighting = step.AdaptToLighting,
-        };
+        var options = ImageMatchOptions(step);
 
         return new PreparedSearch("The image", isTimed: true, async (timer, t) =>
         {
@@ -158,6 +150,25 @@ public sealed class ScreenProbes
             return new ScreenProbe(true, bounds.CenterX, bounds.CenterY,
                 $"Found the image at ({bounds.CenterX}, {bounds.CenterY}), {best.Score:P0} match{more}.", string.Empty, region, bounds);
         });
+    }
+
+    /// <summary>
+    /// The matcher settings for a Find image step or an image condition (If / Repeat / feedback loop). The editor's
+    /// "Test detection now" uses this too, so a test, a Find image step and an If condition with the same settings
+    /// always search in exactly the same way (same accuracy, colour, edge, background and lighting options).
+    /// </summary>
+    public static TemplateMatchOptions ImageMatchOptions(FindImageStep step)
+    {
+        ArgumentNullException.ThrowIfNull(step);
+        return new TemplateMatchOptions
+        {
+            MinScore = step.MinSimilarityPercent / 100.0,
+            IgnoreColor = step.IgnoreColor,
+            IgnoreEdgeFraction = step.IgnoreEdgesPercent / 100.0,
+            MatchForeground = step.MatchForeground,
+            AdaptToLighting = step.AdaptToLighting,
+            MaxResults = 10,
+        };
     }
 
     private PreparedSearch PrepareColor(FindColorStep step)

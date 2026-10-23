@@ -5,6 +5,7 @@ using SmartMacro.Core.Recording;
 using SmartMacro.Core.Storage;
 using SmartMacro.Core.Validation;
 using SmartMacro.Core.Vision;
+using SmartMacro.Core.Workflow;
 
 namespace SmartMacro.Tests;
 
@@ -584,3 +585,345 @@ public class Commit6852889RegressionTests
     }
 }
 
+
+// ---------------- Live test of 538326c: orphan End If steps after deleting an If ----------------
+
+public class OrphanBlockMarkerTests
+{
+    private static Condition Seen() => new() { Check = new FindColorStep { Color = "#00C800", TimeoutMs = 0 } };
+    private static MouseMoveStep Move(int x) => new() { X = x };
+
+    [Fact]
+    public void Deleting_an_if_also_deletes_its_else_and_end_if_but_keeps_the_inner_steps()
+    {
+        var steps = new List<MacroStep> { Move(0), new IfStep { Condition = Seen() }, Move(1), new ElseStep(), Move(2), new EndIfStep(), Move(3) };
+
+        var plan = StepListEditing.PlanDelete(steps, new[] { 1 });
+
+        Assert.Equal(new[] { 1, 3, 5 }, plan.Indexes);
+        Assert.Equal(2, plan.AddedMarkers);
+        Assert.NotNull(plan.Note);
+        var after = steps.Where((_, i) => !plan.Indexes.Contains(i)).ToList();
+        Assert.True(BlockStructure.Analyze(after).IsValid);
+        Assert.Equal(new[] { 0, 1, 2, 3 }, after.Cast<MouseMoveStep>().Select(m => m.X));
+    }
+
+    [Fact]
+    public void Deleting_an_end_if_or_end_repeat_takes_its_opener_along()
+    {
+        var steps = new List<MacroStep> { new RepeatStep { Mode = RepeatMode.Times, Count = 2 }, new IfStep { Condition = Seen() }, Move(1), new EndIfStep(), new EndRepeatStep() };
+
+        var endIf = StepListEditing.PlanDelete(steps, new[] { 3 });
+        Assert.Equal(new[] { 1, 3 }, endIf.Indexes);
+
+        var endRepeat = StepListEditing.PlanDelete(steps, new[] { 4 });
+        Assert.Equal(new[] { 0, 4 }, endRepeat.Indexes);
+    }
+
+    [Fact]
+    public void Deleting_several_steps_including_an_if_never_leaves_an_orphan_end_if()
+    {
+        // The friend's case: steps 1–2 were orphan End Ifs because Ifs were deleted together with other steps.
+        var steps = new List<MacroStep>
+        {
+            Move(0), new IfStep { Condition = Seen() }, Move(1), new EndIfStep(), new IfStep { Condition = Seen() }, Move(2), new EndIfStep(), Move(3),
+        };
+
+        var plan = StepListEditing.PlanDelete(steps, new[] { 0, 1, 4 });
+
+        var after = steps.Where((_, i) => !plan.Indexes.Contains(i)).ToList();
+        Assert.DoesNotContain(after, s => s is EndIfStep or ElseStep);
+        Assert.True(BlockStructure.Analyze(after).IsValid);
+        Assert.Equal(new[] { 1, 2, 3 }, after.Cast<MouseMoveStep>().Select(m => m.X));
+    }
+
+    [Fact]
+    public void Orphan_markers_and_a_lone_else_are_deleted_on_their_own()
+    {
+        var orphans = new List<MacroStep> { new EndIfStep(), new EndIfStep(), Move(1) };
+        Assert.Equal(new[] { 0 }, StepListEditing.PlanDelete(orphans, new[] { 0 }).Indexes);
+        Assert.Null(StepListEditing.PlanDelete(orphans, new[] { 0, 1 }).Note);
+
+        var withElse = new List<MacroStep> { new IfStep { Condition = Seen() }, Move(1), new ElseStep(), Move(2), new EndIfStep() };
+        var plan = StepListEditing.PlanDelete(withElse, new[] { 2 });
+        Assert.Equal(new[] { 2 }, plan.Indexes);
+        Assert.Equal(0, plan.AddedMarkers);
+    }
+
+    [Fact]
+    public void End_if_from_the_toolbox_is_refused_where_no_if_is_open()
+    {
+        var steps = new List<MacroStep> { Move(1), Move(2) };
+
+        Assert.NotNull(StepListEditing.CheckMarkerInsert(steps, 0, new EndIfStep()));
+        Assert.NotNull(StepListEditing.CheckMarkerInsert(steps, 2, new EndRepeatStep()));
+        Assert.NotNull(StepListEditing.CheckMarkerInsert(steps, 1, new ElseStep()));
+    }
+
+    [Fact]
+    public void Markers_from_the_toolbox_are_allowed_where_they_close_or_split_an_open_block()
+    {
+        var openIf = new List<MacroStep> { new IfStep { Condition = Seen() }, Move(1) };
+        Assert.Null(StepListEditing.CheckMarkerInsert(openIf, 2, new EndIfStep()));
+
+        var openRepeat = new List<MacroStep> { new RepeatStep { Mode = RepeatMode.Times, Count = 3 }, Move(1) };
+        Assert.Null(StepListEditing.CheckMarkerInsert(openRepeat, 2, new EndRepeatStep()));
+        Assert.NotNull(StepListEditing.CheckMarkerInsert(openRepeat, 2, new EndIfStep())); // wrong kind of End
+
+        var complete = new List<MacroStep> { new IfStep { Condition = Seen() }, Move(1), Move(2), new EndIfStep() };
+        Assert.Null(StepListEditing.CheckMarkerInsert(complete, 2, new ElseStep()));
+        // A second End If in the middle would orphan the old one.
+        Assert.NotNull(StepListEditing.CheckMarkerInsert(complete, 2, new EndIfStep()));
+
+        var hasElse = new List<MacroStep> { new IfStep { Condition = Seen() }, Move(1), new ElseStep(), Move(2), new EndIfStep() };
+        Assert.NotNull(StepListEditing.CheckMarkerInsert(hasElse, 4, new ElseStep())); // only one Else per If
+
+        // Other kinds of steps are never checked.
+        Assert.Null(StepListEditing.CheckMarkerInsert(new List<MacroStep>(), 0, Move(5)));
+    }
+}
+
+// ---------------- Live test of 538326c: Play = 0 / Play > 1 skipped the movement of Run #2+ ----------------
+
+public class MultiRunPlaybackTests
+{
+    /// <summary>One run's slice of the recorded input calls.</summary>
+    private sealed record RunSlice(int Run, TimeSpan Start, TimeSpan End, List<string> Calls, List<TimeSpan> Times)
+    {
+        public TimeSpan Duration => End - Start;
+        public IEnumerable<string> Moves => Calls.Where(c => c.StartsWith("move ", StringComparison.Ordinal));
+    }
+
+    /// <summary>Plays the macro and cuts the input calls into runs using the engine's RunStarted event.</summary>
+    private static async Task<(PlaybackResult Result, List<RunSlice> Runs)> PlayAndSplitAsync(PlaybackEngine engine, FakeInput input, FakeClock clock, Macro macro)
+    {
+        var starts = new List<(int Run, TimeSpan At, int CallIndex)>();
+        engine.RunStarted += (_, info) =>
+        {
+            lock (input.Calls) starts.Add((info.CurrentRun, clock.Elapsed, input.Calls.Count));
+        };
+
+        var result = await engine.RunAsync(macro);
+
+        var runs = new List<RunSlice>();
+        for (var i = 0; i < starts.Count; i++)
+        {
+            var from = starts[i].CallIndex;
+            var to = i + 1 < starts.Count ? starts[i + 1].CallIndex : input.Calls.Count;
+            var end = i + 1 < starts.Count ? starts[i + 1].At : clock.Elapsed;
+            runs.Add(new RunSlice(starts[i].Run, starts[i].At, end, input.Calls.GetRange(from, to - from), input.Times.GetRange(from, to - from)));
+        }
+
+        return (result, runs);
+    }
+
+    /// <summary>
+    /// A recorded-style movement macro: 20 × (Delay 16 ms → Move), then a click and a 100 ms rest. The fake PC is
+    /// "slow" like a real one: every input call costs 3 ms and a mouse press costs 40 ms (Win32 hover nudge + settle),
+    /// time that is NOT on the playback timeline. Before the fix that time piled up as "debt", and later delays and
+    /// glides thought they were late and finished in 0 ms.
+    /// </summary>
+    private static (Macro Macro, FakeInput Input, FakeClock Clock) SlowPcMovementMacro(int runs)
+    {
+        var clock = new FakeClock();
+        var input = new FakeInput { Clock = clock };
+        input.OnCall = call => clock.Advance(TimeSpan.FromMilliseconds(call == "mouse Left down" ? 40 : 3));
+
+        var steps = new List<MacroStep>();
+        for (var i = 1; i <= 20; i++)
+        {
+            steps.Add(new DelayStep { DurationMs = 16 });
+            steps.Add(new MouseMoveStep { X = 100 + i * 10, Y = 200 });
+        }
+
+        steps.Add(new MouseClickStep { X = 300, Y = 200 });
+        steps.Add(new DelayStep { DurationMs = 100 });
+        var macro = Flow.Macro(steps.ToArray());
+        macro.RepeatCount = runs;
+        return (macro, input, clock);
+    }
+
+    [Fact]
+    public async Task Five_runs_make_the_same_moves_and_take_the_same_time()
+    {
+        var (macro, input, clock) = SlowPcMovementMacro(5);
+        var engine = new PlaybackEngine(input, clock);
+
+        var (result, runs) = await PlayAndSplitAsync(engine, input, clock, macro);
+
+        Assert.Equal(PlaybackOutcome.Completed, result.Outcome);
+        Assert.Equal(5, result.IterationsCompleted);
+        Assert.Equal(new[] { 1, 2, 3, 4, 5 }, runs.Select(r => r.Run));
+
+        var first = runs[0];
+        Assert.Equal(21, first.Moves.Count()); // 20 moves + the click's move
+        Assert.True(first.Duration.TotalMilliseconds >= 20 * 16 + 100, $"run 1 took {first.Duration.TotalMilliseconds} ms");
+        foreach (var run in runs.Skip(1))
+        {
+            Assert.Equal(first.Moves, run.Moves);
+            Assert.Equal(first.Duration.TotalMilliseconds, run.Duration.TotalMilliseconds, 3);
+            // Nothing is fast-forwarded: the first move of every run comes after the full first 16 ms Delay.
+            Assert.True((run.Times[0] - run.Start).TotalMilliseconds >= 16, $"run {run.Run}'s first move came after {(run.Times[0] - run.Start).TotalMilliseconds} ms");
+        }
+    }
+
+    [Fact]
+    public async Task Run_two_and_later_keep_the_spacing_of_every_move()
+    {
+        var (macro, input, clock) = SlowPcMovementMacro(4);
+        var (_, runs) = await PlayAndSplitAsync(new PlaybackEngine(input, clock), input, clock, macro);
+
+        foreach (var run in runs)
+        {
+            // Moves 1–20 are 16 ms apart in every run (none bunched together in 0 ms).
+            var moveTimes = run.Calls.Select((c, i) => (c, i)).Where(x => x.c.StartsWith("move ", StringComparison.Ordinal))
+                .Take(20).Select(x => run.Times[x.i]).ToList();
+            for (var i = 1; i < moveTimes.Count; i++)
+                Assert.Equal(16, (moveTimes[i] - moveTimes[i - 1]).TotalMilliseconds, 3);
+        }
+    }
+
+    [Fact]
+    public async Task Infinite_play_keeps_full_timing_until_stopped()
+    {
+        var (macro, input, clock) = SlowPcMovementMacro(0); // Play = 0: repeat until stopped
+        var engine = new PlaybackEngine(input, clock);
+        engine.RunStarted += (_, info) =>
+        {
+            Assert.True(info.IsInfinite);
+            if (info.CurrentRun == 6) engine.Stop();
+        };
+
+        var (result, runs) = await PlayAndSplitAsync(engine, input, clock, macro);
+
+        Assert.Equal(PlaybackOutcome.Stopped, result.Outcome);
+        Assert.Equal(5, result.IterationsCompleted);
+        var full = runs.Take(5).ToList();
+        Assert.All(full, run => Assert.Equal(full[0].Duration.TotalMilliseconds, run.Duration.TotalMilliseconds, 3));
+        Assert.All(full, run => Assert.Equal(21, run.Moves.Count()));
+        Assert.Equal(6, engine.CurrentRun);
+    }
+
+    [Fact]
+    public async Task Wait_between_repeats_is_waited_in_full_every_time()
+    {
+        var (macro, input, clock) = SlowPcMovementMacro(3);
+        macro.RepeatDelayMs = 250;
+        var (_, runs) = await PlayAndSplitAsync(new PlaybackEngine(input, clock), input, clock, macro);
+
+        // Run k ends with the 100 ms rest; the next run starts ≥ 250 ms after that.
+        for (var i = 1; i < runs.Count; i++)
+            Assert.True(runs[i].Duration.TotalMilliseconds >= 20 * 16 + 100, $"run {runs[i].Run} took {runs[i].Duration.TotalMilliseconds} ms");
+        Assert.True((runs[1].Start - runs[0].Start).TotalMilliseconds >= 20 * 16 + 100 + 250);
+    }
+
+    [Fact]
+    public async Task Recorded_input_starts_fresh_and_plays_every_point_in_every_run()
+    {
+        var clock = new FakeClock();
+        var input = new FakeInput { Clock = clock };
+        input.OnCall = _ => clock.Advance(TimeSpan.FromMilliseconds(2));
+        var events = new List<InputEvent>();
+        for (var i = 0; i <= 10; i++) events.Add(InputEvent.Move(i * 50_000, 10, 0, 100 + i * 10, 300)); // 11 points over 500 ms
+        var sequence = new InputSequenceStep
+        {
+            Events = events,
+            MouseSegments = new List<MouseSegment> { new() { StartUs = 0, Detected = MouseMovementMode.CursorPosition } },
+            StartX = 90,
+            StartY = 300,
+        };
+        var macro = Flow.Macro(sequence);
+        macro.RepeatCount = 3;
+
+        var (result, runs) = await PlayAndSplitAsync(new PlaybackEngine(input, clock), input, clock, macro);
+
+        Assert.Equal(PlaybackOutcome.Completed, result.Outcome);
+        Assert.Equal(3, runs.Count);
+        var recorded = Enumerable.Range(0, 11).Select(i => $"move {100 + i * 10},300").ToList();
+        Assert.Equal(recorded, runs[0].Moves);
+        foreach (var run in runs.Skip(1))
+        {
+            // Run #2+ first put the cursor back on the recording's start, then play every point again.
+            Assert.Equal(new[] { "move 90,300" }.Concat(recorded), run.Moves);
+            Assert.True(run.Duration.TotalMilliseconds >= 500, $"run {run.Run} took {run.Duration.TotalMilliseconds} ms");
+        }
+    }
+
+    [Fact]
+    public async Task Short_recorded_delays_glide_during_the_delay_instead_of_adding_the_move_glide()
+    {
+        var clock = new FakeClock();
+        var input = new FakeInput { Clock = clock };
+        var steps = new List<MacroStep> { new MouseMoveStep { X = 0, Y = 0 } };
+        for (var i = 1; i <= 10; i++)
+        {
+            steps.Add(new DelayStep { DurationMs = 16 });
+            steps.Add(new MouseMoveStep { X = i * 30, Y = 0, MoveStyle = MouseMoveStyle.SmoothGlide, MoveDurationMs = 120 });
+        }
+
+        var macro = Flow.Macro(steps.ToArray());
+        macro.RepeatCount = 2;
+        var (_, runs) = await PlayAndSplitAsync(new PlaybackEngine(input, clock), input, clock, macro);
+
+        foreach (var run in runs)
+        {
+            // 10 × 16 ms, not 10 × (16 + 120) ms.
+            Assert.Equal(160, run.Duration.TotalMilliseconds, 3);
+            Assert.Equal("move 300,0", run.Moves.Last());
+        }
+
+        // A manual "wait, then glide" (Delay longer than RecordedPointMaxDelayMs) keeps waiting first, then gliding.
+        var manualClock = new FakeClock();
+        var manual = new FakeInput { Clock = manualClock };
+        await new PlaybackEngine(manual, manualClock).RunAsync(Flow.Macro(new MouseMoveStep(), new DelayStep { DurationMs = 300 },
+            new MouseMoveStep { X = 300, MoveStyle = MouseMoveStyle.SmoothGlide, MoveDurationMs = 120 }));
+        Assert.Equal(420, manual.Times[^1].TotalMilliseconds, 3);
+    }
+
+    [Theory]
+    [InlineData(3, 0, "Run #3 / ∞")]
+    [InlineData(1, 0, "Run #1 / ∞")]
+    [InlineData(3, 10, "Run 3 / 10")]
+    [InlineData(0, 5, "Run 1 / 5")]
+    public void Run_counter_text(int current, int total, string expected)
+    {
+        Assert.Equal(expected, PlaybackRunInfo.FormatCounter(current, total));
+        Assert.Equal(expected, new PlaybackRunInfo(current, total).CounterText);
+    }
+
+    [Fact]
+    public async Task Run_started_reports_every_run_with_the_configured_count()
+    {
+        var input = new FakeInput();
+        var engine = new PlaybackEngine(input, new FakeClock());
+        var seen = new List<PlaybackRunInfo>();
+        engine.RunStarted += (_, info) => seen.Add(info);
+        var macro = Flow.Macro(Flow.Move(1));
+        macro.RepeatCount = 3;
+
+        await engine.RunAsync(macro);
+
+        Assert.Equal(new[] { new PlaybackRunInfo(1, 3), new PlaybackRunInfo(2, 3), new PlaybackRunInfo(3, 3) }, seen);
+        Assert.Equal(3, engine.CurrentRun);
+    }
+
+    [Fact]
+    public void Desktop_recordings_start_at_the_cursor_position_where_recording_began()
+    {
+        var raw = new List<RawInputEvent>
+        {
+            new(100, RawInputKind.MouseMove, 300, 300),
+            new(200, RawInputKind.MouseMove, 400, 400),
+            new(300, RawInputKind.MouseMove, 500, 450),
+        };
+
+        var steps = RecordingConverter.Convert(raw, new RecordingOptions { RecordMouseMoves = true, StartX = 50, StartY = 60 });
+
+        var firstMove = Assert.IsType<MouseMoveStep>(steps.First(s => s is MouseMoveStep));
+        Assert.Equal((50, 60), (firstMove.X, firstMove.Y));
+        Assert.Contains(steps, s => s is MouseMoveStep { X: 500, Y: 450 });
+
+        var withoutStart = RecordingConverter.Convert(raw, new RecordingOptions { RecordMouseMoves = true });
+        Assert.DoesNotContain(withoutStart, s => s is MouseMoveStep { X: 50, Y: 60 });
+    }
+}

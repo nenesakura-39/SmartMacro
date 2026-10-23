@@ -339,6 +339,18 @@
                                     <TextBlock Text="Stop" Margin="6,0,0,0" FontSize="12" />
                                 </StackPanel>
                             </Button>
+                            <!-- Live run counter while playing: "Run #3 / ∞ · Step 4 / 12" (Play = 0 shows ∞). -->
+                            <Border Style="{StaticResource Pill}" Margin="8,0,0,0" Padding="9,3,10,4"
+                                    ToolTip="Which run (repeat) of the macro is playing now, and which step"
+                                    AutomationProperties.Name="Run counter" AutomationProperties.LiveSetting="Polite"
+                                    Visibility="{Binding HasRunCounter, Converter={StaticResource BoolToVisibility}}">
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock Text="&#xE8EE;" Style="{StaticResource IconText}" FontSize="11" Foreground="{StaticResource AccentBrush}" />
+                                    <TextBlock Text="{Binding RunCounterText}" FontSize="11.5" FontWeight="SemiBold" Margin="6,0,0,0" />
+                                    <TextBlock Text="·" FontSize="11.5" Margin="6,0" Foreground="{StaticResource MutedTextBrush}" />
+                                    <TextBlock Text="{Binding StepCounterText}" FontSize="11.5" Foreground="{StaticResource MutedTextBrush}" />
+                                </StackPanel>
+                            </Border>
                         </StackPanel>
                     </StackPanel>
 

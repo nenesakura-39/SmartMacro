@@ -213,7 +213,8 @@ public sealed class VisionTools : IVisionTools
         if (frame.Image.Width < template.Width || frame.Image.Height < template.Height)
             return $"The search area on screen ({frame.Bounds.Width}×{frame.Bounds.Height}) is smaller than the image ({template.Width}×{template.Height}). Make the area bigger.";
 
-        var options = new TemplateMatchOptions { MinScore = step.MinSimilarityPercent / 100.0, IgnoreColor = step.IgnoreColor, AdaptToLighting = step.AdaptToLighting, IgnoreEdgeFraction = step.IgnoreEdgesPercent / 100.0, MatchForeground = step.MatchForeground, MaxResults = 10 };
+        // Same settings as a playing Find image step / image condition (one shared builder).
+        var options = ScreenProbes.ImageMatchOptions(step);
         var watch = Stopwatch.StartNew();
         var result = await Task.Run(() => TemplateMatcher.Find(frame.Image, template, options));
         var searchTime = watch.Elapsed;

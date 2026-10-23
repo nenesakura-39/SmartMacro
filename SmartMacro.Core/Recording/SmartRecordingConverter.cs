@@ -419,6 +419,7 @@ public static class SmartRecordingConverter
 
         if (raw.Count == 0) return false;
 
+        var hasStart = chunk.First == 0 && (options.StartX != 0 || options.StartY != 0);
         steps = RecordingConverter.Convert(raw, new RecordingOptions
         {
             RecordMouseMoves = options.RecordMouseMoves,
@@ -426,6 +427,8 @@ public static class SmartRecordingConverter
             SimplifyMousePath = options.SimplifyMousePath,
             CollapseMousePaths = options.CollapseMousePaths,
             MaxTapDurationMs = options.KeepHoldTime ? MacroValidator.MaxHoldMs : 500,
+            StartX = hasStart ? options.StartX : null,
+            StartY = hasStart ? options.StartY : null,
         });
         if (steps.Count == 0) return false;
 
@@ -510,13 +513,14 @@ public static class SmartRecordingConverter
             parts.Add(new MouseSegment { StartUs = 0, Detected = MouseMovementMode.Relative, Evidence = MouseContextEvidence.Unclear });
         parts[0].StartUs = 0;
 
+        var hasExplicitStart = chunk.First == 0 && (options.StartX != 0 || options.StartY != 0);
         return new InputSequenceStep
         {
             Events = list,
             MouseSegments = parts,
-            StartX = startX ?? options.StartX,
-            StartY = startY ?? options.StartY,
-            MoveCursorToStart = false, // cursor-position parts already carry their positions
+            StartX = hasExplicitStart ? options.StartX : (startX ?? options.StartX),
+            StartY = hasExplicitStart ? options.StartY : (startY ?? options.StartY),
+            MoveCursorToStart = hasExplicitStart && parts[0].Detected == MouseMovementMode.CursorPosition,
         };
     }
 }

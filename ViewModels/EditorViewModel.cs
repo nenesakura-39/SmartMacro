@@ -830,12 +830,23 @@ public sealed class EditorViewModel : ObservableObject
     {
         if (!HasMacro || parameter is not StepKind kind) return;
 
-        RecordUndo();
-        var step = CreateStepViewModel(MacroFactory.CreateStep(kind, _defaultDelayMs()));
+        var model = MacroFactory.CreateStep(kind, _defaultDelayMs());
         var selectedIndex = SelectedStep is null ? -1 : Steps.IndexOf(SelectedStep);
+        var models = Steps.Select(s => s.Model).ToList();
         var index = forcePosition
             ? StepListEditing.InsertIndex(Steps.Count, selectedIndex, position)
-            : StepListEditing.InsertIndex(Steps.Select(s => s.Model).ToList(), selectedIndex, position, kind);
+            : StepListEditing.InsertIndex(models, selectedIndex, position, kind);
+
+        // A standalone Else / End If / End Repeat is only added where it closes (or splits) an open block, so the
+        // toolbox can't create orphan markers (an End If at the top of the macro with no If before it).
+        if (StepListEditing.CheckMarkerInsert(models, index, model) is { } markerProblem)
+        {
+            _setStatus(markerProblem, StatusKind.Warning);
+            return;
+        }
+
+        RecordUndo();
+        var step = CreateStepViewModel(model);
         Steps.Insert(index, step);
 
         // If and Repeat come with their End, so the new block is complete straight away.
@@ -937,41 +948,28 @@ public sealed class EditorViewModel : ObservableObject
     }
 
     /// <summary>
-    /// Deletes the selected steps. Deleting just the If / Repeat (or its End) of a complete block removes the whole
-    /// set of markers (If, Else, End If / Repeat, End Repeat) but keeps the steps that were inside.
+    /// Deletes the selected steps. Deleting an If / Repeat (or its End If / End Repeat) also removes the other markers
+    /// of that block (If, Else, End If / Repeat, End Repeat) but keeps the steps that were inside, so a delete can
+    /// never leave an orphan End If / Else / End Repeat behind (see <see cref="StepListEditing.PlanDelete"/>).
     /// </summary>
     private void DeleteSelectedSteps()
     {
         var selected = SelectedInOrder();
         if (selected.Count == 0) return;
 
-        var toRemove = new HashSet<StepViewModel>(selected);
-        string? note = null;
-        if (selected.Count == 1 && selected[0].Model is IfStep or EndIfStep or RepeatStep or EndRepeatStep)
-        {
-            var blocks = BlockStructure.Analyze(Steps.Select(s => s.Model).ToList());
-            var index = Steps.IndexOf(selected[0]);
-            var start = selected[0].Model is IfStep or RepeatStep ? index : blocks.StartOf(index);
-            var end = start >= 0 ? blocks.EndOf(start) : -1;
-            if (start >= 0 && end >= 0)
-            {
-                toRemove.Add(Steps[start]);
-                toRemove.Add(Steps[end]);
-                var elseIndex = blocks.ElseOf(start);
-                if (elseIndex >= 0) toRemove.Add(Steps[elseIndex]);
-                note = $"Removed the {StepDescriber.DisplayName(Steps[start].Kind)} block markers. The steps inside were kept.";
-            }
-        }
+        var plan = StepListEditing.PlanDelete(Steps.Select(s => s.Model).ToList(), selected.Select(s => Steps.IndexOf(s)));
+        if (plan.Indexes.Count == 0) return;
+        var toRemove = plan.Indexes.Select(i => Steps[i]).ToList();
 
         RecordUndo();
-        var firstIndex = Steps.IndexOf(selected[0]);
+        var firstIndex = plan.Indexes[0];
         foreach (var step in toRemove.OrderByDescending(s => Steps.IndexOf(s)).ToList())
             Steps.Remove(step);
 
         _selection.Clear();
         SelectedStep = Steps.Count == 0 ? null : Steps[Math.Clamp(firstIndex, 0, Steps.Count - 1)];
         Touch();
-        if (note is not null) _setStatus(note, StatusKind.Info);
+        if (plan.Note is not null) _setStatus(plan.Note, StatusKind.Info);
     }
 
     private void DuplicateSelectedStep()

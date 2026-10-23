@@ -1,6 +1,7 @@
 # SmartMacro – Project Status / Handoff
 
-_Last updated: 2026-10-17 (Studio upgrades batch on top of `cdd0919` – failsafe release, Run step / Play from here, Undo / Redo +
+_Last updated: 2026-10-23 (live-test fix of `538326c`: Part B – Run #2+ skipping movement + run counter, written WITHOUT a
+.NET SDK, NOT built or tested; Part A – image match "0 % similar" + orphan End If, owner build + tests all green. Before it: Studio upgrades batch on top of `cdd0919` – failsafe release, Run step / Play from here, Undo / Redo +
 copy / paste, target window + coordinate scaling, on-screen highlight, Humanize, Studio Library / Settings / Logs: written WITHOUT a
 .NET SDK, NOT built or tested. Before it: Studio UI redesign on top of `d54c087` – new palette, pill switch / segmented controls,
 175 px sidebar, unified editor header, bottom Activity + Problems drawer, 2-column toolbox tiles, step cards, inspector
@@ -21,6 +22,68 @@ Developer: Riku (リク) · Brand: KuroLogic_
 | Release package | `publish\SmartMacro-1.0.0-win-x64\SmartMacro.exe` is an OLD build (made right after `159d6b3`, before Stage 1) | – | ignored by git |
 
 
+
+## Live-test fix of `538326c` – Part B (2026-10-23): Run #2+ skipping movement + live run counter; written WITHOUT a .NET SDK: **NOT built, NOT tested**
+Part A was built and tested by the owner afterwards: all green. Part B again written without a .NET SDK; timing logic traced
+by hand on the fake clock. Next step for the owner: `tools\verify.cmd`, then a live re-test with Play = 0 and Play = 5.
+- Found on arrival: the working copy already had UNCOMMITTED timeline changes made after `538326c` (engine, both
+  recording converters, `LowLevelInputHook`): timeline reset at the start of every run, `SyncTimelineToNow()` after
+  steps with their own waits (click, key hold, drag, glide, scroll, Find, If / Repeat, feedback, recorded input),
+  `ClampTimelineBacklog()` before every timeline wait (`MaxTimelineLag` 250 → 15 ms), recorded input restarting at
+  t = 0 and Run #2+ putting the cursor back on its start, `CurrentRun` / `TotalRuns` / `RunStarted`, and StartX/Y
+  for smart / game recordings. In `538326c` itself none of that existed: time used outside the timeline (Win32 hover
+  nudge + settle, glides, holds) stayed as "debt" up to 250 ms and later delays finished in 0 ms. Those changes had no
+  tests; this batch adds them and finishes the rest.
+- Engine (`Core/Playback/PlaybackEngine.cs`): recorded points – a Delay ≤ `RecordedPointMaxDelayMs` (50 ms) right before
+  a Move mouse step with Smooth glide / Human curve glides DURING the Delay and the Move only lands on its spot (no
+  extra 120 ms per 16 ms point); longer Delays keep "wait, then glide". `PlaybackRunInfo.FormatCounter` /
+  `CounterText`: "Run #3 / ∞" (Play = 0) or "Run 3 / 10".
+- Desktop recordings now pass the recorder's start position (`AutomationViewModel`), so the first Move step goes there.
+- UI: `AutomationViewModel.CurrentRunNumber`, `ConfiguredRunCount`, `RunCounterText`, `StepCounterText`,
+  `HasRunCounter` (RunStarted event + 100 ms UI timer). Editor header pill next to Stop (repeat icon + "Run #3 / ∞ ·
+  Step 4 / 12"); bottom bar `ProgressText` = "▶ Playing: Run #3 / ∞ · Step 4/12" (⏸ Paused while paused); mini
+  overlay (`Services/RunModeHost.cs`, optional `counter` parameter on `IRunModeHost.Enter/Update`): bold cyan
+  "Run #3 / ∞" | "Step 4/12 — activity… (Esc to stop)"; Activity log on stop: "Stopped \"Macro\" after 4 run(s)
+  (3 finished, N step(s), x s)." `EditorViewModel` needed no change (the header binds to the Automation view model).
+- Tests: `LiveTestFixTests.MultiRunPlaybackTests` (5 runs on a "slow PC" fake: same moves + same duration in every run,
+  16 ms spacing in Run #2+, Play = 0 until stopped, wait between repeats, recorded input in 3 runs with start reset,
+  recorded-point glide, run counter text, RunStarted, desktop start position).
+- Not verified: build, tests, the real Windows run.
+
+## Live-test fix of `538326c` – Part A (2026-10-23): image match "0 % similar" + orphan End If; written WITHOUT a .NET SDK: **NOT built, NOT tested**
+The AI's cloud environment had no .NET SDK (downloads blocked), so nothing was compiled. The new matching pipeline was
+checked with a NumPy port (same steps, same windows) and the FFT code with a pure-Python port of the exact C# loops.
+Next step for the owner: `tools\verify.cmd` (send `artifacts\build.log` / `artifacts\test.log` if anything fails). Part B
+(multi-run skipping + run counter) is still to do.
+1. **Cause of "0 % similar"** (friend's 301×288 Tic-Tac-Toe grid in an If "Look for: Image"): templates > 300 px used a
+   stride-sampled fast path (32×32 "anchor" patch picked from every 4th pixel, 2-point samples per 4×4 block at 1/4,
+   only 4 candidates, every-4th-pixel verification). 1-pixel lines were skipped, so the anchor / coarse map were flat
+   and the search returned nothing (best 0 %). Alpha was NOT the cause (grey / colour checks never read alpha).
+2. **Fix** (`Core/Vision/TemplateMatcher.cs`, new `Core/Vision/FftCorrelator.cs`, `Core/Vision/ForegroundMatcher.cs`):
+   - Every pixel counts: area-average pyramid (full, 1/2, 1/4); no 1/8 or 1/16 any more (`MaxCoarseScale = 4`).
+   - Large templates: coarse NCC of the whole 1/4 template over a *phase-tolerant* 1/4 map (8×8 blocks every 4 px, so a
+     1-px line always lands inside its block) via a 2D FFT (cost independent of template size) → top 25 spots (no
+     threshold, `MinRefineCandidates`) → 1/2 check → best 8 (+ any within 0.15, max 12) exact at full size + uphill step.
+   - Small templates: unchanged logic, but ≥ 25 candidates, scale ≤ 1/4, FFT for expensive coarse passes (same scores).
+   - Every score = max(NCC, direct RGB similarity) (`CombinedScore`, NaN/∞ → 0). Direct similarity = 1 − SAD ÷ SAD of the
+     template vs its own median colour (NOT 1 − mean diff ÷ 255, which would score an empty black area ~98 % against a
+     98 %-black grid). Exact copy = 100 %; any flat patch = 0 %. Alpha never compared.
+   - Foreground ("Ignore background") search: no sampled large path any more; big templates use an FFT mask correlation
+     on the phase-tolerant map; shrunken masks of big templates fall back to their own Otsu threshold.
+   - `ScreenProbes.ImageMatchOptions(step)` is the one place that builds matcher settings; Find image steps, image
+     conditions (If / Repeat / feedback) and "Test detection now" (`VisionTools`) all use it.
+3. **Orphan End If** (`Core/Workflow/StepListEditing.cs`, `ViewModels/EditorViewModel.cs`): `PlanDelete` – deleting an
+   If / End If / Repeat / End Repeat (also in a multi-selection) removes that block's other markers (If + Else + End If,
+   Repeat + End Repeat), inner steps kept; orphan markers / a lone Else are deleted alone. `CheckMarkerInsert` – the
+   toolbox only adds a standalone Else / End If / End Repeat where it closes or splits an open block (otherwise a warning
+   in the status bar, nothing added, no undo entry).
+- Tests: new `VisionTests.LineArtTemplateTests` (grid at 7 positions incl. odd offsets and screen corners, AdaptToLighting
+  on / off, foreground / ignore-edges options, busy screen, blank screen must NOT match, alpha 0 vs 255, NaN guard, FFT =
+  direct sum, scale ≤ 1/4, `ScreenConditionEvaluator` + If step true branch, shared options) and
+  `LiveTestFixTests.OrphanBlockMarkerTests`. Updated on purpose: the two large-template timing asserts in `VisionTests`
+  (< 20 ms → < 1500 ms in Debug; the 20 ms goal was only reachable by skipping pixels).
+- Not verified: build, tests, real speed (estimate: a 640×480 template on 1080p ≈ tens of ms in Release, a few hundred
+  ms in a Debug test run), the friend's grid on a real screen.
 
 ## KuroLogic studio brand (2026-10-17)
 - Brand kit in `tools/brand/` (vector SVG sources + README with palette / fonts): mark = obsidian hexagon with a circuit-node
@@ -807,6 +870,9 @@ no .NET SDK in the AI's environment)
   csproj Company/Authors "Riku", Copyright "© 2026 Riku", README "© 2026 Riku") – change awaits owner approval.
 
 ## Next task
+- Owner: `tools\\verify.cmd` for Part B of the `538326c` live-test fix (never compiled), then a live run with Play = 0
+  and Play = 5 (every run should move the same; watch the run counter in the header, bottom bar and mini overlay).
+  Then commit Parts A + B together with the earlier uncommitted timeline changes.
 - Owner: `tools\verify.cmd` for the brand icon / logo change too, then look at the sidebar logo, the mini overlay,
   the taskbar / Alt+Tab / Explorer icon (16 → 256 px).
 - Owner: `tools\verify.cmd` for the Studio upgrades batch (never compiled; send `artifacts\build.log` /

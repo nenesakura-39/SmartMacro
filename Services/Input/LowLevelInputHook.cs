@@ -206,6 +206,10 @@ public sealed class WindowsInputRecorder : IInputRecorder, IDisposable
 
     public bool LimitReached { get; private set; }
 
+    public int StartX { get; private set; }
+
+    public int StartY { get; private set; }
+
     public void Start()
     {
         if (IsRecording) throw new InvalidOperationException("Already recording.");
@@ -214,6 +218,16 @@ public sealed class WindowsInputRecorder : IInputRecorder, IDisposable
         _keysRecordedDown.Clear();
         LimitReached = false;
         _startTick = unchecked((uint)Environment.TickCount);
+        if (GetCursorPos(out var pt))
+        {
+            StartX = pt.X;
+            StartY = pt.Y;
+        }
+        else
+        {
+            StartX = 0;
+            StartY = 0;
+        }
 
         var hook = new LowLevelInputHook(mouse: true, keyboard: true);
         hook.Received += OnReceived;

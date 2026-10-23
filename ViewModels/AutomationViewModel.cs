@@ -78,6 +78,12 @@ public sealed class AutomationViewModel : ObservableObject, IDisposable
     private RecordingMode _recordingMode = RecordingMode.Smart;
     private Guid? _runningStepId;
 
+    // Run counter: written by the engine's RunStarted event (playback thread), shown by the UI timer.
+    private volatile int _currentRun;
+    private volatile int _configuredRuns;
+    private string _runCounterText = string.Empty;
+    private string _stepCounterText = string.Empty;
+
     public AutomationViewModel(
         PlaybackEngine engine,
         IInputRecorder recorder,
@@ -106,6 +112,7 @@ public sealed class AutomationViewModel : ObservableObject, IDisposable
         _engine.ProgressChanged += OnEngineProgress;
         _engine.StateChanged += OnEngineStateChanged;
         _engine.Message += OnEngineMessage;
+        _engine.RunStarted += OnEngineRunStarted;
         _emergency.EmergencyStopRequested += OnEmergencyStop;
 
         _progressTimer = new DispatcherTimer(DispatcherPriority.Background, _dispatcher) { Interval = TimeSpan.FromMilliseconds(100) };
@@ -223,6 +230,35 @@ public sealed class AutomationViewModel : ObservableObject, IDisposable
         private set => SetProperty(ref _isProgressIndeterminate, value);
     }
 
+    /// <summary>The run (repeat of the whole macro) that is playing now, 1-based; 0 when nothing plays.</summary>
+    public int CurrentRunNumber => IsPlaying ? _currentRun : 0;
+
+    /// <summary>How many runs the playing macro is set to (its "Play n times"); 0 = until stopped.</summary>
+    public int ConfiguredRunCount => _configuredRuns;
+
+    /// <summary>"Run #3 / ∞" (Play = 0) or "Run 3 / 10"; empty when nothing plays.</summary>
+    public string RunCounterText
+    {
+        get => _runCounterText;
+        private set
+        {
+            if (!SetProperty(ref _runCounterText, value)) return;
+            OnPropertyChanged(nameof(HasRunCounter));
+            OnPropertyChanged(nameof(CurrentRunNumber));
+            OnPropertyChanged(nameof(ConfiguredRunCount));
+        }
+    }
+
+    /// <summary>"Step 4 / 12" while playing; empty otherwise.</summary>
+    public string StepCounterText
+    {
+        get => _stepCounterText;
+        private set => SetProperty(ref _stepCounterText, value);
+    }
+
+    /// <summary>True while a run counter is shown (playing or paused).</summary>
+    public bool HasRunCounter => _runCounterText.Length > 0;
+
     /// <summary>Called by the main view model when the open/selected macro changes.</summary>
     public void RefreshTarget()
     {
@@ -284,6 +320,7 @@ public sealed class AutomationViewModel : ObservableObject, IDisposable
         _engine.ProgressChanged -= OnEngineProgress;
         _engine.StateChanged -= OnEngineStateChanged;
         _engine.Message -= OnEngineMessage;
+        _engine.RunStarted -= OnEngineRunStarted;
         _emergency.EmergencyStopRequested -= OnEmergencyStop;
         _emergency.Dispose();
         if (_recorder is IDisposable disposable) disposable.Dispose();
@@ -376,6 +413,10 @@ public sealed class AutomationViewModel : ObservableObject, IDisposable
             SimplifyMousePath = true, // a few meaningful Move steps instead of one every 30 ms
             CollapseMousePaths = false, // Desktop-only mode keeps simplified mouse paths so pure movements & oscillations work
             MaxTapDurationMs = settings.KeepTapHoldTime ? MacroValidator.MaxHoldMs : 500,
+            // Where the cursor was when recording started: the first Move step goes there, so Run #2+ start from the
+            // same spot instead of wherever Run #1 ended. (0, 0) = unknown.
+            StartX = _recorder.StartX == 0 && _recorder.StartY == 0 ? null : _recorder.StartX,
+            StartY = _recorder.StartX == 0 && _recorder.StartY == 0 ? null : _recorder.StartY,
         };
         var steps = RecordingConverter.Convert(raw, options);
 
@@ -549,11 +590,15 @@ public sealed class AutomationViewModel : ObservableObject, IDisposable
         _runningMacroName = range is null ? macro.Name
             : range.SingleStep ? $"{macro.Name}, step {range.StepIndex + 1}" : $"{macro.Name} from step {range.StepIndex + 1}";
         _latestProgress = null;
+        _currentRun = 0;
+        _configuredRuns = range is null ? Math.Max(0, macro.RepeatCount) : 1;
         Mode = AutomationMode.Playing;
         IsProgressIndeterminate = range is null && macro.RepeatCount == 0;
         ProgressValue = 0;
         ProgressText = "Starting…";
-        _host.Enter(OverlayKind.Playing, OverlayText());
+        RunCounterText = PlaybackRunInfo.FormatCounter(1, _configuredRuns);
+        StepCounterText = string.Empty;
+        _host.Enter(OverlayKind.Playing, OverlayText(), RunCounterText);
 
         try
         {
@@ -617,6 +662,9 @@ public sealed class AutomationViewModel : ObservableObject, IDisposable
             IsProgressIndeterminate = false;
             _runTask = null;
             ReportResult(result);
+            RunCounterText = string.Empty;
+            StepCounterText = string.Empty;
+            _currentRun = 0;
             RefreshTarget();
         }
     }
@@ -633,8 +681,16 @@ public sealed class AutomationViewModel : ObservableObject, IDisposable
                 _hooks.SetStatus($"Finished \"{name}\" ({result.IterationsCompleted} run{(result.IterationsCompleted == 1 ? "" : "s")}, {elapsed.TotalSeconds:0.0} s).", StatusKind.Success);
                 break;
             case PlaybackOutcome.Stopped:
-                _hooks.SetStatus($"Stopped \"{name}\" after {result.StepsExecuted:N0} step(s).", StatusKind.Warning);
+            {
+                // The run that was playing when it stopped counts (stopped during run 4 = "after 4 run(s)").
+                var runs = Math.Max(_currentRun, result.IterationsCompleted);
+                var finished = result.IterationsCompleted;
+                _hooks.SetStatus(runs <= 0
+                    ? $"Stopped \"{name}\" before it started."
+                    : $"Stopped \"{name}\" after {runs} run(s) ({finished} finished, {result.StepsExecuted:N0} step(s), {elapsed.TotalSeconds:0.0} s).",
+                    StatusKind.Warning);
                 break;
+            }
             case PlaybackOutcome.Failed:
                 _hooks.SetStatus($"\"{name}\" stopped because of an error: {result.Error}", StatusKind.Error);
                 _dialogs.ShowError("Playback stopped", $"\"{name}\" stopped because of an error:\n\n{result.Error}");
@@ -674,6 +730,13 @@ public sealed class AutomationViewModel : ObservableObject, IDisposable
     private void OnEngineMessage(object? sender, string message) => _log.Info(message);
 
     private void OnEngineProgress(object? sender, PlaybackProgress progress) => _latestProgress = progress;
+
+    // Playback thread: just remember the numbers; the 100 ms UI timer shows them (RefreshProgress).
+    private void OnEngineRunStarted(object? sender, PlaybackRunInfo info)
+    {
+        _configuredRuns = Math.Max(0, info.TotalRuns);
+        _currentRun = info.CurrentRun;
+    }
 
     private void OnEngineStateChanged(object? sender, PlaybackState state)
     {
@@ -716,17 +779,22 @@ public sealed class AutomationViewModel : ObservableObject, IDisposable
 
         if (_latestProgress is { } p && p.StepCount > 0)
         {
-            var run = p.TotalIterations is int total ? $"run {p.Iteration} of {total}" : $"run {p.Iteration} (until stopped)";
+            // The engine's RunStarted event is the source of truth for the run number (it changes before the first
+            // step of a run is reported); the progress report is the fallback.
+            var runNumber = Math.Max(1, Math.Max(_currentRun, p.Iteration));
+            RunCounterText = PlaybackRunInfo.FormatCounter(runNumber, _configuredRuns);
+            StepCounterText = $"Step {p.StepNumber} / {p.StepCount}";
+            var state = Mode == AutomationMode.Paused ? "⏸ Paused" : "▶ Playing";
             ProgressText = p.LoopText is null
-                ? $"Step {p.StepNumber} of {p.StepCount} · {run}"
-                : $"Step {p.StepNumber} of {p.StepCount} · {p.LoopText} · {run}";
+                ? $"{state}: {RunCounterText} · Step {p.StepNumber}/{p.StepCount}"
+                : $"{state}: {RunCounterText} · Step {p.StepNumber}/{p.StepCount} · {p.LoopText}";
             ProgressValue = p.TotalIterations is int t && t > 0
                 ? ((p.Iteration - 1) + (double)p.StepNumber / p.StepCount) / t
                 : (double)p.StepNumber / p.StepCount;
             SetRunningStep(p.Step.Id);
         }
 
-        _host.Update(Mode == AutomationMode.Paused ? OverlayKind.Paused : OverlayKind.Playing, OverlayText());
+        _host.Update(Mode == AutomationMode.Paused ? OverlayKind.Paused : OverlayKind.Playing, OverlayText(), RunCounterText);
     }
 
     private void SetRunningStep(Guid? id)
@@ -746,12 +814,13 @@ public sealed class AutomationViewModel : ObservableObject, IDisposable
                 ? $"SmartMacro: Paused \"{_runningMacroName}\" ({PauseShortcut} to resume, Esc to stop)"
                 : $"SmartMacro: Starting \"{_runningMacroName}\"… (Esc to stop)";
 
+        // The run counter ("Run #3 / ∞") is shown in front of this text by the overlay itself.
         var where = $"Step {p.StepNumber}/{p.StepCount}";
         if (Mode == AutomationMode.Paused)
-            return $"SmartMacro: Paused at {where} ({PauseShortcut} to resume, Esc to stop)";
+            return $"Paused at {where} ({PauseShortcut} to resume, Esc to stop)";
 
         var loop = p.LoopText is null ? "" : $" · {p.LoopText}";
-        return $"SmartMacro: {where} — {StepDescriber.Activity(p.Step)}…{loop} (Esc to stop)";
+        return $"{where} — {StepDescriber.Activity(p.Step)}…{loop} (Esc to stop)";
     }
 
     private static string DescribeRepeat(int repeatCount, double speed)

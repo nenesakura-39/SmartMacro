@@ -40,6 +40,13 @@ public sealed record MovePlan(bool Allowed, int First, int Last, int NewFirst, s
 }
 
 /// <summary>
+/// The answer to "what goes when these steps are deleted?": <see cref="Indexes"/> (ascending) are the steps to remove,
+/// <see cref="AddedMarkers"/> of them were added to keep If / Repeat blocks matched, and <see cref="Note"/> tells the
+/// user about those (null when nothing was added).
+/// </summary>
+public sealed record DeletePlan(IReadOnlyList<int> Indexes, int AddedMarkers, string? Note);
+
+/// <summary>
 /// Pure rules for adding and moving steps in the editor's step list, kept in Core so they can be unit tested.
 /// The editor (WPF) only applies the result to its list.
 ///
@@ -166,6 +173,86 @@ public static class StepListEditing
         }
 
         return (start, end, start != first || end != last);
+    }
+
+    /// <summary>
+    /// Which steps to delete when the user deletes <paramref name="selected"/>: the selection itself, plus the other
+    /// markers of every If / Repeat block whose If, End If, Repeat or End Repeat is selected (If + its Else + End If;
+    /// Repeat + End Repeat). The steps inside those blocks are kept. That way deleting an If can never leave an
+    /// orphan End If (or Else) behind, and an End If is only ever deleted together with its If.
+    /// A marker that has no partner (already orphaned) is simply deleted. Selecting just an Else deletes just the Else.
+    /// </summary>
+    public static DeletePlan PlanDelete(IReadOnlyList<MacroStep> steps, IEnumerable<int> selected)
+    {
+        ArgumentNullException.ThrowIfNull(steps);
+        ArgumentNullException.ThrowIfNull(selected);
+        var remove = new SortedSet<int>(selected.Where(i => i >= 0 && i < steps.Count));
+        if (remove.Count == 0) return new DeletePlan(Array.Empty<int>(), 0, null);
+
+        var blocks = BlockStructure.Analyze(steps);
+        var added = 0;
+        bool addedIf = false, addedRepeat = false;
+        foreach (var index in remove.ToList())
+        {
+            if (steps[index] is not (IfStep or EndIfStep or RepeatStep or EndRepeatStep)) continue;
+            var start = steps[index] is IfStep or RepeatStep ? index : blocks.StartOf(index);
+            if (start < 0) continue; // an orphan End: deleting it alone fixes the list
+
+            var isIf = steps[start] is IfStep;
+            var partners = new[] { start, blocks.EndOf(start), isIf ? blocks.ElseOf(start) : -1 };
+            foreach (var partner in partners)
+            {
+                if (partner < 0 || !remove.Add(partner)) continue;
+                added++;
+                if (isIf) addedIf = true;
+                else addedRepeat = true;
+            }
+        }
+
+        string? note = null;
+        if (added > 0)
+        {
+            var what = addedIf && addedRepeat
+                ? "the matching If / Else / End If and Repeat / End Repeat"
+                : addedIf ? "the matching If / Else / End If" : "the matching Repeat / End Repeat";
+            note = $"Also removed {what} marker{(added == 1 ? "" : "s")}, so no block is left half open." +
+                   (remove.Count < steps.Count ? " The steps inside were kept." : "");
+        }
+
+        return new DeletePlan(remove.ToList(), added, note);
+    }
+
+    /// <summary>
+    /// Checks whether a standalone Else, End If or End Repeat may be inserted at <paramref name="index"/>: it must
+    /// close (or split) an If / Repeat that is still open there, and it must not leave another marker without its
+    /// partner. Returns null when it's fine, otherwise a plain-English reason (the step is then not added).
+    /// Other step kinds always return null.
+    /// </summary>
+    public static string? CheckMarkerInsert(IReadOnlyList<MacroStep> steps, int index, MacroStep marker)
+    {
+        ArgumentNullException.ThrowIfNull(steps);
+        ArgumentNullException.ThrowIfNull(marker);
+        if (marker is not (ElseStep or EndIfStep or EndRepeatStep)) return null;
+        index = Math.Clamp(index, 0, steps.Count);
+
+        var before = BlockStructure.Analyze(steps);
+        var afterSteps = steps.ToList();
+        afterSteps.Insert(index, marker);
+        var after = BlockStructure.Analyze(afterSteps);
+
+        var markerProblem = after.Problems.Any(p => p.StepIndex == index);
+        if (!markerProblem && after.Problems.Count <= before.Problems.Count) return null;
+
+        var position = index >= steps.Count ? "at the end" : $"before step {index + 1}";
+        return marker switch
+        {
+            ElseStep => $"An Else can only go inside an If block that has no Else yet, and there isn't one open {position}. " +
+                        "Select a step inside an If block first, or add an If (it comes with its End If).",
+            EndIfStep => $"An End If closes an If block, but no If is waiting for its End If {position}. " +
+                         "Add an If instead (it comes with its End If), or select a step inside the If you want to close.",
+            _ => $"An End Repeat closes a Repeat block, but no Repeat is waiting for its End Repeat {position}. " +
+                 "Add a Repeat instead (it comes with its End Repeat), or select a step inside the Repeat you want to close.",
+        };
     }
 
     private static MovePlan Check(IReadOnlyList<MacroStep> steps, int first, int last, int newFirst, bool tookBlocks)

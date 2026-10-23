@@ -22,7 +22,30 @@ public enum PlaybackOutcome
     Failed,
 }
 
-public sealed record PlaybackResult(PlaybackOutcome Outcome, int IterationsCompleted, int StepsExecuted, string? Error = null, string? Warning = null);
+public sealed record PlaybackResult(PlaybackOutcome Outcome, int IterationsCompleted, int StepsExecuted, string? Error = null, string? Warning = null)
+{
+    /// <summary>How many whole runs (repeats) of the macro finished (same as <see cref="IterationsCompleted"/>).</summary>
+    public int CompletedRuns => IterationsCompleted;
+}
+
+/// <summary>
+/// Raised when a run (one repeat of the whole macro) starts. CurrentRun is 1-based; TotalRuns is 0 when the macro
+/// repeats until stopped.
+/// </summary>
+public sealed record PlaybackRunInfo(int CurrentRun, int TotalRuns)
+{
+    public bool IsInfinite => TotalRuns <= 0;
+
+    /// <summary>"Run #3 / ∞" when repeating until stopped, "Run 3 / 10" for a fixed number of runs.</summary>
+    public string CounterText => FormatCounter(CurrentRun, TotalRuns);
+
+    /// <summary>
+    /// The run counter shown in the editor header, the status bar and the mini overlay: "Run #3 / ∞" when the macro
+    /// repeats until stopped (Play = 0), "Run 3 / 10" for a fixed number of runs.
+    /// </summary>
+    public static string FormatCounter(int currentRun, int totalRuns) =>
+        totalRuns <= 0 ? $"Run #{Math.Max(1, currentRun)} / ∞" : $"Run {Math.Max(1, currentRun)} / {totalRuns}";
+}
 
 /// <summary>
 /// Where playback currently is. StepNumber is the 1-based position in the macro (including disabled steps),
@@ -68,8 +91,11 @@ public sealed class PlaybackEngine
 {
     private static readonly TimeSpan MaxDelayChunk = TimeSpan.FromMilliseconds(50);
 
-    /// <summary>If playback is more than this far behind schedule, it skips ahead instead of catching up.</summary>
-    public static readonly TimeSpan MaxTimelineLag = TimeSpan.FromMilliseconds(250);
+    /// <summary>
+    /// If playback is more than this far behind schedule (e.g. after a step with its own internal wait or OS stall),
+    /// clamp the timeline to now instead of fast-forwarding subsequent delays/movements in 0 ms.
+    /// </summary>
+    public static readonly TimeSpan MaxTimelineLag = TimeSpan.FromMilliseconds(15);
 
     /// <summary>
     /// Pause after clicking found text / an image / a colour ("post-action delay") so the clicked window (or game UI)
@@ -105,6 +131,18 @@ public sealed class PlaybackEngine
 
     // Set just before a Delay step runs: the spot the next step jumps to (for the smooth glide), or null.
     private (int X, int Y)? _glideTarget;
+
+    // Recorded points: a short Delay followed by a Move with a glide style glides DURING the Delay (set just before
+    // the Delay runs), and that Move then only lands on its spot instead of adding its own glide time.
+    private MouseMoveStep? _glideDuringDelay;
+    private MouseMoveStep? _glideAbsorbedBy;
+
+    /// <summary>
+    /// A Delay this short (or shorter) right before a Move mouse step with Smooth glide / Human curve is treated as a
+    /// recorded point: the glide uses the Delay's time instead of adding its own (120 ms) on top of every 16 ms point.
+    /// Longer Delays (a manual "wait 1 s, then glide there") keep the old behaviour: wait, then glide.
+    /// </summary>
+    public const int RecordedPointMaxDelayMs = 50;
 
     /// <summary>How often the progress text is refreshed while a feedback loop runs.</summary>
     private static readonly TimeSpan FeedbackProgressInterval = TimeSpan.FromMilliseconds(250);
@@ -206,6 +244,18 @@ public sealed class PlaybackEngine
     /// <summary>Raised on the playback thread before each step. Keep handlers fast.</summary>
     public event EventHandler<PlaybackProgress>? ProgressChanged;
 
+    /// <summary>Raised on the playback thread at the start of each macro repeat iteration (1-based run number, 0 = infinite).</summary>
+    public event EventHandler<PlaybackRunInfo>? RunStarted;
+
+    /// <summary>Optional callback invoked at the start of each macro repeat iteration: (currentRun, totalRuns).</summary>
+    public Action<int, int>? OnRunStarted { get; set; }
+
+    /// <summary>1-based run number of the current (or most recent) repeat iteration.</summary>
+    public int CurrentRun { get; private set; }
+
+    /// <summary>Total configured runs for the current playback (0 when repeating infinitely).</summary>
+    public int TotalRuns { get; private set; }
+
     public PlaybackState State
     {
         get { lock (_gate) return _state; }
@@ -264,6 +314,10 @@ public sealed class PlaybackEngine
             _skipNextStep = false;
             _cursor = null;
             _glideTarget = null;
+            _glideDuringDelay = null;
+            _glideAbsorbedBy = null;
+            CurrentRun = 0;
+            TotalRuns = span is not null ? 1 : macro.RepeatCount;
         }
 
         SetState(PlaybackState.Running);
@@ -283,6 +337,7 @@ public sealed class PlaybackEngine
         var steps = macro.Steps;
         var blocks = BlockStructure.Analyze(steps);
         int? totalIterations = span is not null ? 1 : macro.RepeatCount == 0 ? (int?)null : macro.RepeatCount;
+        var configuredTotalRuns = totalIterations ?? 0;
         var repeatDelayMs = span is null ? macro.RepeatDelayMs : 0;
 
         PlaybackResult result;
@@ -320,13 +375,23 @@ public sealed class PlaybackEngine
                     // Pause between loops (never before the first run or after the last one).
                     if (iteration > 1 && repeatDelayMs > 0)
                     {
+                        ResetTimeline();
                         AdvanceTimeline(Vary(repeatDelayMs / current.Speed));
                         await WaitForTimelineAsync(token).ConfigureAwait(false);
                     }
 
+                    // Reset the master timeline at the start of every single repeat iteration so any wall-clock
+                    // time spent in Run #N never spills over or skips delays/movements in Run #(N+1).
+                    ResetTimeline();
+
                     current.Iteration = iteration;
+                    CurrentRun = iteration;
+                    RunStarted?.Invoke(this, new PlaybackRunInfo(iteration, configuredTotalRuns));
+                    OnRunStarted?.Invoke(iteration, configuredTotalRuns);
                     _cursor = null;
                     _glideTarget = null;
+                    _glideDuringDelay = null;
+                    _glideAbsorbedBy = null;
                     await RunStepsAsync(current, token).ConfigureAwait(false);
                     if (current.TotalIterations is null || iteration < current.TotalIterations)
                     {
@@ -490,8 +555,38 @@ public sealed class PlaybackEngine
 
     private void ResetTimeline() => _timelineTarget = _clock.Elapsed;
 
+    /// <summary>
+    /// Ensures <see cref="_timelineTarget"/> is never more than <see cref="MaxTimelineLag"/> behind <see cref="_clock"/>
+    /// before scheduling the next wait or glide, preventing accumulated clock debt from skipping steps in 0 ms.
+    /// </summary>
+    private void ClampTimelineBacklog()
+    {
+        var now = _clock.Elapsed;
+        var lag = now - _timelineTarget;
+        if (lag > MaxTimelineLag)
+        {
+            _timelineShift += lag;
+            _timelineTarget = now;
+        }
+    }
+
+    /// <summary>
+    /// Resynchronises <see cref="_timelineTarget"/> to <see cref="_clock"/> after a step that performs its own internal
+    /// waits or sleeps (clicks, smooth glides, key holds, scrolls, searches, sequences, or condition checks).
+    /// </summary>
+    private void SyncTimelineToNow()
+    {
+        var now = _clock.Elapsed;
+        if (now > _timelineTarget)
+        {
+            _timelineShift += now - _timelineTarget;
+            _timelineTarget = now;
+        }
+    }
+
     private void AdvanceTimeline(double milliseconds)
     {
+        ClampTimelineBacklog();
         if (milliseconds > 0) _timelineTarget += TimeSpan.FromTicks((long)Math.Round(milliseconds * TimeSpan.TicksPerMillisecond));
     }
 
@@ -649,9 +744,9 @@ public sealed class PlaybackEngine
                     {
                         await PerformFoundActionAsync(ifStep.ThenAction, answer.X + ifStep.ThenOffsetX, answer.Y + ifStep.ThenOffsetY,
                             ifStep.ThenHoldMs, FoundActionTiming.Default, run.Held, token, answer.Match).ConfigureAwait(false);
-                        ResetTimeline();
                     }
 
+                    SyncTimelineToNow();
                     var elseIndex = blocks.ElseOf(pc);
                     pc = answer.IsTrue ? pc + 1 : (elseIndex >= 0 ? elseIndex + 1 : blocks.EndOf(pc) + 1);
                     break;
@@ -689,6 +784,7 @@ public sealed class PlaybackEngine
                         pc = blocks.EndOf(pc) + 1;
                     }
 
+                    SyncTimelineToNow();
                     break;
                 }
 
@@ -717,12 +813,14 @@ public sealed class PlaybackEngine
                         pc++;
                     }
 
+                    SyncTimelineToNow();
                     break;
                 }
 
                 case FeedbackLoopStep feedback when feedback.Enabled:
                     Report(run, pc, loops);
                     await RunFeedbackLoopAsync(run, pc, loops, feedback, token).ConfigureAwait(false);
+                    SyncTimelineToNow();
                     run.StepsExecuted++;
                     pc++;
                     break;
@@ -733,6 +831,7 @@ public sealed class PlaybackEngine
                     {
                         // Smooth mouse: a Delay right before a cursor jump glides there (see SmoothMouseMoves).
                         _glideTarget = step is DelayStep && pc + 1 < steps.Count ? JumpTargetOf(steps[pc + 1]) : null;
+                        _glideDuringDelay = step is DelayStep delay && pc + 1 < steps.Count ? RecordedGlideAfter(delay, steps[pc + 1]) : null;
                         Report(run, pc, loops);
                         await ExecuteStepAsync(step, run.Speed, run.Held, token).ConfigureAwait(false);
                         run.StepsExecuted++;
@@ -1120,6 +1219,24 @@ public sealed class PlaybackEngine
     {
         switch (step)
         {
+            case DelayStep d when _glideDuringDelay is { } next:
+            {
+                // Recorded point: glide to the next Move's spot over this Delay (its recorded gap), not after it.
+                _glideDuringDelay = null;
+                ClampTimelineBacklog();
+                var deadline = _timelineTarget + TimeSpan.FromTicks((long)Math.Round(d.DurationMs / speed * TimeSpan.TicksPerMillisecond));
+                await MoveCursorAsync(next.X, next.Y, next.MoveStyle, d.DurationMs, speed, onTimeline: true, token).ConfigureAwait(false);
+                _glideAbsorbedBy = next;
+                if (_timelineTarget < deadline)
+                {
+                    // The glide was skipped (unknown start) or ended early: the Delay still lasts its full time.
+                    _timelineTarget = deadline;
+                    await WaitForTimelineAsync(token).ConfigureAwait(false);
+                }
+
+                break;
+            }
+
             case DelayStep d:
                 if (SmoothMouseMoves && _glideTarget is { } target && d.DurationMs > 0)
                 {
@@ -1142,7 +1259,14 @@ public sealed class PlaybackEngine
                 await WaitForTimelineAsync(token).ConfigureAwait(false);
                 break;
 
+            case MouseMoveStep m when ReferenceEquals(_glideAbsorbedBy, m):
+                // Its glide already happened during the Delay before it: just make sure it ends exactly on the spot.
+                _glideAbsorbedBy = null;
+                if (_cursor != (m.X, m.Y)) MoveTo(m.X, m.Y);
+                break;
+
             case MouseMoveStep m:
+                _glideAbsorbedBy = null;
                 await MoveCursorAsync(m.X, m.Y, m.MoveStyle, m.MoveDurationMs, speed, onTimeline: true, token).ConfigureAwait(false);
                 break;
 
@@ -1220,11 +1344,14 @@ public sealed class PlaybackEngine
                         await DragAsync(c, start, speed, held, token).ConfigureAwait(false);
                         break;
                 }
+
+                SyncTimelineToNow();
                 break;
 
             case MouseScrollStep s:
                 if (!s.UseCurrentPosition) MoveTo(s.X, s.Y);
                 await ScrollInNotchesAsync(s.Delta, s.Horizontal, token).ConfigureAwait(false);
+                SyncTimelineToNow();
                 break;
 
             case KeyPressStep k:
@@ -1277,6 +1404,7 @@ public sealed class PlaybackEngine
                             held.Keys.Remove(new HeldKey(modifiers[i]));
                         }
 
+                        SyncTimelineToNow();
                         break;
                     }
                     case KeyAction.Press:
@@ -1301,12 +1429,12 @@ public sealed class PlaybackEngine
 
             case TypeTextStep t:
                 await TypeTextAsync(t, speed, token).ConfigureAwait(false);
-                ResetTimeline(); // typing takes as long as it takes; start timing again from here
+                SyncTimelineToNow(); // typing takes as long as it takes; start timing again from here
                 break;
 
             case FindTextStep or FindImageStep or FindColorStep:
                 await SearchAsync((ScreenSearchStep)step, token).ConfigureAwait(false);
-                ResetTimeline(); // the search takes as long as it takes; start timing again from here
+                SyncTimelineToNow(); // the search takes as long as it takes; start timing again from here
                 break;
 
             case InputSequenceStep q:
@@ -1330,15 +1458,25 @@ public sealed class PlaybackEngine
     private async Task PlaySequenceAsync(InputSequenceStep step, double speed, HeldInput held, CancellationToken token)
     {
         var events = step.Events;
-        if (step.MoveCursorToStart) MoveTo(step.StartX, step.StartY);
-
         var segments = step.HasMouseSegments ? step.MouseSegments! : null;
         var segmentIndex = 0;
         var mode = segments is null ? MouseMovementMode.Relative : segments[0].Effective;
         (int X, int Y)? cursorSent = null; // last position a move put the cursor on (repeated moves are skipped)
 
-        // If the previous steps left us far behind schedule, start this recording from "now".
-        if (_clock.Elapsed - _timelineTarget > MaxTimelineLag) ResetTimeline();
+        if (step.MoveCursorToStart)
+        {
+            MoveTo(step.StartX, step.StartY);
+            if (mode == MouseMovementMode.CursorPosition)
+                cursorSent = (step.StartX, step.StartY);
+        }
+        else if (CurrentRun > 1 && mode == MouseMovementMode.CursorPosition && (step.StartX != 0 || step.StartY != 0))
+        {
+            MoveTo(step.StartX, step.StartY);
+            cursorSent = (step.StartX, step.StartY);
+        }
+
+        // Start this sequence's relative timeline cleanly at t = 0 from the current clock position.
+        SyncTimelineToNow();
 
         var stepStart = _timelineTarget;
         var shiftAtStart = _timelineShift;
@@ -1397,6 +1535,7 @@ public sealed class PlaybackEngine
 
                         _input.MouseButton(e.Button, true);
                         held.Buttons.Add(e.Button);
+                        ClampTimelineBacklog();
                         break;
                     case InputEventKind.MouseUp:
                         // Only if the cursor isn't already there (normally the last move put it there).
@@ -1408,6 +1547,7 @@ public sealed class PlaybackEngine
 
                         _input.MouseButton(e.Button, false);
                         held.Buttons.Remove(e.Button);
+                        ClampTimelineBacklog();
                         break;
                     case InputEventKind.Wheel:
                     case InputEventKind.HorizontalWheel:
@@ -1418,6 +1558,7 @@ public sealed class PlaybackEngine
                         }
 
                         _input.Scroll(e.Delta, e.Kind == InputEventKind.HorizontalWheel);
+                        ClampTimelineBacklog();
                         break;
                     case InputEventKind.KeyDown:
                     {
@@ -1453,6 +1594,8 @@ public sealed class PlaybackEngine
                     held.Buttons.Remove(button);
                 }
             }
+
+            SyncTimelineToNow();
         }
     }
 
@@ -1671,6 +1814,7 @@ public sealed class PlaybackEngine
     {
         _input.MouseButton(c.Button, true);
         held.Buttons.Add(c.Button);
+        ClampTimelineBacklog();
 
         var duration = TimeSpan.FromMilliseconds(Vary(Math.Max(0, c.DragDurationMs) / speed));
         var steps = start is null ? 1 : Math.Max(1, (int)Math.Ceiling(duration / DragStepInterval));
@@ -1696,6 +1840,7 @@ public sealed class PlaybackEngine
 
         _input.MouseButton(c.Button, false);
         held.Buttons.Remove(c.Button);
+        SyncTimelineToNow();
     }
 
     /// <summary>Absolute cursor move; remembers the spot so a later glide knows where it starts.</summary>
@@ -1718,6 +1863,16 @@ public sealed class PlaybackEngine
     };
 
     /// <summary>
+    /// The Move step that should glide during <paramref name="delay"/> (see <see cref="RecordedPointMaxDelayMs"/>), or
+    /// null: only an enabled Move mouse step with Smooth glide / Human curve whose glide is longer than a short Delay.
+    /// </summary>
+    private static MouseMoveStep? RecordedGlideAfter(DelayStep delay, MacroStep next) =>
+        next is MouseMoveStep { Enabled: true, MoveStyle: MouseMoveStyle.SmoothGlide or MouseMoveStyle.HumanCurve } move
+        && delay.DurationMs > 0 && delay.DurationMs <= RecordedPointMaxDelayMs && move.MoveDurationMs > delay.DurationMs
+            ? move
+            : null;
+
+    /// <summary>
     /// Smooth mouse movement (see <see cref="SmoothMouseMoves"/>): glides the cursor from where it is to
     /// <paramref name="target"/> over <paramref name="duration"/> (on the timeline, so the time is taken out of the
     /// Delay that comes before the jump). Does nothing when the start is unknown or the jump is tiny.
@@ -1730,6 +1885,7 @@ public sealed class PlaybackEngine
         else return;
         if (Math.Abs(target.X - from.X) + Math.Abs(target.Y - from.Y) < 3) return;
 
+        ClampTimelineBacklog();
         var steps = Math.Max(1, (int)Math.Floor(duration / GlideStepInterval));
         var stepTime = duration / steps;
         for (var i = 1; i <= steps; i++)
@@ -1822,7 +1978,7 @@ public sealed class PlaybackEngine
 
         var duration = TimeSpan.FromMilliseconds(Vary(durationMs / (speed > 0 ? speed : 1.0)));
         var plan = MouseMotion.Plan(from, (x, y), glide, duration, GlideStepInterval);
-        if (onTimeline && _clock.Elapsed - _timelineTarget > MaxTimelineLag) ResetTimeline(); // far behind: glide from "now"
+        if (onTimeline) ClampTimelineBacklog(); // far behind: glide from "now"
 
         var previousAt = TimeSpan.Zero;
         (int X, int Y)? sent = from;
@@ -1851,6 +2007,7 @@ public sealed class PlaybackEngine
         }
 
         if (!moved || sent != (x, y)) MoveTo(x, y);
+        if (onTimeline) SyncTimelineToNow();
     }
 
     private async Task TypeTextAsync(TypeTextStep step, double speed, CancellationToken token)
