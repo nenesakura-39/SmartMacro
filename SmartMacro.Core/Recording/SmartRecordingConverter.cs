@@ -251,7 +251,7 @@ public static class SmartRecordingConverter
                 lastY = k.Y;
             }
 
-            output.Add(new CapturedInputEvent(k, captured.Cursor));
+            output.Add(new CapturedInputEvent(k, captured.Cursor, k.Kind == InputEventKind.MouseDown ? captured.ClickedTarget : null));
         }
 
         if (output.Count == 0) return output;
@@ -397,7 +397,7 @@ public static class SmartRecordingConverter
                     if (options.RecordMouseMoves && e.HasPosition) raw.Add(new RawInputEvent(ms, RawInputKind.MouseMove, X: x, Y: y));
                     break;
                 case InputEventKind.MouseDown:
-                    raw.Add(new RawInputEvent(ms, RawInputKind.MouseDown, X: x, Y: y, Button: e.Button));
+                    raw.Add(new RawInputEvent(ms, RawInputKind.MouseDown, X: x, Y: y, Button: e.Button, ClickedTarget: events[i].ClickedTarget));
                     break;
                 case InputEventKind.MouseUp:
                     raw.Add(new RawInputEvent(ms, RawInputKind.MouseUp, X: x, Y: y, Button: e.Button));

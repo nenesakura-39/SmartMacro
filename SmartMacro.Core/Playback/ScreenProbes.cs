@@ -8,9 +8,11 @@ namespace SmartMacro.Core.Playback;
 /// Result of one look at the screen. Found = the text / image / colour is there. X / Y is the spot to act on
 /// (screen pixels). FoundText describes the find for the log; MissText (starting with a space) explains a miss,
 /// e.g. what OCR read instead. Area is the screen rectangle that was searched (empty when it couldn't be searched).
-/// Match is the rectangle of what was found (empty on a miss).
+/// Match is the rectangle of what was found (empty on a miss). Confidence is how sure the find is (0..1: the image's
+/// similarity, the text's match; 1 for a colour patch).
 /// </summary>
-public readonly record struct ScreenProbe(bool Found, int X, int Y, string FoundText, string MissText, ScreenRect Area = default, ScreenRect Match = default)
+public readonly record struct ScreenProbe(bool Found, int X, int Y, string FoundText, string MissText, ScreenRect Area = default, ScreenRect Match = default,
+    double Confidence = 1.0)
 {
     public static ScreenProbe Miss(string missText, ScreenRect area = default) => new(false, 0, 0, string.Empty, missText, area);
 }
@@ -109,7 +111,8 @@ public sealed class ScreenProbes
             return match is null
                 ? ScreenProbe.Miss(DescribeLastRead(read.FullText), region)
                 : new ScreenProbe(true, match.Bounds.CenterX, match.Bounds.CenterY,
-                    $"Found \"{match.Text}\" at ({match.Bounds.CenterX}, {match.Bounds.CenterY}), {match.Similarity:P0} match.", string.Empty, region, match.Bounds);
+                    $"Found \"{match.Text}\" at ({match.Bounds.CenterX}, {match.Bounds.CenterY}), {match.Similarity:P0} match.", string.Empty, region, match.Bounds,
+                    match.Similarity);
         });
     }
 
@@ -148,7 +151,7 @@ public sealed class ScreenProbes
             var bounds = frame.ToScreen(best.Bounds);
             var more = result.Matches.Count > 1 ? $" ({result.Matches.Count} matches; the best one is used)" : "";
             return new ScreenProbe(true, bounds.CenterX, bounds.CenterY,
-                $"Found the image at ({bounds.CenterX}, {bounds.CenterY}), {best.Score:P0} match{more}.", string.Empty, region, bounds);
+                $"Found the image at ({bounds.CenterX}, {bounds.CenterY}), {best.Score:P0} match{more}.", string.Empty, region, bounds, best.Score);
         });
     }
 

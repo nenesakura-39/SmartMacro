@@ -16,6 +16,8 @@ public enum HotkeyAction
 /// <summary>
 /// System-wide shortcuts (they work even when SmartMacro is minimized), registered with RegisterHotKey.
 /// The keys come from Settings and can be changed while the app runs.
+/// Record and Play / Stop are always registered. Pause / Resume (F8 by default) is only registered while a macro plays
+/// (<see cref="SetPauseActive"/>), so the key keeps working normally in other apps the rest of the time.
 /// </summary>
 public sealed class HotkeyService : IDisposable
 {
@@ -23,6 +25,9 @@ public sealed class HotkeyService : IDisposable
     private readonly List<int> _registered = new();
     private HwndSource? _source;
     private IntPtr _hwnd;
+    private HotkeyBinding _pauseBinding = HotkeyBinding.DefaultPause;
+    private bool _pauseActive;
+    private bool _pauseRegistered;
 
     public HotkeyService(ILogService log)
     {
@@ -46,8 +51,37 @@ public sealed class HotkeyService : IDisposable
         var failed = new List<string>();
         Register(HotkeyAction.ToggleRecording, settings.RecordHotkey, failed);
         Register(HotkeyAction.TogglePlayback, settings.PlayHotkey, failed);
-        Register(HotkeyAction.TogglePause, settings.PauseHotkey, failed);
+        _pauseBinding = settings.PauseHotkey;
+        if (_pauseActive) RegisterPause(failed);
         return failed;
+    }
+
+    /// <summary>
+    /// Turns the pause / resume shortcut on while a macro plays (or is paused) and off again afterwards. Call on the UI
+    /// thread. A shortcut another program already uses is logged once per playback.
+    /// </summary>
+    public void SetPauseActive(bool active)
+    {
+        if (_pauseActive == active) return;
+        _pauseActive = active;
+        if (active)
+        {
+            RegisterPause(null);
+        }
+        else if (_pauseRegistered)
+        {
+            UnregisterHotKey(_hwnd, (int)HotkeyAction.TogglePause);
+            _registered.Remove((int)HotkeyAction.TogglePause);
+            _pauseRegistered = false;
+        }
+    }
+
+    private void RegisterPause(List<string>? failed)
+    {
+        if (_pauseRegistered) return;
+        var count = _registered.Count;
+        Register(HotkeyAction.TogglePause, _pauseBinding, failed ?? new List<string>());
+        _pauseRegistered = _registered.Count > count;
     }
 
     public void Dispose()
@@ -83,6 +117,7 @@ public sealed class HotkeyService : IDisposable
     {
         foreach (var id in _registered) UnregisterHotKey(_hwnd, id);
         _registered.Clear();
+        _pauseRegistered = false;
     }
 
     private IntPtr WndProc(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)

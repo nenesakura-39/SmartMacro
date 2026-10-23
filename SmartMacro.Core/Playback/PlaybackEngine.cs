@@ -54,6 +54,30 @@ public sealed record PlaybackRunInfo(int CurrentRun, int TotalRuns)
 /// </summary>
 public sealed record PlaybackProgress(int Iteration, int? TotalIterations, int StepNumber, int StepCount, MacroStep Step, string? LoopText = null);
 
+/// <summary>
+/// "Last found target" memory: where the most recent Find text / image / color step, If / Repeat condition or feedback
+/// loop condition found something in this run (screen pixels). X / Y / Width / Height = the rectangle of what was found
+/// (0 × 0 when only a point is known); CenterX / CenterY = the spot clicks use (a colour patch's middle, a match's center).
+/// Mouse click / Move mouse steps with "On the last found spot" act at (CenterX + OffsetX, CenterY + OffsetY).
+/// </summary>
+public readonly record struct FoundRect(int X, int Y, int Width, int Height, int CenterX, int CenterY)
+{
+    public ScreenRect Bounds => new(X, Y, Width, Height);
+
+    /// <summary>The rectangle of a match (its center as the click spot unless another spot is given).</summary>
+    public static FoundRect From(int centerX, int centerY, ScreenRect bounds) =>
+        bounds.IsEmpty
+            ? new FoundRect(centerX, centerY, 0, 0, centerX, centerY)
+            : new FoundRect(bounds.X, bounds.Y, bounds.Width, bounds.Height, centerX, centerY);
+}
+
+/// <summary>
+/// AAA live vision: something a step just found on screen, for the on-screen "target lock" reticle. Bounds = the
+/// rectangle of what was found (screen pixels; a small square around the spot when only a point is known), X / Y = the
+/// spot clicks use, Confidence = 0..1 (how similar it was), Label = what found it ("Find image", "If", "Smart-Aim"…).
+/// </summary>
+public sealed record TargetDetection(ScreenRect Bounds, double Confidence, string Label, int X, int Y);
+
 /// <summary>Thrown when a Repeat block reaches its safety limit (max turns / max time) and is set to stop the macro.</summary>
 public sealed class LoopLimitException : Exception
 {
@@ -123,6 +147,30 @@ public sealed class PlaybackEngine
     /// <summary>Longest glide before a cursor jump (ms of the preceding Delay that is used for gliding).</summary>
     public const int MaxGlideMs = 200;
 
+    /// <summary>
+    /// Speed never shortens a button / key hold below this (or below the original hold if that was shorter): games read
+    /// input once per frame, so a 35 ms click played at 5× (7 ms) could be missed. 25 ms spans a frame at 60 fps.
+    /// </summary>
+    public const int MinScaledHoldMs = 25;
+
+    /// <summary>Humanize only varies delays at least this long (short recorded gaps keep their exact rhythm).</summary>
+    public const int HumanizeMinDelayMs = 40;
+
+    /// <summary>Humanize: smooth glides bend sideways by up to this share of the distance (a natural hand arc)…</summary>
+    public const double HumanizeArc = 0.05;
+
+    /// <summary>…but never more than this many pixels.</summary>
+    public const double HumanizeMaxArcPixels = 24;
+
+    /// <summary>Slowest / fastest live playback speed.</summary>
+    public const double MinLiveSpeed = 0.1;
+
+    public const double MaxLiveSpeed = 10.0;
+
+    // Live speed change requested from the UI (NaN = none pending). Read by the playback thread before each step.
+    private double _pendingSpeed = double.NaN;
+    private readonly object _speedGate = new();
+
     /// <summary>Time between cursor updates while gliding or dragging (~120 per second).</summary>
     public static readonly TimeSpan GlideStepInterval = TimeSpan.FromMilliseconds(8);
 
@@ -165,6 +213,11 @@ public sealed class PlaybackEngine
     // jittered click inside it.
     private ScreenRect _lastFoundBounds;
 
+    // Smart-Aim (Smart Click Snapshots): decoded thumbnails per click step (null = unusable), and the last log line per
+    // step so a click inside a loop doesn't log the same thing every turn. Per run.
+    private readonly Dictionary<Guid, BgraImage?> _smartAimTemplates = new();
+    private readonly Dictionary<Guid, string> _smartAimLastNote = new();
+
     // Humanize (per run, from the macro): random click offset (px) and timing variation (%).
     private bool _humanize;
     private int _clickJitterPx;
@@ -204,9 +257,9 @@ public sealed class PlaybackEngine
     /// Humanize: a duration in ms with up to ± the macro's timing variation (e.g. 1000 ms → 920…1080 ms at 8 %).
     /// Unchanged when Humanize is off.
     /// </summary>
-    private double Vary(double milliseconds)
+    private double Vary(double milliseconds, double minimumMs = 0)
     {
-        if (!_humanize || _delayJitterPercent <= 0 || milliseconds <= 0) return milliseconds;
+        if (!_humanize || _delayJitterPercent <= 0 || milliseconds <= 0 || milliseconds < minimumMs) return milliseconds;
         var factor = 1.0 + (HumanizeRandom.NextDouble() * 2.0 - 1.0) * _delayJitterPercent / 100.0;
         return Math.Max(0, milliseconds * factor);
     }
@@ -244,6 +297,63 @@ public sealed class PlaybackEngine
     /// <summary>Raised on the playback thread before each step. Keep handlers fast.</summary>
     public event EventHandler<PlaybackProgress>? ProgressChanged;
 
+    /// <summary>Raised (true / false) whenever playback is paused or resumed, on the thread that did it.</summary>
+    public event EventHandler<bool>? PausedChanged;
+
+    /// <summary>
+    /// AAA live vision: raised on the playback thread whenever a Find image / color / text step, an If / Repeat condition or
+    /// a Smart-Aim click finds its target. The app draws a short "target lock" reticle there. Keep handlers fast.
+    /// </summary>
+    public event EventHandler<TargetDetection>? TargetDetected;
+
+    /// <summary>True while playback is paused (Pause / F8).</summary>
+    public bool IsPaused => State == PlaybackState.Paused;
+
+    /// <summary>The speed the current run plays at (1 = recorded speed); the macro's Speed when idle.</summary>
+    public double CurrentSpeed { get; private set; } = 1.0;
+
+    /// <summary>
+    /// Live speed change (the editor's speed selector while playing): the running macro continues at
+    /// <paramref name="speed"/> (clamped to 0.1–10) from its next step. A step already running (a long Delay or recorded
+    /// input) finishes at the old speed. No effect when nothing plays.
+    /// </summary>
+    public void SetPlaybackSpeed(double speed)
+    {
+        if (double.IsNaN(speed) || double.IsInfinity(speed)) return;
+        lock (_speedGate) _pendingSpeed = Math.Clamp(speed, MinLiveSpeed, MaxLiveSpeed);
+    }
+
+    private double? TakePendingSpeed()
+    {
+        lock (_speedGate)
+        {
+            if (double.IsNaN(_pendingSpeed)) return null;
+            var speed = _pendingSpeed;
+            _pendingSpeed = double.NaN;
+            return speed;
+        }
+    }
+
+    /// <summary>Tells the overlay what was found (bounds may be empty: then a small square around the spot is used).</summary>
+    private void ReportTarget(int x, int y, ScreenRect bounds, double confidence, string label)
+    {
+        if (TargetDetected is not { } handler) return;
+        var box = bounds.IsEmpty ? new ScreenRect(x - 12, y - 12, 24, 24) : bounds;
+        try { handler(this, new TargetDetection(box, Math.Clamp(confidence, 0, 1), label, x, y)); }
+        catch (Exception ex) { Message?.Invoke(this, $"Target overlay error: {ex.Message}"); }
+    }
+
+    /// <summary>
+    /// A hold time (ms) on the playback timeline at <paramref name="speed"/>: divided by the speed, but never below
+    /// <see cref="MinScaledHoldMs"/> (or the original hold, if that was even shorter), so fast playback still registers.
+    /// </summary>
+    public static double ScaledHoldMs(int holdMs, double speed)
+    {
+        if (holdMs <= 0) return 0;
+        var scaled = holdMs / (speed > 0 ? speed : 1.0);
+        return Math.Max(scaled, Math.Min(holdMs, MinScaledHoldMs));
+    }
+
     /// <summary>Raised on the playback thread at the start of each macro repeat iteration (1-based run number, 0 = infinite).</summary>
     public event EventHandler<PlaybackRunInfo>? RunStarted;
 
@@ -255,6 +365,28 @@ public sealed class PlaybackEngine
 
     /// <summary>Total configured runs for the current playback (0 when repeating infinitely).</summary>
     public int TotalRuns { get; private set; }
+
+    /// <summary>
+    /// "Last found target" of the current (or most recent) run: what the latest Find step / If / Repeat / feedback
+    /// condition found, or null when nothing has been found yet (or a Find step that "continues" timed out since).
+    /// </summary>
+    public FoundRect? LastFoundRect { get; private set; }
+
+    /// <summary>Remembers what a Find step / condition just found ("last found target").</summary>
+    private void RememberFound(int x, int y, ScreenRect match)
+    {
+        _lastFound = (x, y);
+        _lastFoundBounds = match;
+        LastFoundRect = FoundRect.From(x, y, match);
+    }
+
+    /// <summary>Forgets the last found target (a Find step that was set to continue didn't find anything).</summary>
+    private void ForgetFound()
+    {
+        _lastFound = null;
+        _lastFoundBounds = default;
+        LastFoundRect = null;
+    }
 
     public PlaybackState State
     {
@@ -311,6 +443,10 @@ public sealed class PlaybackEngine
             _resumeSignal = null;
             _lastFound = null;
             _lastFoundBounds = default;
+            LastFoundRect = null;
+            _pendingSpeed = double.NaN;
+            _smartAimTemplates.Clear();
+            _smartAimLastNote.Clear();
             _skipNextStep = false;
             _cursor = null;
             _glideTarget = null;
@@ -354,6 +490,7 @@ public sealed class PlaybackEngine
                 Message?.Invoke(this, $"Coordinates adjusted to the {targetName}: {mapping}.");
             }
 
+            CurrentSpeed = macro.Speed;
             var current = new RunContext(steps, blocks, macro.Speed, held, new ScreenConditionEvaluator(_probes), totalIterations,
                 span?.Start ?? 0, span?.End ?? steps.Count);
             run = current;
@@ -376,7 +513,7 @@ public sealed class PlaybackEngine
                     if (iteration > 1 && repeatDelayMs > 0)
                     {
                         ResetTimeline();
-                        AdvanceTimeline(Vary(repeatDelayMs / current.Speed));
+                        AdvanceTimeline(Vary(repeatDelayMs / current.Speed, HumanizeMinDelayMs));
                         await WaitForTimelineAsync(token).ConfigureAwait(false);
                     }
 
@@ -459,7 +596,16 @@ public sealed class PlaybackEngine
             _state = PlaybackState.Paused;
         }
 
+        // Let go of everything right now (not only when the playback thread reaches its next check, up to 50 ms later),
+        // so no key or button stays stuck while paused. The playback thread presses what it was holding again on resume.
+        if (ReleaseHeldInputWhilePaused)
+        {
+            try { _input.ReleaseAllHeldInputs(); }
+            catch (Exception ex) { Message?.Invoke(this, $"Could not release held input when pausing: {ex.Message}"); }
+        }
+
         StateChanged?.Invoke(this, PlaybackState.Paused);
+        PausedChanged?.Invoke(this, true);
         return true;
     }
 
@@ -474,15 +620,21 @@ public sealed class PlaybackEngine
         }
 
         StateChanged?.Invoke(this, PlaybackState.Running);
+        PausedChanged?.Invoke(this, false);
         return true;
     }
+
+    /// <summary>Pause when playing, resume when paused (the F8 / ⏸ button). Returns true if it changed something.</summary>
+    public bool TogglePause() => State == PlaybackState.Paused ? Resume() : Pause();
 
     /// <summary>Stops as soon as possible. Safe to call any time, from any thread.</summary>
     public bool Stop()
     {
+        bool wasPaused;
         lock (_gate)
         {
             if (_state is not (PlaybackState.Running or PlaybackState.Paused)) return false;
+            wasPaused = _state == PlaybackState.Paused;
             _state = PlaybackState.Stopping;
             _cts?.Cancel();
             _resumeSignal?.TrySetResult();
@@ -490,6 +642,7 @@ public sealed class PlaybackEngine
         }
 
         StateChanged?.Invoke(this, PlaybackState.Stopping);
+        if (wasPaused) PausedChanged?.Invoke(this, false);
         return true;
     }
 
@@ -663,7 +816,9 @@ public sealed class PlaybackEngine
 
         public List<MacroStep> Steps { get; }
         public BlockStructure Blocks { get; }
-        public double Speed { get; }
+        /// <summary>Playback speed; the editor's live speed selector can change it between steps.</summary>
+        public double Speed { get; set; }
+
         public HeldInput Held { get; }
         public IConditionEvaluator Conditions { get; }
         public int? TotalIterations { get; }
@@ -722,6 +877,13 @@ public sealed class PlaybackEngine
             await WaitIfPausedAsync(token).ConfigureAwait(false);
             token.ThrowIfCancellationRequested();
 
+            if (TakePendingSpeed() is { } newSpeed && !newSpeed.Equals(run.Speed))
+            {
+                run.Speed = newSpeed;
+                CurrentSpeed = newSpeed;
+                Message?.Invoke(this, $"Playback speed changed to {newSpeed:0.##}× (from step {pc + 1}).");
+            }
+
             var step = steps[pc];
             switch (step)
             {
@@ -735,7 +897,7 @@ public sealed class PlaybackEngine
                     }
 
                     Report(run, pc, loops);
-                    var answer = await EvaluateConditionAsync(run, ifStep.Condition, token).ConfigureAwait(false);
+                    var answer = await EvaluateConditionAsync(run, ifStep.Condition, token, label: "If").ConfigureAwait(false);
                     run.StepsExecuted++;
                     LogIfAnswer(run, pc, answer.IsTrue, answer.Text);
 
@@ -935,8 +1097,8 @@ public sealed class PlaybackEngine
         var answer = grace > 0
             ? await EvaluateConditionAsync(run, condition, token,
                 stopWhen: c => KeepGoing(c.IsTrue),
-                window: TimeSpan.FromMilliseconds(Math.Max(grace, condition.Search!.TimeoutMs))).ConfigureAwait(false)
-            : await EvaluateConditionAsync(run, condition, token).ConfigureAwait(false);
+                window: TimeSpan.FromMilliseconds(Math.Max(grace, condition.Search!.TimeoutMs)), label: "Repeat").ConfigureAwait(false)
+            : await EvaluateConditionAsync(run, condition, token, label: "Repeat").ConfigureAwait(false);
         frame.LastCheckAt = ActiveTime;
 
         var keepGoing = KeepGoing(answer.IsTrue);
@@ -971,7 +1133,7 @@ public sealed class PlaybackEngine
     /// checks. When the condition sees its text / image / colour, that spot becomes the "last found" spot for clicks.
     /// </summary>
     private async Task<ConditionAnswer> EvaluateConditionAsync(RunContext run, Condition condition, CancellationToken token,
-        Func<ConditionCheck, bool>? stopWhen = null, TimeSpan? window = null)
+        Func<ConditionCheck, bool>? stopWhen = null, TimeSpan? window = null, string label = "Condition")
     {
         var conditions = run.Conditions;
         var search = condition.Search ?? throw new InvalidOperationException("This condition has no valid search settings. The macro may be damaged.");
@@ -987,11 +1149,7 @@ public sealed class PlaybackEngine
             token.ThrowIfCancellationRequested();
 
             check = await conditions.CheckAsync(condition, timer, token).ConfigureAwait(false);
-            if (check.Seen)
-            {
-                _lastFound = (check.X, check.Y);
-                _lastFoundBounds = check.Match;
-            }
+            if (check.Seen) RememberFound(check.X, check.Y, check.Match);
 
             if (stopWhen(check) || ActiveTime - started >= timeout) break;
 
@@ -999,6 +1157,7 @@ public sealed class PlaybackEngine
         }
 
         ResetTimeline(); // checking takes as long as it takes; start timing again from here
+        if (check.Seen) ReportTarget(check.X, check.Y, check.Match, check.Confidence, label);
         var stats = timer is null ? string.Empty : " " + timer.Describe(ActiveTime - started);
         return new ConditionAnswer(check.IsTrue, $"({conditions.Describe(condition)}: {(check.IsTrue ? "true" : "false")}) {check.Details}{stats}",
             check.Seen, check.X, check.Y, check.Match);
@@ -1204,11 +1363,7 @@ public sealed class PlaybackEngine
     {
         var check = await run.Conditions.CheckAsync(condition, null, token).ConfigureAwait(false);
         stats.ConditionChecks++;
-        if (check.Seen)
-        {
-            _lastFound = (check.X, check.Y);
-            _lastFoundBounds = check.Match;
-        }
+        if (check.Seen) RememberFound(check.X, check.Y, check.Match);
 
         return check;
     }
@@ -1241,7 +1396,7 @@ public sealed class PlaybackEngine
                 if (SmoothMouseMoves && _glideTarget is { } target && d.DurationMs > 0)
                 {
                     // Wait for the first part of the Delay, then glide to the next step's spot during the rest.
-                    var total = Vary(d.DurationMs / speed);
+                    var total = Vary(d.DurationMs / speed, HumanizeMinDelayMs);
                     var glide = Math.Min(total, MaxGlideMs);
                     AdvanceTimeline(total - glide);
                     await WaitForTimelineAsync(token).ConfigureAwait(false);
@@ -1253,7 +1408,7 @@ public sealed class PlaybackEngine
                 }
                 else
                 {
-                    AdvanceTimeline(Vary(d.DurationMs / speed));
+                    AdvanceTimeline(Vary(d.DurationMs / speed, HumanizeMinDelayMs));
                 }
 
                 await WaitForTimelineAsync(token).ConfigureAwait(false);
@@ -1264,6 +1419,17 @@ public sealed class PlaybackEngine
                 _glideAbsorbedBy = null;
                 if (_cursor != (m.X, m.Y)) MoveTo(m.X, m.Y);
                 break;
+
+            case MouseMoveStep m when m.TargetMode != ClickTargetMode.Coordinates:
+            {
+                // "To the last found spot (+ offset)" / "By the offset from where the cursor is".
+                _glideAbsorbedBy = null;
+                if (MoveTargetOf(m) is { } moveTo)
+                    await MoveCursorAsync(moveTo.X, moveTo.Y, m.MoveStyle, m.MoveDurationMs, speed, onTimeline: true, token).ConfigureAwait(false);
+                else
+                    Message?.Invoke(this, "Move by an offset: the cursor position isn't known, so the cursor wasn't moved.");
+                break;
+            }
 
             case MouseMoveStep m:
                 _glideAbsorbedBy = null;
@@ -1276,15 +1442,26 @@ public sealed class PlaybackEngine
                 var jitters = c.Action is MouseClickAction.Click or MouseClickAction.DoubleClick or MouseClickAction.Hold;
                 if (c.UseLastFoundText)
                 {
-                    var found = _lastFound ?? throw new TextNotFoundException(
-                        "This click uses the last found spot, but no Find text / image / color step has found anything yet in this run.");
+                    // "On the last found spot": its center plus the step's offset (e.g. a cell 100 px right of a board).
+                    var center = _lastFound ?? throw new TextNotFoundException(
+                        "This click uses the last found spot, but no Find text / image / color step (or If / Repeat condition) has found anything yet in this run.");
+                    (int X, int Y) found = (center.X + c.OffsetX, center.Y + c.OffsetY);
                     if (jitters) found = Jitter(found.X, found.Y, _lastFoundBounds);
                     await MoveCursorAsync(found.X, found.Y, c.MoveStyle, c.MoveDurationMs, speed, onTimeline: true, token).ConfigureAwait(false);
                     start = found;
                 }
                 else if (!c.UseCurrentPosition)
                 {
-                    (int X, int Y) clickAt = jitters ? Jitter(c.X, c.Y) : (c.X, c.Y);
+                    // Smart-Aim: the recorded target may have moved a little; click the same spot on it (or X / Y if not found).
+                    (int X, int Y) aimSpot = (c.X, c.Y);
+                    var aimBounds = default(ScreenRect);
+                    if (c.SmartAimAtTarget && c.HasTargetThumbnail)
+                    {
+                        (aimSpot, aimBounds) = await SmartAimAsync(c, token).ConfigureAwait(false);
+                        SyncTimelineToNow(); // looking takes as long as it takes; the click's own timing starts now
+                    }
+
+                    (int X, int Y) clickAt = jitters ? Jitter(aimSpot.X, aimSpot.Y, aimBounds) : aimSpot;
                     await MoveCursorAsync(clickAt.X, clickAt.Y, c.MoveStyle, c.MoveDurationMs, speed, onTimeline: true, token).ConfigureAwait(false);
                     start = clickAt;
                 }
@@ -1299,7 +1476,7 @@ public sealed class PlaybackEngine
                         // Keep the button down for the recorded time (tracked, so Stop still releases it).
                         _input.MouseButton(c.Button, true);
                         held.Buttons.Add(c.Button);
-                        AdvanceTimeline(c.HoldMs / speed);
+                        AdvanceTimeline(ScaledHoldMs(c.HoldMs, speed));
                         await WaitForTimelineAsync(token).ConfigureAwait(false);
                         _input.MouseButton(c.Button, false);
                         held.Buttons.Remove(c.Button);
@@ -1334,7 +1511,7 @@ public sealed class PlaybackEngine
                         // Press, keep it down for HoldMs (on the timeline, so Speed applies), release.
                         _input.MouseButton(c.Button, true);
                         held.Buttons.Add(c.Button);
-                        AdvanceTimeline(Math.Max(0, c.HoldMs) / speed);
+                        AdvanceTimeline(ScaledHoldMs(c.HoldMs, speed));
                         await WaitForTimelineAsync(token).ConfigureAwait(false);
                         _input.MouseButton(c.Button, false);
                         held.Buttons.Remove(c.Button);
@@ -1392,7 +1569,7 @@ public sealed class PlaybackEngine
                         }
                         else
                         {
-                            AdvanceTimeline(k.HoldMs / speed);
+                            AdvanceTimeline(ScaledHoldMs(k.HoldMs, speed));
                             await WaitForTimelineAsync(token).ConfigureAwait(false);
                         }
 
@@ -1483,6 +1660,10 @@ public sealed class PlaybackEngine
         var keysBefore = held.Keys.ToHashSet();
         var buttonsBefore = held.Buttons.ToHashSet();
 
+        // Faster than recorded: remember when each button went down, so a click is never held shorter than
+        // MinScaledHoldMs (or its recorded hold, if that was shorter) and games still see it.
+        var pressedAt = new Dictionary<MacroMouseButton, (TimeSpan Clock, long TimeUs)>();
+
         try
         {
             foreach (var e in events)
@@ -1535,9 +1716,18 @@ public sealed class PlaybackEngine
 
                         _input.MouseButton(e.Button, true);
                         held.Buttons.Add(e.Button);
+                        pressedAt[e.Button] = (_clock.Elapsed, e.TimeUs);
                         ClampTimelineBacklog();
                         break;
                     case InputEventKind.MouseUp:
+                        if (speed > 1 && pressedAt.Remove(e.Button, out var down))
+                        {
+                            var recordedHold = TimeSpan.FromTicks(Math.Max(0, e.TimeUs - down.TimeUs) * 10);
+                            var minimum = TimeSpan.FromMilliseconds(MinScaledHoldMs) < recordedHold ? TimeSpan.FromMilliseconds(MinScaledHoldMs) : recordedHold;
+                            var heldFor = _clock.Elapsed - down.Clock;
+                            if (heldFor < minimum) await WaitAsync(minimum - heldFor, token).ConfigureAwait(false);
+                        }
+
                         // Only if the cursor isn't already there (normally the last move put it there).
                         if (usePosition && cursorSent != (e.X, e.Y))
                         {
@@ -1667,8 +1857,8 @@ public sealed class PlaybackEngine
 
             if (step.Goal == WaitGoal.Appear && result.Found)
             {
-                _lastFound = (result.X, result.Y);
-                _lastFoundBounds = result.Match;
+                RememberFound(result.X, result.Y, result.Match);
+                ReportTarget(result.X, result.Y, result.Match, result.Confidence, StepDescriber.DisplayName(step.Kind));
                 Message?.Invoke(this, result.FoundText + Stats());
                 await PerformFoundActionAsync(step.Action, result.X + step.OffsetX, result.Y + step.OffsetY, step.ActionHoldMs,
                     FoundActionTiming.Of(step), _held ?? throw new InvalidOperationException("Playback isn't running."), token, result.Match).ConfigureAwait(false);
@@ -1711,11 +1901,7 @@ public sealed class PlaybackEngine
 
                 if (step.WhenNotFound is TextNotFoundBehavior.Continue or TextNotFoundBehavior.SkipNextStep)
                 {
-                    if (step.Goal == WaitGoal.Appear)
-                    {
-                        _lastFound = null;
-                        _lastFoundBounds = default;
-                    }
+                    if (step.Goal == WaitGoal.Appear) ForgetFound();
 
                     var skip = step.WhenNotFound == TextNotFoundBehavior.SkipNextStep;
                     _skipNextStep = skip;
@@ -1843,6 +2029,137 @@ public sealed class PlaybackEngine
         SyncTimelineToNow();
     }
 
+    /// <summary>
+    /// Where a Move mouse step with a non-coordinate target goes: the last found spot + offset, or the cursor + offset.
+    /// Null when the cursor position isn't known (relative / camera movement before, and the simulator can't tell).
+    /// Throws when "the last found spot" is used before anything was found.
+    /// </summary>
+    private (int X, int Y)? MoveTargetOf(MouseMoveStep m)
+    {
+        switch (m.TargetMode)
+        {
+            case ClickTargetMode.LastFoundMatch:
+            {
+                var center = _lastFound ?? throw new TextNotFoundException(
+                    "This Move mouse step goes to the last found spot, but no Find text / image / color step (or If / Repeat condition) has found anything yet in this run.");
+                return (center.X + m.OffsetX, center.Y + m.OffsetY);
+            }
+
+            case ClickTargetMode.CurrentCursor:
+            {
+                (int X, int Y) from;
+                if (_input.TryGetCursorPosition(out var cx, out var cy)) from = (cx, cy);
+                else if (_cursor is { } known) from = known;
+                else return null;
+                return (from.X + m.OffsetX, from.Y + m.OffsetY);
+            }
+
+            default:
+                return (m.X, m.Y);
+        }
+    }
+
+    /// <summary>Largest Smart-Aim search distance (px each way).</summary>
+    public const int MaxSmartAimRadiusPx = 2_000;
+
+    /// <summary>
+    /// Smart-Aim (Smart Click Snapshots): looks for the click's recorded thumbnail in a small area around where it was
+    /// recorded (the thumbnail's rectangle grown by SmartAimRadiusPx on every side) and returns the same spot on it, so
+    /// a button that moved a bit is still hit. When several copies are found, the one nearest the recorded spot wins.
+    /// Not found (or no screen capture / a damaged picture) = the recorded X / Y. Never throws except for Stop.
+    /// Returns the matched rectangle too (empty when not found), so Humanize keeps its jitter inside the target.
+    /// </summary>
+    private async Task<((int X, int Y) Spot, ScreenRect Bounds)> SmartAimAsync(MouseClickStep c, CancellationToken token)
+    {
+        (int X, int Y) recorded = (c.X, c.Y);
+        if (_capture is not { } capture)
+        {
+            NoteSmartAim(c, "Smart-Aim: screen capture isn't available, so the click uses its recorded spot.");
+            return (recorded, default);
+        }
+
+        if (!_smartAimTemplates.TryGetValue(c.Id, out var template))
+        {
+            template = SmartClickConversion.TryDecodeThumbnail(c, out var error);
+            _smartAimTemplates[c.Id] = template;
+            if (template is null) NoteSmartAim(c, $"Smart-Aim: the recorded picture can't be used ({error}); clicking the recorded spot.");
+        }
+
+        if (template is null) return (recorded, default);
+
+        var (anchorX, anchorY) = SmartClickConversion.Anchor(c, template.Width, template.Height);
+        var expectedX = c.X - anchorX; // where the thumbnail's top-left corner was when it was recorded
+        var expectedY = c.Y - anchorY;
+        var radius = Math.Clamp(c.SmartAimRadiusPx, 0, MaxSmartAimRadiusPx);
+        var region = new ScreenRect(expectedX - radius, expectedY - radius, template.Width + 2 * radius, template.Height + 2 * radius);
+
+        ScreenFrame frame;
+        try
+        {
+            frame = await capture.CaptureAsync(region, token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (token.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            NoteSmartAim(c, $"Smart-Aim: couldn't look at the screen ({ex.Message}); clicking the recorded spot.");
+            return (recorded, default);
+        }
+
+        if (frame.Image.Width < template.Width || frame.Image.Height < template.Height)
+        {
+            NoteSmartAim(c, "Smart-Aim: the area around the click is off screen; clicking the recorded spot.");
+            return (recorded, default);
+        }
+
+        var options = new TemplateMatchOptions
+        {
+            MinScore = Math.Clamp(c.SmartAimAccuracy, 0.5, 1.0),
+            MaxResults = 10,
+        };
+        var result = TemplateMatcher.Find(frame.Image, template, options, token);
+        if (result.Matches.Count == 0)
+        {
+            NoteSmartAim(c, $"Smart-Aim: the clicked target wasn't found within {radius} px (best {result.BestScore:P0}, needs {options.MinScore:P0}); clicking the recorded spot ({c.X}, {c.Y}).");
+            return (recorded, default);
+        }
+
+        // Several look-alikes (e.g. identical grid cells): take the one closest to where the target was.
+        VisualMatch? best = null;
+        var bestDistance = long.MaxValue;
+        foreach (var match in result.Matches)
+        {
+            var bounds = frame.ToScreen(match.Bounds);
+            long dx = bounds.X - expectedX, dy = bounds.Y - expectedY;
+            var distance = dx * dx + dy * dy;
+            if (distance < bestDistance)
+            {
+                bestDistance = distance;
+                best = match;
+            }
+        }
+
+        var found = frame.ToScreen(best!.Bounds);
+        ReportTarget(found.CenterX, found.CenterY, found, best.Score, "Smart-Aim");
+        var shiftX = found.X - expectedX;
+        var shiftY = found.Y - expectedY;
+        (int X, int Y) spot = (c.X + shiftX, c.Y + shiftY);
+        NoteSmartAim(c, shiftX == 0 && shiftY == 0
+            ? $"Smart-Aim: the clicked target is where it was recorded ({best.Score:P0} match)."
+            : $"Smart-Aim: the clicked target moved by ({shiftX:+0;-0;0}, {shiftY:+0;-0;0}) px; clicking it at ({spot.X}, {spot.Y}) ({best.Score:P0} match).");
+        return (spot, found);
+    }
+
+    /// <summary>Logs a Smart-Aim note, but not the same note for the same step twice in a row (clicks inside loops).</summary>
+    private void NoteSmartAim(MouseClickStep c, string note)
+    {
+        if (_smartAimLastNote.TryGetValue(c.Id, out var last) && last == note) return;
+        _smartAimLastNote[c.Id] = note;
+        Message?.Invoke(this, note);
+    }
+
     /// <summary>Absolute cursor move; remembers the spot so a later glide knows where it starts.</summary>
     private void MoveTo(int x, int y)
     {
@@ -1856,8 +2173,8 @@ public sealed class PlaybackEngine
     /// </summary>
     private static (int X, int Y)? JumpTargetOf(MacroStep? step) => step switch
     {
-        MouseMoveStep { Enabled: true, MoveStyle: null or MouseMoveStyle.Instant } m => (m.X, m.Y),
-        MouseClickStep { Enabled: true, UseLastFoundText: false, UseCurrentPosition: false, MoveStyle: null or MouseMoveStyle.Instant } c => (c.X, c.Y),
+        MouseMoveStep { Enabled: true, TargetMode: ClickTargetMode.Coordinates, MoveStyle: null or MouseMoveStyle.Instant } m => (m.X, m.Y),
+        MouseClickStep { Enabled: true, UseLastFoundText: false, UseCurrentPosition: false, SmartAimAtTarget: false, MoveStyle: null or MouseMoveStyle.Instant } c => (c.X, c.Y),
         MouseScrollStep { Enabled: true, UseCurrentPosition: false } s => (s.X, s.Y),
         _ => null,
     };
@@ -1867,7 +2184,7 @@ public sealed class PlaybackEngine
     /// null: only an enabled Move mouse step with Smooth glide / Human curve whose glide is longer than a short Delay.
     /// </summary>
     private static MouseMoveStep? RecordedGlideAfter(DelayStep delay, MacroStep next) =>
-        next is MouseMoveStep { Enabled: true, MoveStyle: MouseMoveStyle.SmoothGlide or MouseMoveStyle.HumanCurve } move
+        next is MouseMoveStep { Enabled: true, TargetMode: ClickTargetMode.Coordinates, MoveStyle: MouseMoveStyle.SmoothGlide or MouseMoveStyle.HumanCurve } move
         && delay.DurationMs > 0 && delay.DurationMs <= RecordedPointMaxDelayMs && move.MoveDurationMs > delay.DurationMs
             ? move
             : null;
@@ -1938,7 +2255,7 @@ public sealed class PlaybackEngine
 
         _input.MouseButton(button, true);
         held.Buttons.Add(button);
-        AdvanceTimeline(holdMs / speed);
+        AdvanceTimeline(ScaledHoldMs(holdMs, speed));
         await WaitForTimelineAsync(token).ConfigureAwait(false);
         _input.MouseButton(button, false);
         held.Buttons.Remove(button);
@@ -1977,7 +2294,17 @@ public sealed class PlaybackEngine
         }
 
         var duration = TimeSpan.FromMilliseconds(Vary(durationMs / (speed > 0 ? speed : 1.0)));
-        var plan = MouseMotion.Plan(from, (x, y), glide, duration, GlideStepInterval);
+
+        // Humanize: a smooth glide bends into a slight, random natural arc instead of a ruler-straight line.
+        var arc = 0.0;
+        if (_humanize && glide == MouseMoveStyle.SmoothGlide)
+        {
+            var length = Math.Sqrt(Math.Pow(x - from.X, 2) + Math.Pow(y - from.Y, 2));
+            arc = Math.Min(length * HumanizeArc, HumanizeMaxArcPixels) * (0.4 + 0.6 * HumanizeRandom.NextDouble())
+                  * (HumanizeRandom.Next(2) == 0 ? 1 : -1);
+        }
+
+        var plan = MouseMotion.Plan(from, (x, y), glide, duration, GlideStepInterval, arc);
         if (onTimeline) ClampTimelineBacklog(); // far behind: glide from "now"
 
         var previousAt = TimeSpan.Zero;

@@ -21,8 +21,11 @@ public enum CursorFlags : byte
     AtEdge = 4,
 }
 
-/// <summary>One recorded event plus the cursor state at that moment (smart recording).</summary>
-public readonly record struct CapturedInputEvent(InputEvent Input, CursorFlags Cursor = CursorFlags.None);
+/// <summary>
+/// One recorded event plus the cursor state at that moment (smart recording). ClickedTarget (button downs with a
+/// visible cursor only): the Smart Click Snapshot of what was under the cursor, or null.
+/// </summary>
+public readonly record struct CapturedInputEvent(InputEvent Input, CursorFlags Cursor = CursorFlags.None, ClickTargetSnapshot? ClickedTarget = null);
 
 /// <summary>Tuning for <see cref="MouseContextClassifier"/>. The defaults are what the app uses.</summary>
 public sealed class MouseContextOptions

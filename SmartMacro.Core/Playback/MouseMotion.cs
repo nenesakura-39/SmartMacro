@@ -31,9 +31,12 @@ public static class MouseMotion
     /// <summary>
     /// The points to visit, oldest first. <paramref name="duration"/> ≤ 0, <see cref="MouseMoveStyle.Instant"/> or a
     /// tiny distance give a single point (the target) at time 0.
+    /// <paramref name="glideArcPixels"/> (Humanize): a Smooth glide bows sideways by up to this many pixels in the middle
+    /// (+ = to the left of the direction of travel, − = to the right), like a hand that doesn't move in a perfect line.
+    /// 0 = a straight line (the default). Start and end stay exact.
     /// </summary>
     public static IReadOnlyList<MotionPoint> Plan((int X, int Y) from, (int X, int Y) to, MouseMoveStyle style, TimeSpan duration,
-        TimeSpan? tick = null)
+        TimeSpan? tick = null, double glideArcPixels = 0)
     {
         var step = tick is { } t && t > TimeSpan.Zero ? t : DefaultTick;
         var distance = Math.Abs(to.X - from.X) + Math.Abs(to.Y - from.Y);
@@ -74,8 +77,9 @@ public static class MouseMotion
             else
             {
                 var e = SmoothStep(p);
-                x = from.X + dx * e;
-                y = from.Y + dy * e;
+                var bow = glideArcPixels * 4 * e * (1 - e); // 0 at both ends, the full arc halfway
+                x = from.X + dx * e + nx * bow;
+                y = from.Y + dy * e + ny * bow;
             }
 
             points.Add(new MotionPoint(at, (int)Math.Round(x), (int)Math.Round(y)));

@@ -108,6 +108,131 @@ public sealed class EditorViewModel : ObservableObject
         PlayFromHereCommand = new AsyncRelayCommand(PlayFromSelectedAsync, HandleUnexpectedError, () => CanRunNow && SelectedStep is not null);
         UseCurrentSizeCommand = new RelayCommand(CaptureReference, () => HasMacro);
         RefreshTargetWindowsCommand = new RelayCommand(RefreshTargetWindows);
+        ConvertClickToFindImageCommand = new RelayCommand(ConvertClickToFindImage,
+            p => HasMacro && (p as MouseClickStepViewModel ?? SelectedStep as MouseClickStepViewModel) is { CanConvertToFindImage: true });
+        AutoFixBlocksCommand = new RelayCommand(AutoFixBlocks, () => HasMacro && CanAutoFixBlocks);
+    }
+
+    // ---------------- ✨ Auto-Fix block structure ----------------
+
+    private bool _canAutoFixBlocks;
+    private string _blockProblemText = "";
+
+    /// <summary>
+    /// ✨ Auto-Fix block structure: removes orphan Else / End If / End Repeat markers (and extra Elses) and adds the
+    /// missing End If / End Repeat (see <see cref="StepCleanup.RepairBlockStructure"/>). Ctrl+Z undoes it.
+    /// </summary>
+    public RelayCommand AutoFixBlocksCommand { get; }
+
+    /// <summary>True while the If / Repeat markers don't match up in a way Auto-Fix can repair (shows the banner).</summary>
+    public bool CanAutoFixBlocks
+    {
+        get => _canAutoFixBlocks;
+        private set
+        {
+            if (SetProperty(ref _canAutoFixBlocks, value))
+                System.Windows.Input.CommandManager.InvalidateRequerySuggested();
+        }
+    }
+
+    /// <summary>The banner text: the first block problem (with its step number) and how many more there are.</summary>
+    public string BlockProblemText
+    {
+        get => _blockProblemText;
+        private set => SetProperty(ref _blockProblemText, value);
+    }
+
+    // Called from Revalidate with the fresh block analysis.
+    private void UpdateBlockFixBanner(BlockStructure blocks)
+    {
+        var models = Steps.Select(s => s.Model).ToList();
+        var fixable = !blocks.IsValid && StepCleanup.NeedsBlockRepair(models);
+        CanAutoFixBlocks = fixable;
+        if (!fixable)
+        {
+            BlockProblemText = "";
+            return;
+        }
+
+        var first = blocks.Problems[0];
+        var more = blocks.Problems.Count - 1;
+        BlockProblemText = $"The If / Repeat blocks don't match up. Step {first.StepIndex + 1}: {first.Message}" +
+                           (more > 0 ? $" (+{more} more problem{(more == 1 ? "" : "s")})" : "");
+    }
+
+    private void AutoFixBlocks()
+    {
+        if (!HasMacro) return;
+        var models = Steps.Select(s => s.Model).ToList();
+        var before = Snapshot();
+        var result = StepCleanup.RepairBlockStructure(models); // fixes the copy in place
+        if (!result.Changed)
+        {
+            _setStatus(BlockRepairResult.NothingToFixText, StatusKind.Info);
+            return;
+        }
+
+        _history.Record(before);
+        RaiseHistoryChanged();
+
+        // Keep the editors of the steps that stayed (same objects), make new ones for the added End markers.
+        var existing = new Dictionary<MacroStep, StepViewModel>(ReferenceEqualityComparer.Instance);
+        foreach (var vm in Steps) existing[vm.Model] = vm;
+        var keepSelected = SelectedStep is { } current && models.Contains(current.Model) ? current : null;
+        foreach (var old in Steps) old.Modified -= OnStepModified;
+        Steps.Clear();
+        foreach (var step in models)
+            Steps.Add(existing.TryGetValue(step, out var kept) ? kept : CreateStepViewModel(step));
+
+        _selection.Clear();
+        SelectedStep = keepSelected ?? Steps.ElementAtOrDefault(Math.Clamp(result.FirstChangedIndex, 0, Math.Max(0, Steps.Count - 1)));
+        Touch();
+        _log.Info($"✨ Auto-Fix block structure: {result.Summary}");
+        _setStatus($"✨ Fixed the blocks: {result.Summary} Ctrl+Z undoes it.", StatusKind.Success);
+    }
+
+    // ---------------- Smart Click Snapshots: 🔍 Convert step to full "Find image & click" ----------------
+
+    /// <summary>
+    /// Replaces a recorded Mouse click (parameter = its editor, or the selected step) with a Find image step that looks for
+    /// the click's recorded picture and does the same click on it (see <see cref="SmartClickConversion.ToFindImageStep"/>).
+    /// Undo puts the click back.
+    /// </summary>
+    public RelayCommand ConvertClickToFindImageCommand { get; }
+
+    private void ConvertClickToFindImage(object? parameter)
+    {
+        if (!HasMacro) return;
+        if ((parameter as MouseClickStepViewModel ?? SelectedStep as MouseClickStepViewModel) is not { } click) return;
+        var index = Steps.IndexOf(click);
+        if (index < 0 || click.Model is not MouseClickStep model) return;
+
+        FindImageStep find;
+        try
+        {
+            find = SmartClickConversion.ToFindImageStep(model);
+        }
+        catch (InvalidOperationException ex)
+        {
+            _setStatus(ex.Message, StatusKind.Warning);
+            return;
+        }
+
+        RecordUndo();
+        var vm = CreateStepViewModel(find);
+        Steps[index] = vm; // the collection handler unhooks the old editor and hooks the new one
+        _selection.Clear();
+        SelectedStep = vm;
+        SelectStepsRequested?.Invoke(this, new[] { vm });
+        Touch();
+        _setStatus($"Step {index + 1} is now \"Find image & click\": it looks for what you clicked anywhere on screen (up to {SmartClickConversion.ConvertedWaitMs / 1000} s) and clicks it. Ctrl+Z undoes it.", StatusKind.Success);
+    }
+
+    /// <summary>The Find step / If-Repeat condition above a step whose found spot "the last found spot" would use.</summary>
+    private Core.Models.ScreenSearchStep? ReferenceFor(StepViewModel step)
+    {
+        var index = Steps.IndexOf(step);
+        return index < 0 ? null : SmartClickConversion.LastFoundReference(Steps.Select(s => s.Model).ToList(), index);
     }
 
     // ---------------- Undo / Redo (Ctrl+Z / Ctrl+Y) ----------------
@@ -384,7 +509,7 @@ public sealed class EditorViewModel : ObservableObject
     }
 
     public string HumanizeTooltip =>
-        $"Humanize: adds a subtle ±{ClickJitterPx} px random offset around click spots (kept inside what a Find step found) and ±{DelayJitterPercent} % natural variation to delays and mouse glide times, so repeated game loops don't click the exact same pixel with robotic timing. Recorded input still plays exactly as recorded.";
+        $"🎲 Humanize: adds a subtle ±{ClickJitterPx} px random offset around click spots (kept inside what a Find step found), ±{DelayJitterPercent} % natural variation to delays of {PlaybackEngine.HumanizeMinDelayMs} ms or more and to glide times, and a slight natural arc to Smooth glides, so repeated game loops don't click the exact same pixel with robotic timing. Recorded input still plays exactly as recorded.";
 
     private void RefreshTargetWindows()
     {
@@ -588,8 +713,34 @@ public sealed class EditorViewModel : ObservableObject
         get => _speed;
         set
         {
-            if (SetProperty(ref _speed, value)) Touch();
+            if (!SetProperty(ref _speed, value)) return;
+            RefreshSpeedChoices();
+            Touch();
         }
+    }
+
+    /// <summary>The speed selector: 0.5× / 1× / 1.5× / 2× / 5× (plus the macro's own speed if it is something else).</summary>
+    public ObservableCollection<Choice<double>> SpeedChoices { get; } = new();
+
+    /// <param name="rebuild">
+    /// True when a macro is loaded: start from the presets again. Otherwise the list only grows (an extra entry for an unusual
+    /// speed is added, nothing is removed), so the selector is never cleared while the user is picking from it.
+    /// </param>
+    private void RefreshSpeedChoices(bool rebuild = false)
+    {
+        var known = rebuild ? Macro.SpeedPresets.ToList() : SpeedChoices.Select(c => c.Value).Union(Macro.SpeedPresets).ToList();
+        if (!known.Any(v => Math.Abs(v - _speed) < 1e-9) && !double.IsNaN(_speed) && _speed > 0) known.Add(_speed);
+        known.Sort();
+        if (SpeedChoices.Select(c => c.Value).SequenceEqual(known)) return;
+
+        if (rebuild) SpeedChoices.Clear();
+        for (var i = 0; i < known.Count; i++)
+        {
+            if (i < SpeedChoices.Count && SpeedChoices[i].Value.Equals(known[i])) continue;
+            SpeedChoices.Insert(i, new Choice<double>(known[i], $"{known[i]:0.##}×"));
+        }
+
+        OnPropertyChanged(nameof(Speed)); // re-select after the list changed
     }
 
     /// <summary>Wait between repeats in ms.</summary>
@@ -689,6 +840,7 @@ public sealed class EditorViewModel : ObservableObject
         _description = copy.Description ?? string.Empty;
         _repeatCount = copy.RepeatCount;
         _speed = copy.Speed;
+        RefreshSpeedChoices(rebuild: true);
         _repeatDelayMs = copy.RepeatDelayMs;
         _targetWindowTitle = string.IsNullOrWhiteSpace(copy.TargetWindowTitle) ? null : copy.TargetWindowTitle.Trim();
         _scaleCoordinates = copy.ScaleCoordinatesToWindow;
@@ -719,6 +871,8 @@ public sealed class EditorViewModel : ObservableObject
         Issues.Clear();
         ErrorCount = 0;
         WarningCount = 0;
+        CanAutoFixBlocks = false;
+        BlockProblemText = "";
         IsDirty = false;
         OnPropertyChanged(string.Empty);
     }
@@ -1093,6 +1247,19 @@ public sealed class EditorViewModel : ObservableObject
     {
         var vm = StepViewModel.Create(step);
         _screenTools.ApplyTo(vm);
+
+        // "Pick offset from screen" measures from the Find step / condition above the step (looked up when clicked,
+        // so moving the step around keeps it right).
+        switch (vm)
+        {
+            case MouseClickStepViewModel click:
+                click.ReferenceFinder = () => ReferenceFor(click);
+                break;
+            case MouseMoveStepViewModel move:
+                move.ReferenceFinder = () => ReferenceFor(move);
+                break;
+        }
+
         return vm;
     }
 
@@ -1146,6 +1313,7 @@ public sealed class EditorViewModel : ObservableObject
         // Indent the steps inside If / Repeat blocks (also when the blocks don't match up yet).
         var blocks = BlockStructure.Analyze(Steps.Select(s => s.Model).ToList());
         UpdateBlockPairing(blocks);
+        UpdateBlockFixBanner(blocks);
 
         ErrorCount = issues.Count(i => i.Severity == IssueSeverity.Error);
         WarningCount = issues.Count(i => i.Severity == IssueSeverity.Warning);

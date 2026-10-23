@@ -111,7 +111,20 @@
                              Margin="-5,0,0,0" ToolTip="Zone color (empty for a fixed zone)" />
                 </StackPanel>
             </DataTemplate>
+            <!-- AAA: a recorded click's Smart Click Snapshot (+ ✨ when Smart-Aim is on). -->
+            <DataTemplate x:Key="ClickSnapshotPreviewTemplate">
+                <Grid>
+                    <Border Width="28" Height="28" CornerRadius="4" BorderBrush="{StaticResource VisionAccentBrush}" BorderThickness="1"
+                            Background="{StaticResource SurfaceBrush}" ToolTip="What this click hit when it was recorded (Smart Click Snapshot)">
+                        <Image Source="{Binding TargetThumbnail}" Stretch="Uniform" RenderOptions.BitmapScalingMode="NearestNeighbor" />
+                    </Border>
+                    <TextBlock Text="✨" FontSize="10" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,-6,-6,0"
+                               Visibility="{Binding SmartAimAtTarget, Converter={StaticResource BoolToVisibility}}"
+                               ToolTip="Smart-Aim is on: finds this target again if it moved" />
+                </Grid>
+            </DataTemplate>
             <conv:StepKindTemplateSelector x:Key="StepPreviewSelector"
+                                           ClickSnapshotTemplate="{StaticResource ClickSnapshotPreviewTemplate}"
                                            FindImageTemplate="{StaticResource ImagePreviewTemplate}"
                                            FindColorTemplate="{StaticResource ColorPreviewTemplate}"
                                            FeedbackLoopTemplate="{StaticResource FeedbackPreviewTemplate}" />
@@ -327,7 +340,7 @@
                                     AutomationProperties.Name="Pause or resume"
                                     Visibility="{Binding IsPlaying, Converter={StaticResource BoolToVisibility}}">
                                 <StackPanel Orientation="Horizontal">
-                                    <TextBlock Text="&#xE769;" Style="{StaticResource IconText}" FontSize="12" />
+                                    <TextBlock Text="{Binding PauseButtonGlyph}" Style="{StaticResource IconText}" FontSize="12" />
                                     <TextBlock Text="{Binding PauseButtonText}" Margin="6,0,0,0" FontSize="12" />
                                 </StackPanel>
                             </Button>
@@ -368,10 +381,10 @@
                         <TextBlock Text="times" Foreground="{StaticResource MutedTextBrush}" VerticalAlignment="Center" FontSize="12"
                                    ToolTip="0 = until stopped" />
                         <TextBlock Text="Speed" Foreground="{StaticResource MutedTextBrush}" VerticalAlignment="Center" Margin="12,0,0,0" FontSize="12" />
-                        <TextBox Style="{StaticResource HeaderNumberBox}" Text="{Binding Speed, UpdateSourceTrigger=LostFocus, ValidatesOnExceptions=True}"
-                                 Width="42" Margin="6,0,2,0" AutomationProperties.Name="Playback speed"
-                                 ToolTip="Speed multiplier for delays: 2 = twice as fast, 0.5 = half speed (0.1 to 10)." />
-                        <TextBlock Text="×" Foreground="{StaticResource MutedTextBrush}" VerticalAlignment="Center" />
+                        <ComboBox ItemsSource="{Binding SpeedChoices}" DisplayMemberPath="Label" SelectedValuePath="Value"
+                                  SelectedValue="{Binding Speed, Mode=TwoWay}" MinWidth="64" Padding="8,3" FontSize="11.5" Margin="6,0,0,0" VerticalAlignment="Center"
+                                  AutomationProperties.Name="Playback speed"
+                                  ToolTip="Playback speed: delays, glides and recorded input run this many times faster (0.5× = half speed). Clicks and key taps are never held shorter than 25 ms, so games still see them. Changing it while this macro plays takes effect from the next step." />
                         <TextBlock Text="Wait" Foreground="{StaticResource MutedTextBrush}" VerticalAlignment="Center" Margin="12,0,0,0" FontSize="12"
                                    ToolTip="Wait between repeats" />
                         <TextBox Style="{StaticResource HeaderNumberBox}" Text="{Binding RepeatDelayMs, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}"
@@ -424,14 +437,14 @@
                                 </StackPanel>
                             </Border>
                         </Popup>
-                        <CheckBox Style="{StaticResource ToggleSwitchCheckBoxStyle}" Content="Humanize" FontSize="11" Margin="0,0,12,0"
+                        <CheckBox Style="{StaticResource ToggleSwitchCheckBoxStyle}" Content="🎲 Humanize" FontSize="11" Margin="0,0,12,0"
                                   IsChecked="{Binding HumanizePlayback}" ToolTip="{Binding HumanizeTooltip}"
                                   AutomationProperties.Name="Humanize playback timing and clicks" />
 
                         <!-- Quick toggles for single-monitor gamers (saved in Settings straight away). -->
-                        <CheckBox Style="{StaticResource ToggleSwitchCheckBoxStyle}" Content="Mini overlay" FontSize="11"
+                        <CheckBox Style="{StaticResource ToggleSwitchCheckBoxStyle}" Content="With overlay" FontSize="11"
                                   IsChecked="{Binding DataContext.ShowMiniOverlay, RelativeSource={RelativeSource AncestorType=Window}}"
-                                  ToolTip="Show mini status overlay while playing: a small click-through pill in the top-right corner shows which step runs and what it's doing (e.g. &quot;Step 2/5 — Finding image…&quot;). It never takes focus from your game and closes when playback ends."
+                                  ToolTip="With overlay: a mini-HUD in the top-right corner shows the run, a timer and which step runs (with ⏸ F8 / ⏹ Esc buttons), and a neon target-lock flashes on everything a Find step, If condition or Smart-Aim finds. It never takes focus from your game, isn't seen by Find steps, and closes when playback ends."
                                   AutomationProperties.Name="Show mini status overlay while playing" />
                         <CheckBox Style="{StaticResource ToggleSwitchCheckBoxStyle}" Content="Minimize" FontSize="11" Margin="12,0,0,0"
                                   IsChecked="{Binding DataContext.MinimizeWhilePlaying, RelativeSource={RelativeSource AncestorType=Window}}"
@@ -578,6 +591,25 @@
                                     <Button Style="{StaticResource IconButton}" Width="30" Height="28" Padding="6" FontSize="12" Content="&#xE8C8;" Command="{Binding DuplicateStepCommand}" ToolTip="Duplicate step (Ctrl+D)" AutomationProperties.Name="Duplicate step" />
                                     <Button Style="{StaticResource IconButton}" Width="30" Height="28" Padding="6" FontSize="12" Content="&#xE74D;" Command="{Binding DeleteStepCommand}" ToolTip="Delete step (Delete)" AutomationProperties.Name="Delete step" />
                                 </WrapPanel>
+                            </DockPanel>
+                        </Border>
+
+                        <!-- ✨ Auto-Fix banner: only while the If / Repeat markers don't match up (and Auto-Fix can repair them) -->
+                        <Border DockPanel.Dock="Top" Background="{StaticResource ErrorSoftBrush}" BorderBrush="{StaticResource ErrorBrush}"
+                                BorderThickness="0,0,0,1" Padding="12,7,8,7"
+                                Visibility="{Binding CanAutoFixBlocks, Converter={StaticResource BoolToVisibility}}"
+                                AutomationProperties.LiveSetting="Polite" AutomationProperties.Name="Block structure problem">
+                            <DockPanel>
+                                <Button DockPanel.Dock="Right" Style="{StaticResource PrimaryButton}" Padding="10,5" FontSize="11" Margin="10,0,0,0"
+                                        VerticalAlignment="Center" Command="{Binding AutoFixBlocksCommand}"
+                                        ToolTip="Removes stray Else / End If / End Repeat steps that have no If / Repeat above them (and extra Elses), and adds the missing End If / End Repeat steps. Your other steps stay exactly where they are. Ctrl+Z undoes it."
+                                        AutomationProperties.Name="Auto-Fix block structure">
+                                    <TextBlock Text="✨ Auto-Fix Block Structure" />
+                                </Button>
+                                <TextBlock Text="&#xEA39;" Style="{StaticResource IconText}" FontSize="13" Foreground="{StaticResource ErrorBrush}"
+                                           VerticalAlignment="Top" Margin="0,1,8,0" />
+                                <TextBlock Text="{Binding BlockProblemText}" FontSize="11" TextWrapping="Wrap" VerticalAlignment="Center"
+                                           ToolTip="{Binding BlockProblemText}" />
                             </DockPanel>
                         </Border>
 

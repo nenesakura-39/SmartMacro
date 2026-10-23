@@ -24,10 +24,12 @@ public sealed record ScreenTools(IFindTextTools? Text, IVisionTools? Vision, ISc
         {
             case MouseMoveStepViewModel move:
                 move.PositionPicker.Tools = Vision;
+                move.OffsetPicker.Tools = Vision;
                 break;
             case MouseClickStepViewModel click:
                 click.PositionPicker.Tools = Vision;
                 click.EndPoint.PositionPicker.Tools = Vision;
+                click.OffsetPicker.Tools = Vision;
                 break;
             case MouseScrollStepViewModel scroll:
                 scroll.PositionPicker.Tools = Vision;
@@ -43,6 +45,7 @@ public sealed record ScreenTools(IFindTextTools? Text, IVisionTools? Vision, ISc
                 break;
             case IfStepViewModel ifStep:
                 ifStep.Tools = this;
+                ifStep.OffsetPicker.Tools = Vision;
                 break;
             case RepeatStepViewModel repeat:
                 repeat.Tools = this;
@@ -206,10 +209,61 @@ public sealed class IfStepViewModel : StepViewModel
         {
             NotifyChanged(nameof(Condition));
             OnPropertyChanged(nameof(ThenActionHint));
+            OnPropertyChanged(nameof(ShowsWhenFound));
         });
+
+        // "Pick offset from screen": measured from what this If's own condition finds.
+        OffsetPicker = new OffsetPickerViewModel(SetFoundOffset, () => _step.Condition is { Negate: false } c ? c.Search : null);
     }
 
     public ConditionViewModel Condition { get; }
+
+    // ---------------- AAA: "When found, also:" ----------------
+
+    /// <summary>"When found, also:" choices (shown when the condition is an "is on screen" check).</summary>
+    public static IReadOnlyList<Choice<IfFoundAction>> WhenFoundActions { get; } = new[]
+    {
+        new Choice<IfFoundAction>(IfFoundAction.None, "Just run the steps inside the If"),
+        new Choice<IfFoundAction>(IfFoundAction.ClickFoundSpot, "Click the found spot"),
+        new Choice<IfFoundAction>(IfFoundAction.DoubleClickFoundSpot, "Double-click the found spot"),
+        new Choice<IfFoundAction>(IfFoundAction.RightClickFoundSpot, "Right-click the found spot"),
+        new Choice<IfFoundAction>(IfFoundAction.MoveToFoundSpot, "Move the mouse to the found spot"),
+        new Choice<IfFoundAction>(IfFoundAction.HoldOnFoundSpot, "Hold the left button on the found spot"),
+    };
+
+    /// <summary>"When found, also:" (the same stored setting as <see cref="ThenAction"/>).</summary>
+    public IfFoundAction WhenFoundAction
+    {
+        get => _step.WhenFoundAction;
+        set
+        {
+            if (_step.WhenFoundAction == value) return;
+            _step.WhenFoundAction = value;
+            NotifyChanged();
+            OnPropertyChanged(nameof(ThenAction));
+            OnPropertyChanged(nameof(ShowsWhenFound));
+            OnPropertyChanged(nameof(HasThenAction));
+            OnPropertyChanged(nameof(IsThenHold));
+            OnPropertyChanged(nameof(ThenActionHint));
+        }
+    }
+
+    /// <summary>
+    /// The "When found, also:" section only makes sense for "… is on screen" (something is found). It stays visible while
+    /// an action is still set, so it can be turned off again after switching to "is NOT on screen".
+    /// </summary>
+    public bool ShowsWhenFound => _step.Condition is not { Negate: true } || _step.ThenAction != FoundTextAction.None;
+
+    /// <summary>"🎯 Pick offset from screen" for the found-spot action.</summary>
+    public OffsetPickerViewModel OffsetPicker { get; }
+
+    private void SetFoundOffset(int x, int y)
+    {
+        _step.FoundOffsetX = x;
+        _step.FoundOffsetY = y;
+        OnPropertyChanged(nameof(ThenOffsetX));
+        NotifyChanged(nameof(ThenOffsetY));
+    }
 
     /// <summary>The same choices as a Find step's "when found".</summary>
     public static IReadOnlyList<Choice<FoundTextAction>> ThenActions => ScreenSearchStepViewModel.Actions;
@@ -222,6 +276,8 @@ public sealed class IfStepViewModel : StepViewModel
             if (_step.ThenAction == value) return;
             _step.ThenAction = value;
             NotifyChanged();
+            OnPropertyChanged(nameof(WhenFoundAction));
+            OnPropertyChanged(nameof(ShowsWhenFound));
             OnPropertyChanged(nameof(HasThenAction));
             OnPropertyChanged(nameof(IsThenHold));
             OnPropertyChanged(nameof(ThenActionHint));
@@ -252,7 +308,7 @@ public sealed class IfStepViewModel : StepViewModel
 
     public string ThenActionHint => _step.Condition is { Negate: true } && HasThenAction
         ? "This only works with \"is on screen\": with \"is NOT on screen\" nothing is found, so there's nothing to click."
-        : "When the condition sees its text / image / color, this happens at its center (plus the offset) before the steps inside the If run. Works even when it shows up at a different spot every time.";
+        : "When the condition sees its image / color / text, this happens at its center (plus the offset) before the steps inside the If run, even when it shows up at a different spot every time. Mouse click / Move mouse steps inside the If can also use \"the last found spot\" + their own offset (e.g. one cell of a game board).";
 
     public ScreenTools Tools
     {

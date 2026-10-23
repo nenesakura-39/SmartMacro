@@ -87,6 +87,29 @@ public enum MouseMoveStyle
     HumanCurve,
 }
 
+/// <summary>
+/// Where a Mouse click / Move mouse step acts (AAA upgrade). Stored on Move mouse steps; on Mouse click steps it is the
+/// same setting as the older <see cref="MouseClickStep.UseCurrentPosition"/> / <see cref="MouseClickStep.UseLastFoundText"/>
+/// switches (one value, so old files keep working unchanged).
+/// </summary>
+public enum ClickTargetMode
+{
+    /// <summary>At the step's own X / Y (the default and the old behaviour).</summary>
+    Coordinates,
+
+    /// <summary>
+    /// Where the cursor already is. Mouse click: click right there (offsets are not used). Move mouse: move BY the
+    /// offset from where the cursor is now.
+    /// </summary>
+    CurrentCursor,
+
+    /// <summary>
+    /// On what the last Find text / image / color step, If / Repeat condition found in this run: its center plus
+    /// (<c>OffsetX</c>, <c>OffsetY</c>). E.g. "If the Tic-Tac-Toe board is on screen → click 100 px right of its center".
+    /// </summary>
+    LastFoundMatch,
+}
+
 /// <summary>Defaults shared by every step that moves the cursor or clicks for you.</summary>
 public static class MouseMotionDefaults
 {
@@ -174,6 +197,21 @@ public sealed class MouseMoveStep : MacroStep
     /// <summary>How long the glide takes, in ms (only for Smooth glide / Human curve).</summary>
     public int MoveDurationMs { get; set; } = MouseMotionDefaults.MoveDurationMs;
 
+    /// <summary>
+    /// Where to move: to X / Y (default, not written to files), to the last found spot + offset, or by the offset from
+    /// where the cursor is now. Older files have no value and load as <see cref="ClickTargetMode.Coordinates"/>.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public ClickTargetMode TargetMode { get; set; } = ClickTargetMode.Coordinates;
+
+    /// <summary>Offset (px) added to the last found spot, or the distance to move from the cursor (see <see cref="TargetMode"/>).</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public int OffsetX { get; set; }
+
+    /// <inheritdoc cref="OffsetX"/>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public int OffsetY { get; set; }
+
     [JsonIgnore]
     public override StepKind Kind => StepKind.MouseMove;
 }
@@ -237,6 +275,105 @@ public sealed class MouseClickStep : MacroStep
     /// 0 = no extra wait (older files and recordings, whose timing is in their Delay steps). New steps: 120 ms.
     /// </summary>
     public int PostActionDelayMs { get; set; }
+
+    // ---------------- AAA upgrade: where to click + Smart Click Snapshots (format 12) ----------------
+
+    /// <summary>
+    /// Where the click happens: at X / Y, where the cursor already is, or on the last found spot (+ offset). The same
+    /// setting as <see cref="UseCurrentPosition"/> / <see cref="UseLastFoundText"/> (one stored value), so it isn't
+    /// written separately.
+    /// </summary>
+    [JsonIgnore]
+    public ClickTargetMode TargetMode
+    {
+        get => UseLastFoundText ? ClickTargetMode.LastFoundMatch : UseCurrentPosition ? ClickTargetMode.CurrentCursor : ClickTargetMode.Coordinates;
+        set
+        {
+            UseLastFoundText = value == ClickTargetMode.LastFoundMatch;
+            UseCurrentPosition = value == ClickTargetMode.CurrentCursor;
+        }
+    }
+
+    /// <summary>"On the last found spot": offset (px) from the center of what was found. Not used by the other targets.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public int OffsetX { get; set; }
+
+    /// <inheritdoc cref="OffsetX"/>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public int OffsetY { get; set; }
+
+    /// <summary>
+    /// Smart Click Snapshot: a small PNG picture (56×56 px, Base64) of what was under the cursor when this click was
+    /// recorded. Null for clicks made by hand and older files. Shown in the editor; used by Smart-Aim and by
+    /// "Convert to Find image".
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? TargetThumbnailBase64 { get; set; }
+
+    /// <summary>
+    /// Where inside the thumbnail the click was (px from its left / top edge). The middle, unless the click was near a
+    /// screen edge and the picture had to be shifted to stay on screen. Null = the middle.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? TargetAnchorX { get; set; }
+
+    /// <inheritdoc cref="TargetAnchorX"/>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? TargetAnchorY { get; set; }
+
+    /// <summary>True when the step has a recorded "what you clicked" picture.</summary>
+    [JsonIgnore]
+    public bool HasTargetThumbnail => !string.IsNullOrEmpty(TargetThumbnailBase64);
+
+    /// <summary>
+    /// "✨ Smart-Aim": before clicking at X / Y, look for the recorded thumbnail within <see cref="SmartAimRadiusPx"/> of
+    /// where it was, and click the same spot on it if it moved. Not found = click X / Y as recorded. Off by default.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public bool SmartAimAtTarget { get; set; }
+
+    /// <summary>Default Smart-Aim accuracy (0.85 = 85 % similar).</summary>
+    public const double DefaultSmartAimAccuracy = 0.85;
+
+    /// <summary>Default Smart-Aim search distance in pixels.</summary>
+    public const int DefaultSmartAimRadiusPx = 120;
+
+    private double? _smartAimAccuracy;
+    private int? _smartAimRadiusPx;
+
+    /// <summary>How similar the spot must be to the thumbnail (0.5–1.0). Default 0.85.</summary>
+    [JsonIgnore]
+    public double SmartAimAccuracy
+    {
+        get => _smartAimAccuracy ?? DefaultSmartAimAccuracy;
+        set => _smartAimAccuracy = value.Equals(DefaultSmartAimAccuracy) ? null : value;
+    }
+
+    /// <summary>How far (px, each direction) the target may have moved. Default 120.</summary>
+    [JsonIgnore]
+    public int SmartAimRadiusPx
+    {
+        get => _smartAimRadiusPx ?? DefaultSmartAimRadiusPx;
+        set => _smartAimRadiusPx = value == DefaultSmartAimRadiusPx ? null : value;
+    }
+
+    /// <summary>File form of <see cref="SmartAimAccuracy"/>: only written when it isn't the default.</summary>
+    [JsonPropertyName("smartAimMinMatch")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public double? SmartAimAccuracyOverride
+    {
+        get => _smartAimAccuracy;
+        set => _smartAimAccuracy = value;
+    }
+
+    /// <summary>File form of <see cref="SmartAimRadiusPx"/>: only written when it isn't the default.</summary>
+    [JsonPropertyName("smartAimRadius")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? SmartAimRadiusOverride
+    {
+        get => _smartAimRadiusPx;
+        set => _smartAimRadiusPx = value;
+    }
 
     [JsonIgnore]
     public override StepKind Kind => StepKind.MouseClick;

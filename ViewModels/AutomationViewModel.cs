@@ -78,6 +78,12 @@ public sealed class AutomationViewModel : ObservableObject, IDisposable
     private RecordingMode _recordingMode = RecordingMode.Smart;
     private Guid? _runningStepId;
 
+    // Mini-HUD timer: time spent paused doesn't count; and what the recording HUD says.
+    private DateTime? _pausedSinceUtc;
+    private TimeSpan _pausedTotal;
+    private string _recordingHudText = string.Empty;
+    private Guid? _runningMacroId;
+
     // Run counter: written by the engine's RunStarted event (playback thread), shown by the UI timer.
     private volatile int _currentRun;
     private volatile int _configuredRuns;
@@ -113,7 +119,10 @@ public sealed class AutomationViewModel : ObservableObject, IDisposable
         _engine.StateChanged += OnEngineStateChanged;
         _engine.Message += OnEngineMessage;
         _engine.RunStarted += OnEngineRunStarted;
+        _engine.TargetDetected += OnTargetDetected;
         _emergency.EmergencyStopRequested += OnEmergencyStop;
+        _host.PauseRequested += OnHudPauseRequested;
+        _host.StopRequested += OnHudStopRequested;
 
         _progressTimer = new DispatcherTimer(DispatcherPriority.Background, _dispatcher) { Interval = TimeSpan.FromMilliseconds(100) };
         _progressTimer.Tick += (_, _) => RefreshProgress();
@@ -158,7 +167,7 @@ public sealed class AutomationViewModel : ObservableObject, IDisposable
     public string RecordTooltip => $"Record your mouse and keyboard into a new macro ({RecordShortcut})";
     public string StopRecordingTooltip => $"Finish recording ({RecordShortcut})";
     public string PlayTooltip => $"Play the macro open in the editor, or the one selected in the library ({PlayShortcut})";
-    public string PauseTooltip => $"Pause or resume ({PauseShortcut})";
+    public string PauseTooltip => $"Pause or resume ({PauseShortcut}). Pausing lets go of every held key and mouse button right away; Resume continues from the same step, and the paused time isn't counted.";
     public string StopTooltip => $"Stop playback (Esc or {PlayShortcut})";
 
     public string EmergencyHint => $"Safety: press Esc to stop playback. {RecordShortcut} records, {PlayShortcut} plays.";
@@ -167,7 +176,8 @@ public sealed class AutomationViewModel : ObservableObject, IDisposable
     public void RefreshShortcuts()
     {
         foreach (var name in new[] { nameof(RecordingMode), nameof(RecordShortcut), nameof(PlayShortcut), nameof(PauseShortcut), nameof(RecordTooltip),
-                     nameof(StopRecordingTooltip), nameof(PlayTooltip), nameof(PauseTooltip), nameof(StopTooltip), nameof(EmergencyHint) })
+                     nameof(StopRecordingTooltip), nameof(PlayTooltip), nameof(PauseTooltip), nameof(StopTooltip), nameof(EmergencyHint),
+                     nameof(PauseButtonText) })
             OnPropertyChanged(name);
     }
 
@@ -176,7 +186,17 @@ public sealed class AutomationViewModel : ObservableObject, IDisposable
         get => _mode;
         private set
         {
+            var previous = _mode;
             if (!SetProperty(ref _mode, value)) return;
+
+            // The HUD's elapsed timer stops while paused.
+            if (value == AutomationMode.Paused) _pausedSinceUtc = DateTime.UtcNow;
+            else if (previous == AutomationMode.Paused && _pausedSinceUtc is { } since)
+            {
+                _pausedTotal += DateTime.UtcNow - since;
+                _pausedSinceUtc = null;
+            }
+
             OnPropertyChanged(nameof(IsIdle));
             OnPropertyChanged(nameof(IsRecording));
             OnPropertyChanged(nameof(IsPlaying));
@@ -184,6 +204,7 @@ public sealed class AutomationViewModel : ObservableObject, IDisposable
             OnPropertyChanged(nameof(IsBusy));
             OnPropertyChanged(nameof(StateText));
             OnPropertyChanged(nameof(PauseButtonText));
+            OnPropertyChanged(nameof(PauseButtonGlyph));
         }
     }
 
@@ -202,7 +223,34 @@ public sealed class AutomationViewModel : ObservableObject, IDisposable
         _ => "Ready",
     };
 
-    public string PauseButtonText => _mode == AutomationMode.Paused ? "Resume" : "Pause";
+    /// <summary>"⏸ Pause (F8)" / "▶ Resume (F8)" (the glyph is <see cref="PauseButtonGlyph"/>).</summary>
+    public string PauseButtonText => _mode == AutomationMode.Paused ? $"Resume ({PauseShortcut})" : $"Pause ({PauseShortcut})";
+
+    /// <summary>Segoe Fluent icon: ▶ while paused, ⏸ otherwise.</summary>
+    public string PauseButtonGlyph => _mode == AutomationMode.Paused ? "\uE768" : "\uE769";
+
+    /// <summary>Time since playback started, without paused time (the mini-HUD timer).</summary>
+    public TimeSpan PlayingElapsed
+    {
+        get
+        {
+            if (_runStartedUtc == default) return TimeSpan.Zero;
+            var paused = _pausedTotal + (_pausedSinceUtc is { } since ? DateTime.UtcNow - since : TimeSpan.Zero);
+            var elapsed = DateTime.UtcNow - _runStartedUtc - paused;
+            return elapsed > TimeSpan.Zero ? elapsed : TimeSpan.Zero;
+        }
+    }
+
+    /// <summary>
+    /// Live speed: the editor's speed selector changed while this macro plays, so the run continues at the new speed from
+    /// its next step. Ignored when something else (or nothing) plays.
+    /// </summary>
+    public void SetLiveSpeed(Guid? macroId, double speed)
+    {
+        if (!IsPlaying || macroId is null || macroId != _runningMacroId) return;
+        _engine.SetPlaybackSpeed(speed);
+        _hooks.SetStatus($"Speed {speed:0.##}× from the next step.", StatusKind.Info);
+    }
 
     /// <summary>Which macro Play will run (when idle).</summary>
     public string TargetText
@@ -321,7 +369,10 @@ public sealed class AutomationViewModel : ObservableObject, IDisposable
         _engine.StateChanged -= OnEngineStateChanged;
         _engine.Message -= OnEngineMessage;
         _engine.RunStarted -= OnEngineRunStarted;
+        _engine.TargetDetected -= OnTargetDetected;
         _emergency.EmergencyStopRequested -= OnEmergencyStop;
+        _host.PauseRequested -= OnHudPauseRequested;
+        _host.StopRequested -= OnHudStopRequested;
         _emergency.Dispose();
         if (_recorder is IDisposable disposable) disposable.Dispose();
         if (_gameRecorder is IDisposable gameDisposable) gameDisposable.Dispose();
@@ -337,13 +388,17 @@ public sealed class AutomationViewModel : ObservableObject, IDisposable
 
         _recordingMode = _hooks.Settings().RecordingMode;
         Mode = AutomationMode.Recording;
-        _host.Enter(OverlayKind.Recording, _recordingMode switch
+        _recordingHudText = _recordingMode switch
         {
             RecordingMode.Game => $"Recording (game mode)…   {RecordShortcut} to stop",
             RecordingMode.Desktop => $"Recording (desktop mode)…   {RecordShortcut} to stop",
             RecordingMode.Rhythm => $"Recording (exact 1:1 / rhythm)…   {RecordShortcut} to stop",
             _ => $"Recording…   {RecordShortcut} to stop",
-        });
+        };
+        _runStartedUtc = DateTime.UtcNow;
+        _pausedTotal = TimeSpan.Zero;
+        _pausedSinceUtc = null;
+        _host.Enter(OverlayKind.Recording, _recordingHudText);
 
         // Give the window a moment to minimize so that isn't recorded.
         await Task.Delay(300);
@@ -351,6 +406,11 @@ public sealed class AutomationViewModel : ObservableObject, IDisposable
 
         try
         {
+            // Smart Click Snapshots (Settings): a small picture of what each recorded click hit.
+            var snapshots = _hooks.Settings().CaptureClickSnapshots;
+            if (_recorder is WindowsInputRecorder desktopRecorder) desktopRecorder.CaptureClickSnapshots = snapshots;
+            if (_smartRecorder is SmartInputRecorder smartRecorder) smartRecorder.CaptureClickSnapshots = snapshots && _recordingMode == RecordingMode.Smart;
+
             switch (_recordingMode)
             {
                 case RecordingMode.Game: _gameRecorder.Start(); break;
@@ -431,6 +491,7 @@ public sealed class AutomationViewModel : ObservableObject, IDisposable
         }
 
         _log.Info($"Recorded {raw.Count:N0} input events → {steps.Count:N0} steps.");
+        LogClickSnapshots(steps);
         await _hooks.RecordingFinished(steps);
         RefreshTarget();
     }
@@ -519,8 +580,17 @@ public sealed class AutomationViewModel : ObservableObject, IDisposable
             _log.Info("Camera / relative parts were detected because the cursor was hidden or locked while the mouse moved. " +
                       "If a part was detected wrongly, open the \"Recorded input\" step and change its mouse playback.");
 
+        LogClickSnapshots(result.Steps);
         await _hooks.RecordingFinished(result.Steps);
         RefreshTarget();
+    }
+
+    /// <summary>One log line about Smart Click Snapshots, when the recording has any.</summary>
+    private void LogClickSnapshots(IReadOnlyList<MacroStep> steps)
+    {
+        var withPicture = steps.Count(s => s is MouseClickStep { HasTargetThumbnail: true });
+        if (withPicture == 0) return;
+        _log.Info($"✨ Smart Click Snapshots: {withPicture} click(s) remember what they clicked. Select one in the editor to see it, turn on Smart-Aim, or convert it to a \"Find image & click\" step.");
     }
 
     // ---------------- Playback ----------------
@@ -589,6 +659,10 @@ public sealed class AutomationViewModel : ObservableObject, IDisposable
 
         _runningMacroName = range is null ? macro.Name
             : range.SingleStep ? $"{macro.Name}, step {range.StepIndex + 1}" : $"{macro.Name} from step {range.StepIndex + 1}";
+        _runningMacroId = macro.Id;
+        _runStartedUtc = default;
+        _pausedTotal = TimeSpan.Zero;
+        _pausedSinceUtc = null;
         _latestProgress = null;
         _currentRun = 0;
         _configuredRuns = range is null ? Math.Max(0, macro.RepeatCount) : 1;
@@ -599,6 +673,7 @@ public sealed class AutomationViewModel : ObservableObject, IDisposable
         RunCounterText = PlaybackRunInfo.FormatCounter(1, _configuredRuns);
         StepCounterText = string.Empty;
         _host.Enter(OverlayKind.Playing, OverlayText(), RunCounterText);
+        _host.UpdateHud(BuildHud());
 
         try
         {
@@ -665,6 +740,7 @@ public sealed class AutomationViewModel : ObservableObject, IDisposable
             RunCounterText = string.Empty;
             StepCounterText = string.Empty;
             _currentRun = 0;
+            _runningMacroId = null;
             RefreshTarget();
         }
     }
@@ -704,12 +780,41 @@ public sealed class AutomationViewModel : ObservableObject, IDisposable
     {
         if (Mode == AutomationMode.Playing)
         {
-            if (_engine.Pause()) _hooks.SetStatus($"Paused. Press {PauseShortcut} or Resume to continue.", StatusKind.Info);
+            if (_engine.Pause())
+            {
+                var where = _latestProgress is { } p ? $" at step {p.StepNumber}" : "";
+                _log.Info($"⏸ Paused{where}: every held key and mouse button was released. {PauseShortcut} resumes.");
+                _hooks.SetStatus($"⏸ Paused{where}. Held keys and buttons were released. Press {PauseShortcut} or Resume to continue.", StatusKind.Info);
+            }
         }
         else if (Mode == AutomationMode.Paused)
         {
-            _engine.Resume();
+            if (_engine.Resume())
+            {
+                _log.Info("▶ Resumed.");
+                _hooks.SetStatus("▶ Resumed.", StatusKind.Info);
+            }
         }
+    }
+
+    // The mini-HUD's "⏸ F8" / "⏹ Esc" buttons (UI thread).
+    private void OnHudPauseRequested(object? sender, EventArgs e) => TogglePause();
+
+    private void OnHudStopRequested(object? sender, EventArgs e)
+    {
+        if (!IsPlaying) return;
+        _log.Info("Stopped from the mini overlay.");
+        StopPlayback();
+    }
+
+    // Playback thread: something was found; draw the target-lock reticle there (mini overlay on only).
+    private void OnTargetDetected(object? sender, TargetDetection target)
+    {
+        if (!_hooks.Settings().ShowRunOverlay) return;
+        _dispatcher.InvokeAsync(() =>
+        {
+            if (IsPlaying) _host.ShowTargetLock(target);
+        });
     }
 
     private void StopPlayback()
@@ -772,6 +877,8 @@ public sealed class AutomationViewModel : ObservableObject, IDisposable
                 _ => _recorder.EventCount,
             };
             ProgressText = $"{count:N0} input events · {seconds:0} s";
+            _host.UpdateHud(new RunHud(OverlayKind.Recording, _recordingHudText, null, $"Recording · {count:N0} input events", 0,
+                DateTime.UtcNow - _runStartedUtc, PauseShortcut));
             return;
         }
 
@@ -794,7 +901,33 @@ public sealed class AutomationViewModel : ObservableObject, IDisposable
             SetRunningStep(p.Step.Id);
         }
 
-        _host.Update(Mode == AutomationMode.Paused ? OverlayKind.Paused : OverlayKind.Playing, OverlayText(), RunCounterText);
+        _host.UpdateHud(BuildHud());
+    }
+
+    /// <summary>Everything the mini-HUD shows right now: state, "Run #3 / ∞", timer, "Step 4/12: Find image", progress.</summary>
+    private RunHud BuildHud()
+    {
+        var kind = Mode == AutomationMode.Paused ? OverlayKind.Paused : OverlayKind.Playing;
+        string? stepText = null;
+        double progress = 0;
+        if (_latestProgress is { } p && p.StepCount > 0)
+        {
+            var name = string.IsNullOrWhiteSpace(p.Step.Comment) ? StepDescriber.DisplayName(p.Step.Kind) : p.Step.Comment.Trim();
+            stepText = $"Step {p.StepNumber}/{p.StepCount}: {name}";
+            progress = (double)p.StepNumber / p.StepCount;
+        }
+
+        var counter = string.IsNullOrEmpty(RunCounterText) ? null : RunCounterText;
+        return new RunHud(kind, HudActivityText(), counter, stepText, progress, PlayingElapsed, PauseShortcut, "Esc");
+    }
+
+    /// <summary>The HUD's small second line: what the step is doing, or how to resume.</summary>
+    private string HudActivityText()
+    {
+        if (Mode == AutomationMode.Paused) return $"Paused — {PauseShortcut} to resume, Esc to stop";
+        if (_latestProgress is not { } p || p.StepCount == 0) return $"Starting \"{_runningMacroName}\"…";
+        var loop = p.LoopText is null ? "" : $" · {p.LoopText}";
+        return $"{StepDescriber.Activity(p.Step)}…{loop}";
     }
 
     private void SetRunningStep(Guid? id)

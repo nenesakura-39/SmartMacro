@@ -28,6 +28,7 @@ public sealed class SettingsViewModel : ObservableObject
     private RecordingMode _recordingMode;
     private bool _keepTapHoldTime;
     private bool _simplifyMousePaths;
+    private bool _captureClickSnapshots = true;
     private bool _smoothMouseMoves;
     private HotkeyBinding _recordHotkey = HotkeyBinding.DefaultRecord;
     private HotkeyBinding _playHotkey = HotkeyBinding.DefaultPlay;
@@ -242,6 +243,13 @@ public sealed class SettingsViewModel : ObservableObject
         set { if (SetProperty(ref _simplifyMousePaths, value)) IsDirty = true; }
     }
 
+    /// <summary>"Save a picture of what I click" (Smart Click Snapshots for Smart-Aim / Convert to Find image).</summary>
+    public bool CaptureClickSnapshots
+    {
+        get => _captureClickSnapshots;
+        set { if (SetProperty(ref _captureClickSnapshots, value)) IsDirty = true; }
+    }
+
     /// <summary>"Smooth mouse movement during playback" (glide instead of jumping).</summary>
     public bool SmoothMouseMoves
     {
@@ -284,6 +292,7 @@ public sealed class SettingsViewModel : ObservableObject
         _recordingMode = settings.RecordingMode;
         _keepTapHoldTime = settings.KeepTapHoldTime;
         _simplifyMousePaths = settings.SimplifyMousePaths;
+        _captureClickSnapshots = settings.CaptureClickSnapshots;
         _smoothMouseMoves = settings.SmoothMouseMoves;
         _recordHotkey = settings.RecordHotkey;
         _playHotkey = settings.PlayHotkey;
@@ -307,6 +316,7 @@ public sealed class SettingsViewModel : ObservableObject
             RecordingMode = RecordingMode,
             KeepTapHoldTime = KeepTapHoldTime,
             SimplifyMousePaths = SimplifyMousePaths,
+            CaptureClickSnapshots = CaptureClickSnapshots,
             SmoothMouseMoves = SmoothMouseMoves,
             RecordHotkey = RecordHotkey,
             PlayHotkey = PlayHotkey,

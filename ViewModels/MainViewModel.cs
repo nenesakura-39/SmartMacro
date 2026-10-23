@@ -112,6 +112,10 @@ public sealed class MainViewModel : ObservableObject, IDisposable
             if (e.PropertyName is nameof(EditorViewModel.HasMacro) or nameof(EditorViewModel.Name)
                 or nameof(EditorViewModel.RepeatCount) or nameof(EditorViewModel.Speed) or "")
                 Automation.RefreshTarget();
+
+            // Live speed: changing the speed while this macro plays applies from its next step.
+            if (e.PropertyName == nameof(EditorViewModel.Speed) && Automation.IsPlaying)
+                Automation.SetLiveSpeed(Editor.MacroId, Editor.Speed);
         };
 
         Library.PropertyChanged += (_, e) =>

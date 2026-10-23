@@ -23,6 +23,12 @@ public sealed record PickedColor(int X, int Y, RgbColor Color);
 public readonly record struct ScreenPoint(int X, int Y);
 
 /// <summary>
+/// Result of "Pick offset from screen": the offset from the found target's center to the picked spot, the center it was
+/// measured from, and whether that center was found automatically (true) or clicked by the user (false).
+/// </summary>
+public sealed record OffsetPick(int OffsetX, int OffsetY, ScreenPoint Anchor, bool AnchorDetected, string? AnchorNote = null);
+
+/// <summary>
 /// Screen helpers for the Find image / Find color editors: picking areas, capturing the picture to find,
 /// picking a colour, and testing a step without playing the macro. SmartMacro hides itself while it looks.
 /// </summary>
@@ -84,6 +90,14 @@ public interface IVisionTools
 
     /// <summary>Turns a picture into something WPF can show (frozen, so any thread may use it).</summary>
     ImageSource ToImageSource(BgraImage image);
+
+    /// <summary>
+    /// "Pick offset from screen": SmartMacro hides, looks for <paramref name="reference"/> (the Find step / condition whose
+    /// "last found spot" a click or move uses) once, and marks it on screen; then the user clicks the spot to act on. When
+    /// the reference isn't given or isn't on screen right now, the user first clicks the target's center instead.
+    /// Returns the offset from that center to the clicked spot (null if cancelled).
+    /// </summary>
+    Task<OffsetPick?> PickOffsetAsync(ScreenSearchStep? reference);
 }
 
 public sealed class VisionTools : IVisionTools
@@ -105,6 +119,7 @@ public sealed class VisionTools : IVisionTools
     private readonly GdiScreenCapture _capture;
     private readonly string _logsDirectory;
     private readonly IScreenLayout? _layout;
+    private readonly IOcrService? _ocr;
     private Window? _preview;
     private ScreenPoint? _lastMatch;
 
@@ -113,13 +128,63 @@ public sealed class VisionTools : IVisionTools
     public void ShowSpot(ScreenPoint point) => NativeMethods.SetCursorPos(point.X, point.Y);
 
     /// <param name="layout">Monitors and windows, so "Test detection now" searches the same place the step will.</param>
-    public VisionTools(Window mainWindow, GdiScreenCapture capture, string logsDirectory, IScreenLayout? layout = null)
+    /// <param name="ocr">Text recognition, so "Pick offset from screen" can also find a text target (optional).</param>
+    public VisionTools(Window mainWindow, GdiScreenCapture capture, string logsDirectory, IScreenLayout? layout = null, IOcrService? ocr = null)
     {
         _mainWindow = mainWindow;
         _capture = capture;
         _logsDirectory = logsDirectory;
         _layout = layout;
+        _ocr = ocr;
     }
+
+    public Task<OffsetPick?> PickOffsetAsync(ScreenSearchStep? reference) => WhileHiddenAsync(async () =>
+    {
+        ScreenPoint? anchor = null;
+        string? note = null;
+
+        // 1. Find the reference target once, exactly like playback would (same detection code), and show it.
+        if (reference is not null)
+        {
+            try
+            {
+                var probes = new ScreenProbes(_ocr, _capture, null, _layout);
+                var probe = await probes.Prepare(reference).LookAsync(null, CancellationToken.None);
+                if (probe.Found)
+                {
+                    anchor = new ScreenPoint(probe.X, probe.Y);
+                    ScreenHighlightOverlay.ShowResult(probe.Area, probe.Match.IsEmpty ? (ScreenRect?)null : probe.Match, found: true,
+                        "🎯 Found target — now click your spot", TimeSpan.FromSeconds(8));
+                }
+                else
+                {
+                    note = "The target isn't on screen right now" + probe.MissText;
+                }
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                note = $"The target couldn't be looked for ({ex.Message})";
+            }
+        }
+
+        // 2. Not found automatically: the user clicks the target's center.
+        if (anchor is null)
+        {
+            var center = await RegionPicker.PickAsync(
+                "First click the CENTER of the target (the image / color / text the Find step or If condition looks for).   Esc or right-click to cancel.",
+                pickPoint: true);
+            if (center is not { } c) return (OffsetPick?)null;
+            anchor = new ScreenPoint(c.X, c.Y);
+        }
+
+        // 3. The spot to click / move to, relative to that center.
+        var picked = await RegionPicker.PickAsync(
+            $"Now click where the macro should click, relative to the target at ({anchor.Value.X}, {anchor.Value.Y}).   Esc or right-click to cancel.",
+            pickPoint: true);
+        if (picked is not { } spot) return (OffsetPick?)null;
+
+        return (OffsetPick?)new OffsetPick(spot.X - anchor.Value.X, spot.Y - anchor.Value.Y, anchor.Value, reference is not null && note is null, note);
+    });
 
     /// <summary>
     /// The area a test searches, and how to name it ("Main Monitor", "the \"Roblox\" window"…), or an error to show

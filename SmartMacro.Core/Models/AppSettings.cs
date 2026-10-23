@@ -8,8 +8,10 @@ public sealed class AppSettings
     /// <summary>
     /// 1 = original. 2 = adds the Smart recording mode (the new default). Version 1 files are switched to Smart once,
     /// because version 1 only offered Desktop / Game; both are still available as advanced options.
+    /// 3 = the pause / resume shortcut defaults to F8 (AAA upgrade); files that still have the old default Ctrl+Shift+F11
+    /// are moved to F8 once. A shortcut the user picked themselves is kept.
     /// </summary>
-    public const int CurrentSchemaVersion = 2;
+    public const int CurrentSchemaVersion = 3;
     public const int MaxDefaultDelayMs = 60_000;
 
     public int SchemaVersion { get; set; } = CurrentSchemaVersion;
@@ -52,6 +54,13 @@ public sealed class AppSettings
     public bool SimplifyMousePaths { get; set; } = true;
 
     /// <summary>
+    /// Smart Click Snapshots: while recording (Smart and Desktop modes), save a small 56×56 picture of what was under the
+    /// cursor at every click, so the editor can show it and Smart-Aim / "Convert to Find image" can use it. The pictures
+    /// are stored inside the macro file. On by default (also for settings files made before it existed).
+    /// </summary>
+    public bool CaptureClickSnapshots { get; set; } = true;
+
+    /// <summary>
     /// Playback: a cursor jump right after a Delay glides there smoothly (~120 updates per second) during the end of
     /// that Delay instead of teleporting, so menus, sliders and games see real movement. Total timing is unchanged.
     /// On by default (also for settings files made before it existed).
@@ -64,7 +73,7 @@ public sealed class AppSettings
     /// <summary>Global shortcut to play / stop playback.</summary>
     public HotkeyBinding PlayHotkey { get; set; } = HotkeyBinding.DefaultPlay;
 
-    /// <summary>Global shortcut to pause / resume playback.</summary>
+    /// <summary>Shortcut to pause / resume playback (F8 by default; only active while a macro plays).</summary>
     public HotkeyBinding PauseHotkey { get; set; } = HotkeyBinding.DefaultPause;
 
     public AppSettings Clone() => (AppSettings)MemberwiseClone();
@@ -78,6 +87,11 @@ public sealed class AppSettings
 
         // Settings saved before Smart recording existed: start using it (Desktop / Game stay in Settings → Advanced).
         if (SchemaVersion < 2) RecordingMode = RecordingMode.Smart;
+
+        // Settings saved before the F8 pause key: the old default shortcut becomes F8 (unless F8 is taken).
+        if (SchemaVersion < 3 && PauseHotkey == HotkeyBinding.LegacyDefaultPause
+            && HotkeyBinding.ProblemWithSet(RecordHotkey ?? HotkeyBinding.DefaultRecord, PlayHotkey ?? HotkeyBinding.DefaultPlay, HotkeyBinding.DefaultPause) is null)
+            PauseHotkey = HotkeyBinding.DefaultPause;
 
         // Broken or clashing shortcuts (e.g. from a hand-edited file) fall back to the defaults.
         if (RecordHotkey is null || PlayHotkey is null || PauseHotkey is null

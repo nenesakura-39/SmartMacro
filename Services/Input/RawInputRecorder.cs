@@ -50,6 +50,20 @@ public sealed class RawInputRecorder : IRelativeInputRecorder, IDisposable
 
     private Session? _session;
     private Session? _lastSession;
+    private bool _captureClickSnapshots = true;
+
+    /// <summary>
+    /// Smart recording only: keep a small picture of what each click hit (Smart Click Snapshots). Read when a recording
+    /// starts. Game mode never takes pictures.
+    /// </summary>
+    public bool CaptureClickSnapshots
+    {
+        get => _captureClickSnapshots;
+        set => _captureClickSnapshots = value;
+    }
+
+    /// <summary>How many click pictures the latest recording kept.</summary>
+    public int ClickSnapshotCount => (_session ?? _lastSession)?.SnapshotCount ?? 0;
 
     public bool IsRecording => _session is not null;
 
@@ -74,7 +88,14 @@ public sealed class RawInputRecorder : IRelativeInputRecorder, IDisposable
             StartY = cursor.Y;
         }
 
-        var session = new Session(_captureCursor);
+        ClickSnapshotter? snapshots = null;
+        if (_captureCursor && _captureClickSnapshots)
+        {
+            snapshots = new ClickSnapshotter();
+            snapshots.Reset(); // reads the screen layout here, on the calling (UI) thread
+        }
+
+        var session = new Session(_captureCursor, snapshots);
         _lastSession = session;
         session.Start(); // throws with a readable message if Windows refuses
         _session = session;
@@ -137,6 +158,7 @@ public sealed class RawInputRecorder : IRelativeInputRecorder, IDisposable
         private readonly object _lock = new();
         private readonly List<CapturedInputEvent> _events = new();
         private readonly bool _captureCursor;
+        private readonly ClickSnapshotter? _snapshots; // Smart Click Snapshots (smart recording only)
 
         // Keys whose press was recorded and not released yet (only touched on the session thread).
         private readonly HashSet<int> _keysRecordedDown = new();
@@ -165,10 +187,14 @@ public sealed class RawInputRecorder : IRelativeInputRecorder, IDisposable
         private int _lastCursorX;
         private int _lastCursorY;
 
-        public Session(bool captureCursor)
+        public Session(bool captureCursor, ClickSnapshotter? snapshots = null)
         {
             _captureCursor = captureCursor;
+            _snapshots = snapshots;
         }
+
+        /// <summary>How many click pictures this session kept.</summary>
+        public int SnapshotCount => _snapshots?.Count ?? 0;
 
         public int EventCount
         {
@@ -450,11 +476,17 @@ public sealed class RawInputRecorder : IRelativeInputRecorder, IDisposable
             // release is then dropped by the converter as "released but never pressed".
             if ((buttonFlags & ButtonDownMask) != 0 && IsOwnWindowAt(cursor)) buttonFlags &= unchecked((ushort)~ButtonDownMask);
 
-            if ((buttonFlags & RI_MOUSE_LEFT_BUTTON_DOWN) != 0) Add(InputEvent.ButtonDown(timeUs, MacroMouseButton.Left, x, y), cursorFlags);
+            // Smart Click Snapshot: one small picture per press, only while the cursor is visible and free (a hidden /
+            // locked cursor means a 3D camera, where a picture of the screen centre isn't "what was clicked").
+            ClickTargetSnapshot? target = null;
+            if ((buttonFlags & ButtonDownMask) != 0 && _snapshots is not null && !_cursorHidden && !_cursorConfined)
+                target = _snapshots.TryCapture(x, y);
+
+            if ((buttonFlags & RI_MOUSE_LEFT_BUTTON_DOWN) != 0) Add(InputEvent.ButtonDown(timeUs, MacroMouseButton.Left, x, y), cursorFlags, target);
             if ((buttonFlags & RI_MOUSE_LEFT_BUTTON_UP) != 0) Add(InputEvent.ButtonUp(timeUs, MacroMouseButton.Left, x, y), cursorFlags);
-            if ((buttonFlags & RI_MOUSE_RIGHT_BUTTON_DOWN) != 0) Add(InputEvent.ButtonDown(timeUs, MacroMouseButton.Right, x, y), cursorFlags);
+            if ((buttonFlags & RI_MOUSE_RIGHT_BUTTON_DOWN) != 0) Add(InputEvent.ButtonDown(timeUs, MacroMouseButton.Right, x, y), cursorFlags, target);
             if ((buttonFlags & RI_MOUSE_RIGHT_BUTTON_UP) != 0) Add(InputEvent.ButtonUp(timeUs, MacroMouseButton.Right, x, y), cursorFlags);
-            if ((buttonFlags & RI_MOUSE_MIDDLE_BUTTON_DOWN) != 0) Add(InputEvent.ButtonDown(timeUs, MacroMouseButton.Middle, x, y), cursorFlags);
+            if ((buttonFlags & RI_MOUSE_MIDDLE_BUTTON_DOWN) != 0) Add(InputEvent.ButtonDown(timeUs, MacroMouseButton.Middle, x, y), cursorFlags, target);
             if ((buttonFlags & RI_MOUSE_MIDDLE_BUTTON_UP) != 0) Add(InputEvent.ButtonUp(timeUs, MacroMouseButton.Middle, x, y), cursorFlags);
             if ((buttonFlags & RI_MOUSE_WHEEL) != 0) Add(InputEvent.WheelAt(timeUs, (short)buttonData, false, x, y), cursorFlags);
             if ((buttonFlags & RI_MOUSE_HWHEEL) != 0) Add(InputEvent.WheelAt(timeUs, (short)buttonData, true, x, y), cursorFlags);
@@ -544,7 +576,7 @@ public sealed class RawInputRecorder : IRelativeInputRecorder, IDisposable
                 : InputEvent.KeyDown(timeUs, k.VKey, scan, extended));
         }
 
-        private void Add(InputEvent e, CursorFlags cursor = CursorFlags.None)
+        private void Add(InputEvent e, CursorFlags cursor = CursorFlags.None, ClickTargetSnapshot? target = null)
         {
             lock (_lock)
             {
@@ -554,7 +586,7 @@ public sealed class RawInputRecorder : IRelativeInputRecorder, IDisposable
                     return;
                 }
 
-                _events.Add(new CapturedInputEvent(e, cursor));
+                _events.Add(new CapturedInputEvent(e, cursor, target));
             }
         }
 
@@ -588,6 +620,16 @@ public sealed class SmartInputRecorder : ISmartInputRecorder, IDisposable
     public int StartX => _recorder.StartX;
 
     public int StartY => _recorder.StartY;
+
+    /// <summary>Smart Click Snapshots on / off (Settings). Read when a recording starts.</summary>
+    public bool CaptureClickSnapshots
+    {
+        get => _recorder.CaptureClickSnapshots;
+        set => _recorder.CaptureClickSnapshots = value;
+    }
+
+    /// <summary>How many click pictures the latest recording kept.</summary>
+    public int ClickSnapshotCount => _recorder.ClickSnapshotCount;
 
     /// <summary>Last error inside the WM_INPUT handler of the latest recording.</summary>
     public Exception? LastHandlerError => _recorder.LastHandlerError;

@@ -197,8 +197,19 @@ public sealed class WindowsInputRecorder : IInputRecorder, IDisposable
 
     private readonly List<RawInputEvent> _events = new();
     private readonly HashSet<int> _keysRecordedDown = new(); // pressed in another app, not released yet
+    private readonly ClickSnapshotter _snapshots = new();
     private LowLevelInputHook? _hook;
     private uint _startTick;
+
+    /// <summary>Smart Click Snapshots: keep a small picture of what each click hit (Settings; on by default).</summary>
+    public bool CaptureClickSnapshots
+    {
+        get => _snapshots.Enabled;
+        set => _snapshots.Enabled = value;
+    }
+
+    /// <summary>How many click pictures the latest recording kept.</summary>
+    public int ClickSnapshotCount => _snapshots.Count;
 
     public bool IsRecording => _hook is not null;
 
@@ -216,6 +227,7 @@ public sealed class WindowsInputRecorder : IInputRecorder, IDisposable
 
         _events.Clear();
         _keysRecordedDown.Clear();
+        _snapshots.Reset();
         LimitReached = false;
         _startTick = unchecked((uint)Environment.TickCount);
         if (GetCursorPos(out var pt))
@@ -277,7 +289,10 @@ public sealed class WindowsInputRecorder : IInputRecorder, IDisposable
 
         // Hook times are milliseconds since boot (wrapping); make them relative to the start.
         var time = Math.Max(0, unchecked((int)(e.Time - _startTick)));
-        _events.Add(new RawInputEvent(time, e.Kind, e.X, e.Y, e.Button, e.Delta, e.VirtualKey));
+
+        // Smart Click Snapshot: the hook runs before the clicked app sees the press, so this is the button as clicked.
+        var target = e.Kind == RawInputKind.MouseDown ? _snapshots.TryCapture(e.X, e.Y) : null;
+        _events.Add(new RawInputEvent(time, e.Kind, e.X, e.Y, e.Button, e.Delta, e.VirtualKey, target));
     }
 }
 

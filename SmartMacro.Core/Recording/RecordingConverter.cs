@@ -15,7 +15,10 @@ public enum RawInputKind
     KeyUp,
 }
 
-/// <summary>One raw input event captured by the recorder. TimeMs is relative to the recording start.</summary>
+/// <summary>
+/// One raw input event captured by the recorder. TimeMs is relative to the recording start.
+/// ClickedTarget (mouse downs only): the Smart Click Snapshot of what was under the cursor, or null.
+/// </summary>
 public readonly record struct RawInputEvent(
     long TimeMs,
     RawInputKind Kind,
@@ -23,7 +26,8 @@ public readonly record struct RawInputEvent(
     int Y = 0,
     MacroMouseButton Button = MacroMouseButton.Left,
     int Delta = 0,
-    int VirtualKey = 0);
+    int VirtualKey = 0,
+    ClickTargetSnapshot? ClickedTarget = null);
 
 /// <summary>Captures raw desktop input. The real version uses Windows low-level hooks.</summary>
 public interface IInputRecorder
@@ -233,12 +237,14 @@ public static class RecordingConverter
                         && events[up].TimeMs - e.TimeMs <= options.MaxTapDurationMs
                         && Distance(e, events[up]) <= options.MaxClickDistance)
                     {
-                        Emit(new MouseClickStep
-                            {
-                                Button = e.Button, Action = MouseClickAction.Click, X = e.X, Y = e.Y,
-                                HoldMs = HoldFor(e.TimeMs, events[up].TimeMs),
-                            },
-                            e.TimeMs, events[up].TimeMs);
+                        var click = new MouseClickStep
+                        {
+                            Button = e.Button, Action = MouseClickAction.Click, X = e.X, Y = e.Y,
+                            HoldMs = HoldFor(e.TimeMs, events[up].TimeMs),
+                        };
+                        // Smart Click Snapshot: remember what was clicked (shown in the editor, used by Smart-Aim).
+                        ClickSnapshots.Attach(click, e.ClickedTarget);
+                        Emit(click, e.TimeMs, events[up].TimeMs);
                         for (var k = i; k <= up; k++) consumed[k] = true;
                         lastMovePosition = (events[up].X, events[up].Y);
                     }

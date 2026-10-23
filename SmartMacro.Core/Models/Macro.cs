@@ -18,6 +18,24 @@ public sealed class Macro
     /// <summary>Playback speed multiplier for delays (2 = twice as fast). 0.1 to 10.</summary>
     public double Speed { get; set; } = 1.0;
 
+    /// <summary>
+    /// AAA name for <see cref="Speed"/> (the same stored value): 0.5× / 1× / 1.5× / 2× / 5×… Delays, glides, recorded
+    /// input and hold times are divided by it; holds never get shorter than 25 ms so games still see the clicks.
+    /// Setting it clamps to <see cref="MinPlaybackSpeed"/>–<see cref="MaxPlaybackSpeed"/>.
+    /// </summary>
+    [JsonIgnore]
+    public double PlaybackSpeed
+    {
+        get => Speed;
+        set => Speed = double.IsNaN(value) ? 1.0 : Math.Clamp(value, MinPlaybackSpeed, MaxPlaybackSpeed);
+    }
+
+    public const double MinPlaybackSpeed = 0.25;
+    public const double MaxPlaybackSpeed = 10.0;
+
+    /// <summary>The speeds offered by the editor's speed selector.</summary>
+    public static IReadOnlyList<double> SpeedPresets { get; } = new[] { 0.5, 1.0, 1.5, 2.0, 5.0 };
+
     /// <summary>Pause between repeats, in ms (not after the last one). Also scaled by Speed.</summary>
     public int RepeatDelayMs { get; set; }
 
@@ -75,8 +93,9 @@ public sealed class Macro
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public int? DelayJitterPercent { get; set; }
 
-    public const int DefaultClickJitterPx = 3;
-    public const int DefaultDelayJitterPercent = 8;
+    /// <summary>Humanize defaults: ±2 px around click spots, ±4 % on delays of 40 ms or more.</summary>
+    public const int DefaultClickJitterPx = 2;
+    public const int DefaultDelayJitterPercent = 4;
     public const int MaxClickJitterPx = 50;
     public const int MaxDelayJitterPercent = 50;
 
@@ -111,8 +130,11 @@ public sealed class MacroDocument
     ///     (click hold, double-click gap, wait after click) on Mouse click and Find steps.
     /// 11 = adds macro settings: a target window with "auto-adjust coordinates" (reference rectangle) and "Humanize"
     ///     (click jitter / delay variation).
+    /// 12 = adds Smart Click Snapshots (a recorded "what you clicked" picture + Smart-Aim on Mouse click steps) and
+    ///     "on the last found spot + offset" / "by an offset from the cursor" targets with X / Y offsets on Move mouse and
+    ///     Mouse click steps.
     /// </summary>
-    public const int CurrentSchemaVersion = 11;
+    public const int CurrentSchemaVersion = 12;
 
     public int SchemaVersion { get; set; }
     public Macro? Macro { get; set; }
@@ -133,6 +155,7 @@ public sealed class MacroDocument
         {
             var needed = step switch
             {
+                _ when UsesVersion12Features(step) => 12,
                 _ when UsesVersion10Features(step) => 10,
                 _ when UsesVersion9Features(step) => 9,
                 _ when UsesQualityOfLifeFeatures(step) => 8,
@@ -159,6 +182,16 @@ public sealed class MacroDocument
         macro.HumanizePlayback || macro.ScaleCoordinatesToWindow || macro.TargetWindowTitle is not null
         || macro.ClickJitterPx is not null || macro.DelayJitterPercent is not null
         || macro.ReferenceWidth != 0 || macro.ReferenceHeight != 0;
+
+    /// <summary>True if the step uses an option added in format 12 (see <see cref="CurrentSchemaVersion"/>).</summary>
+    private static bool UsesVersion12Features(MacroStep step) => step switch
+    {
+        MouseClickStep c => c.TargetThumbnailBase64 is not null || c.SmartAimAtTarget || c.TargetAnchorX is not null
+                            || c.TargetAnchorY is not null || c.SmartAimAccuracyOverride is not null || c.SmartAimRadiusOverride is not null
+                            || c.OffsetX != 0 || c.OffsetY != 0,
+        MouseMoveStep m => m.TargetMode != ClickTargetMode.Coordinates || m.OffsetX != 0 || m.OffsetY != 0,
+        _ => false,
+    };
 
     /// <summary>True if the step uses an option added in format 10 (see <see cref="CurrentSchemaVersion"/>).</summary>
     private static bool UsesVersion10Features(MacroStep step)

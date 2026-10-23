@@ -146,7 +146,8 @@
                                 <TextBox Grid.Row="1" Grid.Column="1" Text="{Binding PlayHotkeyText, Mode=OneWay}" Tag="Play" IsReadOnly="True"
                                          Margin="0,4" PreviewKeyDown="HotkeyBox_PreviewKeyDown" AutomationProperties.Name="Play shortcut" Cursor="Hand"
                                          FontWeight="SemiBold" />
-                                <TextBlock Grid.Row="2" Text="⏸ Pause / resume" VerticalAlignment="Center" />
+                                <TextBlock Grid.Row="2" Text="⏸ Pause / resume (while playing)" VerticalAlignment="Center"
+                                           ToolTip="F8 by default. Only active while a macro plays, so the key works normally in other apps the rest of the time. Pausing releases every held key and mouse button; Resume continues from the same step." />
                                 <TextBox Grid.Row="2" Grid.Column="1" Text="{Binding PauseHotkeyText, Mode=OneWay}" Tag="Pause" IsReadOnly="True"
                                          Margin="0,4" PreviewKeyDown="HotkeyBox_PreviewKeyDown" AutomationProperties.Name="Pause shortcut" Cursor="Hand"
                                          FontWeight="SemiBold" />
@@ -187,6 +188,9 @@
                             <CheckBox Style="{StaticResource SettingSwitch}" IsChecked="{Binding SimplifyMousePaths}" IsEnabled="{Binding MakesEditableSteps}"
                                       Content="Simplify mouse paths (recommended for menus and shops)" AutomationProperties.Name="Simplify mouse paths"
                                       ToolTip="Cursor travel between clicks isn't turned into Move mouse steps: each click already remembers where it happens. Dragging with a button held (sliders, items) and the spot you hover before pressing a key are still kept." />
+                            <CheckBox Style="{StaticResource SettingSwitch}" IsChecked="{Binding CaptureClickSnapshots}" IsEnabled="{Binding MakesEditableSteps}"
+                                      Content="✨ Smart Click Snapshots: save a small picture of what I click" AutomationProperties.Name="Smart Click Snapshots"
+                                      ToolTip="Every recorded click keeps a 56×56 picture of what was under the cursor. The editor shows it, Smart-Aim can find the button again if it moved a little, and one click turns the step into a 'Find image &amp; click'. The pictures are saved inside the macro file, so turn this off if your screen shows private things while you record." />
 
                             <TextBlock Text="Default length of new Delay steps (ms)" Style="{StaticResource FieldLabel}" Margin="0,14,0,4" />
                             <TextBox Text="{Binding DefaultDelayMs, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}" Width="140" HorizontalAlignment="Left"

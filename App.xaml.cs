@@ -77,7 +77,8 @@ public partial class App : Application
         var screenCapture = new GdiScreenCapture();
         var screenInfo = new ScreenInfoProvider(); // monitors + app windows for "where to look"
         var automation = new AutomationServices(
-            new PlaybackEngine(new Win32InputSimulator(_log), _playbackClock, ocr, screenCapture, screenInfo),
+            // Playback captures hide the target-lock reticle first where Windows can't leave it out of captures.
+            new PlaybackEngine(new Win32InputSimulator(_log), _playbackClock, ocr, new OverlayAwareScreenCapture(screenCapture), screenInfo),
             new WindowsInputRecorder(),
             new RawInputRecorder(),
             new SmartInputRecorder(),
@@ -85,7 +86,7 @@ public partial class App : Application
             _runHost,
             ocr,
             new FindTextTools(window, ocr, Path.Combine(paths.LogsDirectory, "last-ocr-test.png"), screenInfo),
-            new VisionTools(window, screenCapture, paths.LogsDirectory, screenInfo));
+            new VisionTools(window, screenCapture, paths.LogsDirectory, screenInfo, ocr));
 
         var mainViewModel = new MainViewModel(repository, settingsStore, _log, dialogs, screenInfo, paths, Dispatcher, automation);
         viewModel = mainViewModel;
@@ -99,6 +100,13 @@ public partial class App : Application
         _hotkeys.Pressed += (_, action) => mainViewModel.Automation.HandleHotkey(action);
         _hotkeys.Attach(window);
         _hotkeys.Apply(mainViewModel.CurrentSettings);
+
+        // Pause / resume (F8 by default) is only a global shortcut while a macro plays, so F8 works normally otherwise.
+        mainViewModel.Automation.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName is nameof(AutomationViewModel.IsPlaying) or "")
+                _hotkeys?.SetPauseActive(mainViewModel.Automation.IsPlaying);
+        };
         mainViewModel.SettingsApplied += (_, settings) =>
         {
             var failed = _hotkeys.Apply(settings);

@@ -156,6 +156,9 @@ public static class MacroValidator
             if (step is MouseClickStep { UseLastFoundText: true } && !hasFindTextBefore)
                 issues.Add(new ValidationIssue(IssueSeverity.Warning,
                     "This click uses the last found spot, but there's no \"Find text\", \"Find image\" or \"Find color\" step (or If / Repeat condition) before it.", i, step.Id, nameof(MouseClickStep.UseLastFoundText)));
+            if (step is MouseMoveStep { TargetMode: ClickTargetMode.LastFoundMatch } && !hasFindTextBefore)
+                issues.Add(new ValidationIssue(IssueSeverity.Warning,
+                    "This move goes to the last found spot, but there's no \"Find text\", \"Find image\" or \"Find color\" step (or If / Repeat condition) before it.", i, step.Id, nameof(MouseMoveStep.TargetMode)));
             if (step is ScreenSearchStep { Enabled: true, Goal: WaitGoal.Appear }) hasFindTextBefore = true;
             if (step.Enabled && WorkflowSteps.ConditionsOf(step).Any()) hasFindTextBefore = true; // conditions remember what they saw
 
@@ -252,6 +255,58 @@ public static class MacroValidator
         return false;
     }
 
+    /// <summary>Longest stored "what you clicked" picture (Base64 characters). A 56×56 thumbnail is about 10,000.</summary>
+    public const int MaxThumbnailLength = 1_000_000;
+
+    /// <summary>Smart-Aim accuracy limits (0.5 = 50 % similar … 1.0 = identical).</summary>
+    public const double MinSmartAimAccuracy = 0.5;
+
+    public const double MaxSmartAimAccuracy = 1.0;
+
+    /// <summary>Smart-Aim search distance limits (px each way).</summary>
+    public const int MinSmartAimRadiusPx = 0;
+
+    public const int MaxSmartAimRadiusPx = 2_000;
+
+    /// <summary>"Offset X / Y" of a "last found spot" (or "move by") target.</summary>
+    private static void CheckOffset(List<ValidationIssue> issues, int offsetX, int offsetY)
+    {
+        if (Math.Abs((long)offsetX) > MaxOffset || Math.Abs((long)offsetY) > MaxOffset)
+            issues.Add(Error($"Offsets must be between -{MaxOffset} and {MaxOffset} pixels.", "Offset"));
+    }
+
+    /// <summary>Smart Click Snapshots: the recorded picture and the Smart-Aim settings.</summary>
+    private static void ValidateSmartClick(List<ValidationIssue> issues, MouseClickStep c)
+    {
+        if (c.TargetThumbnailBase64 is { } thumbnail)
+        {
+            if (thumbnail.Length > MaxThumbnailLength)
+            {
+                issues.Add(Error("The recorded \"what you clicked\" picture is too big. The macro may be damaged.", nameof(MouseClickStep.TargetThumbnailBase64)));
+                return;
+            }
+
+            if (c.SmartAimAtTarget && SmartClickConversion.TryDecodeThumbnail(c, out var error) is null)
+                issues.Add(Warning($"Smart-Aim can't use the recorded picture ({error}), so this click always uses its X / Y.", nameof(MouseClickStep.SmartAimAtTarget)));
+        }
+
+        if (c.TargetAnchorX is < 0 or > MaxTemplateSize || c.TargetAnchorY is < 0 or > MaxTemplateSize)
+            issues.Add(Error("The recorded click spot inside the picture is invalid. The macro may be damaged.", nameof(MouseClickStep.TargetAnchorX)));
+
+        if (double.IsNaN(c.SmartAimAccuracy) || c.SmartAimAccuracy < MinSmartAimAccuracy || c.SmartAimAccuracy > MaxSmartAimAccuracy)
+            issues.Add(Error($"Smart-Aim accuracy must be {MinSmartAimAccuracy:P0} to {MaxSmartAimAccuracy:P0}.", nameof(MouseClickStep.SmartAimAccuracy)));
+        if (c.SmartAimRadiusPx < MinSmartAimRadiusPx || c.SmartAimRadiusPx > MaxSmartAimRadiusPx)
+            issues.Add(Error($"The Smart-Aim distance must be {MinSmartAimRadiusPx} to {MaxSmartAimRadiusPx:N0} px.", nameof(MouseClickStep.SmartAimRadiusPx)));
+
+        if (c.SmartAimAtTarget)
+        {
+            if (!c.HasTargetThumbnail)
+                issues.Add(Warning("Smart-Aim needs a recorded picture of what was clicked, and this click has none, so it always uses its X / Y.", nameof(MouseClickStep.SmartAimAtTarget)));
+            else if (c.UseCurrentPosition || c.UseLastFoundText)
+                issues.Add(Warning("Smart-Aim only works with \"At a chosen position\": it looks for the picture around X / Y.", nameof(MouseClickStep.SmartAimAtTarget)));
+        }
+    }
+
     /// <summary>
     /// Stricter check used before playback: everything from Validate, plus the macro must actually do something.
     /// </summary>
@@ -282,7 +337,12 @@ public static class MacroValidator
                 break;
 
             case MouseMoveStep m:
-                CheckPosition(issues, m.X, m.Y, screen);
+                if (!Enum.IsDefined(m.TargetMode))
+                    issues.Add(Error("Unknown \"where to move\" choice. The macro may be damaged.", nameof(MouseMoveStep.TargetMode)));
+                else if (m.TargetMode == ClickTargetMode.Coordinates)
+                    CheckPosition(issues, m.X, m.Y, screen);
+                else
+                    CheckOffset(issues, m.OffsetX, m.OffsetY);
                 CheckMovement(issues, m.MoveStyle, m.MoveDurationMs);
                 break;
 
@@ -293,6 +353,9 @@ public static class MacroValidator
                     issues.Add(Error("Unknown click action.", nameof(MouseClickStep.Action)));
                 if (!c.UseCurrentPosition && !c.UseLastFoundText)
                     CheckPosition(issues, c.X, c.Y, screen);
+                if (c.UseLastFoundText)
+                    CheckOffset(issues, c.OffsetX, c.OffsetY);
+                ValidateSmartClick(issues, c);
                 CheckMovement(issues, c.MoveStyle, c.MoveDurationMs);
                 if (c.DoubleClickIntervalMs < 0 || c.DoubleClickIntervalMs > MouseMotionDefaults.MaxDoubleClickIntervalMs)
                     issues.Add(Error($"The double-click gap must be 0 to {MouseMotionDefaults.MaxDoubleClickIntervalMs:N0} ms.", nameof(MouseClickStep.DoubleClickIntervalMs)));

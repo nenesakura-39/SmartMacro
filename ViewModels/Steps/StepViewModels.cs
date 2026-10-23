@@ -381,15 +381,80 @@ public sealed class MouseMoveStepViewModel : StepViewModel
     {
         _step = step;
         PositionPicker = new PositionPickerViewModel(SetPosition);
+        OffsetPicker = new OffsetPickerViewModel(SetOffset, () => ReferenceFinder?.Invoke());
     }
 
     /// <summary>"Pick position" / "Use cursor position" for the destination.</summary>
     public PositionPickerViewModel PositionPicker { get; }
 
+    /// <summary>"🎯 Pick offset from screen" for "To the last found spot" / "By an offset from the cursor".</summary>
+    public OffsetPickerViewModel OffsetPicker { get; }
+
+    /// <summary>Set by the editor: the Find step / If-Repeat condition before this step whose found spot it uses.</summary>
+    public Func<ScreenSearchStep?>? ReferenceFinder { get; set; }
+
+    public static IReadOnlyList<Choice<ClickTargetMode>> Targets { get; } = new[]
+    {
+        new Choice<ClickTargetMode>(ClickTargetMode.Coordinates, "To a chosen position (X / Y below)"),
+        new Choice<ClickTargetMode>(ClickTargetMode.LastFoundMatch, "To what the last Find step / If condition found (+ offset)"),
+        new Choice<ClickTargetMode>(ClickTargetMode.CurrentCursor, "By an offset from where the cursor is"),
+    };
+
+    /// <summary>Where to move (AAA upgrade): a fixed spot, the last found spot + offset, or the cursor + offset.</summary>
+    public ClickTargetMode TargetMode
+    {
+        get => _step.TargetMode;
+        set
+        {
+            if (_step.TargetMode == value) return;
+            _step.TargetMode = value;
+            NotifyChanged();
+            OnPropertyChanged(nameof(UsesFixedPosition));
+            OnPropertyChanged(nameof(UsesOffset));
+            OnPropertyChanged(nameof(OffsetHelp));
+        }
+    }
+
+    public bool UsesFixedPosition => _step.TargetMode == ClickTargetMode.Coordinates;
+
+    public bool UsesOffset => _step.TargetMode != ClickTargetMode.Coordinates;
+
+    public int OffsetX
+    {
+        get => _step.OffsetX;
+        set { if (_step.OffsetX == value) return; _step.OffsetX = value; NotifyChanged(); }
+    }
+
+    public int OffsetY
+    {
+        get => _step.OffsetY;
+        set { if (_step.OffsetY == value) return; _step.OffsetY = value; NotifyChanged(); }
+    }
+
+    public string OffsetHelp => _step.TargetMode == ClickTargetMode.CurrentCursor
+        ? "Moves the cursor this many pixels from wherever it is when the step runs (+X = right, +Y = down)."
+        : "Moves to the center of what the last Find step / If condition found, plus this offset (+X = right, +Y = down). \"Pick offset from screen\" finds the target and lets you click the spot.";
+
+    private void SetOffset(int x, int y)
+    {
+        _step.OffsetX = x;
+        _step.OffsetY = y;
+        OnPropertyChanged(nameof(OffsetX));
+        NotifyChanged(nameof(OffsetY));
+    }
+
     private void SetPosition(int x, int y)
     {
         _step.X = x;
         _step.Y = y;
+        if (_step.TargetMode != ClickTargetMode.Coordinates)
+        {
+            _step.TargetMode = ClickTargetMode.Coordinates; // picking a spot means "go there"
+            OnPropertyChanged(nameof(TargetMode));
+            OnPropertyChanged(nameof(UsesFixedPosition));
+            OnPropertyChanged(nameof(UsesOffset));
+        }
+
         OnPropertyChanged(nameof(X));
         NotifyChanged(nameof(Y));
     }
@@ -437,10 +502,14 @@ public sealed class MouseClickStepViewModel : StepViewModel
 {
     private readonly MouseClickStep _step;
 
+    private System.Windows.Media.ImageSource? _thumbnail;
+    private bool _thumbnailLoaded;
+
     public MouseClickStepViewModel(MouseClickStep step) : base(step)
     {
         _step = step;
         PositionPicker = new PositionPickerViewModel(SetPosition);
+        OffsetPicker = new OffsetPickerViewModel(SetOffset, () => ReferenceFinder?.Invoke());
         EndPoint = new PointEditorViewModel(
             () => _step.EndX, v => _step.EndX = v,
             () => _step.EndY, v => _step.EndY = v,
@@ -477,7 +546,7 @@ public sealed class MouseClickStepViewModel : StepViewModel
     {
         new Choice<ClickTarget>(ClickTarget.ChosenPosition, "At a chosen position (X / Y below)"),
         new Choice<ClickTarget>(ClickTarget.CurrentCursor, "Where the cursor already is"),
-        new Choice<ClickTarget>(ClickTarget.LastFound, "On what the last Find text / image / color step found"),
+        new Choice<ClickTarget>(ClickTarget.LastFound, "On what the last Find step / If condition found (+ offset)"),
     };
 
     /// <summary>"Pick position" / "Use cursor position" for the click position.</summary>
@@ -486,16 +555,171 @@ public sealed class MouseClickStepViewModel : StepViewModel
     /// <summary>Where the click happens: one choice instead of two check boxes (same two settings underneath).</summary>
     public ClickTarget Target
     {
-        get => _step.UseLastFoundText ? ClickTarget.LastFound : _step.UseCurrentPosition ? ClickTarget.CurrentCursor : ClickTarget.ChosenPosition;
+        get => _step.TargetMode switch
+        {
+            ClickTargetMode.LastFoundMatch => ClickTarget.LastFound,
+            ClickTargetMode.CurrentCursor => ClickTarget.CurrentCursor,
+            _ => ClickTarget.ChosenPosition,
+        };
         set
         {
             if (Target == value) return;
-            _step.UseLastFoundText = value == ClickTarget.LastFound;
-            _step.UseCurrentPosition = value == ClickTarget.CurrentCursor;
+            _step.TargetMode = value switch
+            {
+                ClickTarget.LastFound => ClickTargetMode.LastFoundMatch,
+                ClickTarget.CurrentCursor => ClickTargetMode.CurrentCursor,
+                _ => ClickTargetMode.Coordinates,
+            };
             NotifyChanged();
-            OnPropertyChanged(nameof(UseCurrentPosition));
-            OnPropertyChanged(nameof(UseLastFoundText));
-            OnPropertyChanged(nameof(UsesFixedPosition));
+            RaiseTargetChanged();
+        }
+    }
+
+    private void RaiseTargetChanged()
+    {
+        OnPropertyChanged(nameof(Target));
+        OnPropertyChanged(nameof(UseCurrentPosition));
+        OnPropertyChanged(nameof(UseLastFoundText));
+        OnPropertyChanged(nameof(UsesFixedPosition));
+        OnPropertyChanged(nameof(UsesLastFound));
+        OnPropertyChanged(nameof(SmartAimHint));
+    }
+
+    // ---------------- AAA: "On the last found spot" + offset ----------------
+
+    /// <summary>"🎯 Pick offset from screen" for "On what the last Find step found".</summary>
+    public OffsetPickerViewModel OffsetPicker { get; }
+
+    /// <summary>Set by the editor: the Find step / If-Repeat condition before this step whose found spot it uses.</summary>
+    public Func<ScreenSearchStep?>? ReferenceFinder { get; set; }
+
+    public bool UsesLastFound => _step.UseLastFoundText;
+
+    public int OffsetX
+    {
+        get => _step.OffsetX;
+        set { if (_step.OffsetX == value) return; _step.OffsetX = value; NotifyChanged(); }
+    }
+
+    public int OffsetY
+    {
+        get => _step.OffsetY;
+        set { if (_step.OffsetY == value) return; _step.OffsetY = value; NotifyChanged(); }
+    }
+
+    private void SetOffset(int x, int y)
+    {
+        _step.OffsetX = x;
+        _step.OffsetY = y;
+        OnPropertyChanged(nameof(OffsetX));
+        NotifyChanged(nameof(OffsetY));
+    }
+
+    // ---------------- AAA: Smart Click Snapshot + Smart-Aim ----------------
+
+    /// <summary>True when this click was recorded with a picture of what it hit.</summary>
+    public bool HasTargetThumbnail => _step.HasTargetThumbnail;
+
+    /// <summary>The recorded 56×56 picture of what was clicked (null when none / unreadable).</summary>
+    public System.Windows.Media.ImageSource? TargetThumbnail
+    {
+        get
+        {
+            if (!_thumbnailLoaded)
+            {
+                _thumbnailLoaded = true;
+                _thumbnail = LoadThumbnail(_step.TargetThumbnailBase64);
+            }
+
+            return _thumbnail;
+        }
+    }
+
+    /// <summary>"56 × 56 px · clicked at the center" etc.</summary>
+    public string TargetThumbnailInfo
+    {
+        get
+        {
+            if (TargetThumbnail is not System.Windows.Media.Imaging.BitmapSource bitmap) return "The recorded picture can't be shown (it may be damaged).";
+            var w = bitmap.PixelWidth;
+            var h = bitmap.PixelHeight;
+            var (ax, ay) = Core.Workflow.SmartClickConversion.Anchor(_step, w, h);
+            var where = ax == w / 2 && ay == h / 2 ? "clicked in the middle" : $"clicked at ({ax}, {ay}) inside it (near a screen edge)";
+            return $"What you clicked when recording: {w} × {h} px, {where}.";
+        }
+    }
+
+    /// <summary>"[x] ✨ Smart-Aim: find &amp; click this visual target if it moved".</summary>
+    public bool SmartAimAtTarget
+    {
+        get => _step.SmartAimAtTarget;
+        set
+        {
+            if (_step.SmartAimAtTarget == value) return;
+            _step.SmartAimAtTarget = value;
+            NotifyChanged();
+            OnPropertyChanged(nameof(SmartAimHint));
+        }
+    }
+
+    /// <summary>Smart-Aim accuracy in percent (50–100; stored as 0.5–1.0).</summary>
+    public int SmartAimAccuracyPercent
+    {
+        get => (int)Math.Round(_step.SmartAimAccuracy * 100);
+        set
+        {
+            var accuracy = value / 100.0;
+            if (_step.SmartAimAccuracy.Equals(accuracy)) return;
+            _step.SmartAimAccuracy = accuracy;
+            NotifyChanged();
+        }
+    }
+
+    /// <summary>How far (px) the target may have moved.</summary>
+    public int SmartAimRadiusPx
+    {
+        get => _step.SmartAimRadiusPx;
+        set
+        {
+            if (_step.SmartAimRadiusPx == value) return;
+            _step.SmartAimRadiusPx = value;
+            NotifyChanged();
+            OnPropertyChanged(nameof(SmartAimLabel));
+        }
+    }
+
+    public string SmartAimLabel => $"✨ Smart-Aim: find & click this visual target if it moved (within {_step.SmartAimRadiusPx} px)";
+
+    public string SmartAimHint => !_step.SmartAimAtTarget
+        ? "Off: the click always happens at X / Y, exactly as recorded."
+        : _step.UseCurrentPosition || _step.UseLastFoundText
+            ? "Smart-Aim only works with \"At a chosen position\" (it looks around X / Y)."
+            : $"On: before clicking, SmartMacro looks for this picture within {_step.SmartAimRadiusPx} px of where it was and clicks the same spot on it. Not found = it clicks X / Y as recorded.";
+
+    /// <summary>True when "🔍 Convert step to full 'Find image &amp; click'" can be used.</summary>
+    public bool CanConvertToFindImage => Core.Workflow.SmartClickConversion.WhyNotConvertible(_step) is null;
+
+    public string ConvertHint => Core.Workflow.SmartClickConversion.WhyNotConvertible(_step)
+        ?? "Replaces this click with a Find image step that looks for this picture anywhere on screen (up to 5 s) and does the same click on it. Ctrl+Z undoes it.";
+
+    private static System.Windows.Media.ImageSource? LoadThumbnail(string? base64)
+    {
+        if (string.IsNullOrEmpty(base64)) return null;
+        try
+        {
+            var bytes = Convert.FromBase64String(base64);
+            var image = new System.Windows.Media.Imaging.BitmapImage();
+            image.BeginInit();
+            image.CacheOption = System.Windows.Media.Imaging.BitmapCacheOption.OnLoad;
+            image.StreamSource = new MemoryStream(bytes);
+            image.EndInit();
+            image.Freeze();
+            return image;
+        }
+        catch (Exception ex) when (ex is FormatException or NotSupportedException or ArgumentException or IOException
+                                       or InvalidOperationException or System.Runtime.InteropServices.COMException)
+        {
+            return null;
         }
     }
 
@@ -538,6 +762,8 @@ public sealed class MouseClickStepViewModel : StepViewModel
             OnPropertyChanged(nameof(UsesClickTiming));
             OnPropertyChanged(nameof(HoldMs));
             OnPropertyChanged(nameof(ActionHelp));
+            OnPropertyChanged(nameof(CanConvertToFindImage));
+            OnPropertyChanged(nameof(ConvertHint));
         }
     }
 
@@ -574,9 +800,7 @@ public sealed class MouseClickStepViewModel : StepViewModel
             _step.UseCurrentPosition = value;
             if (value) _step.UseLastFoundText = false;
             NotifyChanged();
-            OnPropertyChanged(nameof(UseLastFoundText));
-            OnPropertyChanged(nameof(UsesFixedPosition));
-            OnPropertyChanged(nameof(Target));
+            RaiseTargetChanged();
         }
     }
 
@@ -590,9 +814,7 @@ public sealed class MouseClickStepViewModel : StepViewModel
             _step.UseLastFoundText = value;
             if (value) _step.UseCurrentPosition = false;
             NotifyChanged();
-            OnPropertyChanged(nameof(UseCurrentPosition));
-            OnPropertyChanged(nameof(UsesFixedPosition));
-            OnPropertyChanged(nameof(Target));
+            RaiseTargetChanged();
         }
     }
 

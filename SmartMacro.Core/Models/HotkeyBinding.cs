@@ -10,7 +10,11 @@ public sealed record HotkeyBinding(KeyModifiers Modifiers, int VirtualKey)
 
     public static HotkeyBinding DefaultRecord { get; } = new(KeyModifiers.Control | KeyModifiers.Shift, 0x78); // F9
     public static HotkeyBinding DefaultPlay { get; } = new(KeyModifiers.Control | KeyModifiers.Shift, 0x79);   // F10
-    public static HotkeyBinding DefaultPause { get; } = new(KeyModifiers.Control | KeyModifiers.Shift, 0x7A);  // F11
+    /// <summary>F8 alone: pause / resume. Only registered while a macro plays, so F8 works normally in other apps otherwise.</summary>
+    public static HotkeyBinding DefaultPause { get; } = new(KeyModifiers.None, 0x77);                         // F8
+
+    /// <summary>The pause shortcut before the AAA upgrade (Ctrl+Shift+F11); settings that still have it move to F8 once.</summary>
+    public static HotkeyBinding LegacyDefaultPause { get; } = new(KeyModifiers.Control | KeyModifiers.Shift, 0x7A);
 
     [JsonIgnore]
     public bool IsFunctionKey => VirtualKey is >= 0x70 and <= 0x87; // F1..F24

@@ -98,6 +98,50 @@
         </StackPanel>
     </DataTemplate>
 
+    <!--
+        AAA upgrade: "🎯 Pick offset from screen" + its status line. DataContext = a step editor with OffsetPicker.
+        SmartMacro finds the reference target (the Find step / If condition above), then you click your spot.
+    -->
+    <DataTemplate x:Key="OffsetPickerTemplate">
+        <StackPanel>
+            <WrapPanel Margin="0,10,0,0">
+                <Button Command="{Binding OffsetPicker.PickCommand}" Style="{StaticResource PrimaryButton}" Margin="0,0,8,6"
+                        ToolTip="SmartMacro hides and finds the target the last Find step / If condition looks for, then you click the spot to use. The difference becomes Offset X / Y. If the target isn't on screen, you click its center first."
+                        AutomationProperties.Name="Pick offset from screen">
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="&#xE8B0;" Style="{StaticResource IconText}" />
+                        <TextBlock Text="🎯 Pick offset from screen" Margin="8,0,0,0" />
+                    </StackPanel>
+                </Button>
+            </WrapPanel>
+            <Border Padding="10,6" CornerRadius="6" Background="{StaticResource SurfaceAltBrush}" Margin="0,2,0,0"
+                    Visibility="{Binding OffsetPicker.Status, Converter={StaticResource NullToVisibility}}">
+                <TextBlock Text="{Binding OffsetPicker.Status}" TextWrapping="Wrap" FontSize="12" />
+            </Border>
+        </StackPanel>
+    </DataTemplate>
+
+    <!-- AAA upgrade: Offset X / Y fields (DataContext has OffsetX / OffsetY). -->
+    <DataTemplate x:Key="OffsetFieldsTemplate">
+        <Grid Margin="0,4,0,0">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="10" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+            <StackPanel Grid.Column="0">
+                <TextBlock Text="Offset X (+ = right)" Style="{StaticResource FieldLabel}" />
+                <TextBox Text="{Binding OffsetX, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}" AutomationProperties.Name="Offset X"
+                         ToolTip="Pixels to the right of the found spot (negative = left)." />
+            </StackPanel>
+            <StackPanel Grid.Column="2">
+                <TextBlock Text="Offset Y (+ = down)" Style="{StaticResource FieldLabel}" />
+                <TextBox Text="{Binding OffsetY, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}" AutomationProperties.Name="Offset Y"
+                         ToolTip="Pixels below the found spot (negative = above)." />
+            </StackPanel>
+        </Grid>
+    </DataTemplate>
+
     <DataTemplate DataType="{x:Type steps:DelayStepViewModel}">
         <StackPanel>
             <ContentControl Content="{Binding}" ContentTemplate="{StaticResource StepHeaderTemplate}" Focusable="False" Visibility="{Binding IsStandalone, Converter={StaticResource BoolToVisibility}}" />
@@ -122,8 +166,19 @@
     <DataTemplate DataType="{x:Type steps:MouseMoveStepViewModel}">
         <StackPanel>
             <ContentControl Content="{Binding}" ContentTemplate="{StaticResource StepHeaderTemplate}" Focusable="False" Visibility="{Binding IsStandalone, Converter={StaticResource BoolToVisibility}}" />
-            <TextBlock Text="Destination" Style="{StaticResource FieldLabel}" Margin="0,18,0,0" />
-            <ContentControl Content="{Binding}" ContentTemplate="{StaticResource PositionPickerTemplate}" Focusable="False" />
+            <TextBlock Text="Where to move" Style="{StaticResource FieldLabel}" Margin="0,18,0,4" />
+            <ComboBox ItemsSource="{x:Static steps:MouseMoveStepViewModel.Targets}" DisplayMemberPath="Label" SelectedValuePath="Value"
+                      SelectedValue="{Binding TargetMode}" AutomationProperties.Name="Where to move"
+                      ToolTip="A chosen position (X / Y), the center of what the last Find step / If condition found plus an offset, or a distance from wherever the cursor is." />
+            <StackPanel Visibility="{Binding UsesFixedPosition, Converter={StaticResource BoolToVisibility}}">
+                <TextBlock Text="Destination" Style="{StaticResource FieldLabel}" Margin="0,12,0,0" />
+                <ContentControl Content="{Binding}" ContentTemplate="{StaticResource PositionPickerTemplate}" Focusable="False" />
+            </StackPanel>
+            <StackPanel Visibility="{Binding UsesOffset, Converter={StaticResource BoolToVisibility}}">
+                <ContentControl Content="{Binding}" ContentTemplate="{StaticResource OffsetFieldsTemplate}" Focusable="False" />
+                <ContentControl Content="{Binding}" ContentTemplate="{StaticResource OffsetPickerTemplate}" Focusable="False" />
+                <TextBlock Text="{Binding OffsetHelp}" Style="{StaticResource MutedText}" FontSize="11" Margin="0,4,0,0" TextWrapping="Wrap" />
+            </StackPanel>
             <TextBlock Text="Movement style" Style="{StaticResource FieldLabel}" Margin="0,16,0,4"
                        ToolTip="How the cursor travels there. Smooth Glide and Human Curve send real mouse movement (sliders, hover effects and games notice it); Instant jumps." />
             <ComboBox ItemsSource="{x:Static steps:StepViewModel.MoveStyles}" DisplayMemberPath="Label" SelectedValuePath="Value"
@@ -142,6 +197,71 @@
     <DataTemplate DataType="{x:Type steps:MouseClickStepViewModel}">
         <StackPanel>
             <ContentControl Content="{Binding}" ContentTemplate="{StaticResource StepHeaderTemplate}" Focusable="False" Visibility="{Binding IsStandalone, Converter={StaticResource BoolToVisibility}}" />
+
+            <!-- AAA upgrade: Smart Click Snapshot card (only for clicks recorded with a picture of what they hit). -->
+            <Border Style="{StaticResource SetupCard}" BorderBrush="{StaticResource VisionAccentBrush}" BorderThickness="1"
+                    Visibility="{Binding HasTargetThumbnail, Converter={StaticResource BoolToVisibility}}">
+                <StackPanel>
+                    <TextBlock Text="✨ SMART CLICK SNAPSHOT" Style="{StaticResource SetupCardTitle}"
+                               ToolTip="SmartMacro saved a small picture of what was under the cursor when you recorded this click." />
+                    <Grid Margin="0,8,0,0">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="12" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <Border Grid.Column="0" Width="84" Height="84" CornerRadius="8" Padding="4" Background="{StaticResource SurfaceBrush}"
+                                BorderBrush="{StaticResource VisionAccentBrush}" BorderThickness="1" VerticalAlignment="Top">
+                            <Grid>
+                                <Image Source="{Binding TargetThumbnail}" Stretch="Uniform" RenderOptions.BitmapScalingMode="NearestNeighbor"
+                                       AutomationProperties.Name="Picture of what was clicked" ToolTip="What was under the cursor when this click was recorded." />
+                                <!-- A small crosshair over the middle, where (normally) the click was. -->
+                                <Rectangle Width="1" Height="14" Fill="{StaticResource VisionAccentBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" Opacity="0.85" IsHitTestVisible="False" />
+                                <Rectangle Width="14" Height="1" Fill="{StaticResource VisionAccentBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" Opacity="0.85" IsHitTestVisible="False" />
+                            </Grid>
+                        </Border>
+                        <StackPanel Grid.Column="2">
+                            <TextBlock Text="{Binding TargetThumbnailInfo}" TextWrapping="Wrap" FontSize="12" />
+                            <CheckBox IsChecked="{Binding SmartAimAtTarget}" Margin="0,10,0,0" AutomationProperties.Name="Smart-Aim"
+                                      ToolTip="Before clicking, SmartMacro looks for this picture near X / Y. If the button moved a little (a window moved, a list scrolled), it clicks the same spot on it. Not found = it clicks X / Y as recorded.">
+                                <TextBlock Text="{Binding SmartAimLabel}" TextWrapping="Wrap" />
+                            </CheckBox>
+                            <TextBlock Text="{Binding SmartAimHint}" Style="{StaticResource MutedText}" FontSize="11" Margin="0,4,0,0" TextWrapping="Wrap" />
+                        </StackPanel>
+                    </Grid>
+
+                    <Grid Margin="0,8,0,0" Visibility="{Binding SmartAimAtTarget, Converter={StaticResource BoolToVisibility}}">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="10" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <StackPanel Grid.Column="0">
+                            <TextBlock Text="Match accuracy (%)" Style="{StaticResource FieldLabel}" />
+                            <TextBox Text="{Binding SmartAimAccuracyPercent, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}"
+                                     AutomationProperties.Name="Smart-Aim match accuracy percent"
+                                     ToolTip="How similar the spot must be to the picture (50–100 %). 85 works for most buttons; lower it for glowing / animated ones." />
+                        </StackPanel>
+                        <StackPanel Grid.Column="2">
+                            <TextBlock Text="Search distance (px)" Style="{StaticResource FieldLabel}" />
+                            <TextBox Text="{Binding SmartAimRadiusPx, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}"
+                                     AutomationProperties.Name="Smart-Aim search distance in pixels"
+                                     ToolTip="How far (in pixels, each direction) the button may have moved. 120 is a good start; bigger = slower and more look-alikes." />
+                        </StackPanel>
+                    </Grid>
+
+                    <Button Command="{Binding DataContext.ConvertClickToFindImageCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                            CommandParameter="{Binding}" Style="{StaticResource TestActionButton}" Margin="0,12,0,0" HorizontalAlignment="Left"
+                            ToolTip="{Binding ConvertHint}" ToolTipService.ShowOnDisabled="True"
+                            AutomationProperties.Name="Convert step to Find image and click">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="&#xE8B9;" Style="{StaticResource IconText}" />
+                            <TextBlock Text="🔍 Convert Step to Full 'Find Image &amp; Click'" Margin="8,0,0,0" />
+                        </StackPanel>
+                    </Button>
+                    <TextBlock Text="{Binding ConvertHint}" Style="{StaticResource MutedText}" FontSize="11" Margin="0,4,0,0" TextWrapping="Wrap" />
+                </StackPanel>
+            </Border>
 
             <StackPanel>
                 <StackPanel>
@@ -178,6 +298,12 @@
                       ToolTip="A chosen position (X / Y), wherever the cursor is when the step runs, or the spot the last Find text / image / color step found." />
             <ContentControl Content="{Binding}" ContentTemplate="{StaticResource PositionPickerTemplate}" Focusable="False" Margin="0,4,0,0"
                             Visibility="{Binding UsesFixedPosition, Converter={StaticResource BoolToVisibility}}" />
+            <StackPanel Visibility="{Binding UsesLastFound, Converter={StaticResource BoolToVisibility}}">
+                <ContentControl Content="{Binding}" ContentTemplate="{StaticResource OffsetFieldsTemplate}" Focusable="False" />
+                <ContentControl Content="{Binding}" ContentTemplate="{StaticResource OffsetPickerTemplate}" Focusable="False" />
+                <TextBlock Style="{StaticResource MutedText}" FontSize="11" Margin="0,4,0,0" TextWrapping="Wrap"
+                           Text="Clicks the center of what the last Find step or If / Repeat condition found, moved by the offset. Example: If the game board image is on screen → click (+100, 0) = the cell 100 px right of the board's center." />
+            </StackPanel>
             <TextBlock Style="{StaticResource MutedText}" FontSize="11" Margin="0,8,0,0" TextWrapping="Wrap"
                        Text="Choose where the click should happen (for a drag: where it starts). With a chosen position, the cursor first moves to X / Y (the movement style is under Advanced), then the button is used there. Pick position lets you choose the spot directly on your screen." />
 
@@ -1034,9 +1160,11 @@
             <TextBlock Text="Condition" Style="{StaticResource FieldLabel}" Margin="0,18,0,4" />
             <ContentControl Content="{Binding Condition}" ContentTemplate="{StaticResource ConditionEditorTemplate}" Focusable="False" />
 
-            <TextBlock Text="When true (and it was found)" Style="{StaticResource FieldLabel}" Margin="0,18,0,4" />
-            <ComboBox ItemsSource="{x:Static steps:IfStepViewModel.ThenActions}" DisplayMemberPath="Label" SelectedValuePath="Value"
-                      SelectedValue="{Binding ThenAction}" AutomationProperties.Name="Action when the condition is true" />
+            <StackPanel Visibility="{Binding ShowsWhenFound, Converter={StaticResource BoolToVisibility}}">
+            <TextBlock Text="When found, also:" Style="{StaticResource FieldLabel}" Margin="0,18,0,4"
+                       ToolTip="When the image / color / text is on screen, act on the spot where it was found before the steps inside the If run." />
+            <ComboBox ItemsSource="{x:Static steps:IfStepViewModel.WhenFoundActions}" DisplayMemberPath="Label" SelectedValuePath="Value"
+                      SelectedValue="{Binding WhenFoundAction}" AutomationProperties.Name="When found, also" />
             <StackPanel Visibility="{Binding HasThenAction, Converter={StaticResource BoolToVisibility}}">
                 <Grid Margin="0,4,0,0">
                     <Grid.ColumnDefinitions>
@@ -1045,11 +1173,11 @@
                         <ColumnDefinition Width="*" />
                     </Grid.ColumnDefinitions>
                     <StackPanel Grid.Column="0">
-                        <TextBlock Text="Offset X from center" Style="{StaticResource FieldLabel}" />
+                        <TextBlock Text="Offset X (+ = right)" Style="{StaticResource FieldLabel}" />
                         <TextBox Text="{Binding ThenOffsetX, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}" AutomationProperties.Name="Offset X" />
                     </StackPanel>
                     <StackPanel Grid.Column="2">
-                        <TextBlock Text="Offset Y from center" Style="{StaticResource FieldLabel}" />
+                        <TextBlock Text="Offset Y (+ = down)" Style="{StaticResource FieldLabel}" />
                         <TextBox Text="{Binding ThenOffsetY, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}" AutomationProperties.Name="Offset Y" />
                     </StackPanel>
                 </Grid>
@@ -1058,6 +1186,8 @@
                     <TextBox Text="{Binding ThenHoldMs, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}" Width="100" HorizontalAlignment="Left"
                              AutomationProperties.Name="Hold time in milliseconds" />
                 </StackPanel>
+                <ContentControl Content="{Binding}" ContentTemplate="{StaticResource OffsetPickerTemplate}" Focusable="False" />
+            </StackPanel>
             </StackPanel>
             <TextBlock Text="{Binding ThenActionHint}" Style="{StaticResource MutedText}" FontSize="11" Margin="0,4,0,0" TextWrapping="Wrap" />
 

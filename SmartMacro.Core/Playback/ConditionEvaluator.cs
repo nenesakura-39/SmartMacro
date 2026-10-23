@@ -10,7 +10,7 @@ namespace SmartMacro.Core.Playback;
 /// X / Y: where it was seen (screen pixels), only meaningful when Seen. Details: a sentence for the log.
 /// Match: the rectangle of what was seen (empty when unknown).
 /// </summary>
-public sealed record ConditionCheck(bool Seen, bool IsTrue, int X, int Y, string Details, ScreenRect Match = default);
+public sealed record ConditionCheck(bool Seen, bool IsTrue, int X, int Y, string Details, ScreenRect Match = default, double Confidence = 0);
 
 /// <summary>
 /// Answers a condition by looking at the screen once. Waiting, timeouts, pause and stop are handled by the
@@ -52,7 +52,7 @@ public sealed class ScreenConditionEvaluator : IConditionEvaluator
         var probe = await search.LookAsync(timer, cancellationToken).ConfigureAwait(false);
         var isTrue = probe.Found != condition.Negate;
         var details = probe.Found ? probe.FoundText : $"{search.What} is not on screen.{probe.MissText}";
-        return new ConditionCheck(probe.Found, isTrue, probe.X, probe.Y, details, probe.Match);
+        return new ConditionCheck(probe.Found, isTrue, probe.X, probe.Y, details, probe.Match, probe.Found ? probe.Confidence : 0);
     }
 
     public DetectionTimer? NewTimer(Condition condition) => Prepare(condition).NewTimer();

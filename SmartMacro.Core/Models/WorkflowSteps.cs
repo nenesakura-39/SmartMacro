@@ -102,8 +102,74 @@ public sealed class IfStep : MacroStep
     /// <summary>Hold time for <see cref="FoundTextAction.Hold"/>, in ms.</summary>
     public int ThenHoldMs { get; set; } = ScreenSearchStep.DefaultActionHoldMs;
 
+    /// <summary>
+    /// "When found, also:" (AAA upgrade wording of <see cref="ThenAction"/>, the same stored value): when the image /
+    /// colour / text "is on screen" check is true, click / double-click / right-click / move to the found spot
+    /// (+ <see cref="FoundOffsetX"/>, <see cref="FoundOffsetY"/>) before the steps inside the If run.
+    /// </summary>
+    [JsonIgnore]
+    public IfFoundAction WhenFoundAction
+    {
+        get => ThenAction switch
+        {
+            FoundTextAction.Click => IfFoundAction.ClickFoundSpot,
+            FoundTextAction.DoubleClick => IfFoundAction.DoubleClickFoundSpot,
+            FoundTextAction.RightClick => IfFoundAction.RightClickFoundSpot,
+            FoundTextAction.Move => IfFoundAction.MoveToFoundSpot,
+            FoundTextAction.Hold => IfFoundAction.HoldOnFoundSpot,
+            _ => IfFoundAction.None,
+        };
+        set => ThenAction = value switch
+        {
+            IfFoundAction.ClickFoundSpot => FoundTextAction.Click,
+            IfFoundAction.DoubleClickFoundSpot => FoundTextAction.DoubleClick,
+            IfFoundAction.RightClickFoundSpot => FoundTextAction.RightClick,
+            IfFoundAction.MoveToFoundSpot => FoundTextAction.Move,
+            IfFoundAction.HoldOnFoundSpot => FoundTextAction.Hold,
+            _ => FoundTextAction.None,
+        };
+    }
+
+    /// <summary>Offset (px) from the center of what was found, for <see cref="WhenFoundAction"/> (same value as <see cref="ThenOffsetX"/>).</summary>
+    [JsonIgnore]
+    public int FoundOffsetX
+    {
+        get => ThenOffsetX;
+        set => ThenOffsetX = value;
+    }
+
+    /// <inheritdoc cref="FoundOffsetX"/>
+    [JsonIgnore]
+    public int FoundOffsetY
+    {
+        get => ThenOffsetY;
+        set => ThenOffsetY = value;
+    }
+
     [JsonIgnore]
     public override StepKind Kind => StepKind.If;
+}
+
+/// <summary>"When found, also:" choices of an If step (see <see cref="IfStep.WhenFoundAction"/>).</summary>
+public enum IfFoundAction
+{
+    /// <summary>Just run the steps inside the If.</summary>
+    None,
+
+    /// <summary>Click the found spot (+ offset).</summary>
+    ClickFoundSpot,
+
+    /// <summary>Double-click the found spot (+ offset).</summary>
+    DoubleClickFoundSpot,
+
+    /// <summary>Right-click the found spot (+ offset).</summary>
+    RightClickFoundSpot,
+
+    /// <summary>Move the mouse to the found spot (+ offset), no click.</summary>
+    MoveToFoundSpot,
+
+    /// <summary>Hold the left button on the found spot for <see cref="IfStep.ThenHoldMs"/> (older "Hold" choice).</summary>
+    HoldOnFoundSpot,
 }
 
 /// <summary>Optional middle of an If block: the steps after it run when the condition was false.</summary>

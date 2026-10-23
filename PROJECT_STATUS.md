@@ -1,6 +1,9 @@
 # SmartMacro – Project Status / Handoff
 
-_Last updated: 2026-10-23 (live-test fix of `538326c`: Part B – Run #2+ skipping movement + run counter, written WITHOUT a
+_Last updated: 2026-10-23 (AAA Studio Upgrade Parts 5 + 6 – `StepCleanup.RepairBlockStructure` + "✨ Auto-Fix Block Structure"
+banner / button with Undo + tests: written WITHOUT a .NET SDK, NOT built or tested. Before it: AAA Parts 3 + 4 – Pause F8 / live speed selector / Humanize ±4 % ±2 px arcs,
+TargetDetected + target-lock reticle, AAA mini-HUD with ⏸ / ⏹ buttons: written WITHOUT a .NET SDK, NOT built or tested.
+Before it: AAA Parts 1 + 2 on top of `553abfb` – owner build + tests all green. Before it: live-test fix of `538326c` (committed as `553abfb`): Part B – Run #2+ skipping movement + run counter, written WITHOUT a
 .NET SDK, NOT built or tested; Part A – image match "0 % similar" + orphan End If, owner build + tests all green. Before it: Studio upgrades batch on top of `cdd0919` – failsafe release, Run step / Play from here, Undo / Redo +
 copy / paste, target window + coordinate scaling, on-screen highlight, Humanize, Studio Library / Settings / Logs: written WITHOUT a
 .NET SDK, NOT built or tested. Before it: Studio UI redesign on top of `d54c087` – new palette, pill switch / segmented controls,
@@ -22,6 +25,132 @@ Developer: Riku (リク) · Brand: KuroLogic_
 | Release package | `publish\SmartMacro-1.0.0-win-x64\SmartMacro.exe` is an OLD build (made right after `159d6b3`, before Stage 1) | – | ignored by git |
 
 
+
+## AAA Studio Upgrade – Parts 5 + 6 (2026-10-23, on top of Parts 3 + 4, which are NOT built yet); written WITHOUT a .NET SDK: **NOT built, NOT tested**
+Checked by script only (brace balance, XAML well-formed) + a Python port of the repair rules fuzzed on 200,000 random
+marker lists (always valid afterwards, idempotent, no normal step lost or moved, "changed" ⇔ "was invalid"). Next step
+for the owner: `tools\verify.cmd` (covers Parts 3–6), then sections G–L of `docs/AAA_UPGRADE_MANUAL_TESTS.md`.
+1. **`StepCleanup.RepairBlockStructure(IList<MacroStep>)`** (`Core/Workflow/StepCleanup.cs`) fixes the list in place and
+   returns `BlockRepairResult(Repairs, RemovedSteps, AddedSteps, FirstChangedIndex)` (+ `Changed`, `Summary`,
+   `NothingToFixText`). Top to bottom with a stack of open blocks:
+   - Else / End If / End Repeat with no open block of its kind above → removed ("Removed 2 orphan 'End If' steps …").
+   - Second Else in the same If → removed.
+   - Marker whose block is open but an inner block of the other kind is still open (overlap, e.g. Repeat, If, End Repeat)
+     → the inner block's End is inserted right before the marker (so Repeat, If, x, End Repeat, y, End If becomes
+     Repeat, If, x, End If, End Repeat, y).
+   - Still open at the end → End If / End Repeat appended, innermost first.
+   - Never removes / moves normal steps or If / Repeat steps; doesn't try to fix "nested more than 8 deep".
+   - `NeedsBlockRepair(steps)` runs it on a copy (used for the banner).
+2. **Editor** (`EditorViewModel`, `EditorView.xaml`): `CanAutoFixBlocks` / `BlockProblemText` (first block problem with its
+   step number + "(+N more problems)") are refreshed in `Revalidate`; a red banner above the step list shows them with a
+   **✨ Auto-Fix Block Structure** button (`AutoFixBlocksCommand`). The fix records one Undo snapshot (Ctrl+Z / Ctrl+Y),
+   keeps the existing step editors (same objects), selects the previously selected step (or the first changed spot),
+   logs + shows the summary. Hidden when the blocks are fine or only too-deep nesting is left.
+3. **Tests** (`SmartMacro.Tests/AaaUpgradeTests.cs`, `BlockRepairTests`): leading orphan End Ifs (`EndIf, EndIf, If, EndIf →
+   If, EndIf`), unclosed If + Repeat closed at the end innermost first, extra / orphan Else + orphan End Repeat, overlap,
+   already-valid list untouched, `NeedsBlockRepair` doesn't modify, validator has no "Block" errors afterwards, seeded
+   3,000-list random test. The other Part 6 items (If "When found" click + offset, last-found click, Smart-Aim at
+   (+40, +30), pause / resume, 2× speed with valid holds) were already covered by the Parts 1–4 tests.
+
+## AAA Studio Upgrade – Parts 3 + 4 (2026-10-23, on top of Parts 1 + 2, which the owner built: all green); written WITHOUT a .NET SDK: **NOT built, NOT tested**
+Checked by script only (brace / bracket balance, XAML well-formed). Next step for the owner: `tools\verify.cmd`, then sections
+G–K of `docs/AAA_UPGRADE_MANUAL_TESTS.md`. Parts 5–6 were added on top (see above).
+Much of Part 3 already existed (engine `Pause()` / `Resume()` with held-input release + timeline shift, `Macro.Speed`,
+`Macro.HumanizePlayback`), so it was extended, not duplicated:
+1. **Pause / Resume (F8)**:
+   - Engine: `IsPaused`, `PausedChanged` (true / false, also false when stopped while paused), `TogglePause()`; `Pause()` now
+     calls `IInputSimulator.ReleaseAllHeldInputs()` immediately (when `ReleaseHeldInputWhilePaused`), not only at the next
+     50 ms check. Paused time was already excluded from the timeline / timeouts (no backlog after resume).
+   - `HotkeyBinding.DefaultPause` = **F8** (no modifier); `LegacyDefaultPause` = Ctrl+Shift+F11. `AppSettings.CurrentSchemaVersion
+     = 3`: settings that still have the old default move to F8 once (a user-picked key is kept).
+   - `HotkeyService.SetPauseActive(bool)`: the pause key is only registered while a macro plays (App.xaml.cs follows
+     `Automation.IsPlaying`), so F8 works normally in other apps otherwise.
+   - Editor: "⏸ Pause (F8)" / "▶ Resume (F8)" (`PauseButtonText` + `PauseButtonGlyph`); log + status lines on pause / resume.
+2. **Speed**: `Macro.PlaybackSpeed` = [JsonIgnore] alias of `Speed` (setter clamps 0.25–10), `Macro.SpeedPresets` 0.5 / 1 /
+   1.5 / 2 / 5. Engine `ScaledHoldMs` (= hold ÷ speed, never below 25 ms or the original hold if shorter) for click / double
+   click / hold / key-press holds; recorded input at > 1× keeps every mouse button down ≥ 25 ms. **Live speed**:
+   `PlaybackEngine.SetPlaybackSpeed` (applied before the next step, `CurrentSpeed`, log line); `EditorViewModel.SpeedChoices`
+   drop-down replaces the number box (an unusual stored speed gets its own entry; the list only grows while editing);
+   `MainViewModel` → `AutomationViewModel.SetLiveSpeed` when the playing macro is the open one.
+3. **Humanize**: defaults ±2 px / ±4 % (were 3 / 8; explicit values kept); delays under 40 ms (`HumanizeMinDelayMs`) are never
+   varied; Smooth glides get a random arc (5 % of the distance, ≤ 24 px, 40–100 %, random side) via the new
+   `MouseMotion.Plan(..., glideArcPixels)` (0 = straight, the old behaviour). Header switch "🎲 Humanize".
+4. **Target lock (Part 4.1)**: `TargetDetection(Bounds, Confidence, Label, X, Y)` + `PlaybackEngine.TargetDetected`, raised by
+   Find image / color / text (label = step name), If ("If") and Repeat ("Repeat") conditions that saw their target, and
+   Smart-Aim; handler errors only log. `ScreenProbe.Confidence` (image score, OCR similarity, 1 for colour) and
+   `ConditionCheck.Confidence` added (optional last parameters). New `Services/Vision/TargetLockOverlay.cs`: ONE reusable
+   click-through / no-activate / tool window, capture-excluded; neon box + 4 corner brackets + centre mark + "🎯 98% Match ·
+   Find image" badge, 350 ms then 160 ms fade; `OverlayAwareScreenCapture` (used by the engine in App.xaml.cs) hides it before
+   a capture only where Windows can't exclude it. Shown through `IRunModeHost.ShowTargetLock` when "With overlay"
+   (`ShowRunOverlay`, header switch renamed from "Mini overlay") is on.
+5. **Mini-HUD (Part 4.2)**: `Services/RunModeHost.cs` rewritten: `RunHud` record + `IRunModeHost.UpdateHud`, `PauseRequested` /
+   `StopRequested`. Dark-glass pill (372 px): pulsing dot (green / amber / red), "Run #3 / ∞" badge (● REC while recording),
+   mm:ss timer (paused time excluded, `AutomationViewModel.PlayingElapsed`), "Step 4/12: Find image" (comment if set),
+   activity line, gradient progress bar, "⏸ F8" / "⏹ Esc" mini buttons. The window stays click-through; the buttons work
+   through `HudClickHook` (WH_MOUSE_LL while playing only): PHYSICAL left clicks on a button are swallowed and become
+   pause / stop, injected (macro) clicks and everything else pass through.
+- Tests (added to `SmartMacro.Tests/AaaUpgradeTests.cs`): `PauseResumeTests` (immediate release, frozen clock, full delays
+  after a 10 s pause, events, toggle, F8 default + settings migration), `PlaybackSpeedTests` (2× delays, 25 ms floor for
+  clicks / key taps / recorded clicks at 5×, `ScaledHoldMs` table, alias + clamp, live change), `HumanizeAaaTests` (short
+  gaps exact, ±2 px / ±4 %, glide arc, `Plan` arc maths), `TargetDetectedTests` (Find image / If / colour / Smart-Aim, misses
+  don't report, failing handler). No existing test changed (existing Humanize tests still fit the smaller defaults).
+- Not verified: build, tests, the HUD look / click hook / reticle on mixed DPI, F8 registration in games.
+
+## AAA Studio Upgrade – Parts 1 + 2 (2026-10-23, on top of `553abfb`); written WITHOUT a .NET SDK, then built + tested by the owner: **all green**
+The AI's environment again had no .NET SDK / NuGet (downloads blocked) and no shell on the owner's PC, so nothing was compiled.
+Checked by script: brace / bracket balance of every changed C# file, XAML well-formed, new StaticResource keys exist, binding
+names exist on the view models. The PNG row-filter decoder was checked with a Python port against Pillow-made test files.
+Next step for the owner: `tools\verify.cmd` (send `artifacts\build.log` / `artifacts\test.log`), then
+`docs/AAA_UPGRADE_MANUAL_TESTS.md`. Parts 3–6 of the request (Pause F8 + speed selector + Humanize arcs, overlay target-lock
+reticle + HUD, Auto-Fix block structure, their tests) are NOT done yet.
+1. **Smart Click Snapshots** (Part 1):
+   - Core: new `Core/Vision/PngCodec.cs` (8-bit RGB PNG writer – alpha dropped because GDI leaves it 0; reader for grey / RGB /
+     RGBA, all 5 row filters, CRC checked, size limits), `Core/Recording/ClickSnapshots.cs` (`ClickTargetSnapshot(Png,
+     AnchorX, AnchorY)`, 56×56 `RectAround` kept on the virtual screen, `Create`, `Attach`, max 500 per recording).
+   - `RawInputEvent.ClickedTarget` / `CapturedInputEvent.ClickedTarget` (optional last parameter). `RecordingConverter` puts it
+     on Click steps only (not Down / Up / drags); `SmartRecordingConverter` keeps it through `Normalize` and cursor chunks.
+     Clicks inside camera ("Recorded input") parts get no picture.
+   - Recorders: new `Services/Input/ClickSnapshotter.cs` (one GDI capture of 56×56 via `ScreenCapture.CaptureBgra`, never throws).
+     Desktop mode: `WindowsInputRecorder` captures in the low-level hook callback (before the app sees the press). Smart mode:
+     `RawInputRecorder` session captures on button-down only while the cursor is visible and not confined. Game / Rhythm: none.
+     New setting `AppSettings.CaptureClickSnapshots` (default on) + Settings switch "✨ Smart Click Snapshots…"; one log line
+     after recording ("N click(s) remember what they clicked").
+   - `MouseClickStep`: `TargetThumbnailBase64`, `TargetAnchorX/Y` (where the click was inside the picture), `SmartAimAtTarget`,
+     `SmartAimAccuracy` (0.85, file name `smartAimMinMatch`, only written when changed), `SmartAimRadiusPx` (120, `smartAimRadius`).
+   - Engine Smart-Aim (`PlaybackEngine.SmartAimAsync`): only for "At a chosen position"; captures the thumbnail rectangle grown
+     by the radius, `TemplateMatcher` at the accuracy, nearest match to the recorded spot wins, clicks recorded spot + shift;
+     not found / no capture / damaged picture → recorded X / Y; log lines de-duplicated per step; Humanize jitter stays inside
+     the matched target; the pre-Delay glide skips Smart-Aim clicks.
+   - `Core/Workflow/SmartClickConversion.cs`: `ToFindImageStep` (template = thumbnail, All monitors, wait 5 s, Click /
+     DoubleClick / RightClick / Hold, offset keeps an off-centre click off-centre, accuracy = Smart-Aim %, comment / enabled /
+     move style carried over, new ID), `WhyNotConvertible`, `LastFoundReference`.
+   - Editor: ✨ SMART CLICK SNAPSHOT card in Mouse click Properties (56×56 picture ×1.5 with crosshair, info, Smart-Aim
+     checkbox + accuracy / distance, "🔍 Convert Step to Full 'Find Image & Click'" = `EditorViewModel.ConvertClickToFindImageCommand`
+     with Undo), 28 px picture (+ ✨ when Smart-Aim is on) on the step card (`StepKindTemplateSelector.ClickSnapshotTemplate`).
+2. **"Last found target" + offsets** (Part 2):
+   - Engine: `FoundRect` record + `PlaybackEngine.LastFoundRect` (X, Y, Width, Height, CenterX, CenterY), set by Find steps,
+     If / Repeat conditions and feedback-loop conditions (`RememberFound`), cleared by a Find step that continues after a miss.
+   - `IfStep.WhenFoundAction` (`IfFoundAction`: None / ClickFoundSpot / DoubleClickFoundSpot / RightClickFoundSpot /
+     MoveToFoundSpot / HoldOnFoundSpot) + `FoundOffsetX/Y`: NOT new stored fields – they are the existing `ThenAction` /
+     `ThenOffsetX/Y` (format 8, already played by the engine) under the new names, so old files and older builds are unaffected.
+     Editor: "When found, also:" with the requested wording, shown for "is on screen" (and while an action is still set).
+   - `ClickTargetMode` (Coordinates / CurrentCursor / LastFoundMatch). `MouseClickStep.TargetMode` = facade over
+     `UseCurrentPosition` / `UseLastFoundText` (not written separately) + new `OffsetX/Y` (used for the last found spot only).
+     `MouseMoveStep.TargetMode` + `OffsetX/Y` stored (only when not default): last found spot + offset, or "by an offset from
+     where the cursor is" (cursor = simulator position, else the engine's last move). Validator: offsets ±5,000, warning when
+     nothing is found before; StepCleanup never folds such moves; describer "Move to the last found spot (+10, -5)".
+   - "🎯 Pick offset from screen" (`ViewModels/Steps/OffsetPickerViewModel.cs`, `IVisionTools.PickOffsetAsync`): SmartMacro hides,
+     finds the reference (nearest Find step / If-Repeat condition above, or the If's own condition) once with `ScreenProbes`,
+     then the user clicks the spot; not on screen → the user clicks the target's centre first. `VisionTools` now gets the OCR
+     service too (text references).
+- Files: `MacroDocument.CurrentSchemaVersion = 12`, written only for a thumbnail / Smart-Aim / click offsets or a Move target.
+- Tests: new `SmartMacro.Tests/AaaUpgradeTests.cs` (`PngCodecTests`, `SmartClickSnapshotTests`, `LastFoundTargetTests`): PNG round
+  trip + every row filter + damaged data; snapshot rectangle clamping (incl. negative monitors); desktop + smart converters attach
+  the picture; JSON / format 12; validation; Smart-Aim moved (+40, +30), gone, out of range, off, nearest copy, off-centre, no
+  capture; convert (actions, offset, refusal, plays correctly); If "When found" click + offset, negated If, click / move on the
+  last found spot after Find image and inside an If, move by offset, forget after a miss, facades, reference lookup.
+  No existing test was changed.
+- Not verified: build, tests, GDI capture inside the hook (timing), the editor card / pickers at runtime, real games.
 
 ## Live-test fix of `538326c` – Part B (2026-10-23): Run #2+ skipping movement + live run counter; written WITHOUT a .NET SDK: **NOT built, NOT tested**
 Part A was built and tested by the owner afterwards: all green. Part B again written without a .NET SDK; timing logic traced
@@ -870,6 +999,9 @@ no .NET SDK in the AI's environment)
   csproj Company/Authors "Riku", Copyright "© 2026 Riku", README "© 2026 Riku") – change awaits owner approval.
 
 ## Next task
+- Owner: `tools\verify.cmd` for AAA Parts 3–6 (never compiled; send `artifacts\build.log` / `artifacts\test.log` if anything
+  fails), then sections G–L of `docs/AAA_UPGRADE_MANUAL_TESTS.md` (A–F for Parts 1 + 2 if not done yet). Then commit the
+  whole AAA upgrade.
 - Owner: `tools\\verify.cmd` for Part B of the `538326c` live-test fix (never compiled), then a live run with Play = 0
   and Play = 5 (every run should move the same; watch the run counter in the header, bottom bar and mini overlay).
   Then commit Parts A + B together with the earlier uncommitted timeline changes.

@@ -31,7 +31,7 @@ public static class StepDescriber
         DelayStep d => d.DurationMs >= 1000
             ? $"Wait {d.DurationMs / 1000.0:0.###} s"
             : $"Wait {d.DurationMs} ms",
-        MouseMoveStep m => $"Move to ({m.X}, {m.Y}){MotionSuffix(m.MoveStyle, m.MoveDurationMs)}",
+        MouseMoveStep m => $"{DescribeMoveTarget(m)}{MotionSuffix(m.MoveStyle, m.MoveDurationMs)}",
         MouseClickStep c => DescribeClick(c),
         MouseScrollStep s => $"Scroll {ScrollDirection(s)} {Notches(s.Delta)} {Where(s.UseCurrentPosition, s.X, s.Y)}",
         KeyPressStep k => $"{KeyVerb(k.Action)} {KeyCombo(k)}{Hold(k.Action == KeyAction.Press, k.HoldMs)}",
@@ -52,15 +52,29 @@ public static class StepDescriber
     private static string DescribeClick(MouseClickStep c)
     {
         var button = $"{c.Button.ToString().ToLowerInvariant()} button";
-        var where = c.UseLastFoundText ? "at the last found spot" : Where(c.UseCurrentPosition, c.X, c.Y);
+        var lastFound = $"the last found spot{OffsetText(c.OffsetX, c.OffsetY)}";
+        var where = c.UseLastFoundText ? "at " + lastFound : Where(c.UseCurrentPosition, c.X, c.Y);
         var motion = c.UseCurrentPosition ? "" : MotionSuffix(c.MoveStyle, c.MoveDurationMs);
+        var aim = c.SmartAimAtTarget && c.HasTargetThumbnail && !c.UseCurrentPosition && !c.UseLastFoundText ? " · ✨ Smart-Aim" : "";
         return c.Action switch
         {
-            MouseClickAction.Hold => $"Hold {button} for {c.HoldMs} ms {where}{motion}",
-            MouseClickAction.Drag => $"Drag {button} from {(c.UseLastFoundText ? "the last found spot" : c.UseCurrentPosition ? "the cursor" : $"({c.X}, {c.Y})")} to ({c.EndX}, {c.EndY}) over {c.DragDurationMs / 1000.0:0.##} s",
-            _ => $"{ClickVerb(c.Action)} {button} {where}{Hold(c.Action == MouseClickAction.Click, c.HoldMs)}{motion}",
+            MouseClickAction.Hold => $"Hold {button} for {c.HoldMs} ms {where}{motion}{aim}",
+            MouseClickAction.Drag => $"Drag {button} from {(c.UseLastFoundText ? lastFound : c.UseCurrentPosition ? "the cursor" : $"({c.X}, {c.Y})")} to ({c.EndX}, {c.EndY}) over {c.DragDurationMs / 1000.0:0.##} s",
+            _ => $"{ClickVerb(c.Action)} {button} {where}{Hold(c.Action == MouseClickAction.Click, c.HoldMs)}{motion}{aim}",
         };
     }
+
+    /// <summary>"Move to (x, y)", "Move to the last found spot (+10, -5)" or "Move the cursor by (+20, 0)".</summary>
+    private static string DescribeMoveTarget(MouseMoveStep m) => m.TargetMode switch
+    {
+        ClickTargetMode.LastFoundMatch => $"Move to the last found spot{OffsetText(m.OffsetX, m.OffsetY)}",
+        ClickTargetMode.CurrentCursor => $"Move the cursor by ({m.OffsetX:+0;-0;0}, {m.OffsetY:+0;-0;0})",
+        _ => $"Move to ({m.X}, {m.Y})",
+    };
+
+    /// <summary>" (+10, -5)" for a non-zero offset, empty otherwise.</summary>
+    private static string OffsetText(int offsetX, int offsetY) =>
+        offsetX != 0 || offsetY != 0 ? $" ({offsetX:+0;-0;0}, {offsetY:+0;-0;0})" : "";
 
     /// <summary>" (smooth glide 120 ms)" / " (human curve 120 ms)" for a styled movement; empty for instant jumps.</summary>
     private static string MotionSuffix(MouseMoveStyle? style, int durationMs) => style switch
@@ -80,9 +94,15 @@ public static class StepDescriber
         return step switch
         {
             DelayStep d => d.DurationMs >= 1000 ? $"Waiting {d.DurationMs / 1000.0:0.#} s" : $"Waiting {d.DurationMs} ms",
-            MouseMoveStep m => $"Moving the mouse to ({m.X}, {m.Y})",
+            MouseMoveStep m => m.TargetMode switch
+            {
+                ClickTargetMode.LastFoundMatch => "Moving the mouse to the last found spot",
+                ClickTargetMode.CurrentCursor => "Moving the mouse",
+                _ => $"Moving the mouse to ({m.X}, {m.Y})",
+            },
             MouseClickStep c => c.UseLastFoundText ? "Clicking the last found spot"
                 : c.UseCurrentPosition ? "Clicking where the cursor is"
+                : c.SmartAimAtTarget && c.HasTargetThumbnail ? $"Smart-Aim clicking near ({c.X}, {c.Y})"
                 : $"Clicking at ({c.X}, {c.Y})",
             MouseScrollStep => "Scrolling",
             KeyPressStep k => $"Pressing {KeyCombo(k)}",

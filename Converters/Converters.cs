@@ -236,6 +236,10 @@ public sealed class StepKindTemplateSelector : System.Windows.Controls.DataTempl
     public DataTemplate? FindTextTemplate { get; set; }
     public DataTemplate? FeedbackLoopTemplate { get; set; }
     public DataTemplate? ScreenSearchTemplate { get; set; }
+
+    /// <summary>Mouse click steps recorded with a Smart Click Snapshot (shows the little "what was clicked" picture).</summary>
+    public DataTemplate? ClickSnapshotTemplate { get; set; }
+
     public DataTemplate? DefaultTemplate { get; set; }
 
     public override DataTemplate SelectTemplate(object? item, DependencyObject container)
@@ -246,6 +250,7 @@ public sealed class StepKindTemplateSelector : System.Windows.Controls.DataTempl
             StepKind.FindColor => FindColorTemplate,
             StepKind.FindText => FindTextTemplate,
             StepKind.FeedbackLoop => FeedbackLoopTemplate,
+            StepKind.MouseClick when item is SmartMacro.ViewModels.Steps.MouseClickStepViewModel { HasTargetThumbnail: true } => ClickSnapshotTemplate,
             _ => null,
         };
         if (specific is not null) return specific;
