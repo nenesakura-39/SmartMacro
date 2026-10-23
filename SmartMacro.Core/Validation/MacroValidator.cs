@@ -953,7 +953,7 @@ public static class MacroValidator
             return;
         }
 
-        if (!TemplateCodec.TryDecode(step.TemplateData, step.TemplateWidth, step.TemplateHeight, out var image, out var error))
+        if (!TemplateCache.TryGetOrDecode(step.TemplateData, step.TemplateWidth, step.TemplateHeight, out var image, out var error))
         {
             issues.Add(Error(error ?? "The stored image is damaged.", property));
             return;

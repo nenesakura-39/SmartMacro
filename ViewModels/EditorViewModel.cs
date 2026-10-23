@@ -49,6 +49,16 @@ public sealed class EditorViewModel : ObservableObject
     // Undo / Redo of structural edits (snapshots of the step list taken before each edit).
     private readonly UndoHistory _history = new();
 
+    // Studio UI view state (never saved, never played): folded If / Repeat blocks (by step ID, so it survives Undo /
+    // Redo, moves and reloads of the list), the search box, the filter pill and the compact list mode.
+    private readonly HashSet<Guid> _collapsed = new();
+    private string _searchText = string.Empty;
+    private StepFilter _filter = StepFilter.All;
+    private IReadOnlyList<int> _matches = Array.Empty<int>();
+    private int _currentMatch = -1;
+    private bool _isCompactView;
+    private bool _suspendTouch;
+
     // Macro settings: target window + "auto-adjust coordinates", Humanize.
     private string? _targetWindowTitle;
     private bool _scaleCoordinates;
@@ -106,6 +116,23 @@ public sealed class EditorViewModel : ObservableObject
         PasteStepCommand = new RelayCommand(PasteSteps, () => HasMacro);
         RunStepCommand = new AsyncRelayCommand(RunSelectedStepAsync, HandleUnexpectedError, () => CanRunNow && SelectedStep is not null);
         PlayFromHereCommand = new AsyncRelayCommand(PlayFromSelectedAsync, HandleUnexpectedError, () => CanRunNow && SelectedStep is not null);
+        ToggleEnabledCommand = new RelayCommand(ToggleEnabledSelected, () => HasMacro && SelectedStep is not null);
+        ToggleCollapseCommand = new RelayCommand(p => ToggleCollapse(p as StepViewModel ?? SelectedStep), p => HasMacro && (p as StepViewModel ?? SelectedStep) is { CanCollapse: true });
+        CollapseAllCommand = new RelayCommand(() => SetAllCollapsed(true), () => HasMacro && Steps.Any(s => s.CanCollapse));
+        ExpandAllCommand = new RelayCommand(() => SetAllCollapsed(false), () => HasMacro && _collapsed.Count > 0);
+        NextMatchCommand = new RelayCommand(() => GoToMatch(+1), () => _matches.Count > 0);
+        PreviousMatchCommand = new RelayCommand(() => GoToMatch(-1), () => _matches.Count > 0);
+        ClearSearchCommand = new RelayCommand(ClearSearch, () => IsSearchActive);
+        SetFilterCommand = new RelayCommand(p => { if (p is StepFilterPill pill) ActiveFilter = pill.Value; else if (p is StepFilter f) ActiveFilter = f; });
+        FilterPills = new[]
+        {
+            new StepFilterPill(StepFilter.All, "All", "Show every step"),
+            new StepFilterPill(StepFilter.VisionAndLogic, "Vision / If", "Find text / image / color, feedback loops, If and Repeat blocks"),
+            new StepFilterPill(StepFilter.Mouse, "Mouse", "Move mouse, Mouse click, Scroll wheel and recorded input"),
+            new StepFilterPill(StepFilter.Keyboard, "Keyboard", "Key press, Type text and recorded input"),
+            new StepFilterPill(StepFilter.Disabled, "Disabled", "Steps that are turned off"),
+        };
+        FilterPills[0].IsActive = true;
         UseCurrentSizeCommand = new RelayCommand(CaptureReference, () => HasMacro);
         RefreshTargetWindowsCommand = new RelayCommand(RefreshTargetWindows);
         ConvertClickToFindImageCommand = new RelayCommand(ConvertClickToFindImage,
@@ -454,8 +481,25 @@ public sealed class EditorViewModel : ObservableObject
     /// <summary>"▶ Run step": tests only the selected step (an If / Repeat runs its whole block) once.</summary>
     public AsyncRelayCommand RunStepCommand { get; }
 
-    /// <summary>"⏭ Play from here": plays from the selected step to the end, once.</summary>
+    /// <summary>"▶ From here" (Shift+F5): plays from the selected step to the end, once.</summary>
     public AsyncRelayCommand PlayFromHereCommand { get; }
+
+    /// <summary>Same command as <see cref="PlayFromHereCommand"/> (the name used by the AAA upgrade: Shift+F5).</summary>
+    public AsyncRelayCommand PlayFromSelectedCommand => PlayFromHereCommand;
+
+    /// <summary>
+    /// What "▶ From here" would play for the selected step: [Start, End) of the step list (the enclosing Repeat when the
+    /// step is inside a loop). Null when nothing is selected.
+    /// </summary>
+    public (int Start, int End)? PlayFromSelectedRange
+    {
+        get
+        {
+            var index = SelectedStep is null ? -1 : Steps.IndexOf(SelectedStep);
+            if (index < 0) return null;
+            return PlaybackRanges.PlayFromHere(Steps.Select(s => s.Model).ToList(), index);
+        }
+    }
 
     private Task RunSelectedStepAsync()
     {
@@ -471,6 +515,260 @@ public sealed class EditorViewModel : ObservableObject
     {
         if (SelectedStep is not { } step || PlayFromStepHandler is null) return Task.CompletedTask;
         return PlayFromStepHandler(MacroJson.Clone(BuildMacro()), Steps.IndexOf(step));
+    }
+
+    // ---------------- Power-user QoL: Space toggles on / off ----------------
+
+    /// <summary>
+    /// Space: turns the selected steps on / off (all to the opposite of the focused step). A selected If / Repeat (or its
+    /// Else / End) switches its whole block, inner steps included (<see cref="StepListEditing.ToggleEnabledTargets"/>).
+    /// </summary>
+    public RelayCommand ToggleEnabledCommand { get; }
+
+    private void ToggleEnabledSelected()
+    {
+        if (SelectedStep is not { } focused) return;
+        var models = Steps.Select(s => s.Model).ToList();
+        var selected = SelectedInOrder().Select(s => Steps.IndexOf(s)).Where(i => i >= 0).ToList();
+        if (selected.Count == 0) selected.Add(Steps.IndexOf(focused));
+        // A folded block counts as selected whole.
+        var targets = StepListEditing.ToggleEnabledTargets(models, selected);
+        if (targets.Count == 0) return;
+
+        var turnOn = !focused.Enabled;
+        RecordUndo();
+        _suspendTouch = true;
+        try
+        {
+            foreach (var index in targets) Steps[index].Enabled = turnOn;
+        }
+        finally
+        {
+            _suspendTouch = false;
+        }
+
+        Touch();
+        var what = targets.Count == 1 ? "the step" : $"{targets.Count} steps";
+        var block = targets.Count > selected.Count ? " (the whole If / Repeat block)" : "";
+        _setStatus($"Turned {(turnOn ? "on" : "off")} {what}{block}. Space switches it back.", StatusKind.Info);
+    }
+
+    // ---------------- Studio UI: folding If / Repeat blocks, compact view ----------------
+
+    /// <summary>▼ / ▶ on an If / Repeat row (parameter = that row; the selected step when none): folds / unfolds its block.</summary>
+    public RelayCommand ToggleCollapseCommand { get; }
+
+    /// <summary>Folds every If / Repeat block.</summary>
+    public RelayCommand CollapseAllCommand { get; }
+
+    /// <summary>Unfolds every block.</summary>
+    public RelayCommand ExpandAllCommand { get; }
+
+    /// <summary>Dense single-line rows (about twice as many steps on screen).</summary>
+    public bool IsCompactView
+    {
+        get => _isCompactView;
+        set => SetProperty(ref _isCompactView, value);
+    }
+
+    /// <summary>IDs of the folded If / Repeat steps (view state only).</summary>
+    public IReadOnlyCollection<Guid> CollapsedStepIds => _collapsed;
+
+    /// <summary>How many steps are folded away right now.</summary>
+    public int HiddenByCollapseCount => Steps.Count(s => s.IsHiddenByCollapse);
+
+    private void ToggleCollapse(StepViewModel? step)
+    {
+        if (step is not { CanCollapse: true }) return;
+        if (!_collapsed.Remove(step.Id)) _collapsed.Add(step.Id);
+        RefreshListView();
+
+        // Never leave the selection on a step that just disappeared: select the folded If / Repeat instead.
+        if (SelectedStep is { IsHiddenByCollapse: true })
+        {
+            _selection.Clear();
+            SelectedStep = step;
+        }
+    }
+
+    private void SetAllCollapsed(bool collapsed)
+    {
+        _collapsed.Clear();
+        if (collapsed)
+        {
+            foreach (var step in Steps.Where(s => s.CanCollapse)) _collapsed.Add(step.Id);
+        }
+
+        RefreshListView();
+        if (SelectedStep is { IsHiddenByCollapse: true } hidden)
+        {
+            var models = Steps.Select(s => s.Model).ToList();
+            var outer = StepListView.EnclosingBlocks(models, Steps.IndexOf(hidden));
+            _selection.Clear();
+            SelectedStep = outer.Count > 0 ? Steps[outer[0]] : null;
+        }
+    }
+
+    /// <summary>Unfolds every block that hides the step (so it can be shown and selected).</summary>
+    private void Reveal(StepViewModel step)
+    {
+        var index = Steps.IndexOf(step);
+        if (index < 0) return;
+        var changed = false;
+        foreach (var outer in StepListView.EnclosingBlocks(Steps.Select(s => s.Model).ToList(), index))
+            changed |= _collapsed.Remove(Steps[outer].Id);
+        if (changed) RefreshListView();
+    }
+
+    // ---------------- Studio UI: search box + filter pills (Ctrl+F) ----------------
+
+    /// <summary>The search box text: matching steps are highlighted, the others dimmed; "↑ ↓" jumps between them.</summary>
+    public string SearchText
+    {
+        get => _searchText;
+        set
+        {
+            if (!SetProperty(ref _searchText, value ?? string.Empty)) return;
+            _currentMatch = -1;
+            RefreshListView();
+            OnPropertyChanged(nameof(IsSearchActive));
+        }
+    }
+
+    /// <summary>The active filter pill (steps outside it are hidden; indexes and indentation stay the same).</summary>
+    public StepFilter ActiveFilter
+    {
+        get => _filter;
+        set
+        {
+            if (!SetProperty(ref _filter, value)) return;
+            foreach (var pill in FilterPills) pill.IsActive = pill.Value == value;
+            _currentMatch = -1;
+            RefreshListView();
+            OnPropertyChanged(nameof(IsSearchActive));
+        }
+    }
+
+    /// <summary>All / Vision · If / Mouse / Keyboard / Disabled.</summary>
+    public IReadOnlyList<StepFilterPill> FilterPills { get; }
+
+    public RelayCommand SetFilterCommand { get; }
+    public RelayCommand NextMatchCommand { get; }
+    public RelayCommand PreviousMatchCommand { get; }
+    public RelayCommand ClearSearchCommand { get; }
+
+    /// <summary>True while a search text or a filter other than "All" is active.</summary>
+    public bool IsSearchActive => !string.IsNullOrWhiteSpace(_searchText) || _filter != StepFilter.All;
+
+    /// <summary>How many steps match the search / filter.</summary>
+    public int SearchMatchCount => _matches.Count;
+
+    /// <summary>"3 matches · 2 / 3 · ↑ ↓" (empty while no search is active).</summary>
+    public string MatchNavigatorText
+    {
+        get
+        {
+            if (!IsSearchActive) return string.Empty;
+            var count = StepListView.MatchCountText(_matches.Count);
+            var position = StepListView.MatchPosition(_currentMatch, _matches.Count);
+            return position.Length == 0 ? count : $"{count} · {position}";
+        }
+    }
+
+    /// <summary>Raised when a step should be scrolled into view (search navigation); the view scrolls the list to it.</summary>
+    public event EventHandler<StepViewModel>? RevealStepRequested;
+
+    private void GoToMatch(int direction)
+    {
+        if (_matches.Count == 0) return;
+        if (_currentMatch < 0)
+        {
+            // Start from the selected step: the next match after it (or the one before it for ↑).
+            var selected = SelectedStep is null ? -1 : Steps.IndexOf(SelectedStep);
+            var next = direction > 0 ? 0 : _matches.Count - 1; // wrap around when there is none after / before it
+            if (direction > 0)
+            {
+                for (var k = 0; k < _matches.Count; k++)
+                {
+                    if (_matches[k] > selected) { next = k; break; }
+                }
+            }
+            else
+            {
+                for (var k = _matches.Count - 1; k >= 0; k--)
+                {
+                    if (_matches[k] < selected) { next = k; break; }
+                }
+            }
+
+            _currentMatch = next;
+        }
+        else
+        {
+            _currentMatch = ((_currentMatch + direction) % _matches.Count + _matches.Count) % _matches.Count;
+        }
+
+        var step = Steps[_matches[_currentMatch]];
+        Reveal(step);
+        _selection.Clear();
+        SelectedStep = step;
+        MarkCurrentMatch();
+        OnPropertyChanged(nameof(MatchNavigatorText));
+        RevealStepRequested?.Invoke(this, step);
+    }
+
+    private void ClearSearch()
+    {
+        SearchText = string.Empty;
+        ActiveFilter = StepFilter.All;
+    }
+
+    private void ResetViewState()
+    {
+        _collapsed.Clear();
+        _searchText = string.Empty;
+        _filter = StepFilter.All;
+        foreach (var pill in FilterPills) pill.IsActive = pill.Value == StepFilter.All;
+        _matches = Array.Empty<int>();
+        _currentMatch = -1;
+    }
+
+    /// <summary>
+    /// Recomputes what the list shows: folded blocks (<see cref="StepListView.Collapse"/>), the filter pill and the search
+    /// highlight. Only view flags on the step view models change; the steps, their order and indexes never do.
+    /// </summary>
+    private void RefreshListView()
+    {
+        var models = Steps.Select(s => s.Model).ToList();
+        _collapsed.RemoveWhere(id => !models.Any(m => m.Id == id && StepListView.CanCollapse(m)));
+        var fold = StepListView.Collapse(models, _collapsed);
+        var searching = !string.IsNullOrWhiteSpace(_searchText);
+        _matches = StepListView.FindMatches(models, _searchText, _filter);
+        var matchSet = new HashSet<int>(_matches);
+
+        for (var i = 0; i < Steps.Count; i++)
+        {
+            var vm = Steps[i];
+            vm.IsCollapsed = _collapsed.Contains(vm.Id);
+            vm.HiddenStepCount = vm.IsCollapsed ? fold.HiddenCount[i] : 0;
+            vm.IsHiddenByCollapse = fold.Hidden[i];
+            vm.IsFilteredOut = _filter != StepFilter.All && !StepListView.MatchesFilter(vm.Model, _filter);
+            vm.IsSearchMatch = searching && matchSet.Contains(i);
+            vm.IsSearchDimmed = searching && !matchSet.Contains(i);
+        }
+
+        if (_currentMatch >= _matches.Count) _currentMatch = -1;
+        MarkCurrentMatch();
+        OnPropertyChanged(nameof(SearchMatchCount));
+        OnPropertyChanged(nameof(MatchNavigatorText));
+        OnPropertyChanged(nameof(HiddenByCollapseCount));
+        System.Windows.Input.CommandManager.InvalidateRequerySuggested();
+    }
+
+    private void MarkCurrentMatch()
+    {
+        var current = _currentMatch >= 0 && _currentMatch < _matches.Count ? _matches[_currentMatch] : -1;
+        for (var i = 0; i < Steps.Count; i++) Steps[i].IsCurrentSearchMatch = i == current;
     }
 
     // ---------------- Macro settings: target window, auto-adjust coordinates, Humanize ----------------
@@ -904,6 +1202,7 @@ public sealed class EditorViewModel : ObservableObject
         _history.Clear();
         RaiseHistoryChanged();
         RefreshTargetWindows();
+        ResetViewState();
 
         ReplaceSteps(copy.Steps);
 
@@ -920,6 +1219,7 @@ public sealed class EditorViewModel : ObservableObject
         _description = string.Empty;
         _history.Clear();
         RaiseHistoryChanged();
+        ResetViewState();
         ReplaceSteps(Array.Empty<MacroStep>());
         Issues.Clear();
         ErrorCount = 0;
@@ -1179,51 +1479,62 @@ public sealed class EditorViewModel : ObservableObject
         if (plan.Note is not null) _setStatus(plan.Note, StatusKind.Info);
     }
 
+    /// <summary>
+    /// Duplicate (Ctrl+D): copies the selected steps (next to each other) right after them. Block-aware: an If / Repeat (or
+    /// its Else / End) copies the WHOLE block with every step inside, so the copy is a valid block of its own
+    /// (<see cref="StepListEditing.PlanDuplicate"/>). Not next to each other: only the focused step (or its block).
+    /// </summary>
     private void DuplicateSelectedStep()
     {
         if (SelectedStep is not { } step) return;
-        var index = Steps.IndexOf(step);
-        if (index < 0) return;
-
-        if (step.Model is IfStep or RepeatStep or EndIfStep or EndRepeatStep or ElseStep)
+        var models = Steps.Select(s => s.Model).ToList();
+        var selected = SelectedInOrder();
+        int first, last;
+        if (selected.Count > 1 && Steps.IndexOf(selected[^1]) - Steps.IndexOf(selected[0]) + 1 == selected.Count)
         {
-            var models = Steps.Select(s => s.Model).ToList();
-            var blocks = BlockStructure.Analyze(models);
-            if (blocks.IsValid)
-            {
-                if (step.Model is ElseStep)
-                {
-                    _setStatus("An If block can have only one Else. To duplicate the whole If block, select its If step and press Ctrl+D.", StatusKind.Warning);
-                    return;
-                }
+            first = Steps.IndexOf(selected[0]);
+            last = Steps.IndexOf(selected[^1]);
+        }
+        else
+        {
+            first = last = Steps.IndexOf(step);
+        }
 
-                var start = step.Model is IfStep or RepeatStep ? index : blocks.StartOf(index);
-                var end = start >= 0 ? blocks.EndOf(start) : -1;
-                if (start >= 0 && end >= 0)
-                {
-                    RecordUndo();
-                    var added = new List<StepViewModel>();
-                    for (var i = start; i <= end; i++)
-                    {
-                        var vm = CreateStepViewModel(MacroFactory.DuplicateStep(models[i]));
-                        Steps.Insert(end + 1 + added.Count, vm);
-                        added.Add(vm);
-                    }
+        // A folded block always copies whole (what you see is one row).
+        if (Enumerable.Range(first, last - first + 1).Any(i => Steps[i].IsCollapsed))
+            (first, last, _) = StepListEditing.GrowToWholeBlocks(models, first, last);
 
-                    _selection = added;
-                    SelectedStep = added[0];
-                    SelectStepsRequested?.Invoke(this, added);
-                    Touch();
-                    return;
-                }
-            }
+        var plan = StepListEditing.PlanDuplicate(models, first, last);
+        if (!plan.Allowed)
+        {
+            if (plan.Problem is not null) _setStatus(plan.Problem, StatusKind.Warning);
+            return;
         }
 
         RecordUndo();
-        var copy = CreateStepViewModel(MacroFactory.DuplicateStep(step.Model));
-        Steps.Insert(index + 1, copy);
-        SelectedStep = copy;
+        var added = new List<StepViewModel>();
+        foreach (var copy in StepListEditing.DuplicateSteps(models, plan))
+        {
+            var vm = CreateStepViewModel(copy);
+            Steps.Insert(plan.InsertAt + added.Count, vm);
+            added.Add(vm);
+        }
+
+        // A copy of a folded block starts folded too.
+        for (var i = 0; i < added.Count; i++)
+        {
+            if (Steps[plan.First + i].IsCollapsed) _collapsed.Add(added[i].Id);
+        }
+
+        _selection = added.Count > 1 ? added : new List<StepViewModel>();
+        SelectedStep = added[0];
+        if (added.Count > 1) SelectStepsRequested?.Invoke(this, added);
         Touch();
+        RefreshListView();
+        if (plan.TookWholeBlocks || plan.Count > 1)
+            _setStatus(plan.TookWholeBlocks
+                ? $"Duplicated the whole block ({plan.Count} steps), right after the original."
+                : $"Duplicated {plan.Count} steps.", StatusKind.Info);
     }
 
     private bool CanMove(bool up)
@@ -1237,7 +1548,11 @@ public sealed class EditorViewModel : ObservableObject
     private void MoveSelected(MoveDirection direction)
     {
         if (!TryGetSelectedRange(out var first, out var last)) return;
-        Apply(StepListEditing.PlanMove(Steps.Select(s => s.Model).ToList(), first, last, direction));
+        var models = Steps.Select(s => s.Model).ToList();
+        // A folded If / Repeat is one row on screen: it moves with everything it hides.
+        if (Enumerable.Range(first, last - first + 1).Any(i => Steps[i].IsCollapsed))
+            (first, last, _) = StepListEditing.GrowToWholeBlocks(models, first, last);
+        Apply(StepListEditing.PlanMove(models, first, last, direction));
     }
 
     /// <summary>
@@ -1336,12 +1651,16 @@ public sealed class EditorViewModel : ObservableObject
 
         var blocks = BlockStructure.Analyze(Steps.Select(s => s.Model).ToList());
         UpdateBlockPairing(blocks);
+        RefreshListView();
 
         OnPropertyChanged(nameof(HasSteps));
         OnPropertyChanged(nameof(StepCountText)); // also re-checks Move up/down availability
     }
 
-    private void OnStepModified(object? sender, EventArgs e) => Touch();
+    private void OnStepModified(object? sender, EventArgs e)
+    {
+        if (!_suspendTouch) Touch();
+    }
 
     private void Touch()
     {
@@ -1367,6 +1686,7 @@ public sealed class EditorViewModel : ObservableObject
         var blocks = BlockStructure.Analyze(Steps.Select(s => s.Model).ToList());
         UpdateBlockPairing(blocks);
         UpdateBlockFixBanner(blocks);
+        RefreshListView(); // an edit can change what the search matches
 
         ErrorCount = issues.Count(i => i.Severity == IssueSeverity.Error);
         WarningCount = issues.Count(i => i.Severity == IssueSeverity.Warning);
@@ -1452,5 +1772,28 @@ public sealed class EditorViewModel : ObservableObject
     {
         _log.Error("Unexpected error in the editor.", ex);
         _dialogs.ShowError("Unexpected error", ex.Message);
+    }
+}
+
+/// <summary>One filter pill above the step list ("All", "Vision / If", "Mouse", "Keyboard", "Disabled").</summary>
+public sealed class StepFilterPill : ObservableObject
+{
+    private bool _isActive;
+
+    public StepFilterPill(StepFilter value, string label, string tooltip)
+    {
+        Value = value;
+        Label = label;
+        Tooltip = tooltip;
+    }
+
+    public StepFilter Value { get; }
+    public string Label { get; }
+    public string Tooltip { get; }
+
+    public bool IsActive
+    {
+        get => _isActive;
+        set => SetProperty(ref _isActive, value);
     }
 }

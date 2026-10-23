@@ -1,6 +1,10 @@
 # SmartMacro – Project Status / Handoff
 
-_Last updated: 2026-10-23 (Audit fixes of `a33c29f` + Upgrade 7 – capture shield for overlays, pause measured from F8,
+_Last updated: 2026-10-23 (AAA Performance upgrade – Upgrades 4–6: Shift+F5 / Space / Ctrl+F search + filter pills,
+block-aware duplicate, folding If / Repeat, compact view, ⚡ vision telemetry, tests – NOT built or tested. Before it:
+Upgrade 1 build fix + Upgrades 2 (GDI capture reuse) and 3 (frozen
+thumbnail cache, ~30 FPS playback UI, pixel-scroll virtualization): NOT built or tested. Before it: Upgrade 1 "Vision Engine Turbo" on top of `adbdd5a`: template cache +
+Hot-Spot fast path + vision timing telemetry, written WITHOUT a .NET SDK, NOT built or tested; Upgrades 2–6 still to do. Before it: audit fixes of `a33c29f` + Upgrade 7 – capture shield for overlays, pause measured from F8,
 "last found spot" skip instead of stop, click pictures inside recorded input + "✂ Break into steps", lazy click-snapshot
 PNGs, shared Smart-Aim locator + "🎯 Test Smart-Aim", anchor arrow in "Pick offset": written WITHOUT a .NET SDK, NOT built
 or tested. Before it: the whole AAA Studio Upgrade Parts 1–6, committed as `a33c29f`: owner build 0 warnings / 0 errors,
@@ -26,6 +30,127 @@ Developer: Riku (リク) · Brand: KuroLogic_
 | Release package | `publish\SmartMacro-1.0.0-win-x64\SmartMacro.exe` is an OLD build (made right after `159d6b3`, before Stage 1) | – | ignored by git |
 
 
+
+## AAA Performance upgrade – Upgrades 4, 5, 6 (2026-10-23, on top of 1–3); written WITHOUT a .NET SDK: **NOT built, NOT tested**
+Also fixed before it: the Upgrade 3 edit of `StepViewModels.cs` had duplicated a block of the file (7 × CS0101 / CS0111:
+`MouseClickStepViewModel` twice) – the script's end marker matched an earlier `SetPosition`; the file was rebuilt from the
+original with only the two intended changes (diff-checked).
+Found on arrival: "Play from here" (`PlayFromHereCommand`, `PlaybackRanges.FromStep`), block-aware Ctrl+D (in the view
+model), Ctrl+D / Alt+Up / Alt+Down bindings and recycling virtualization already existed.
+1. **Upgrade 4 – QoL**:
+   - `PlaybackRanges.PlayFromHere(steps, index)` = [FromStep, Count) (engine `PlayFromStepAsync` uses it);
+     `EditorViewModel.PlayFromSelectedCommand` (= PlayFromHereCommand) + `PlayFromSelectedRange`; Shift+F5 (UserControl and
+     list level), toolbar button "▶ From here" (tooltip "Play from the selected step to the end (Shift+F5)"), context menu.
+   - Core `StepListEditing.PlanDuplicate` / `DuplicateSteps` / `ApplyDuplicate` (`DuplicatePlan`): contiguous selection grown to
+     whole blocks, copies inserted right after; lone Else refused; markers refused while blocks are broken. Editor Ctrl+D uses
+     it (multi-selection too; a folded block copies whole and the copy starts folded).
+   - `StepListEditing.ToggleEnabledTargets` + `ToggleEnabledCommand`: Space (list focused, not in a text box; code-behind
+     `StepList_PreviewKeyDown`) turns the selected steps on / off, a selected If / Repeat / Else / End switches its whole block;
+     one Undo snapshot, one revalidation (`_suspendTouch`). Left / Right fold / unfold a selected If / Repeat.
+   - Search + filter bar above the list: `SearchBox` (Ctrl+F focuses it; Enter / F3 next, Shift+Enter / Shift+F3 previous,
+     Esc clears, ↓ back to the list), pills All / Vision · If / Mouse / Keyboard / Disabled (`StepFilterPill`,
+     `SetFilterCommand`), "3 matches · 2 / 3" + ↑ ↓ ✕. Search highlights matches (amber outline, the current one glows) and dims
+     the rest; a pill hides steps outside its group (ListBoxItem Visibility – indexes, numbers and indentation unchanged).
+     Jumping to a match unfolds the blocks around it (`RevealStepRequested` → ScrollIntoView). Core rules:
+     `Core/Workflow/StepListView.cs` (`MatchesText` = name + description + comment, all words, ignore case; `MatchesFilter`;
+     `FindMatches`; `EnclosingBlocks`; texts).
+2. **Upgrade 5 – Studio UI**:
+   - Folding: `StepListView.Collapse(steps, collapsedIds)` hides everything after a collapsed If / Repeat through its End
+     (block without End doesn't fold), `HiddenCount` = inner steps (own Else / End not counted). Editor keeps folded IDs in
+     `_collapsed` (survives Undo / Redo / moves; reset on Load / Unload); `ToggleCollapseCommand`, `CollapseAllCommand`,
+     `ExpandAllCommand` (▶ / ▼ toolbar buttons); `StepViewModel` view flags `CanCollapse`, `IsCollapsed`, `CollapseGlyph`,
+     `HiddenStepCount`, `HiddenBadgeText` ("[4 steps hidden]"), `IsHiddenByCollapse`, `IsFilteredOut`, `IsVisibleInList`,
+     `IsSearchMatch`, `IsSearchDimmed`, `IsCurrentSearchMatch`. Row: ▼ / ▶ button replaces the number on If / Repeat rows;
+     hidden badge pill. A folded block moves / duplicates as a whole; collapsing moves the selection to the If / Repeat.
+     Nothing is saved or played differently.
+   - "Compact view" toggle (`IsCompactView`, not saved): rows 3 px padding, 22 px badge, 12 px title, summary inline on the
+     title line, comment hidden, 2 px row gap (style `StudioStepCardItem` in EditorView resources).
+   - Telemetry: header run pill shows "· ⚡ Vision: 0.6ms" (`VisionTelemetryText`); mini-HUD `RunHud.Telemetry` → violet
+     "⚡ 0.6ms" next to the timer.
+3. **Upgrade 6 – tests** (`SmartMacro.Tests/PerformanceAndQolTests.cs`): `BlockAwareDuplicateTests` (If / Else / End If copied
+   whole + valid + fresh IDs, End If selected, lone Else refused, normal steps, Repeat with nested If, range growing, broken
+   blocks, Space targets), `PlayFromHereTests` (slice table + 3 engine runs: inside true branch, inside loop, otherwise
+   part), `StepListViewTests` (fold If / nested Repeat, folding keeps every step for playback + identical JSON, broken block,
+   enclosing blocks, search, filter pills, texts). Test 4 of the request ("collapsing in EditorViewModel") is tested on the
+   Core rules the view model uses: the test project can't load the WPF view models.
+- Not verified: build, tests, the XAML at runtime (search box placeholder over the 🔍 icon, pill highlight, chevron click vs
+  drag start, compact layout, Space vs ListBox selection).
+
+## AAA Performance upgrade – Upgrade 1 build fix + Upgrades 2 and 3 (2026-10-23); written WITHOUT a .NET SDK: **NOT built, NOT tested**
+- Owner's build of Upgrade 1: 5 errors, all in `PerformanceAndQolTests.cs`: `TemplateCache.GetPng` didn't exist (added
+  instance `GetPng` / `GetTemplate` shortcuts) and `Select(_ => …)` made `out _` mean the lambda's int parameter (renamed
+  to `i`). Core / app compiled; tests not run yet.
+- **Upgrade 2 – GDI capture** (`Services/Ocr/WindowsOcrService.cs` → `ScreenCapture`): the one BitBlt used by image capture, OCR
+  and click snapshots now keeps ONE memory DC + bitmap per thread (`[ThreadStatic]` `CaptureSurface`) for the last size, and
+  reuses it when the next capture has the same size; a new size replaces it; areas > 1024 × 1024 px (whole monitors) are never
+  kept (no thread holds tens of MB of GDI memory). Errors throw the surface away. `ReleaseThreadResources()`,
+  `ReleaseAllResources()` (App `OnExit`; bumps a generation so other threads drop theirs on their next capture – handles are
+  only freed by the thread that uses them), `LiveSurfaceCount`. Virtual-screen rectangle (GetSystemMetrics + monitor
+  enumeration) is cached for 500 ms (`ScreenCapture.VirtualScreen()`, used by `GdiScreenCapture` and `WindowsOcrService`;
+  `InvalidateVirtualScreen()`). `GdiScreenCapture.CaptureRegion(rect)` alias. Audit: every caller ALREADY captured exactly its
+  area (custom areas, Smart-Aim radius, Hot-Spot, feedback bars, tests); the only full-desktop captures are on purpose (freeze
+  picker, the "anywhere" fallback of 🎯 Test Smart-Aim).
+- **Upgrade 3 – UI**:
+  1. `Converters/Converters.cs`: `FrozenBitmapCache` (LRU 256, thread-safe, frozen `BitmapSource`s keyed by the picture
+     text; `FromPngBase64`, `FromTemplate` (via `TemplateCache`), `Decodes`, `Count`, `Clear`) + `Base64ToImageSourceConverter`.
+     Click-snapshot thumbnails (`MouseClickStepViewModel.LoadThumbnail`) and Find image previews (`RefreshPreview`, no longer
+     needs the vision tools) use it, so recycled cards / Undo / Redo / reloads don't decode again. Step-card thumbnails and the
+     Find image preview use `BitmapScalingMode="HighQuality"`; the zoomed Smart Click Snapshot in Properties stays
+     NearestNeighbor (crisp pixels on purpose).
+  2. `AutomationViewModel`: found on arrival that engine events already only stored the latest values and a 100 ms timer drew
+     them (no per-event dispatcher calls). Now: `UiRefreshInterval` = 33 ms (~30 FPS); a version counter bumped by
+     ProgressChanged / RunStarted, and a tick with nothing new (same version, mode, HUD second and vision time) does no work;
+     state changes (pause / resume / stopping) refresh at once (`RefreshProgress(force: true)`); end of playback resets as
+     before. New `VisionTelemetryText` ("⚡ Vision: 0.6ms" from `PlaybackEngine.LastProbeElapsedMs`) + `HasVisionTelemetry` +
+     `FormatVisionTelemetry` – not shown in XAML yet (Upgrade 5 pill / HUD). HUD `SetHud` uses frozen brushes (no new brush
+     per tick).
+  3. `EditorView.xaml` step list: + `ScrollUnit="Pixel"`, `ScrollViewer.CanContentScroll="True"`, `CacheLength="1,1"` pages
+     (virtualizing + recycling were already on). Drag auto-scroll (`EditorView.xaml.cs AutoScroll`) now scrolls 6–36 px per
+     drag event depending on how close to the edge (LineUp / LineDown would only move 16 px in pixel mode).
+- Tests: none added for 2 / 3 – the test project targets plain net10.0 (no WPF / Win32), so these app-side parts can only be
+  checked by hand: thumbnails show, scrolling a long list is smooth, drag-and-drop auto-scroll works, Run counter / step /
+  HUD update smoothly in a Play = 0 loop, pause / resume show at once, no GDI handle growth in Task Manager (GDI objects
+  column) during a long Find image loop.
+
+## AAA Performance, QoL & Studio UI Upgrade – Upgrade 1 "Vision Engine Turbo" (2026-10-23, on top of `adbdd5a`); written WITHOUT a .NET SDK: **NOT built, NOT tested**
+Checked by script only (brace / bracket balance). Upgrades 2–6 of the same request (GDI capture reuse, frozen thumbnail
+cache + 30 FPS UI, editor QoL shortcuts / search, collapsible blocks + compact view + telemetry pill, the rest of the tests)
+are NOT done yet. Next step for the owner: `tools\verify.cmd` (send `artifacts\build.log` / `artifacts\test.log`).
+Found on arrival: Find image templates are NOT stored as PNG – they are `TemplateCodec` text (BGR → zlib → Base64 +
+width / height); only Smart-Aim click thumbnails are Base64 PNG. Conditions already decoded once per playback
+(`ScreenConditionEvaluator` cache) and Find steps once per step run, but every macro repeat, every Smart-Aim click run and
+every editor re-validation decoded again, and every look scanned the whole search area.
+1. **`Core/Vision/TemplateCache.cs`**: thread-safe LRU (128 entries, 256 MB of pixels; newest always kept). Key = (kind, width,
+   height, text length, text hash), a hit needs the same text (reference check, then ordinal compare). Damaged pictures are
+   cached with their error. `TemplateCache.Shared`; static `GetOrDecode(base64)` / `GetOrDecode(data, w, h)` /
+   `TryGetOrDecode(...)`; instances have `Hits`, `Decodes`, `Count`, `CachedBytes`, `Clear()`. Returned pictures are shared
+   (read-only). Used by `ScreenProbes` (Find image + image conditions), `SmartClickConversion.TryDecodeThumbnail` (engine
+   Smart-Aim, validator, Test Smart-Aim, Convert), `MacroValidator` (template check), `VisionTools.TestImageAsync`, the Find
+   image editor preview. The engine's per-run `_smartAimTemplates` dictionary was removed (cache instead).
+2. **Hot-Spot fast path** (`Core/Playback/HotSpotMemory.cs`, `ScreenProbes`): key = step ID + picture size / text hash; the
+   engine owns one (`PlaybackEngine.HotSpots`), cleared at the start of every playback, kept across poll iterations, loop turns
+   and macro repeats. When a search found its picture before, a look first checks the last match ± 2 px, then ± 24 px
+   (`HotSpotMarginPx`), clipped to the step's area, at full resolution, needing max(step accuracy, 0.88); else the normal full
+   search (so found / not found is the same as before). Used for Find image steps and image conditions (If / Repeat /
+   feedback; also "is NOT on screen" and "wait until gone", where the answer is unchanged). Not for Smart-Aim (already a
+   small area) or colour / text. New `IScreenCapture.PrefersSmallCaptures` (default false): GDI (`GdiScreenCapture`, forwarded by
+   `OverlayAwareScreenCapture`) = true → only the ~80×80 spot is captured, full area only on a miss; fakes = false → still
+   exactly ONE capture per look (the spot is checked inside the full capture), so existing capture-count tests are unaffected.
+   Found text says "(⚡ at its last spot, 0.4 ms)". One known difference: with several identical copies on screen, the copy
+   found last time keeps winning (before: the best-scoring one).
+3. **Telemetry**: `ScreenProbe.ElapsedMs` / `FromHotSpot`, `ConditionCheck.ElapsedMs` (Stopwatch real time, capture + search),
+   `PlaybackEngine.LastProbeElapsedMs` (image / colour looks + Smart-Aim; thread-safe), `TargetDetection.ElapsedMs` /
+   `FromHotSpot` / `Badge` ("🎯 99% · 0.6ms", invariant culture) / `FormatMs`. Reticle badge = "🎯 98% · 0.6ms · ⚡ Find image".
+   `AutomationViewModel.OnTargetDetected` now queues at most one dispatcher call at a time (draws the newest target), because
+   fast loops can now detect hundreds of times per second.
+- Tests: new `SmartMacro.Tests/PerformanceAndQolTests.cs` (`RegionCapture` fake with PrefersSmallCaptures, `TemplateCacheTests`:
+  same instance / no re-decode, PNG + template, shared shortcuts, size in key, damaged cached, empty input, LRU, byte limit,
+  16 threads; `HotSpotTests`: stationary target in < 2 ms with only small captures, far move → full search + new spot
+  remembered, small move inside the hot spot, disappeared = same miss text as without hot spot, stays inside a custom area,
+  threshold / area maths, no memory = always full, fakes keep one capture per look, engine across 4 repeats + Badge +
+  LastProbeElapsedMs + memory cleared on a new playback, If condition, culture-independent badge, Smart-Aim timing).
+  No existing test was changed.
+- Not verified: build, tests, real speed on Windows (GDI capture of the small spot, Debug vs Release timings).
 
 ## Audit fixes of `a33c29f` + Upgrade 7 (2026-10-23); written WITHOUT a .NET SDK: **NOT built, NOT tested**
 Checked by script only (brace balance, XAML well-formed). Next step for the owner: `tools\verify.cmd`, then section M of
@@ -1048,6 +1173,8 @@ no .NET SDK in the AI's environment)
   csproj Company/Authors "Riku", Copyright "© 2026 Riku", README "© 2026 Riku") – change awaits owner approval.
 
 ## Next task
+- Owner: `tools\verify.cmd` for Upgrades 1–6 (never fully compiled), then try: Shift+F5, Space on an If, Ctrl+D on an If,
+  Ctrl+F search + pills, ▼ / ▶ folding, Compact view, ⚡ Vision in the header pill / mini-HUD during a Find image loop.
 - Owner: `tools\verify.cmd` for the audit fixes of `a33c29f` + Upgrade 7 (never compiled; send `artifacts\build.log` /
   `artifacts\test.log` if anything fails), then section M of `docs/AAA_UPGRADE_MANUAL_TESTS.md` (and G–L if not done yet).
 - Owner: live run of the `538326c` Part B fix (built + tested green as part of `a33c29f`) with Play = 0 and Play = 5

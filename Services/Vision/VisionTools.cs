@@ -329,7 +329,8 @@ public sealed class VisionTools : IVisionTools
     public async Task<string> TestImageAsync(FindImageStep step)
     {
         _lastMatch = null;
-        if (!TemplateCodec.TryDecode(step.TemplateData, step.TemplateWidth, step.TemplateHeight, out var decoded, out var error))
+        // Shared decoded copy (TemplateCache): read-only here, the preview draws on a clone of the screen capture.
+        if (!TemplateCache.TryGetOrDecode(step.TemplateData, step.TemplateWidth, step.TemplateHeight, out var decoded, out var error))
             return error ?? "Capture the image first.";
         var template = decoded!;
 

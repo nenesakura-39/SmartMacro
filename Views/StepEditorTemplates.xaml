@@ -849,7 +849,7 @@
                     <Border Padding="8" Margin="0,8,0,0" CornerRadius="6" Background="{StaticResource SurfaceBrush}" HorizontalAlignment="Left"
                             Visibility="{Binding TemplatePreview, Converter={StaticResource NullToVisibility}}">
                         <Image Source="{Binding TemplatePreview}" Stretch="Uniform" StretchDirection="Both" MaxHeight="120" MaxWidth="320"
-                               RenderOptions.BitmapScalingMode="NearestNeighbor" AutomationProperties.Name="Image to find"
+                               RenderOptions.BitmapScalingMode="HighQuality" AutomationProperties.Name="Image to find"
                                ToolTip="The stored picture SmartMacro looks for." />
                     </Border>
                     <TextBlock Text="{Binding TemplateInfo}" Style="{StaticResource MutedText}" FontSize="12" TextWrapping="Wrap" Margin="0,6,0,0" />

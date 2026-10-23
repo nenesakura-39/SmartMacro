@@ -17,6 +17,15 @@ public interface IScreenCapture
     /// Throws <see cref="ArgumentException"/> if the area is completely off screen.
     /// </summary>
     Task<ScreenFrame> CaptureAsync(ScreenRect region, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// True when capturing a small rectangle is much cheaper than capturing a whole search area (the real GDI capture
+    /// copies only the requested pixels). The Hot-Spot fast path then captures just the spot where the picture was last
+    /// found and only captures the whole area when it isn't there any more. False (the default, e.g. test fakes): every
+    /// look captures the whole area once and the spot is checked inside that picture, so one look = one capture.
+    /// Wrappers (decorators) should pass the inner capture's value on.
+    /// </summary>
+    bool PrefersSmallCaptures => false;
 }
 
 /// <summary>Thrown when an image / colour / text is not found (or doesn't go away) in time.</summary>

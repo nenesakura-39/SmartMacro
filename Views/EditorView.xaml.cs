@@ -27,6 +27,7 @@ public partial class EditorView : UserControl
             {
                 _editor.SelectStepsRequested -= OnSelectStepsRequested;
                 _editor.RunningStepChanged -= OnRunningStepChanged;
+                _editor.RevealStepRequested -= OnRevealStepRequested;
             }
 
             _editor = DataContext as EditorViewModel;
@@ -34,8 +35,88 @@ public partial class EditorView : UserControl
             {
                 _editor.SelectStepsRequested += OnSelectStepsRequested;
                 _editor.RunningStepChanged += OnRunningStepChanged;
+                _editor.RevealStepRequested += OnRevealStepRequested;
             }
         };
+        PreviewKeyDown += Editor_PreviewKeyDown;
+    }
+
+    /// <summary>Search navigation (↑ ↓ / F3): scroll the match into view.</summary>
+    private void OnRevealStepRequested(object? sender, StepViewModel step)
+    {
+        if (!StepList.IsVisible) return;
+        StepList.UpdateLayout(); // a block that was just unfolded must have its rows before scrolling to one of them
+        StepList.ScrollIntoView(step);
+    }
+
+    /// <summary>Ctrl+F anywhere in the editor: jump to the step search box.</summary>
+    private void Editor_PreviewKeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key == Key.F && Keyboard.Modifiers == ModifierKeys.Control && SearchBox.IsVisible)
+        {
+            SearchBox.Focus();
+            SearchBox.SelectAll();
+            e.Handled = true;
+        }
+    }
+
+    /// <summary>Search box: Enter = next match, Shift+Enter = previous, Esc = clear and go back to the list.</summary>
+    private void SearchBox_PreviewKeyDown(object sender, KeyEventArgs e)
+    {
+        if (_editor is null) return;
+        switch (e.Key)
+        {
+            case Key.Enter:
+            {
+                var command = Keyboard.Modifiers == ModifierKeys.Shift ? _editor.PreviousMatchCommand : _editor.NextMatchCommand;
+                if (command.CanExecute(null)) command.Execute(null);
+                e.Handled = true;
+                break;
+            }
+            case Key.Escape:
+                if (_editor.ClearSearchCommand.CanExecute(null)) _editor.ClearSearchCommand.Execute(null);
+                FocusSelectedStep();
+                e.Handled = true;
+                break;
+            case Key.Down when _editor.SelectedStep is not null:
+                FocusSelectedStep();
+                e.Handled = true;
+                break;
+        }
+    }
+
+    /// <summary>
+    /// Step list keys that aren't simple key bindings: Space turns the selected steps (or the whole If / Repeat block)
+    /// on / off, Left / Right fold / unfold a selected If / Repeat. Never while typing in a text box.
+    /// </summary>
+    private void StepList_PreviewKeyDown(object sender, KeyEventArgs e)
+    {
+        if (_editor is null || e.OriginalSource is System.Windows.Controls.Primitives.TextBoxBase) return;
+        if (Keyboard.Modifiers != ModifierKeys.None) return;
+
+        switch (e.Key)
+        {
+            case Key.Space when _editor.ToggleEnabledCommand.CanExecute(null):
+                _editor.ToggleEnabledCommand.Execute(null);
+                e.Handled = true;
+                break;
+            case Key.Left when _editor.SelectedStep is { CanCollapse: true, IsCollapsed: false } open:
+                _editor.ToggleCollapseCommand.Execute(open);
+                e.Handled = true;
+                break;
+            case Key.Right when _editor.SelectedStep is { CanCollapse: true, IsCollapsed: true } folded:
+                _editor.ToggleCollapseCommand.Execute(folded);
+                e.Handled = true;
+                break;
+        }
+    }
+
+    private void FocusSelectedStep()
+    {
+        if (_editor?.SelectedStep is not { } step) return;
+        StepList.ScrollIntoView(step);
+        if (StepList.ItemContainerGenerator.ContainerFromItem(step) is ListBoxItem item) item.Focus();
+        else StepList.Focus();
     }
 
     /// <summary>While playing: keep the running step (the one with the "▶ Running" badge) in view.</summary>
@@ -211,13 +292,24 @@ public partial class EditorView : UserControl
         return element as ListBoxItem;
     }
 
-    /// <summary>Scrolls the list while dragging near its top or bottom edge.</summary>
+    /// <summary>
+    /// Scrolls the list while dragging near its top or bottom edge: the closer to the edge, the faster (6–36 px per drag
+    /// event). The list scrolls by pixels (ScrollUnit="Pixel"), so this stays smooth with the recycling virtualization.
+    /// </summary>
     private void AutoScroll(Point position)
     {
         if (FindScrollViewer(StepList) is not { } scroller) return;
-        const double edge = 28;
-        if (position.Y < edge) scroller.LineUp();
-        else if (position.Y > StepList.ActualHeight - edge) scroller.LineDown();
+        const double edge = 40;
+        const double minStep = 6;
+        const double maxStep = 36;
+        double depth;
+        if (position.Y < edge) depth = (edge - Math.Max(0, position.Y)) / edge;
+        else if (position.Y > StepList.ActualHeight - edge) depth = -(position.Y - (StepList.ActualHeight - edge)) / edge;
+        else return;
+
+        var amount = minStep + (maxStep - minStep) * Math.Min(1, Math.Abs(depth));
+        var target = scroller.VerticalOffset + (depth > 0 ? -amount : amount);
+        scroller.ScrollToVerticalOffset(Math.Clamp(target, 0, scroller.ScrollableHeight));
     }
 
     private static ScrollViewer? FindScrollViewer(DependencyObject parent)

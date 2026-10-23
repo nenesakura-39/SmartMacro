@@ -140,7 +140,8 @@ public partial class App : Application
         _runHost?.Dispose();
         _mainViewModel?.Dispose();
         _playbackClock?.Dispose();
-        DispatcherUnhandledException -= OnDispatcherUnhandledException;
+        ScreenCapture.ReleaseAllResources(); // reused GDI capture bitmaps (Upgrade 2)
+        DispatcherUnhandledException -=OnDispatcherUnhandledException;
         AppDomain.CurrentDomain.UnhandledException -= OnDomainUnhandledException;
         TaskScheduler.UnobservedTaskException -= OnUnobservedTaskException;
         base.OnExit(e);

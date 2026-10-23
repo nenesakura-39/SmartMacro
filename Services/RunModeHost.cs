@@ -31,7 +31,8 @@ public sealed record RunHud(
     double Progress = 0,
     TimeSpan Elapsed = default,
     string PauseKey = "F8",
-    string StopKey = "Esc");
+    string StopKey = "Esc",
+    string? Telemetry = null);
 
 /// <summary>What the app does with its windows while recording or playing.</summary>
 public interface IRunModeHost
@@ -273,6 +274,19 @@ internal sealed class RunOverlayWindow : Window
     private static readonly Color Cyan = Color.FromRgb(0x67, 0xE8, 0xF9);
     private static readonly Color TextColor = Color.FromRgb(0xE6, 0xEB, 0xF5);
     private static readonly Color Muted = Color.FromRgb(0x94, 0xA3, 0xB8);
+    private static readonly Color Violet = Color.FromRgb(0xC0, 0x84, 0xFC);
+
+    // Frozen brushes for the step line: SetHud runs up to ~30 times a second while playing, so it must not allocate
+    // (and re-render) a new brush every time.
+    private static readonly SolidColorBrush AmberTextBrush = Frozen(Amber);
+    private static readonly SolidColorBrush NormalTextBrush = Frozen(TextColor);
+
+    private static SolidColorBrush Frozen(Color color)
+    {
+        var brush = new SolidColorBrush(color);
+        brush.Freeze();
+        return brush;
+    }
     private static readonly FontFamily UiFont = new("Segoe UI Variable Text, Segoe UI");
 
     private readonly Ellipse _dot;
@@ -280,6 +294,7 @@ internal sealed class RunOverlayWindow : Window
     private readonly Border _runBadge;
     private readonly TextBlock _runText;
     private readonly TextBlock _timer;
+    private readonly TextBlock _telemetry; // "⚡ 0.6ms" live vision speed
     private readonly TextBlock _stepText;
     private readonly TextBlock _activity;
     private readonly Border _progressTrack;
@@ -328,6 +343,10 @@ internal sealed class RunOverlayWindow : Window
         _timer = MakeText(12, FontWeights.SemiBold, TextColor);
         _timer.FontFamily = new FontFamily("Cascadia Mono, Consolas");
         _timer.Margin = new Thickness(9, 0, 0, 0);
+        _telemetry = MakeText(11, FontWeights.SemiBold, Violet);
+        _telemetry.Margin = new Thickness(9, 0, 0, 0);
+        _telemetry.Visibility = Visibility.Collapsed;
+        _telemetry.ToolTip = "How long the latest screen look took (capture + search)";
 
         (_pauseButton, _pauseLabel) = MakeMiniButton("⏸ F8", Amber);
         (_stopButton, _stopLabel) = MakeMiniButton("⏹ Esc", Red);
@@ -346,6 +365,7 @@ internal sealed class RunOverlayWindow : Window
                 _dot,
                 _runBadge,
                 _timer,
+                _telemetry,
             },
         };
         DockPanel.SetDock(left, Dock.Left);
@@ -453,6 +473,9 @@ internal sealed class RunOverlayWindow : Window
 
         _runText.Text = !string.IsNullOrEmpty(hud.Counter) ? hud.Counter : recording ? "● REC" : "▶ PLAY";
         _timer.Text = FormatElapsed(hud.Elapsed);
+        var telemetry = string.IsNullOrEmpty(hud.Telemetry) ? null : hud.Telemetry.Replace("Vision: ", "", StringComparison.Ordinal);
+        _telemetry.Text = telemetry ?? string.Empty;
+        _telemetry.Visibility = telemetry is null ? Visibility.Collapsed : Visibility.Visible;
 
         _buttons.Visibility = recording ? Visibility.Collapsed : Visibility.Visible;
         _pauseLabel.Text = hud.Kind == OverlayKind.Paused ? $"▶ {hud.PauseKey}" : $"⏸ {hud.PauseKey}";
@@ -460,7 +483,7 @@ internal sealed class RunOverlayWindow : Window
 
         var step = hud.StepText;
         _stepText.Text = !string.IsNullOrEmpty(step) ? step : recording ? "Recording" : hud.Kind == OverlayKind.Paused ? "Paused" : "Starting…";
-        _stepText.Foreground = new SolidColorBrush(hud.Kind == OverlayKind.Paused ? Amber : TextColor);
+        _stepText.Foreground = hud.Kind == OverlayKind.Paused ? AmberTextBrush : NormalTextBrush;
         _activity.Text = hud.Text;
         _activity.Visibility = string.IsNullOrWhiteSpace(hud.Text) ? Visibility.Collapsed : Visibility.Visible;
 

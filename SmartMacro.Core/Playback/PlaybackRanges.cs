@@ -66,6 +66,18 @@ public static class PlaybackRanges
         return EnclosingRepeat(steps, blocks, index) ?? index;
     }
 
+    /// <summary>
+    /// "▶ From here" (Shift+F5): the steps [Start, End) that play for the selected step at <paramref name="index"/>, i.e.
+    /// from <see cref="FromStep"/> (the enclosing Repeat when the step is inside a loop, so the loop and its End Repeat
+    /// stay balanced) to the end of the macro. Steps inside an If simply start right there: the engine treats the If's
+    /// Else as "skip the otherwise part" and its End If as a normal marker, so no partner is ever missing.
+    /// </summary>
+    public static (int Start, int End) PlayFromHere(IReadOnlyList<MacroStep> steps, int index)
+    {
+        ArgumentNullException.ThrowIfNull(steps);
+        return (FromStep(steps, index), steps.Count);
+    }
+
     /// <summary>The innermost Repeat whose block contains the step at <paramref name="index"/>, or null.</summary>
     public static int? EnclosingRepeat(IReadOnlyList<MacroStep> steps, BlockStructure blocks, int index)
     {

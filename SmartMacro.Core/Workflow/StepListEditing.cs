@@ -47,6 +47,18 @@ public sealed record MovePlan(bool Allowed, int First, int Last, int NewFirst, s
 public sealed record DeletePlan(IReadOnlyList<int> Indexes, int AddedMarkers, string? Note);
 
 /// <summary>
+/// The answer to "what does Duplicate (Ctrl+D) copy?": the steps <see cref="First"/>..<see cref="Last"/> (grown to whole
+/// If / Repeat blocks, so a copied If always comes with its Else / End If), inserted as copies at <see cref="InsertAt"/>
+/// (right after the original block). <see cref="Allowed"/> false = nothing is copied; <see cref="Problem"/> says why.
+/// </summary>
+public sealed record DuplicatePlan(bool Allowed, int First, int Last, int InsertAt, bool TookWholeBlocks = false, string? Problem = null)
+{
+    public int Count => Allowed ? Last - First + 1 : 0;
+
+    public static DuplicatePlan Refused(string problem) => new(false, -1, -1, -1, false, problem);
+}
+
+/// <summary>
 /// Pure rules for adding and moving steps in the editor's step list, kept in Core so they can be unit tested.
 /// The editor (WPF) only applies the result to its list.
 ///
@@ -220,6 +232,89 @@ public static class StepListEditing
         }
 
         return new DeletePlan(remove.ToList(), added, note);
+    }
+
+    /// <summary>
+    /// Plans Duplicate (Ctrl+D) for the contiguous range first..last. Block-aware: when the range holds an If / Repeat (or
+    /// one of its Else / End markers), the copy takes the WHOLE block (If … Else … End If, Repeat … End Repeat, with every
+    /// step inside), so the copy is a valid block of its own and goes right after the original. A lone Else can't be
+    /// copied (an If can only have one Else). When the blocks are already broken, markers aren't copied at all (that
+    /// would only add more broken markers): Auto-Fix first.
+    /// </summary>
+    public static DuplicatePlan PlanDuplicate(IReadOnlyList<MacroStep> steps, int first, int last)
+    {
+        ArgumentNullException.ThrowIfNull(steps);
+        if (!IsRange(steps, first, last)) return DuplicatePlan.Refused("Select the step(s) to duplicate first.");
+
+        var hasMarker = false;
+        var onlyElse = true;
+        for (var i = first; i <= last; i++)
+        {
+            if (WorkflowSteps.IsBlockStep(steps[i])) hasMarker = true;
+            if (steps[i] is not ElseStep) onlyElse = false;
+        }
+
+        if (!hasMarker) return new DuplicatePlan(true, first, last, last + 1);
+        if (onlyElse)
+            return DuplicatePlan.Refused("An If block can have only one Else. To duplicate the whole If block, select its If step and press Ctrl+D.");
+
+        var blocks = BlockStructure.Analyze(steps);
+        if (!blocks.IsValid)
+            return DuplicatePlan.Refused("The If / Repeat blocks don't match up yet, so block steps can't be duplicated. Use \"✨ Auto-Fix Block Structure\" first.");
+
+        var (start, end, grew) = GrowToWholeBlocks(steps, first, last);
+        return new DuplicatePlan(true, start, end, end + 1, grew);
+    }
+
+    /// <summary>
+    /// Fresh copies (new IDs) of the steps a <see cref="DuplicatePlan"/> copies, in order. The block structure of the
+    /// copied range is the same as the original's, so it can be inserted at <see cref="DuplicatePlan.InsertAt"/> as is.
+    /// </summary>
+    public static List<MacroStep> DuplicateSteps(IReadOnlyList<MacroStep> steps, DuplicatePlan plan)
+    {
+        ArgumentNullException.ThrowIfNull(steps);
+        ArgumentNullException.ThrowIfNull(plan);
+        var copies = new List<MacroStep>();
+        if (!plan.Allowed) return copies;
+        for (var i = plan.First; i <= plan.Last; i++) copies.Add(MacroFactory.DuplicateStep(steps[i]));
+        return copies;
+    }
+
+    /// <summary>
+    /// The list after a duplicate (for tests and anyone without an observable list): the copies inserted right after
+    /// the original range.
+    /// </summary>
+    public static List<MacroStep> ApplyDuplicate(IReadOnlyList<MacroStep> steps, DuplicatePlan plan)
+    {
+        ArgumentNullException.ThrowIfNull(steps);
+        var result = steps.ToList();
+        if (plan.Allowed) result.InsertRange(plan.InsertAt, DuplicateSteps(steps, plan));
+        return result;
+    }
+
+    /// <summary>
+    /// Which steps Space (turn on / off) changes for the selected steps: each selected step, and for a selected If /
+    /// Repeat (or one of its Else / End markers) every step of its block, from the If / Repeat to its End. Ascending,
+    /// no duplicates. With broken blocks only the selected steps themselves.
+    /// </summary>
+    public static IReadOnlyList<int> ToggleEnabledTargets(IReadOnlyList<MacroStep> steps, IEnumerable<int> selected)
+    {
+        ArgumentNullException.ThrowIfNull(steps);
+        ArgumentNullException.ThrowIfNull(selected);
+        var targets = new SortedSet<int>(selected.Where(i => i >= 0 && i < steps.Count));
+        var blocks = BlockStructure.Analyze(steps);
+        if (!blocks.IsValid) return targets.ToList();
+
+        foreach (var index in targets.ToList())
+        {
+            if (!WorkflowSteps.IsBlockStep(steps[index])) continue;
+            var start = steps[index] is IfStep or RepeatStep ? index : blocks.StartOf(index);
+            var end = start >= 0 ? blocks.EndOf(start) : -1;
+            if (start < 0 || end < 0) continue;
+            for (var i = start; i <= end; i++) targets.Add(i);
+        }
+
+        return targets.ToList();
     }
 
     /// <summary>

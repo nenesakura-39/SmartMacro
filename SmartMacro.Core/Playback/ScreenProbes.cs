@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using SmartMacro.Core.Models;
 using SmartMacro.Core.Ocr;
 using SmartMacro.Core.Vision;
@@ -9,10 +10,12 @@ namespace SmartMacro.Core.Playback;
 /// (screen pixels). FoundText describes the find for the log; MissText (starting with a space) explains a miss,
 /// e.g. what OCR read instead. Area is the screen rectangle that was searched (empty when it couldn't be searched).
 /// Match is the rectangle of what was found (empty on a miss). Confidence is how sure the find is (0..1: the image's
-/// similarity, the text's match; 1 for a colour patch).
+/// similarity, the text's match; 1 for a colour patch). ElapsedMs = how long the look took in real time (capture + search,
+/// for the live "⚡ Vision: 0.6 ms" telemetry). FromHotSpot = an image found by the Hot-Spot fast path (at / near the
+/// spot where it was found last time) without scanning the whole search area.
 /// </summary>
 public readonly record struct ScreenProbe(bool Found, int X, int Y, string FoundText, string MissText, ScreenRect Area = default, ScreenRect Match = default,
-    double Confidence = 1.0)
+    double Confidence = 1.0, double ElapsedMs = 0, bool FromHotSpot = false)
 {
     public static ScreenProbe Miss(string missText, ScreenRect area = default) => new(false, 0, 0, string.Empty, missText, area);
 }
@@ -56,15 +59,47 @@ public sealed class ScreenProbes
     private readonly IScreenCapture? _capture;
     private readonly IPlaybackClock _clock;
     private readonly IScreenLayout? _layout;
+    private readonly HotSpotMemory? _hotSpots;
+
+    /// <summary>
+    /// Hot-Spot fast path: how far (px, every side) around the spot where an image was found last time the quick
+    /// re-check looks. A target that moved further than this is found by the normal search of the whole area.
+    /// </summary>
+    public const int HotSpotMarginPx = 24;
+
+    /// <summary>The first, tiny re-check: the last spot ± this many px (a target that didn't move costs almost nothing).</summary>
+    public const int HotSpotExactSlackPx = 2;
+
+    /// <summary>
+    /// The quick re-check only counts when the picture matches at least this well (or the step's own accuracy, if that's
+    /// higher). Anything less goes to the normal full search, so a borderline look gets exactly the old answer.
+    /// </summary>
+    public const double HotSpotMinScore = 0.88;
 
     /// <param name="layout">Monitors and windows, for "where to look" = a monitor / an app window (null: main monitor = whole desktop).</param>
-    public ScreenProbes(IOcrService? ocr, IScreenCapture? capture, IPlaybackClock? clock = null, IScreenLayout? layout = null)
+    /// <param name="hotSpots">
+    /// Where each image search found its picture last time (one per playback session), for the Hot-Spot fast path.
+    /// Null = no fast path: every look searches the whole area (the editor's "Test detection now").
+    /// </param>
+    public ScreenProbes(IOcrService? ocr, IScreenCapture? capture, IPlaybackClock? clock = null, IScreenLayout? layout = null,
+        HotSpotMemory? hotSpots = null)
     {
         _ocr = ocr;
         _capture = capture;
         _clock = clock ?? new SystemPlaybackClock();
         _layout = layout;
+        _hotSpots = hotSpots;
     }
+
+    /// <summary>The Hot-Spot memory these probes use (null when the fast path is off).</summary>
+    public HotSpotMemory? HotSpots => _hotSpots;
+
+    /// <summary>Looks for a Find image step's picture once (a shortcut for <c>Prepare(step).LookAsync(...)</c>).</summary>
+    public Task<ScreenProbe> ProbeImageAsync(FindImageStep step, DetectionTimer? timer = null, CancellationToken cancellationToken = default) =>
+        PrepareImage(step).LookAsync(timer, cancellationToken);
+
+    /// <summary>Real time (ms) since a <see cref="Stopwatch.GetTimestamp"/> value.</summary>
+    private static double MsSince(long started) => Stopwatch.GetElapsedTime(started).TotalMilliseconds;
 
     /// <summary>
     /// The area to search right now (monitors / windows are looked up on every look, because a window can move), or null
@@ -102,6 +137,7 @@ public sealed class ScreenProbes
 
         return new PreparedSearch($"\"{step.Text}\"", isTimed: false, async (_, t) =>
         {
+            var started = Stopwatch.GetTimestamp();
             var (region, problem) = ResolveArea(step, ocr.GetVirtualScreen());
             if (problem is not null) return ScreenProbe.Miss(problem);
             var read = await ocr.ReadAsync(region, t).ConfigureAwait(false);
@@ -112,27 +148,81 @@ public sealed class ScreenProbes
                 ? ScreenProbe.Miss(DescribeLastRead(read.FullText), region)
                 : new ScreenProbe(true, match.Bounds.CenterX, match.Bounds.CenterY,
                     $"Found \"{match.Text}\" at ({match.Bounds.CenterX}, {match.Bounds.CenterY}), {match.Similarity:P0} match.", string.Empty, region, match.Bounds,
-                    match.Similarity);
+                    match.Similarity, MsSince(started));
         });
     }
 
     private PreparedSearch PrepareImage(FindImageStep step)
     {
         var capture = RequireCapture();
-        if (!TemplateCodec.TryDecode(step.TemplateData, step.TemplateWidth, step.TemplateHeight, out var decoded, out var error))
+        // Vision Engine Turbo: the picture is decoded once and shared (not again for every run / repeat / poll).
+        if (!TemplateCache.TryGetOrDecode(step.TemplateData, step.TemplateWidth, step.TemplateHeight, out var decoded, out var error))
             throw new InvalidOperationException($"The image of this step can't be used: {error}");
         var template = decoded!;
         var options = ImageMatchOptions(step);
+        var hotSpots = _hotSpots;
+        var hotKey = hotSpots is null ? default : HotSpotMemory.KeyOf(step);
+        var hotOptions = options with { MinScore = HotSpotScore(options.MinScore) };
 
         return new PreparedSearch("The image", isTimed: true, async (timer, t) =>
         {
+            var started = Stopwatch.GetTimestamp();
             var (region, problem) = ResolveArea(step, capture.GetVirtualScreen());
             if (problem is not null) return ScreenProbe.Miss(problem);
-            var t0 = _clock.Elapsed;
-            var frame = await capture.CaptureAsync(region, t).ConfigureAwait(false);
-            var t1 = _clock.Elapsed;
+
+            var captureTime = TimeSpan.Zero;
+            var searchTime = TimeSpan.Zero;
+            ScreenFrame? frame = null;
+
+            // 1. Hot-Spot fast path: the picture was found before; is it still there (or a few px away)?
+            if (hotSpots is not null && hotSpots.TryGet(hotKey, out var last))
+            {
+                var spotArea = HotSpotArea(last, region);
+                if (spotArea.Width >= template.Width && spotArea.Height >= template.Height)
+                {
+                    ScreenFrame? spot;
+                    var c0 = _clock.Elapsed;
+                    if (capture.PrefersSmallCaptures)
+                    {
+                        // Real screen capture: copy only the ~100×100 px around the last spot.
+                        spot = await capture.CaptureAsync(spotArea, t).ConfigureAwait(false);
+                    }
+                    else
+                    {
+                        // One capture per look (fakes): take the whole area once and check the spot inside it.
+                        frame = await capture.CaptureAsync(region, t).ConfigureAwait(false);
+                        spot = frame.CropFromScreen(spotArea);
+                    }
+
+                    var s0 = _clock.Elapsed;
+                    captureTime += s0 - c0;
+                    var hit = spot is null ? null : FindNearLastSpot(spot, last, template, hotOptions, t);
+                    searchTime += _clock.Elapsed - s0;
+
+                    if (hit is not null)
+                    {
+                        timer?.Add(captureTime, searchTime);
+                        hotSpots.Remember(hotKey, hit.Bounds);
+                        var ms = MsSince(started);
+                        return new ScreenProbe(true, hit.Bounds.CenterX, hit.Bounds.CenterY,
+                            $"Found the image at ({hit.Bounds.CenterX}, {hit.Bounds.CenterY}), {hit.Score:P0} match (⚡ at its last spot, {ms:0.0} ms).",
+                            string.Empty, region, hit.Bounds, hit.Score, ms, FromHotSpot: true);
+                    }
+                }
+            }
+
+            // 2. Normal search of the whole area (first look, or the picture moved / disappeared).
+            if (frame is null)
+            {
+                var c1 = _clock.Elapsed;
+                frame = await capture.CaptureAsync(region, t).ConfigureAwait(false);
+                captureTime += _clock.Elapsed - c1;
+            }
+
+            var s1 = _clock.Elapsed;
             var result = TemplateMatcher.Find(frame.Image, template, options, t);
-            timer?.Add(t1 - t0, _clock.Elapsed - t1);
+            searchTime += _clock.Elapsed - s1;
+            timer?.Add(captureTime, searchTime);
 
             if (frame.Image.Width < template.Width || frame.Image.Height < template.Height)
                 return ScreenProbe.Miss(" The search area (on screen) is smaller than the image.", region);
@@ -145,14 +235,52 @@ public sealed class ScreenProbes
                 if (result.BestScore >= 0.5 && !step.MatchForeground)
                     miss += " If you can see the game through the button (or the background around it changes), turn on \"Ignore background\""
                             + (step.IgnoreEdgesPercent == 0 ? $" or \"Ignore the edges\" ({FindImageStep.RecommendedIgnoreEdgesPercent} %)." : ".");
-                return ScreenProbe.Miss(miss, region);
+                return ScreenProbe.Miss(miss, region) with { ElapsedMs = MsSince(started) };
             }
 
             var bounds = frame.ToScreen(best.Bounds);
+            hotSpots?.Remember(hotKey, bounds);
             var more = result.Matches.Count > 1 ? $" ({result.Matches.Count} matches; the best one is used)" : "";
             return new ScreenProbe(true, bounds.CenterX, bounds.CenterY,
-                $"Found the image at ({bounds.CenterX}, {bounds.CenterY}), {best.Score:P0} match{more}.", string.Empty, region, bounds, best.Score);
+                $"Found the image at ({bounds.CenterX}, {bounds.CenterY}), {best.Score:P0} match{more}.", string.Empty, region, bounds, best.Score,
+                MsSince(started));
         });
+    }
+
+    /// <summary>The accuracy the Hot-Spot re-check needs: the step's own, but at least <see cref="HotSpotMinScore"/>.</summary>
+    public static double HotSpotScore(double requiredScore) => Math.Clamp(Math.Max(requiredScore, HotSpotMinScore), 0, 1);
+
+    /// <summary>
+    /// The part of the screen the Hot-Spot re-check looks at: the last match grown by <see cref="HotSpotMarginPx"/> on
+    /// every side, kept inside the step's search area (so it never finds something the normal search couldn't).
+    /// </summary>
+    public static ScreenRect HotSpotArea(ScreenRect lastMatch, ScreenRect searchArea) =>
+        Grow(lastMatch, HotSpotMarginPx).Intersect(searchArea);
+
+    private static ScreenRect Grow(ScreenRect r, int by) => new(r.X - by, r.Y - by, r.Width + 2 * by, r.Height + 2 * by);
+
+    /// <summary>
+    /// The Hot-Spot re-check inside <paramref name="spot"/> (a capture of <see cref="HotSpotArea"/>), at full resolution:
+    /// first the last spot ± <see cref="HotSpotExactSlackPx"/> px (a target that didn't move: a few thousand pixel
+    /// compares), then the whole ± <see cref="HotSpotMarginPx"/> px area. Null when it isn't there well enough.
+    /// Uses the matcher exactly like the normal search (same shape, colour, edge and background rules).
+    /// </summary>
+    internal static VisualMatch? FindNearLastSpot(ScreenFrame spot, ScreenRect lastMatch, BgraImage template, TemplateMatchOptions options,
+        CancellationToken token)
+    {
+        if (spot.CropFromScreen(Grow(lastMatch, HotSpotExactSlackPx)) is { } exact
+            && exact.Image.Width >= template.Width && exact.Image.Height >= template.Height
+            && TemplateMatcher.Find(exact.Image, template, options, token).Best is { } still)
+            return still with { Bounds = exact.ToScreen(still.Bounds) };
+
+        // The last spot ± 2 px covers the whole capture already when it was clipped that small: nothing more to check.
+        if (spot.Image.Width < template.Width || spot.Image.Height < template.Height) return null;
+        if (spot.Image.Width <= template.Width + 2 * HotSpotExactSlackPx && spot.Image.Height <= template.Height + 2 * HotSpotExactSlackPx)
+            return null;
+
+        return TemplateMatcher.Find(spot.Image, template, options, token).Best is { } near
+            ? near with { Bounds = spot.ToScreen(near.Bounds) }
+            : null;
     }
 
     /// <summary>
@@ -191,6 +319,7 @@ public sealed class ScreenProbes
         var what = secondaryColor is { } sec ? $"Color {color} or {sec}" : $"Color {color}";
         return new PreparedSearch(what, isTimed: true, async (timer, t) =>
         {
+            var started = Stopwatch.GetTimestamp();
             var (region, problem) = ResolveArea(step, capture.GetVirtualScreen());
             if (problem is not null) return ScreenProbe.Miss(problem);
             var t0 = _clock.Elapsed;
@@ -203,14 +332,15 @@ public sealed class ScreenProbes
             {
                 return ScreenProbe.Miss(result.MatchingPixels > 0
                     ? $" {result.MatchingPixels:N0} pixel(s) of that color were found, but no patch had at least {step.MinPixels} pixels."
-                    : " No pixels of that color were found in the search area.", region);
+                    : " No pixels of that color were found in the search area.", region) with { ElapsedMs = MsSince(started) };
             }
 
             var x = frame.Bounds.X + (int)Math.Round(blob.CenterX);
             var y = frame.Bounds.Y + (int)Math.Round(blob.CenterY);
             var more = result.Blobs.Count > 1 ? $", {result.Blobs.Count} patches; the biggest is used" : "";
             var patch = new ScreenRect(frame.Bounds.X + blob.Bounds.X, frame.Bounds.Y + blob.Bounds.Y, blob.Bounds.Width, blob.Bounds.Height);
-            return new ScreenProbe(true, x, y, $"Found {what.ToLowerInvariant()} at ({x}, {y}): {blob.PixelCount:N0} pixels{more}.", string.Empty, region, patch);
+            return new ScreenProbe(true, x, y, $"Found {what.ToLowerInvariant()} at ({x}, {y}): {blob.PixelCount:N0} pixels{more}.", string.Empty, region, patch,
+                1.0, MsSince(started));
         });
     }
 

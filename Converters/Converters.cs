@@ -1,7 +1,9 @@
 using System.Globalization;
+using System.IO;
 using System.Windows;
 using System.Windows.Data;
 using System.Windows.Media;
+using System.Windows.Media.Imaging;
 using SmartMacro.Core.Logging;
 using SmartMacro.Core.Models;
 using SmartMacro.Core.Validation;
@@ -9,6 +11,123 @@ using SmartMacro.ViewModels;
 using SmartMacro.ViewModels.Steps;
 
 namespace SmartMacro.Converters;
+
+/// <summary>
+/// Zero-lag thumbnails: a bounded (LRU, <see cref="Capacity"/> entries), thread-safe cache of FROZEN WPF bitmaps, keyed by
+/// the picture text stored in the macro (Base64 PNG of a click snapshot, or a Find image template). Step cards are
+/// virtualized and recycled, and Undo / Redo / reloading rebuilds the step view models, so without this every scroll or
+/// edit decoded the same pictures again. Frozen bitmaps can be shared by any number of Image elements and threads.
+/// Unreadable pictures are remembered as "none" (null) too.
+/// </summary>
+public static class FrozenBitmapCache
+{
+    /// <summary>How many decoded thumbnails are kept.</summary>
+    public const int Capacity = 256;
+
+    private static readonly object Gate = new();
+    private static readonly Dictionary<string, LinkedListNode<(string Key, BitmapSource? Bitmap)>> Map = new(StringComparer.Ordinal);
+    private static readonly LinkedList<(string Key, BitmapSource? Bitmap)> Lru = new();
+    private static long _decodes;
+
+    /// <summary>Decodes done so far (cache misses), for diagnostics.</summary>
+    public static long Decodes => Interlocked.Read(ref _decodes);
+
+    /// <summary>How many thumbnails are cached right now.</summary>
+    public static int Count
+    {
+        get { lock (Gate) return Map.Count; }
+    }
+
+    /// <summary>A Base64 PNG (Smart Click Snapshot) as a frozen bitmap; null when empty or unreadable.</summary>
+    public static BitmapSource? FromPngBase64(string? base64)
+    {
+        if (string.IsNullOrWhiteSpace(base64)) return null;
+        return GetOrAdd("png:" + base64, () =>
+        {
+            var bytes = Convert.FromBase64String(base64);
+            var image = new BitmapImage();
+            image.BeginInit();
+            image.CacheOption = BitmapCacheOption.OnLoad;
+            image.CreateOptions = BitmapCreateOptions.IgnoreColorProfile;
+            image.StreamSource = new MemoryStream(bytes);
+            image.EndInit();
+            return image;
+        });
+    }
+
+    /// <summary>A stored Find image template (<see cref="Core.Vision.TemplateCodec"/> text) as a frozen bitmap; null when unreadable.</summary>
+    public static BitmapSource? FromTemplate(string? data, int width, int height)
+    {
+        if (string.IsNullOrEmpty(data)) return null;
+        return GetOrAdd($"tpl:{width}x{height}:{data}", () =>
+            Core.Vision.TemplateCache.TryGetOrDecode(data, width, height, out var pixels, out _) && pixels is not null
+                ? BitmapSource.Create(pixels.Width, pixels.Height, 96, 96, PixelFormats.Bgr32, null, pixels.Pixels, pixels.Stride)
+                : null);
+    }
+
+    /// <summary>Forgets every cached thumbnail.</summary>
+    public static void Clear()
+    {
+        lock (Gate)
+        {
+            Map.Clear();
+            Lru.Clear();
+        }
+    }
+
+    private static BitmapSource? GetOrAdd(string key, Func<BitmapSource?> create)
+    {
+        lock (Gate)
+        {
+            if (Map.TryGetValue(key, out var node))
+            {
+                Lru.Remove(node);
+                Lru.AddFirst(node);
+                return node.Value.Bitmap;
+            }
+        }
+
+        Interlocked.Increment(ref _decodes);
+        BitmapSource? bitmap;
+        try
+        {
+            bitmap = create();
+            if (bitmap is { CanFreeze: true }) bitmap.Freeze();
+            else if (bitmap is { IsFrozen: false }) bitmap = null; // can't be shared safely
+        }
+        catch (Exception ex) when (ex is FormatException or NotSupportedException or ArgumentException or IOException
+                                       or InvalidOperationException or System.Runtime.InteropServices.COMException)
+        {
+            bitmap = null;
+        }
+
+        lock (Gate)
+        {
+            if (Map.TryGetValue(key, out var raced)) return raced.Value.Bitmap; // another thread was faster: use its copy
+            Map[key] = Lru.AddFirst((key, bitmap));
+            while (Map.Count > Capacity && Lru.Last is { } oldest)
+            {
+                Lru.RemoveLast();
+                Map.Remove(oldest.Value.Key);
+            }
+        }
+
+        return bitmap;
+    }
+}
+
+/// <summary>
+/// Base64 PNG text (a click's Smart Click Snapshot) → a cached, frozen <see cref="BitmapSource"/> (see
+/// <see cref="FrozenBitmapCache"/>). Null / unreadable → no picture.
+/// </summary>
+public sealed class Base64ToImageSourceConverter : IValueConverter
+{
+    public object? Convert(object? value, Type targetType, object? parameter, CultureInfo culture) =>
+        FrozenBitmapCache.FromPngBase64(value as string);
+
+    public object ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture) =>
+        throw new NotSupportedException();
+}
 
 /// <summary>true → Visible, false → Collapsed. Pass "Invert" as the parameter to flip it.</summary>
 public sealed class BoolToVisibilityConverter : IValueConverter

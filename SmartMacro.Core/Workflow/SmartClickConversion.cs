@@ -36,7 +36,10 @@ public static class SmartClickConversion
     /// <summary>How long the converted Find image step waits for its picture.</summary>
     public const int ConvertedWaitMs = 5_000;
 
-    /// <summary>The click step's thumbnail as pixels, or null with the reason (no thumbnail / damaged).</summary>
+    /// <summary>
+    /// The click step's thumbnail as pixels, or null with the reason (no thumbnail / damaged). Decoded once and shared
+    /// through <see cref="TemplateCache"/> (Smart-Aim inside fast loops, the validator, the editor): don't draw on it.
+    /// </summary>
     public static BgraImage? TryDecodeThumbnail(MouseClickStep step, out string? error)
     {
         ArgumentNullException.ThrowIfNull(step);
@@ -46,7 +49,7 @@ public static class SmartClickConversion
             return null;
         }
 
-        return PngCodec.TryDecodeBase64(step.TargetThumbnailBase64, out var image, out error) ? image : null;
+        return TemplateCache.TryGetOrDecode(step.TargetThumbnailBase64, out var image, out error) ? image : null;
     }
 
     /// <summary>

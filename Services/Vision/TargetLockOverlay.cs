@@ -192,7 +192,7 @@ public sealed class TargetLockOverlay : Window
         _canvas.Children.Add(MakeLine(cx, cy - 7, cx, cy - 2, Lock, 2));
         _canvas.Children.Add(MakeLine(cx, cy + 2, cx, cy + 7, Lock, 2));
 
-        // "🎯 98% Match · Find image" badge above the target (below it when there's no room).
+        // "🎯 98% · 0.6ms · Find image" badge above the target (below it when there's no room); ⚡ = found at its last spot.
         var badge = new Border
         {
             Background = new SolidColorBrush(Color.FromArgb(0xE8, 0x0B, 0x12, 0x20)),
@@ -203,7 +203,7 @@ public sealed class TargetLockOverlay : Window
             Effect = new DropShadowEffect { Color = Neon, BlurRadius = 10, ShadowDepth = 0, Opacity = 0.8 },
             Child = new TextBlock
             {
-                Text = $"🎯 {target.Confidence * 100:0}% Match · {target.Label}",
+                Text = $"{target.Badge} · {(target.FromHotSpot ? "⚡ " : "")}{target.Label}",
                 Foreground = new SolidColorBrush(NeonBright),
                 FontSize = 12.5 * dpi.DpiScaleY, // the canvas is scaled back down, so this ends up as 12.5 px text
                 FontWeight = FontWeights.SemiBold,
@@ -266,6 +266,9 @@ public sealed class OverlayAwareScreenCapture : IScreenCapture
     }
 
     public ScreenRect GetVirtualScreen() => _inner.GetVirtualScreen();
+
+    /// <summary>Same as the wrapped capture (GDI: true), so the Hot-Spot fast path captures only the small spot.</summary>
+    public bool PrefersSmallCaptures => _inner.PrefersSmallCaptures;
 
     public Task<ScreenFrame> CaptureAsync(ScreenRect region, CancellationToken cancellationToken)
     {

@@ -89,6 +89,21 @@ public sealed class AutomationViewModel : ObservableObject, IDisposable
     private volatile int _configuredRuns;
     private string _runCounterText = string.Empty;
     private string _stepCounterText = string.Empty;
+    private string _visionTelemetryText = string.Empty;
+
+    /// <summary>
+    /// Playback UI refresh rate: engine events (step started, run started) only store the latest numbers on the playback
+    /// thread; the UI shows them at most this often (~30 FPS), so a fast loop running hundreds of steps per second never
+    /// floods the UI thread. Pause, resume, stop and the end of a run are shown at once.
+    /// </summary>
+    public static readonly TimeSpan UiRefreshInterval = TimeSpan.FromMilliseconds(33);
+
+    // Bumped (playback thread) whenever there is something new to show; a UI tick with nothing new does no work.
+    private int _progressVersion;
+    private int _renderedVersion = -1;
+    private long _renderedSecond = -1;
+    private AutomationMode _renderedMode = AutomationMode.Idle;
+    private double _renderedProbeMs = -1;
 
     public AutomationViewModel(
         PlaybackEngine engine,
@@ -124,7 +139,7 @@ public sealed class AutomationViewModel : ObservableObject, IDisposable
         _host.PauseRequested += OnHudPauseRequested;
         _host.StopRequested += OnHudStopRequested;
 
-        _progressTimer = new DispatcherTimer(DispatcherPriority.Background, _dispatcher) { Interval = TimeSpan.FromMilliseconds(100) };
+        _progressTimer = new DispatcherTimer(DispatcherPriority.Background, _dispatcher) { Interval = UiRefreshInterval };
         _progressTimer.Tick += (_, _) => RefreshProgress();
 
         RecordCommand = new AsyncRelayCommand(StartRecordingAsync, HandleError, () => Mode == AutomationMode.Idle);
@@ -306,6 +321,23 @@ public sealed class AutomationViewModel : ObservableObject, IDisposable
 
     /// <summary>True while a run counter is shown (playing or paused).</summary>
     public bool HasRunCounter => _runCounterText.Length > 0;
+
+    /// <summary>Live vision speed while playing, e.g. "⚡ Vision: 0.6ms" (empty until an image / colour look has run).</summary>
+    public string VisionTelemetryText
+    {
+        get => _visionTelemetryText;
+        private set
+        {
+            if (SetProperty(ref _visionTelemetryText, value)) OnPropertyChanged(nameof(HasVisionTelemetry));
+        }
+    }
+
+    /// <summary>True while <see cref="VisionTelemetryText"/> has something to show.</summary>
+    public bool HasVisionTelemetry => _visionTelemetryText.Length > 0;
+
+    /// <summary>"⚡ Vision: 0.6ms" for a look time in ms; empty for 0 / unknown.</summary>
+    public static string FormatVisionTelemetry(double milliseconds) =>
+        milliseconds > 0 && double.IsFinite(milliseconds) ? $"⚡ Vision: {TargetDetection.FormatMs(milliseconds)}" : string.Empty;
 
     /// <summary>Called by the main view model when the open/selected macro changes.</summary>
     public void RefreshTarget()
@@ -743,6 +775,9 @@ public sealed class AutomationViewModel : ObservableObject, IDisposable
             ReportResult(result);
             RunCounterText = string.Empty;
             StepCounterText = string.Empty;
+            VisionTelemetryText = string.Empty;
+            _renderedVersion = -1;
+            _renderedProbeMs = -1;
             _currentRun = 0;
             _runningMacroId = null;
             RefreshTarget();
@@ -811,13 +846,20 @@ public sealed class AutomationViewModel : ObservableObject, IDisposable
         StopPlayback();
     }
 
+    // The newest detection that the UI thread hasn't drawn yet (null = nothing waiting). With the Hot-Spot fast path a
+    // loop can find its target hundreds of times per second: only ONE dispatcher call is queued at a time and it draws
+    // the latest target, so the UI thread never gets a backlog of reticles.
+    private TargetDetection? _pendingTarget;
+
     // Playback thread: something was found; draw the target-lock reticle there (mini overlay on only).
     private void OnTargetDetected(object? sender, TargetDetection target)
     {
         if (!_hooks.Settings().ShowRunOverlay) return;
+        if (Interlocked.Exchange(ref _pendingTarget, target) is not null) return; // a draw is already queued; it takes this one
         _dispatcher.InvokeAsync(() =>
         {
-            if (IsPlaying) _host.ShowTargetLock(target);
+            var latest = Interlocked.Exchange(ref _pendingTarget, null);
+            if (latest is not null && IsPlaying) _host.ShowTargetLock(latest);
         });
     }
 
@@ -843,15 +885,22 @@ public sealed class AutomationViewModel : ObservableObject, IDisposable
         else _log.Info(message);
     }
 
-    private void OnEngineProgress(object? sender, PlaybackProgress progress) => _latestProgress = progress;
+    // Playback thread: just remember the latest step (no dispatcher call); the ~30 FPS UI timer shows it.
+    private void OnEngineProgress(object? sender, PlaybackProgress progress)
+    {
+        _latestProgress = progress;
+        Interlocked.Increment(ref _progressVersion);
+    }
 
-    // Playback thread: just remember the numbers; the 100 ms UI timer shows them (RefreshProgress).
+    // Playback thread: just remember the numbers; the ~30 FPS UI timer shows them (RefreshProgress).
     private void OnEngineRunStarted(object? sender, PlaybackRunInfo info)
     {
         _configuredRuns = Math.Max(0, info.TotalRuns);
         _currentRun = info.CurrentRun;
+        Interlocked.Increment(ref _progressVersion);
     }
 
+    // Pause / resume / stopping: shown at once (forced refresh), not at the next ~30 FPS tick.
     private void OnEngineStateChanged(object? sender, PlaybackState state)
     {
         _dispatcher.InvokeAsync(() =>
@@ -870,11 +919,16 @@ public sealed class AutomationViewModel : ObservableObject, IDisposable
                     break;
             }
 
-            RefreshProgress();
+            RefreshProgress(force: true);
         });
     }
 
-    private void RefreshProgress()
+    /// <summary>
+    /// Shows the latest playback numbers (step, run counter, progress, HUD, vision speed). Called by the ~30 FPS UI timer,
+    /// which skips the work when nothing changed (same step report, same mode, same second on the HUD clock, same vision
+    /// time); <paramref name="force"/> = show now (pause / resume / state change).
+    /// </summary>
+    private void RefreshProgress(bool force = false)
     {
         if (IsRecording)
         {
@@ -892,6 +946,17 @@ public sealed class AutomationViewModel : ObservableObject, IDisposable
         }
 
         if (!IsPlaying) return;
+
+        var version = Volatile.Read(ref _progressVersion);
+        var second = (long)PlayingElapsed.TotalSeconds;
+        var probeMs = _engine.LastProbeElapsedMs;
+        if (!force && version == _renderedVersion && second == _renderedSecond && Mode == _renderedMode && probeMs.Equals(_renderedProbeMs))
+            return;
+        _renderedVersion = version;
+        _renderedSecond = second;
+        _renderedMode = Mode;
+        _renderedProbeMs = probeMs;
+        VisionTelemetryText = FormatVisionTelemetry(probeMs);
 
         if (_latestProgress is { } p && p.StepCount > 0)
         {
@@ -927,7 +992,8 @@ public sealed class AutomationViewModel : ObservableObject, IDisposable
         }
 
         var counter = string.IsNullOrEmpty(RunCounterText) ? null : RunCounterText;
-        return new RunHud(kind, HudActivityText(), counter, stepText, progress, PlayingElapsed, PauseShortcut, "Esc");
+        var telemetry = string.IsNullOrEmpty(VisionTelemetryText) ? null : VisionTelemetryText;
+        return new RunHud(kind, HudActivityText(), counter, stepText, progress, PlayingElapsed, PauseShortcut, "Esc", telemetry);
     }
 
     /// <summary>The HUD's small second line: what the step is doing, or how to resume.</summary>

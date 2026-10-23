@@ -152,6 +152,97 @@ public abstract class StepViewModel : ObservableObject
         set => SetProperty(ref _isRunning, value);
     }
 
+    // ---------------- Studio UI: folding, search and filter (view state only; never saved, never played) ----------------
+
+    private bool _isCollapsed;
+    private int _hiddenStepCount;
+    private bool _isHiddenByCollapse;
+    private bool _isFilteredOut;
+    private bool _isSearchMatch;
+    private bool _isSearchDimmed;
+    private bool _isCurrentSearchMatch;
+
+    /// <summary>True for If / Repeat rows, which have a ▼ / ▶ chevron to fold their block.</summary>
+    public bool CanCollapse => Core.Workflow.StepListView.CanCollapse(Model);
+
+    /// <summary>
+    /// If / Repeat only: the block is folded (its inner steps and its End are hidden in the list, but stay in the macro and
+    /// play normally). Set by the editor (ToggleCollapseCommand).
+    /// </summary>
+    public bool IsCollapsed
+    {
+        get => _isCollapsed;
+        internal set
+        {
+            if (!SetProperty(ref _isCollapsed, value)) return;
+            OnPropertyChanged(nameof(CollapseGlyph));
+            OnPropertyChanged(nameof(CollapseTooltip));
+        }
+    }
+
+    /// <summary>"▼" (open) or "▶" (folded).</summary>
+    public string CollapseGlyph => _isCollapsed ? "▶" : "▼";
+
+    public string CollapseTooltip => _isCollapsed ? "Show the steps inside this block" : "Fold this block (hide the steps inside; they still play)";
+
+    /// <summary>How many steps a folded If / Repeat hides (0 when open).</summary>
+    public int HiddenStepCount
+    {
+        get => _hiddenStepCount;
+        internal set
+        {
+            if (!SetProperty(ref _hiddenStepCount, value)) return;
+            OnPropertyChanged(nameof(HiddenBadgeText));
+        }
+    }
+
+    /// <summary>"[4 steps hidden]" on a folded If / Repeat row.</summary>
+    public string HiddenBadgeText => Core.Workflow.StepListView.HiddenBadge(_hiddenStepCount);
+
+    /// <summary>True when a folded If / Repeat above hides this step.</summary>
+    public bool IsHiddenByCollapse
+    {
+        get => _isHiddenByCollapse;
+        internal set
+        {
+            if (SetProperty(ref _isHiddenByCollapse, value)) OnPropertyChanged(nameof(IsVisibleInList));
+        }
+    }
+
+    /// <summary>True when a filter pill (Mouse, Keyboard…) hides this step.</summary>
+    public bool IsFilteredOut
+    {
+        get => _isFilteredOut;
+        internal set
+        {
+            if (SetProperty(ref _isFilteredOut, value)) OnPropertyChanged(nameof(IsVisibleInList));
+        }
+    }
+
+    /// <summary>Shown in the step list (not folded away, not filtered out). Hidden rows keep their index and indentation.</summary>
+    public bool IsVisibleInList => !_isHiddenByCollapse && !_isFilteredOut;
+
+    /// <summary>The search text matches this step (highlighted).</summary>
+    public bool IsSearchMatch
+    {
+        get => _isSearchMatch;
+        internal set => SetProperty(ref _isSearchMatch, value);
+    }
+
+    /// <summary>A search is active and this step doesn't match it (shown dimmed).</summary>
+    public bool IsSearchDimmed
+    {
+        get => _isSearchDimmed;
+        internal set => SetProperty(ref _isSearchDimmed, value);
+    }
+
+    /// <summary>The match the "↑ ↓" navigator is on.</summary>
+    public bool IsCurrentSearchMatch
+    {
+        get => _isCurrentSearchMatch;
+        internal set => SetProperty(ref _isCurrentSearchMatch, value);
+    }
+
     /// <summary>1-based position shown in the list.</summary>
     public int Number
     {
@@ -748,26 +839,9 @@ public sealed class MouseClickStepViewModel : StepViewModel
     public string ConvertHint => Core.Workflow.SmartClickConversion.WhyNotConvertible(_step)
         ?? "Replaces this click with a Find image step that looks for this picture anywhere on screen (up to 5 s) and does the same click on it. Ctrl+Z undoes it.";
 
-    private static System.Windows.Media.ImageSource? LoadThumbnail(string? base64)
-    {
-        if (string.IsNullOrEmpty(base64)) return null;
-        try
-        {
-            var bytes = Convert.FromBase64String(base64);
-            var image = new System.Windows.Media.Imaging.BitmapImage();
-            image.BeginInit();
-            image.CacheOption = System.Windows.Media.Imaging.BitmapCacheOption.OnLoad;
-            image.StreamSource = new MemoryStream(bytes);
-            image.EndInit();
-            image.Freeze();
-            return image;
-        }
-        catch (Exception ex) when (ex is FormatException or NotSupportedException or ArgumentException or IOException
-                                       or InvalidOperationException or System.Runtime.InteropServices.COMException)
-        {
-            return null;
-        }
-    }
+    // Cached + frozen (Converters.FrozenBitmapCache): recycled step cards, Undo / Redo and reloads don't decode it again.
+    private static System.Windows.Media.ImageSource? LoadThumbnail(string? base64) =>
+        SmartMacro.Converters.FrozenBitmapCache.FromPngBase64(base64);
 
     private void SetPosition(int x, int y)
     {
@@ -1971,10 +2045,8 @@ public sealed class FindImageStepViewModel : ScreenSearchStepViewModel
 
     private void RefreshPreview()
     {
-        TemplatePreview = _tools is not null
-                          && TemplateCodec.TryDecode(_step.TemplateData, _step.TemplateWidth, _step.TemplateHeight, out var image, out _)
-            ? _tools.ToImageSource(image!)
-            : null;
+        // Cached + frozen per picture (Converters.FrozenBitmapCache), so recycled step cards and Undo / Redo reuse it.
+        TemplatePreview = SmartMacro.Converters.FrozenBitmapCache.FromTemplate(_step.TemplateData, _step.TemplateWidth, _step.TemplateHeight);
     }
 }
 

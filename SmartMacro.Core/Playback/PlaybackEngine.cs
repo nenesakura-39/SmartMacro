@@ -1,3 +1,5 @@
+using System.Diagnostics;
+using System.Globalization;
 using SmartMacro.Core.Input;
 using SmartMacro.Core.Models;
 using SmartMacro.Core.Ocr;
@@ -75,8 +77,30 @@ public readonly record struct FoundRect(int X, int Y, int Width, int Height, int
 /// AAA live vision: something a step just found on screen, for the on-screen "target lock" reticle. Bounds = the
 /// rectangle of what was found (screen pixels; a small square around the spot when only a point is known), X / Y = the
 /// spot clicks use, Confidence = 0..1 (how similar it was), Label = what found it ("Find image", "If", "Smart-Aim"…).
+/// ElapsedMs = how long that look took (capture + search, real time; 0 = not measured), FromHotSpot = found by the
+/// Hot-Spot fast path at / near the spot where it was found last time.
 /// </summary>
-public sealed record TargetDetection(ScreenRect Bounds, double Confidence, string Label, int X, int Y);
+public sealed record TargetDetection(ScreenRect Bounds, double Confidence, string Label, int X, int Y, double ElapsedMs = 0, bool FromHotSpot = false)
+{
+    /// <summary>Short badge for the reticle / HUD, e.g. "🎯 99% · 0.6ms" (just "🎯 99%" when the time isn't known).</summary>
+    public string Badge
+    {
+        get
+        {
+            var percent = (int)Math.Round(Math.Clamp(Confidence, 0, 1) * 100);
+            return ElapsedMs > 0 ? $"🎯 {percent}% · {FormatMs(ElapsedMs)}" : $"🎯 {percent}%";
+        }
+    }
+
+    /// <summary>A duration for the telemetry badges: "0.6ms", "12ms" (always with a dot, whatever the PC's language).</summary>
+    public static string FormatMs(double milliseconds)
+    {
+        if (double.IsNaN(milliseconds) || milliseconds < 0) milliseconds = 0;
+        return milliseconds < 10
+            ? milliseconds.ToString("0.0", CultureInfo.InvariantCulture) + "ms"
+            : milliseconds.ToString("0", CultureInfo.InvariantCulture) + "ms";
+    }
+}
 
 /// <summary>Thrown when a Repeat block reaches its safety limit (max turns / max time) and is set to stop the macro.</summary>
 public sealed class LoopLimitException : Exception
@@ -213,10 +237,16 @@ public sealed class PlaybackEngine
     // jittered click inside it.
     private ScreenRect _lastFoundBounds;
 
-    // Smart-Aim (Smart Click Snapshots): decoded thumbnails per click step (null = unusable), and the last log line per
-    // step so a click inside a loop doesn't log the same thing every turn. Per run.
-    private readonly Dictionary<Guid, BgraImage?> _smartAimTemplates = new();
+    // Smart-Aim (Smart Click Snapshots): the last log line per step so a click inside a loop doesn't log the same thing
+    // every turn. Per run. (The decoded thumbnails live in the shared TemplateCache.)
     private readonly Dictionary<Guid, string> _smartAimLastNote = new();
+
+    // Vision Engine Turbo – Hot-Spot fast path: where each image search found its picture last time. Kept for the whole
+    // playback session (poll iterations, loop turns, macro repeats); cleared when a new playback starts.
+    private readonly HotSpotMemory _hotSpots = new();
+
+    // Telemetry: the latest image / colour / Smart-Aim look time in ms (double bits, so any thread can read it safely).
+    private long _lastProbeElapsedBits;
 
     // Humanize (per run, from the macro): random click offset (px) and timing variation (%).
     private bool _humanize;
@@ -310,6 +340,21 @@ public sealed class PlaybackEngine
     /// <summary>True while playback is paused (Pause / F8).</summary>
     public bool IsPaused => State == PlaybackState.Paused;
 
+    /// <summary>
+    /// Vision telemetry: how long the latest image / colour look or Smart-Aim search took (capture + search, real time,
+    /// ms; 0 before the first one of a playback). Safe to read from any thread (the UI shows "⚡ Vision: 0.6ms").
+    /// </summary>
+    public double LastProbeElapsedMs => BitConverter.Int64BitsToDouble(Interlocked.Read(ref _lastProbeElapsedBits));
+
+    /// <summary>The Hot-Spot memory of the current (or latest) playback session: where each image search found its picture.</summary>
+    public HotSpotMemory HotSpots => _hotSpots;
+
+    private void RecordProbeTime(double milliseconds)
+    {
+        if (double.IsNaN(milliseconds) || double.IsInfinity(milliseconds) || milliseconds <= 0) return;
+        Interlocked.Exchange(ref _lastProbeElapsedBits, BitConverter.DoubleToInt64Bits(milliseconds));
+    }
+
     /// <summary>The speed the current run plays at (1 = recorded speed); the macro's Speed when idle.</summary>
     public double CurrentSpeed { get; private set; } = 1.0;
 
@@ -336,11 +381,11 @@ public sealed class PlaybackEngine
     }
 
     /// <summary>Tells the overlay what was found (bounds may be empty: then a small square around the spot is used).</summary>
-    private void ReportTarget(int x, int y, ScreenRect bounds, double confidence, string label)
+    private void ReportTarget(int x, int y, ScreenRect bounds, double confidence, string label, double elapsedMs = 0, bool fromHotSpot = false)
     {
         if (TargetDetected is not { } handler) return;
         var box = bounds.IsEmpty ? new ScreenRect(x - 12, y - 12, 24, 24) : bounds;
-        try { handler(this, new TargetDetection(box, Math.Clamp(confidence, 0, 1), label, x, y)); }
+        try { handler(this, new TargetDetection(box, Math.Clamp(confidence, 0, 1), label, x, y, Math.Max(0, elapsedMs), fromHotSpot)); }
         catch (Exception ex) { Message?.Invoke(this, $"Target overlay error: {ex.Message}"); }
     }
 
@@ -417,8 +462,8 @@ public sealed class PlaybackEngine
     public Task<PlaybackResult> PlayFromStepAsync(Macro macro, int startStepIndex, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(macro);
-        var start = PlaybackRanges.FromStep(macro.Steps, startStepIndex);
-        return RunCoreAsync(macro, new PlaybackSpan(start, macro.Steps.Count, startStepIndex), cancellationToken);
+        var (start, end) = PlaybackRanges.PlayFromHere(macro.Steps, startStepIndex);
+        return RunCoreAsync(macro, new PlaybackSpan(start, end, startStepIndex), cancellationToken);
     }
 
     /// <summary>The part of the step list a run plays: steps [Start, End). Null span = the whole macro with its repeats.</summary>
@@ -446,8 +491,9 @@ public sealed class PlaybackEngine
             _lastFoundBounds = default;
             LastFoundRect = null;
             _pendingSpeed = double.NaN;
-            _smartAimTemplates.Clear();
             _smartAimLastNote.Clear();
+            _hotSpots.Clear();
+            Interlocked.Exchange(ref _lastProbeElapsedBits, 0);
             _skipNextStep = false;
             _cursor = null;
             _glideTarget = null;
@@ -466,7 +512,7 @@ public sealed class PlaybackEngine
 
         var held = new HeldInput();
         _held = held;
-        _probes = new ScreenProbes(_ocr, _capture, _clock, _layout);
+        _probes = new ScreenProbes(_ocr, _capture, _clock, _layout, _hotSpots);
         var iterationsCompleted = 0;
         var token = cts.Token;
 
@@ -1160,6 +1206,7 @@ public sealed class PlaybackEngine
             token.ThrowIfCancellationRequested();
 
             check = await conditions.CheckAsync(condition, timer, token).ConfigureAwait(false);
+            if (timer is not null) RecordProbeTime(check.ElapsedMs);
             if (check.Seen) RememberFound(check.X, check.Y, check.Match);
 
             if (stopWhen(check) || ActiveTime - started >= timeout) break;
@@ -1168,7 +1215,7 @@ public sealed class PlaybackEngine
         }
 
         ResetTimeline(); // checking takes as long as it takes; start timing again from here
-        if (check.Seen) ReportTarget(check.X, check.Y, check.Match, check.Confidence, label);
+        if (check.Seen) ReportTarget(check.X, check.Y, check.Match, check.Confidence, label, check.ElapsedMs);
         var stats = timer is null ? string.Empty : " " + timer.Describe(ActiveTime - started);
         return new ConditionAnswer(check.IsTrue, $"({conditions.Describe(condition)}: {(check.IsTrue ? "true" : "false")}) {check.Details}{stats}",
             check.Seen, check.X, check.Y, check.Match);
@@ -1373,6 +1420,7 @@ public sealed class PlaybackEngine
     private async Task<ConditionCheck> CheckFeedbackConditionAsync(RunContext run, Condition condition, FeedbackStats stats, CancellationToken token)
     {
         var check = await run.Conditions.CheckAsync(condition, null, token).ConfigureAwait(false);
+        if (condition.Kind != ConditionKind.TextVisible) RecordProbeTime(check.ElapsedMs);
         stats.ConditionChecks++;
         if (check.Seen) RememberFound(check.X, check.Y, check.Match);
 
@@ -1876,11 +1924,13 @@ public sealed class PlaybackEngine
             token.ThrowIfCancellationRequested();
 
             var result = await search.LookAsync(timer, token).ConfigureAwait(false);
+            if (search.IsTimed) RecordProbeTime(result.ElapsedMs);
 
             if (step.Goal == WaitGoal.Appear && result.Found)
             {
                 RememberFound(result.X, result.Y, result.Match);
-                ReportTarget(result.X, result.Y, result.Match, result.Confidence, StepDescriber.DisplayName(step.Kind));
+                ReportTarget(result.X, result.Y, result.Match, result.Confidence, StepDescriber.DisplayName(step.Kind), result.ElapsedMs,
+                    result.FromHotSpot);
                 Message?.Invoke(this, result.FoundText + Stats());
                 await PerformFoundActionAsync(step.Action, result.X + step.OffsetX, result.Y + step.OffsetY, step.ActionHoldMs,
                     FoundActionTiming.Of(step), _held ?? throw new InvalidOperationException("Playback isn't running."), token, result.Match).ConfigureAwait(false);
@@ -2105,15 +2155,16 @@ public sealed class PlaybackEngine
             return (recorded, default);
         }
 
-        if (!_smartAimTemplates.TryGetValue(c.Id, out var template))
+        // Decoded once per picture and shared (TemplateCache), so a Smart-Aim click inside a fast loop doesn't decode its
+        // PNG again every turn.
+        var template = SmartClickConversion.TryDecodeThumbnail(c, out var error);
+        if (template is null)
         {
-            template = SmartClickConversion.TryDecodeThumbnail(c, out var error);
-            _smartAimTemplates[c.Id] = template;
-            if (template is null) NoteSmartAim(c, $"Smart-Aim: the recorded picture can't be used ({error}); clicking the recorded spot.");
+            NoteSmartAim(c, $"Smart-Aim: the recorded picture can't be used ({error}); clicking the recorded spot.");
+            return (recorded, default);
         }
 
-        if (template is null) return (recorded, default);
-
+        var started = Stopwatch.GetTimestamp();
         var radius = SmartAim.RadiusOf(c);
         var region = SmartAim.SearchArea(c, template);
 
@@ -2139,13 +2190,15 @@ public sealed class PlaybackEngine
         }
 
         var (hit, bestScore) = SmartAim.Locate(c, template, frame, token);
+        var elapsedMs = Stopwatch.GetElapsedTime(started).TotalMilliseconds;
+        RecordProbeTime(elapsedMs);
         if (hit is null)
         {
             NoteSmartAim(c, $"Smart-Aim: the clicked target wasn't found within {radius} px (best {bestScore:P0}, needs {SmartAim.OptionsFor(c).MinScore:P0}); clicking the recorded spot ({c.X}, {c.Y}).");
             return (recorded, default);
         }
 
-        ReportTarget(hit.Bounds.CenterX, hit.Bounds.CenterY, hit.Bounds, hit.Score, "Smart-Aim");
+        ReportTarget(hit.Bounds.CenterX, hit.Bounds.CenterY, hit.Bounds, hit.Score, "Smart-Aim", elapsedMs);
         NoteSmartAim(c, !hit.Moved
             ? $"Smart-Aim: the clicked target is where it was recorded ({hit.Score:P0} match)."
             : $"Smart-Aim: the clicked target moved by ({hit.ShiftX:+0;-0;0}, {hit.ShiftY:+0;-0;0}) px; clicking it at ({hit.X}, {hit.Y}) ({hit.Score:P0} match).");

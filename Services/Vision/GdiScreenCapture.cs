@@ -15,44 +15,29 @@ namespace SmartMacro.Services.Vision;
 /// </summary>
 public sealed class GdiScreenCapture : IScreenCapture
 {
-    private const int SM_XVIRTUALSCREEN = 76;
-    private const int SM_YVIRTUALSCREEN = 77;
-    private const int SM_CXVIRTUALSCREEN = 78;
-    private const int SM_CYVIRTUALSCREEN = 79;
+    /// <summary>
+    /// All monitors (physical pixels). Shared with OCR and re-read from Windows at most every 500 ms
+    /// (<see cref="ScreenCapture.VirtualScreen"/>): a fast loop asks for it on every look.
+    /// </summary>
+    public ScreenRect GetVirtualScreen() => ScreenCapture.VirtualScreen();
 
-    public ScreenRect GetVirtualScreen()
-    {
-        // The virtual-screen size must be in the same physical pixels as the capture and the mouse steps.
-        using var dpi = NativeMethods.PhysicalPixelsScope.Enter();
-        var rect = new ScreenRect(
-            NativeMethods.GetSystemMetrics(SM_XVIRTUALSCREEN),
-            NativeMethods.GetSystemMetrics(SM_YVIRTUALSCREEN),
-            NativeMethods.GetSystemMetrics(SM_CXVIRTUALSCREEN),
-            NativeMethods.GetSystemMetrics(SM_CYVIRTUALSCREEN));
-
-        foreach (var m in RegionPicker.MonitorBounds())
-        {
-            if (rect.IsEmpty)
-            {
-                rect = m;
-                continue;
-            }
-
-            var left = Math.Min(rect.X, m.X);
-            var top = Math.Min(rect.Y, m.Y);
-            var right = Math.Max(rect.Right, m.Right);
-            var bottom = Math.Max(rect.Bottom, m.Bottom);
-            rect = new ScreenRect(left, top, right - left, bottom - top);
-        }
-
-        return rect;
-    }
+    /// <summary>
+    /// GDI copies only the requested pixels, so a 100×100 px Hot-Spot re-check costs far less than a whole monitor:
+    /// the playback engine captures just that spot first.
+    /// </summary>
+    public bool PrefersSmallCaptures => true;
 
     public Task<ScreenFrame> CaptureAsync(ScreenRect region, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
         return Task.FromResult(Capture(region));
     }
+
+    /// <summary>
+    /// Captures the on-screen part of the area right away (on the calling thread). Only these pixels are copied
+    /// (BitBlt of exactly this rectangle, into a reused per-thread GDI bitmap when the size repeats).
+    /// </summary>
+    public ScreenFrame CaptureRegion(ScreenRect region) => Capture(region);
 
     /// <summary>Captures the on-screen part of the area right away (on the calling thread).</summary>
     public ScreenFrame Capture(ScreenRect region)
