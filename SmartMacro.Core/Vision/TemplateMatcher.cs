@@ -56,6 +56,13 @@ public sealed record TemplateMatchResult(IReadOnlyList<VisualMatch> Matches, dou
     public static TemplateMatchResult None { get; } = new(Array.Empty<VisualMatch>(), 0, 0, 1);
 
     public VisualMatch? Best => Matches.Count > 0 ? Matches[0] : null;
+
+    /// <summary>
+    /// Near-miss diagnostics: where (in the searched picture's pixels, full template size) the <see cref="BestScore"/>
+    /// spot was, also when it was below the threshold. Empty when nothing scored above 0 (or the search path doesn't
+    /// know it).
+    /// </summary>
+    public ScreenRect BestBounds { get; init; }
 }
 
 /// <summary>
@@ -146,6 +153,7 @@ public static class TemplateMatcher
 
         var found = new List<VisualMatch>();
         var best = 0.0;
+        var bestBounds = default(ScreenRect);
         var rejectedForColor = 0;
         var radius = scale == 1 ? 0 : scale * 2 - 1;
         var checkedSpots = new HashSet<(int, int)>();
@@ -166,11 +174,19 @@ public static class TemplateMatcher
                 continue;
             }
 
-            if (score > best) best = score;
+            if (score > best)
+            {
+                best = score;
+                bestBounds = new ScreenRect(x, y, tw, th);
+            }
+
             if (score >= options.MinScore) found.Add(new VisualMatch(new ScreenRect(x, y, tw, th), score));
         }
 
-        return new TemplateMatchResult(KeepBest(found, options.MaxResults), Math.Min(1.0, best), rejectedForColor, scale);
+        return new TemplateMatchResult(KeepBest(found, options.MaxResults), Math.Min(1.0, best), rejectedForColor, scale)
+        {
+            BestBounds = bestBounds,
+        };
     }
 
     /// <summary>
@@ -264,6 +280,7 @@ public static class TemplateMatcher
 
         var found = new List<VisualMatch>();
         var best = 0.0;
+        var bestBounds = default(ScreenRect);
         var rejectedForColor = 0;
         foreach (var (x, y, nccScore) in current)
         {
@@ -277,11 +294,19 @@ public static class TemplateMatcher
                 continue;
             }
 
-            if (score > best) best = score;
+            if (score > best)
+            {
+                best = score;
+                bestBounds = new ScreenRect(x, y, tw, th);
+            }
+
             if (score >= options.MinScore) found.Add(new VisualMatch(new ScreenRect(x, y, tw, th), score));
         }
 
-        return new TemplateMatchResult(KeepBest(found, options.MaxResults), Math.Min(1.0, best), rejectedForColor, scale);
+        return new TemplateMatchResult(KeepBest(found, options.MaxResults), Math.Min(1.0, best), rejectedForColor, scale)
+        {
+            BestBounds = bestBounds,
+        };
     }
 
     /// <summary>
@@ -328,7 +353,12 @@ public static class TemplateMatcher
         var foreground = ForegroundSearch.Find(image, model, options, cancellationToken);
         var merged = KeepBest(standard.Matches.Concat(foreground.Matches), options.MaxResults);
         return new TemplateMatchResult(merged, Math.Max(standard.BestScore, foreground.BestScore),
-            merged.Count > 0 ? 0 : standard.RejectedForColor + foreground.RejectedForColor, Math.Max(standard.Scale, foreground.Scale));
+            merged.Count > 0 ? 0 : standard.RejectedForColor + foreground.RejectedForColor, Math.Max(standard.Scale, foreground.Scale))
+        {
+            BestBounds = merged.Count > 0 ? merged[0].Bounds
+                : foreground.BestScore > standard.BestScore && !foreground.BestBounds.IsEmpty ? foreground.BestBounds
+                : standard.BestBounds,
+        };
     }
 
     /// <summary>Smallest inner part (pixels per side) an edge-ignoring search keeps, so the shape still means something.</summary>
@@ -360,11 +390,14 @@ public static class TemplateMatcher
         TemplateMatchOptions options, CancellationToken cancellationToken)
     {
         var result = Find(image, inner, options, cancellationToken);
-        if (result.Matches.Count == 0) return result;
+        var bestBounds = result.BestBounds.IsEmpty
+            ? default
+            : new ScreenRect(result.BestBounds.X - offsetX, result.BestBounds.Y - offsetY, fullWidth, fullHeight);
+        if (result.Matches.Count == 0) return result with { BestBounds = bestBounds };
         var matches = result.Matches
             .Select(m => m with { Bounds = new ScreenRect(m.Bounds.X - offsetX, m.Bounds.Y - offsetY, fullWidth, fullHeight) })
             .ToList();
-        return result with { Matches = matches };
+        return result with { Matches = matches, BestBounds = bestBounds };
     }
 
     /// <summary>True when the picture is basically one colour (template matching can't work with it).</summary>

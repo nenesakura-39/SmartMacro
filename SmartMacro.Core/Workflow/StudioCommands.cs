@@ -28,6 +28,12 @@ public enum StudioCommandKind
 
     /// <summary>Sets the playback speed to <see cref="StudioCommand.Speed"/>.</summary>
     SetSpeed,
+
+    /// <summary>"🧪 Test Step" (Ctrl+T) on the selected step.</summary>
+    TestStep,
+
+    /// <summary>Inserts the 📚 blueprint <see cref="StudioCommand.Blueprint"/>.</summary>
+    AddBlueprint,
 }
 
 /// <summary>
@@ -41,7 +47,8 @@ public sealed record StudioCommand(
     string Keywords = "",
     StepKind? Step = null,
     double Speed = 0,
-    string Shortcut = "")
+    string Shortcut = "",
+    MacroBlueprint? Blueprint = null)
 {
     /// <summary>The text the filter looks in (title + keywords, lower case).</summary>
     public string SearchText { get; } = (Title + " " + Keywords).ToLowerInvariant();
@@ -79,6 +86,7 @@ public static class StudioCommandCatalog
             new("clean-up", "🧹 Clean Up Redundant Steps", StudioCommandKind.CleanUp, "tidy merge mouse paths delays simplify"),
             new("compact", "📐 Toggle Compact Step View", StudioCommandKind.ToggleCompactView, "dense list rows view"),
             new("humanize", "🎲 Toggle Humanize Mode", StudioCommandKind.ToggleHumanize, "random jitter human natural"),
+            new("test-step", "🧪 Test Selected Step", StudioCommandKind.TestStep, "try check detect diagnose near miss accuracy", Shortcut: "Ctrl+T"),
         };
 
         foreach (var speed in PaletteSpeeds)
@@ -86,6 +94,12 @@ public static class StudioCommandCatalog
             var text = speed.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture) + "x";
             list.Add(new StudioCommand($"speed-{text}", $"⚡ Set Playback Speed: {text}", StudioCommandKind.SetSpeed,
                 "speed fast slow playback " + text, Speed: speed));
+        }
+
+        foreach (var blueprint in MacroBlueprints.All)
+        {
+            list.Add(new StudioCommand($"blueprint-{blueprint.Blueprint}", $"📚 Blueprint: {blueprint.DisplayName} ({blueprint.Shape})",
+                StudioCommandKind.AddBlueprint, "blueprint recipe template insert " + blueprint.Keywords, Blueprint: blueprint.Blueprint));
         }
 
         return list;

@@ -106,6 +106,13 @@ public interface IVisionTools
     /// Returns the offset from that center to the clicked spot (null if cancelled).
     /// </summary>
     Task<OffsetPick?> PickOffsetAsync(ScreenSearchStep? reference);
+
+    /// <summary>
+    /// "🧪 Test Step" (Ctrl+T): SmartMacro turns invisible for a moment, looks ONCE for a Find image / colour / text step's
+    /// target (or an If / Repeat condition's), exactly like playback, and flashes the target-lock reticle: green on what
+    /// was found, amber on the closest thing on screen when it wasn't found (near miss ≥ 50 %). Nothing is clicked.
+    /// </summary>
+    Task<StepTestResult> TestStepAsync(MacroStep step);
 }
 
 public sealed class VisionTools : IVisionTools
@@ -324,6 +331,59 @@ public sealed class VisionTools : IVisionTools
         {
             return $"✗ Test failed: {ex.Message}";
         }
+    }
+
+    // "🧪 Test Step": one reusable reticle window for the test flashes (green = found, amber = near miss).
+    private TargetLockOverlay? _testReticle;
+
+    /// <summary>How long the test reticle stays on screen (longer than during playback: the user is looking for it).</summary>
+    public static readonly TimeSpan TestReticleHold = TimeSpan.FromMilliseconds(1600);
+
+    public async Task<StepTestResult> TestStepAsync(MacroStep step)
+    {
+        ArgumentNullException.ThrowIfNull(step);
+        ClosePreview();
+        _lastMatch = null;
+
+        // Same detection code as playback, but no Hot-Spot memory (a test always searches the whole area).
+        var probes = new ScreenProbes(_ocr, _capture, null, _layout, null);
+        StepTestResult result;
+        try
+        {
+            result = await WhileInvisibleAsync(() => Task.Run(() => StepTester.TestAsync(probes, step)));
+        }
+        catch (Exception ex)
+        {
+            return new StepTestResult(false, $"🧪 Test Failed: {ex.Message}");
+        }
+
+        try
+        {
+            if (result.Passed && !result.Match.IsEmpty)
+            {
+                _lastMatch = new ScreenPoint(result.Match.CenterX, result.Match.CenterY);
+                FlashTestReticle(result.Match, result.Confidence, result.ElapsedMs, nearMiss: false,
+                    $"🧪 Test passed · {result.Confidence * 100:0}% · {TargetDetection.FormatMs(result.ElapsedMs)}");
+            }
+            else if (result.ShowNearMiss)
+            {
+                FlashTestReticle(result.NearMiss, result.NearMissConfidence, result.ElapsedMs, nearMiss: true,
+                    $"🧪 Closest match {result.NearMissConfidence * 100:0}% (needs {result.RequiredConfidence * 100:0}%)");
+            }
+        }
+        catch (Exception)
+        {
+            // Purely visual: a reticle that can't be drawn never changes the test result.
+        }
+
+        return result;
+    }
+
+    private void FlashTestReticle(ScreenRect box, double confidence, double elapsedMs, bool nearMiss, string badge)
+    {
+        _testReticle ??= new TargetLockOverlay();
+        var target = new TargetDetection(box, confidence, nearMiss ? "Near miss" : "Test", box.CenterX, box.CenterY, elapsedMs);
+        _testReticle.ShowTarget(target, nearMiss, TestReticleHold, badge);
     }
 
     public async Task<string> TestImageAsync(FindImageStep step)

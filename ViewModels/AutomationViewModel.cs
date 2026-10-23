@@ -173,6 +173,9 @@ public sealed class AutomationViewModel : ObservableObject, IDisposable
         }
     }
 
+    /// <summary>The result of the latest playback (null before the first one), e.g. for "🧪 Test Step" on an action step.</summary>
+    public PlaybackResult? LastResult { get; private set; }
+
     /// <summary>True while the summary pill has something to show.</summary>
     public bool HasLastRunSummary => _lastRunSummaryText.Length > 0;
 
@@ -849,6 +852,7 @@ public sealed class AutomationViewModel : ObservableObject, IDisposable
             HideStepProgress();
             SetRunningStep(null);
             LastRunSummaryText = result?.Stats?.SummaryText ?? string.Empty;
+            LastResult = result;
             Mode = AutomationMode.Idle;
             ProgressValue = 0;
             ProgressText = string.Empty;

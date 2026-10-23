@@ -1,6 +1,8 @@
 # SmartMacro – Project Status / Handoff
 
-_Last updated: 2026-10-23 (AAA Studio UI Upgrades 1–3 – guide rails + live step progress bar, Ctrl+K Command Palette,
+_Last updated: 2026-10-24 (Parts 2–4 of the `25ed016` pass – near-miss vision, 🧪 Test Step (Ctrl+T), 📚 Blueprints, In-App
+Manual page: **built + tested on the owner's PC: 0 warnings, 0 errors, 1001 / 1001 passed**; not committed, runtime not checked by
+hand. Before it: Bug-fix pass on `25ed016` – Part 1 (988 / 988). Before it: AAA Studio UI Upgrades 1–3 – guide rails + live step progress bar, Ctrl+K Command Palette,
 post-run summary pill: **built + tested on the owner's PC: 0 warnings, 0 errors, 979 / 979 passed**; not committed, runtime
 look not checked by hand. Before it: Audit of `6de423b` – Fixes 1–5: block-safe Play from here slice, fresh nested IDs + Hot-Spot
 coordinate guard, shared lock-protected GDI buffers, folded-block move / delete, ghost-highlight guard: **built + tested on the
@@ -35,6 +37,61 @@ Developer: Riku (リク) · Brand: KuroLogic_
 | Release package | `publish\SmartMacro-1.0.0-win-x64\SmartMacro.exe` is an OLD build (made right after `159d6b3`, before Stage 1) | – | ignored by git |
 
 
+
+## `25ed016` pass – Parts 2–4 (2026-10-24): **built + tested** (`tools\verify.cmd` on the owner's PC: 0 warnings, 0 errors, **1001 / 1001 passed**)
+Owner decisions: Test Step = **Ctrl+T** (F8 stays Pause); real hotkeys kept (defaults: Record Ctrl+Shift+F9, Play / Stop
+**Ctrl+Shift+F10**, Pause F8 – all three configurable); Manual = new sidebar page. Not committed; UI not checked by hand.
+1. **Near-miss vision** – `TemplateMatchResult.BestBounds` (best-scoring spot, also below the threshold; standard, large,
+   inner-edge and foreground paths). `ScreenProbe` gained `BestConfidence`, `BestMatch`, `BestX/BestY`, `RequiredConfidence`
+   (init properties): image misses report the best score + place; colour misses run a 1-pixel patch search for the biggest
+   too-small patch (confidence = its pixels ÷ the needed pixels, max 0.99); found probes report themselves.
+2. **🧪 Test Step (Ctrl+T)** – Core `Playback/StepTester.cs` (`SearchOf` = Find step or If / While-Until Repeat condition,
+   `TestAsync` = one look via `ScreenProbes` without Hot-Spot memory, never throws for "can't look", `Describe`,
+   `ExecutedText`; `StepTestResult` with `ShowNearMiss` ≥ 50 %). Texts: "🧪 Test Passed: Found at (X, Y) · 96% confidence ·
+   0.8ms" (+ "→ condition is TRUE/FALSE"), "🧪 Test Failed: Not found (Closest match on screen: 79% at X, Y — step requires
+   85%)", colour: "… Closest patch on screen: 4 px at X, Y — step requires 10 px)". App: `IVisionTools.TestStepAsync`
+   (SmartMacro invisible 150 ms, look, then `TargetLockOverlay.ShowTarget(target, nearMiss, hold 1.6 s, badge)` – green /
+   amber reticle). Editor `TestSelectedStepCommand` (toolbar "🧪 Test Step", context menu, Ctrl+T, palette): vision steps on
+   a copy of the edited step; other steps run once through Run step and report "🧪 Executed step #N: …" / stopped / failed
+   (`AutomationViewModel.LastResult`). Result pill (green / amber, ✕) in the bottom bar + status line.
+3. **📚 Blueprints** – Core `Workflow/MacroBlueprints.cs`: Vision Click + Fallback (If image → Click last found spot → Else →
+   Delay 500 → End If), Humanized Anti-AFK (Repeat 50 → Space → Delay 1500 → End Repeat, turns Humanize on), Pixel Color
+   Trigger (Find color, wait 5 s, click), Minigame Tracking (Repeat 10 → Feedback loop max 1000 ms → End Repeat). Editor
+   `AddBlueprint` (after the selected step, never inside a folded block, one Undo step), toolbar "📚 Blueprints ▾" popup,
+   palette entries (`StudioCommandKind.AddBlueprint` / `TestStep`).
+4. **In-App Manual** – Core `Help/ManualCatalog.cs` (categories, 24 articles incl. 4 recipe cards, cheat-sheet built from the
+   configured global keys, word search). `ViewModels/ManualViewModel.cs` + `Views/ManualView.xaml(.cs)`: search box, pills
+   (All Guides + 6 categories), cheat-sheet table, guide cards, recipe cards with "➕ Load Example into Editor"
+   (`MainViewModel.LoadRecipeAsync`: into the open macro, or a new empty macro named after the recipe, then Editor page).
+   `AppPage.Manual`, sidebar "Manual" under APP. Content covers Quick Start, Vision (capture, offset picker, Smart-Aim,
+   Hot-Spot, Test Step tuning, colour / OCR), Logic (If, Repeat, blocks, feedback), shortcuts, troubleshooting (admin / UIPI,
+   exclusive fullscreen black capture, DPI, stuck keys, OBS overlays) and pro tips.
+- Tests: `NearMissDiagnosticsTests`, `TestStepTests`, `BlueprintTests`, `ManualCatalogTests`; palette "loop" test now
+  filters step insertions (blueprint titles also contain "loop").
+- To check by hand: Ctrl+T on a Find image (green reticle + pill) and on a damaged / missing target (amber reticle +
+  near-miss %), Ctrl+T on a Key press, Blueprints popup, Manual search / pills / Load Example (with and without an open macro).
+
+## Bug-fix pass on `25ed016` – Part 1 (2026-10-23): **built + tested** (`tools\verify.cmd` on the owner's PC: 0 warnings, 0 errors, **988 / 988 passed**)
+The request listed "5 bug fixes" but only 4 items; names in it didn't all match the code (`IInputInjector` / `Win32InputInjector`
+= `IInputSimulator` / `Win32InputSimulator`; F6 / F7 / Ctrl+R aren't SmartMacro's hotkeys – Play/Stop F10, Pause F8, Record
+Ctrl+Shift+F9). Audit result per item:
+1. **Highlight / progress mapping** – already correct: the engine reports the played step object (same ID) and the macro's
+   own step number (`RunContext.StepNumberOf`), the editor highlights / scrolls / draws the progress bar by step ID. No code
+   change; tests added (`StepHighlightMappingTests`: Play from here with dropped Else / End If, Run step, full play).
+2. **Stuck keys / buttons** – already implemented (`IInputSimulator.ReleaseAllHeldInputs` default method,
+   `Win32InputSimulator` + `HeldInputTracker`, engine `finally` + `Pause()`); modifiers of a held key press are tracked too.
+   No code change; tests added (`StuckInputOnStopTests`: stop mid key hold with Ctrl, mid mouse hold, pause).
+3. **Folded blocks** – delete of a folded If / Repeat already took the whole block. Real bug fixed: adding (toolbox), pasting
+   and Quick patterns with a folded header selected inserted INSIDE the hidden part (new step selected but invisible). New
+   `StepListEditing.InsertIndexOutsideCollapsed` (skips the hidden run → right after the folded block's End), used by
+   `EditorViewModel.InsertOutsideFolded` in AddStep / PasteSteps / AddPattern. "Wrap in If / Repeat" on a folded header now
+   wraps its whole block. Visibility refresh: every list change already goes through `OnStepsChanged → RefreshListView`.
+   Tests: `CollapsedInsertAndDeleteTests`.
+4. **Shortcuts while typing** – no live bug found (no text inputs inside the step list; the Space handler already skipped
+   text boxes), hardened anyway: Delete, Space, Left / Right, Ctrl+D / C / V, Ctrl+Shift+I / R and Alt+↑ / ↓ / Home / End
+   moved from ListBox key bindings into `StepList_PreviewKeyDown`, which ignores them while the keyboard is in a text box,
+   password box, editable or open combo box (`IsTypingInto`); F5 / Shift+F5 stay key bindings.
+- Build note: the first try failed (CS0111, a second `ParentOf` helper in `EditorView.xaml.cs`); fixed by reusing the existing one.
 
 ## AAA Studio UI Upgrades 1–3 (2026-10-23, on top of the `6de423b` audit fixes): **built + tested** (`tools\verify.cmd` on the owner's PC: 0 warnings, 0 errors, **979 / 979 passed**)
 Not committed to git yet. XAML compiles; the look at runtime is not checked by hand yet.

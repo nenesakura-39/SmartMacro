@@ -54,6 +54,9 @@
         <DataTemplate DataType="{x:Type vm:SettingsViewModel}">
             <views:SettingsView />
         </DataTemplate>
+        <DataTemplate DataType="{x:Type vm:ManualViewModel}">
+            <views:ManualView />
+        </DataTemplate>
     </Window.Resources>
 
     <Window.InputBindings>
@@ -104,6 +107,9 @@
                 <Border DockPanel.Dock="Top" Height="1" Margin="14,10,14,8" Background="{StaticResource BorderBrush}"
                         Visibility="{Binding IsChecked, ElementName=SidebarToggle, Converter={StaticResource BoolToVisibility}, ConverterParameter=Invert}" />
 
+                <RadioButton DockPanel.Dock="Top" Style="{StaticResource NavButton}" Content="Manual" Tag="&#xE82D;"
+                             GroupName="Nav" AutomationProperties.Name="Manual" ToolTip="Manual: guides, recipes and shortcuts"
+                             IsChecked="{Binding CurrentPage, Converter={StaticResource PageToBool}, ConverterParameter=Manual}" />
                 <RadioButton DockPanel.Dock="Top" Style="{StaticResource NavButton}" Content="Logs" Tag="&#xE8A5;"
                              GroupName="Nav" AutomationProperties.Name="Logs" ToolTip="Logs"
                              IsChecked="{Binding CurrentPage, Converter={StaticResource PageToBool}, ConverterParameter=Logs}" />

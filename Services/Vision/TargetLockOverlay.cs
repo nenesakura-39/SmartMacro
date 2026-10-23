@@ -34,9 +34,20 @@ public sealed class TargetLockOverlay : Window
     private const int Pad = 18;    // physical px around the target for the brackets and glow
     private const int BadgeRoom = 30; // physical px above the target for the badge
 
-    private static readonly Color Neon = Color.FromRgb(0x22, 0xD3, 0xEE);
-    private static readonly Color NeonBright = Color.FromRgb(0xA5, 0xF3, 0xFC);
-    private static readonly Color Lock = Color.FromRgb(0x22, 0xFF, 0x7A);
+    private static readonly Color NeonCyan = Color.FromRgb(0x22, 0xD3, 0xEE);
+    private static readonly Color NeonCyanBright = Color.FromRgb(0xA5, 0xF3, 0xFC);
+    private static readonly Color LockGreen = Color.FromRgb(0x22, 0xFF, 0x7A);
+
+    // "🧪 Test Step" near miss: the same reticle in amber, on the spot that ALMOST matched.
+    private static readonly Color NearMissAmber = Color.FromRgb(0xF5, 0x9E, 0x0B);
+    private static readonly Color NearMissAmberBright = Color.FromRgb(0xFD, 0xE6, 0x8A);
+    private static readonly Color NearMissCenter = Color.FromRgb(0xFB, 0xBF, 0x24);
+
+    // The colours of the reticle being drawn (cyan / green normally, amber for a near miss).
+    private Color Neon = NeonCyan;
+    private Color NeonBright = NeonCyanBright;
+    private Color Lock = LockGreen;
+    private string? _badgeOverride;
 
     private readonly Canvas _canvas = new() { IsHitTestVisible = false };
     private readonly DispatcherTimer _holdTimer;
@@ -86,8 +97,21 @@ public sealed class TargetLockOverlay : Window
     public bool IsExcludedFromCapture => _excludedFromCapture;
 
     /// <summary>Flashes the reticle on a detected target (replaces the previous one right away). UI thread.</summary>
-    public void ShowTarget(TargetDetection target)
+    public void ShowTarget(TargetDetection target) => ShowTarget(target, nearMiss: false, hold: null, badgeText: null);
+
+    /// <summary>
+    /// Flashes the reticle. <paramref name="nearMiss"/> = amber (the closest thing on screen that did NOT match well enough,
+    /// for "🧪 Test Step"); <paramref name="hold"/> = how long it stays (default <see cref="HoldTime"/>);
+    /// <paramref name="badgeText"/> replaces the "🎯 98% · Label" badge text. UI thread.
+    /// </summary>
+    public void ShowTarget(TargetDetection target, bool nearMiss, TimeSpan? hold, string? badgeText)
     {
+        Neon = nearMiss ? NearMissAmber : NeonCyan;
+        NeonBright = nearMiss ? NearMissAmberBright : NeonCyanBright;
+        Lock = nearMiss ? NearMissCenter : LockGreen;
+        _badgeOverride = badgeText;
+        _holdTimer.Interval = hold is { } h && h > TimeSpan.Zero ? h : HoldTime;
+
         var box = target.Bounds;
         var bounds = new ScreenRect(box.X - Pad, box.Y - Pad - BadgeRoom, box.Width + 2 * Pad, box.Height + 2 * Pad + BadgeRoom)
             .Intersect(VirtualScreen());
@@ -203,7 +227,7 @@ public sealed class TargetLockOverlay : Window
             Effect = new DropShadowEffect { Color = Neon, BlurRadius = 10, ShadowDepth = 0, Opacity = 0.8 },
             Child = new TextBlock
             {
-                Text = $"{target.Badge} · {(target.FromHotSpot ? "⚡ " : "")}{target.Label}",
+                Text = _badgeOverride ?? $"{target.Badge} · {(target.FromHotSpot ? "⚡ " : "")}{target.Label}",
                 Foreground = new SolidColorBrush(NeonBright),
                 FontSize = 12.5 * dpi.DpiScaleY, // the canvas is scaled back down, so this ends up as 12.5 px text
                 FontWeight = FontWeights.SemiBold,

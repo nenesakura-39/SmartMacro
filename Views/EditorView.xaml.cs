@@ -151,29 +151,102 @@ public partial class EditorView : UserControl
     }
 
     /// <summary>
-    /// Step list keys that aren't simple key bindings: Space turns the selected steps (or the whole If / Repeat block)
-    /// on / off, Left / Right fold / unfold a selected If / Repeat. Never while typing in a text box.
+    /// Step list shortcuts (instead of key bindings, so they can check where the keyboard is):
+    /// Space = turn the selected steps (or the whole If / Repeat block) on / off, Left / Right = fold / unfold a selected
+    /// If / Repeat, Delete = delete, Ctrl+D = duplicate, Ctrl+C / Ctrl+V = copy / paste, Ctrl+Shift+I / R = wrap in If /
+    /// Repeat, Alt+↑ / ↓ / Home / End = move. Never while the keyboard is in a text box, an editable or open combo box or
+    /// a password box: those keys then type / edit text as usual. (F5 / Shift+F5 / Esc stay global.)
     /// </summary>
     private void StepList_PreviewKeyDown(object sender, KeyEventArgs e)
     {
-        if (_editor is null || e.OriginalSource is System.Windows.Controls.Primitives.TextBoxBase) return;
-        if (Keyboard.Modifiers != ModifierKeys.None) return;
+        if (_editor is null || e.Handled || IsTypingInto(e)) return;
 
-        switch (e.Key)
+        var key = e.Key == Key.System ? e.SystemKey : e.Key;
+        var modifiers = Keyboard.Modifiers;
+        ICommand? command = null;
+        object? parameter = null;
+
+        switch (modifiers)
         {
-            case Key.Space when _editor.ToggleEnabledCommand.CanExecute(null):
-                _editor.ToggleEnabledCommand.Execute(null);
-                e.Handled = true;
+            case ModifierKeys.None:
+                switch (key)
+                {
+                    case Key.Space:
+                        command = _editor.ToggleEnabledCommand;
+                        break;
+                    case Key.Delete:
+                        command = _editor.DeleteStepCommand;
+                        break;
+                    case Key.Left when _editor.SelectedStep is { CanCollapse: true, IsCollapsed: false } open:
+                        command = _editor.ToggleCollapseCommand;
+                        parameter = open;
+                        break;
+                    case Key.Right when _editor.SelectedStep is { CanCollapse: true, IsCollapsed: true } folded:
+                        command = _editor.ToggleCollapseCommand;
+                        parameter = folded;
+                        break;
+                }
+
                 break;
-            case Key.Left when _editor.SelectedStep is { CanCollapse: true, IsCollapsed: false } open:
-                _editor.ToggleCollapseCommand.Execute(open);
-                e.Handled = true;
+            case ModifierKeys.Control:
+                command = key switch
+                {
+                    Key.D => _editor.DuplicateStepCommand,
+                    Key.C => _editor.CopySelectedStepCommand,
+                    Key.V => _editor.PasteStepCommand,
+                    _ => null,
+                };
                 break;
-            case Key.Right when _editor.SelectedStep is { CanCollapse: true, IsCollapsed: true } folded:
-                _editor.ToggleCollapseCommand.Execute(folded);
-                e.Handled = true;
+            case ModifierKeys.Control | ModifierKeys.Shift:
+                command = key switch
+                {
+                    Key.I => _editor.WrapInIfCommand,
+                    Key.R => _editor.WrapInRepeatCommand,
+                    _ => null,
+                };
+                break;
+            case ModifierKeys.Alt:
+                command = key switch
+                {
+                    Key.Up => _editor.MoveUpCommand,
+                    Key.Down => _editor.MoveDownCommand,
+                    Key.Home => _editor.MoveToTopCommand,
+                    Key.End => _editor.MoveToBottomCommand,
+                    _ => null,
+                };
                 break;
         }
+
+        if (command is null || !command.CanExecute(parameter)) return;
+        command.Execute(parameter);
+        e.Handled = true;
+    }
+
+    /// <summary>
+    /// True when the key goes to something you type into: the element the key came from, or the element with the
+    /// keyboard focus, is (inside) a text box, a password box, an editable combo box or a combo box whose list is open.
+    /// </summary>
+    internal static bool IsTypingInto(KeyEventArgs e) =>
+        IsTextEntry(e.OriginalSource as DependencyObject) || IsTextEntry(Keyboard.FocusedElement as DependencyObject);
+
+    private static bool IsTextEntry(DependencyObject? element)
+    {
+        for (var current = element; current is not null; current = ParentOf(current))
+        {
+            switch (current)
+            {
+                case System.Windows.Controls.Primitives.TextBoxBase:
+                case PasswordBox:
+                case ComboBox { IsEditable: true }:
+                case ComboBox { IsDropDownOpen: true }:
+                    return true;
+                case ListBox:
+                case UserControl:
+                    return false; // reached the step list (or the editor itself) without passing a text input
+            }
+        }
+
+        return false;
     }
 
     private void FocusSelectedStep()

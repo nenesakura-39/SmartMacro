@@ -5,6 +5,7 @@ using SmartMacro.Core.Ocr;
 using SmartMacro.Core.Playback;
 using SmartMacro.Core.Recording;
 using SmartMacro.Core.Storage;
+using SmartMacro.Core.Workflow;
 using SmartMacro.Mvvm;
 using SmartMacro.Services;
 using SmartMacro.Services.Input;
@@ -19,6 +20,7 @@ public enum AppPage
     Editor,
     Logs,
     Settings,
+    Manual,
 }
 
 public enum StatusKind
@@ -139,6 +141,17 @@ public sealed class MainViewModel : ObservableObject, IDisposable
             if (Automation.PlayCommand.CanExecute(null)) Automation.PlayCommand.Execute(null);
         };
         Editor.PlayShortcutText = () => Automation.PlayShortcut;
+
+        // 🧪 Test Step on an action step reports how its one-step run went.
+        Editor.LastPlaybackResult = () => Automation.LastResult;
+
+        // 📚 In-App Manual: recipes load into the editor; the cheat-sheet shows the shortcuts set in Settings.
+        Manual = new ManualViewModel(LoadRecipeAsync, () => (Automation.RecordShortcut, Automation.PlayShortcut, Automation.PauseShortcut),
+            ex =>
+            {
+                _log.Error("Loading the example failed.", ex);
+                _dialogs.ShowError("Could not load the example", ex.Message);
+            });
     }
 
     public static IReadOnlyList<Steps.Choice<RecordingMode>> RecordingModes => SettingsViewModel.ToolbarRecordingModes;
@@ -180,6 +193,9 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     public EditorViewModel Editor { get; }
     public LogViewModel Logs { get; }
     public SettingsViewModel Settings { get; }
+
+    /// <summary>The In-App Manual (Studio Knowledge Base & Recipe Center).</summary>
+    public ManualViewModel Manual { get; }
     public AutomationViewModel Automation { get; }
     public RelayCommand ShowLogsCommand { get; }
 
@@ -191,8 +207,9 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         get => _currentPage;
         set
         {
-            if (SetProperty(ref _currentPage, value))
-                OnPropertyChanged(nameof(CurrentPageViewModel));
+            if (!SetProperty(ref _currentPage, value)) return;
+            OnPropertyChanged(nameof(CurrentPageViewModel));
+            if (value == AppPage.Manual) Manual.Refresh(); // shortcut keys may have changed in Settings
         }
     }
 
@@ -201,6 +218,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         AppPage.Editor => Editor,
         AppPage.Logs => Logs,
         AppPage.Settings => Settings,
+        AppPage.Manual => Manual,
         _ => Library,
     };
 
@@ -305,6 +323,38 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         Editor.Load(macro);
         CurrentPage = AppPage.Editor;
         SetStatus($"Recorded {steps.Count:N0} steps into \"{macro.Name}\". Review them, then press Play.", StatusKind.Success);
+    }
+
+    /// <summary>
+    /// The Manual's "➕ Load Example into Editor": adds the recipe's blueprint to the macro open in the editor (after the
+    /// selected step; one Undo step) and switches to the Editor. With no macro open, a new empty macro named after the
+    /// recipe is created first.
+    /// </summary>
+    private async Task LoadRecipeAsync(MacroBlueprint blueprint)
+    {
+        var info = MacroBlueprints.Info(blueprint);
+        if (!Editor.HasMacro)
+        {
+            var macro = MacroFactory.CreateNew(Library.Names, $"{info.Title} (example)");
+            macro.Description = $"Example from the Manual: {info.Shape}.";
+            try
+            {
+                await _repository.SaveAsync(macro);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                _log.Error("Creating a macro for the example failed.", ex);
+                _dialogs.ShowError("Could not create a macro for the example", ex.Message);
+                return;
+            }
+
+            Library.Upsert(MacroJson.Clone(macro));
+            Editor.Load(macro);
+        }
+
+        CurrentPage = AppPage.Editor;
+        if (Editor.AddBlueprint(blueprint))
+            _log.Info($"📚 Loaded the \"{info.Title}\" example into \"{Editor.Name}\".");
     }
 
     private async Task OpenInEditorAsync(Guid id)

@@ -1,3 +1,4 @@
+using SmartMacro.Core.Help;
 using SmartMacro.Core.Models;
 using SmartMacro.Core.Ocr;
 using SmartMacro.Core.Playback;
@@ -1162,7 +1163,8 @@ public class CommandPaletteTests
         Assert.Equal(2.0, speed.Speed);
         Assert.Equal(StepKind.FindText, Assert.Single(StudioCommandCatalog.Filter("ocr")).Step);      // title
         Assert.Equal(StepKind.Delay, StudioCommandCatalog.Filter("sleep")[0].Step);                    // keyword only
-        Assert.Equal(new[] { StepKind.Repeat, StepKind.FeedbackLoop }, StudioCommandCatalog.Filter("loop").Select(c => c.Step!.Value));
+        Assert.Equal(new[] { StepKind.Repeat, StepKind.FeedbackLoop },
+            StudioCommandCatalog.Filter("loop").Where(c => c.Kind == StudioCommandKind.AddStep).Select(c => c.Step!.Value));
         Assert.Empty(StudioCommandCatalog.Filter("zzz-nothing"));
     }
 
@@ -1307,5 +1309,419 @@ public class RunSummaryTests
         Assert.Equal(0, second.Stats!.VisionMatchesCount);
         Assert.Equal(1, second.Stats.TotalStepsExecuted);
         Assert.Equal("✓ 1 run in 0.0s · 1 step", second.Stats.SummaryText);
+    }
+}
+
+// ---------------- Bug-fix pass on 25ed016 (Part 1) ----------------
+
+public class StepHighlightMappingTests
+{
+    // 0 Move 1 | 1 If | 2 Move 2 | 3 Else | 4 Move 3 | 5 End If | 6 Repeat ×2 | 7 Move 4 | 8 End Repeat | 9 Move 5
+    private static Macro Workflow() => Flow.Macro(
+        Flow.Move(1), Flow.If(Flow.Text("A")), Flow.Move(2), new ElseStep(), Flow.Move(3), new EndIfStep(),
+        Flow.Times(2), Flow.Move(4), new EndRepeatStep(), Flow.Move(5));
+
+    private static async Task<List<PlaybackProgress>> Reports(Func<PlaybackEngine, Macro, Task> play, Macro macro)
+    {
+        var engine = new PlaybackEngine(new FakeInput(), new FakeClock());
+        var reports = new List<PlaybackProgress>();
+        engine.ProgressChanged += (_, p) => reports.Add(p);
+        await play(engine, macro);
+        return reports;
+    }
+
+    [Fact]
+    public async Task Play_from_here_reports_the_exact_macro_step_by_ID_and_number_even_after_markers_were_dropped()
+    {
+        var macro = Workflow();
+
+        // Step 3 (inside the If's "then" part): the slice drops Else, its otherwise part and End If.
+        var reports = await Reports((e, m) => e.PlayFromStepAsync(m, 2), macro);
+
+        Assert.Equal(new[] { 3, 7, 8, 8, 10 }, reports.Select(r => r.StepNumber));
+        Assert.All(reports, r =>
+        {
+            Assert.Equal(macro.Steps.Count, r.StepCount);
+            Assert.Equal(macro.Steps[r.StepNumber - 1].Id, r.Step.Id); // the editor highlights by this ID
+        });
+    }
+
+    [Fact]
+    public async Task Run_step_and_full_play_report_the_macros_own_steps()
+    {
+        var macro = Workflow();
+
+        var single = await Reports((e, m) => e.PlaySingleStepAsync(m, 7), macro); // inside the Repeat: just that step
+        var full = await Reports((e, m) => e.RunAsync(m), Flow.Macro(Flow.Move(1), Flow.Times(2), Flow.Move(2), new EndRepeatStep()));
+
+        var only = Assert.Single(single);
+        Assert.Equal((8, macro.Steps[7].Id), (only.StepNumber, only.Step.Id));
+        Assert.Equal(new[] { 1, 2, 3, 3 }, full.Select(r => r.StepNumber));
+    }
+}
+
+public class StuckInputOnStopTests
+{
+    private const int Ctrl = 0x11;
+    private const int A = 0x41;
+
+    private static void AssertEverythingReleased(IEnumerable<string> calls)
+    {
+        var list = calls.ToList();
+        foreach (var device in list.Where(c => c.EndsWith(" down")).Select(c => c[..^5]).Distinct())
+        {
+            var last = list.FindLastIndex(c => c.StartsWith(device + " ", StringComparison.Ordinal));
+            Assert.Equal(device + " up", list[last]);
+        }
+    }
+
+    [Fact]
+    public async Task Stopping_in_the_middle_of_a_key_hold_with_a_modifier_releases_everything_and_calls_the_failsafe()
+    {
+        var input = new FakeInput();
+        var engine = new PlaybackEngine(input, new FakeClock());
+        input.OnCall = call => { if (call == $"key {A} down") engine.Stop(); };
+        var macro = Flow.Macro(new KeyPressStep { VirtualKey = A, Modifiers = KeyModifiers.Control, HoldMs = 5000 }, Flow.Move(9));
+
+        var result = await engine.RunAsync(macro);
+
+        Assert.Equal(PlaybackOutcome.Stopped, result.Outcome);
+        Assert.Contains($"key {Ctrl} down", input.Calls);
+        AssertEverythingReleased(input.Calls);
+        Assert.Equal(1, input.ReleaseAllCount);           // IInputSimulator.ReleaseAllHeldInputs (the failsafe)
+        Assert.DoesNotContain("move 9,0", input.Calls);   // nothing after the stop
+    }
+
+    [Fact]
+    public async Task Stopping_during_a_mouse_hold_releases_the_button()
+    {
+        var input = new FakeInput();
+        var engine = new PlaybackEngine(input, new FakeClock());
+        input.OnCall = call => { if (call == "mouse Left down") engine.Stop(); };
+        var macro = Flow.Macro(new MouseClickStep { X = 5, Y = 5, Action = MouseClickAction.Hold, HoldMs = 3000 });
+
+        var result = await engine.RunAsync(macro);
+
+        Assert.Equal(PlaybackOutcome.Stopped, result.Outcome);
+        AssertEverythingReleased(input.Calls);
+        Assert.Equal(1, input.ReleaseAllCount);
+    }
+
+    [Fact]
+    public async Task Pausing_releases_held_input_right_away()
+    {
+        var input = new FakeInput();
+        var engine = new PlaybackEngine(input, new FakeClock());
+        var paused = false;
+        input.OnCall = call =>
+        {
+            if (call != $"key {A} down" || paused) return;
+            paused = true;
+            engine.Pause();
+            engine.Stop();
+        };
+
+        await engine.RunAsync(Flow.Macro(new KeyPressStep { VirtualKey = A, HoldMs = 5000 }));
+
+        Assert.True(input.ReleaseAllCount >= 2); // once on Pause, once when the run ended
+        AssertEverythingReleased(input.Calls);
+    }
+}
+
+public class CollapsedInsertAndDeleteTests
+{
+    // 0 Move 1 | 1 If | 2 Move 2 | 3 Else | 4 Move 3 | 5 End If | 6 Move 4
+    private static List<MacroStep> Sample() => new()
+    {
+        Flow.Move(1), Flow.If(Flow.Text("OK")), Flow.Move(2), new ElseStep(), Flow.Move(3), new EndIfStep(), Flow.Move(4),
+    };
+
+    [Fact]
+    public void Inserting_after_a_folded_header_goes_after_its_End_If()
+    {
+        var steps = Sample();
+        var folded = new HashSet<Guid> { steps[1].Id };
+
+        Assert.Equal(6, StepListEditing.InsertIndexOutsideCollapsed(steps, 2, folded)); // "after the selected If"
+        Assert.Equal(6, StepListEditing.InsertIndexOutsideCollapsed(steps, 4, folded));
+        Assert.Equal(1, StepListEditing.InsertIndexOutsideCollapsed(steps, 1, folded)); // before the If: fine
+        Assert.Equal(6, StepListEditing.InsertIndexOutsideCollapsed(steps, 6, folded)); // after the End If: fine
+        Assert.Equal(7, StepListEditing.InsertIndexOutsideCollapsed(steps, 7, folded)); // at the end
+        Assert.Equal(2, StepListEditing.InsertIndexOutsideCollapsed(steps, 2, new HashSet<Guid>())); // open block: inside
+    }
+
+    [Fact]
+    public void A_step_added_after_a_folded_block_stays_visible_and_the_blocks_stay_valid()
+    {
+        var steps = Sample();
+        var folded = new HashSet<Guid> { steps[1].Id };
+        var index = StepListEditing.InsertIndexOutsideCollapsed(steps, StepListEditing.InsertIndex(steps, 1, InsertPosition.AfterSelected), folded);
+
+        steps.Insert(index, Flow.Move(99));
+
+        Assert.False(StepListView.Collapse(steps, folded).Hidden[index]);
+        Assert.True(BlockStructure.Analyze(steps).IsValid);
+        Assert.Equal(0, BlockStructure.Analyze(steps).Depth[index]);
+    }
+
+    [Fact]
+    public void Inserting_inside_nested_folded_blocks_goes_after_the_outermost_one()
+    {
+        var steps = new List<MacroStep>
+        {
+            Flow.Times(2), Flow.If(Flow.Text("A")), Flow.Move(1), new EndIfStep(), new EndRepeatStep(), Flow.Move(2),
+        };
+
+        Assert.Equal(5, StepListEditing.InsertIndexOutsideCollapsed(steps, 1, new HashSet<Guid> { steps[0].Id, steps[1].Id }));
+        Assert.Equal(4, StepListEditing.InsertIndexOutsideCollapsed(steps, 2, new HashSet<Guid> { steps[1].Id })); // only the If folded
+    }
+
+    [Fact]
+    public void Deleting_a_folded_If_leaves_no_hidden_orphans()
+    {
+        var steps = Sample();
+        var folded = new HashSet<Guid> { steps[1].Id };
+
+        var plan = StepListEditing.PlanDelete(steps, new[] { 1 }, folded);
+        var after = steps.Where((_, i) => !plan.Indexes.Contains(i)).ToList();
+
+        Assert.Equal(new[] { 1, 4 }, after.OfType<MouseMoveStep>().Select(m => m.X));
+        Assert.True(BlockStructure.Analyze(after).IsValid);
+        Assert.Equal(0, StepListView.Collapse(after, folded).HiddenTotal); // nothing left that only the deleted If could unfold
+    }
+}
+
+// ---------------- Part 2: Near-miss vision diagnostics, 🧪 Test Step, 📚 Blueprints ----------------
+
+public class NearMissDiagnosticsTests
+{
+    /// <summary>The 32×32 target with its left quarter painted black (so it no longer matches 99 %).</summary>
+    private static BgraImage Damaged()
+    {
+        var copy = Turbo.Target.Clone();
+        copy.FillRectangle(new ScreenRect(0, 0, 8, 32), RgbColor.Black);
+        return copy;
+    }
+
+    [Fact]
+    public async Task An_image_below_the_required_accuracy_still_reports_its_best_score_and_place()
+    {
+        var screen = TestImages.Blocky(1920, 1080, seed: 41);
+        TestImages.Paste(screen, Damaged(), 900, 500);
+        var probes = new ScreenProbes(null, new FakeCapture(screen), new FakeClock());
+        var step = Turbo.FindTarget(s =>
+        {
+            s.MinSimilarityPercent = 99;
+            s.IgnoreColor = true;
+        });
+
+        var probe = await probes.ProbeImageAsync(step);
+
+        Assert.False(probe.Found);
+        Assert.InRange(probe.BestConfidence, 0.3, 0.989);   // > 0: the near miss is known
+        Assert.Equal(0.99, probe.RequiredConfidence, 3);
+        Assert.InRange(probe.BestMatch.X, 892, 908);        // …and where it is
+        Assert.InRange(probe.BestMatch.Y, 492, 508);
+        Assert.Equal(probe.BestMatch.CenterX, probe.BestX);
+
+        var result = StepTester.Describe(probe, step);
+        Assert.False(result.Passed);
+        Assert.StartsWith("🧪 Test Failed: Not found (Closest match on screen: ", result.Text);
+        Assert.EndsWith("— step requires 99%)", result.Text);
+        Assert.Equal(probe.BestMatch, result.NearMiss);
+        Assert.Equal(result.NearMissConfidence >= 0.5, result.ShowNearMiss);
+    }
+
+    [Fact]
+    public async Task A_found_image_reports_itself_as_the_best_match()
+    {
+        var probes = new ScreenProbes(null, new FakeCapture(Turbo.FullHdScreenWithTarget(900, 500)), new FakeClock());
+
+        var probe = await probes.ProbeImageAsync(Turbo.FindTarget());
+
+        Assert.True(probe.Found);
+        Assert.Equal(probe.Match, probe.BestMatch);
+        Assert.Equal(probe.Confidence, probe.BestConfidence);
+    }
+
+    [Fact]
+    public async Task A_colour_patch_that_is_too_small_is_a_near_miss_with_its_size()
+    {
+        var probes = new ScreenProbes(null, new FakeCapture(Flow.Screen(green: true)), new FakeClock());
+        var step = new FindColorStep { Color = "#00C800", Tolerance = 10, MinPixels = 500, TimeoutMs = 0, SearchFullScreen = true };
+
+        var probe = await probes.Prepare(step).LookAsync(null, CancellationToken.None);
+        var result = StepTester.Describe(probe, step);
+
+        Assert.False(probe.Found);
+        Assert.Equal(new ScreenRect(200, 100, 11, 11), probe.BestMatch);
+        Assert.Equal(121.0 / 500, probe.BestConfidence, 3);
+        Assert.Equal("🧪 Test Failed: Not found (Closest patch on screen: 121 px at 205, 105 — step requires 500 px)", result.Text);
+    }
+}
+
+public class TestStepTests
+{
+    [Fact]
+    public async Task A_vision_step_that_is_on_screen_passes_with_position_confidence_and_time()
+    {
+        var probes = new ScreenProbes(null, new FakeCapture(Turbo.FullHdScreenWithTarget(900, 500)), new FakeClock());
+
+        var result = await StepTester.TestAsync(probes, Turbo.FindTarget());
+
+        Assert.True(result.Passed);
+        Assert.Matches(@"^🧪 Test Passed: Found at \(916, 516\) · 100% confidence · \d+(\.\d)?ms$", result.Text);
+        Assert.Equal(new ScreenRect(900, 500, 32, 32), result.Match);
+        Assert.Null(result.ConditionIsTrue);
+    }
+
+    [Fact]
+    public async Task If_and_Repeat_conditions_are_tested_by_their_search_and_say_whether_the_condition_is_true()
+    {
+        var probes = new ScreenProbes(null, new FakeCapture(Turbo.FullHdScreenWithTarget(900, 500)), new FakeClock());
+        static Condition WholeScreen(bool negate)
+        {
+            var condition = Aaa.ImageCondition(Turbo.Target, negate);
+            var check = (FindImageStep)condition.Check!;
+            check.Scope = SearchScope.AllMonitors;
+            check.SearchFullScreen = true;
+            return condition;
+        }
+
+        var ifResult = await StepTester.TestAsync(probes, new IfStep { Condition = WholeScreen(negate: true) });
+        var whileResult = await StepTester.TestAsync(probes, new RepeatStep { Mode = RepeatMode.While, Condition = WholeScreen(negate: false) });
+
+        Assert.True(ifResult.Passed);                        // the image IS there…
+        Assert.False(ifResult.ConditionIsTrue);              // …so "is NOT on screen" is false
+        Assert.EndsWith("→ condition is FALSE", ifResult.Text);
+        Assert.True(whileResult.ConditionIsTrue);
+    }
+
+    [Fact]
+    public void Only_steps_that_look_at_the_screen_are_vision_tests()
+    {
+        Assert.True(StepTester.IsVisionTest(Turbo.FindTarget()));
+        Assert.True(StepTester.IsVisionTest(new FindColorStep()));
+        Assert.True(StepTester.IsVisionTest(Flow.If(Flow.Text("OK"))));
+        Assert.True(StepTester.IsVisionTest(Flow.While(Flow.Green())));
+        Assert.False(StepTester.IsVisionTest(Flow.Times(3)));                 // Repeat ×3 has no condition
+        Assert.False(StepTester.IsVisionTest(new KeyPressStep()));
+        Assert.False(StepTester.IsVisionTest(new DelayStep()));
+        Assert.StartsWith("🧪 Executed step #4: ", StepTester.ExecutedText(4, new DelayStep { DurationMs = 250 }));
+    }
+
+    [Fact]
+    public async Task A_step_that_cannot_look_says_why_instead_of_throwing()
+    {
+        var probes = new ScreenProbes(null, null, new FakeClock()); // no OCR, no screen capture
+
+        var result = await StepTester.TestAsync(probes, new FindTextStep { Text = "OK" });
+
+        Assert.False(result.Passed);
+        Assert.StartsWith("🧪 Test Failed: ", result.Text);
+    }
+}
+
+public class BlueprintTests
+{
+    [Fact]
+    public void Every_blueprint_builds_a_valid_balanced_block_structure_with_fresh_ids()
+    {
+        foreach (var info in MacroBlueprints.All)
+        {
+            var steps = MacroBlueprints.Build(info.Blueprint);
+            var blocks = BlockStructure.Analyze(steps);
+            Assert.True(blocks.IsValid, $"{info.Title}: {string.Join("; ", blocks.Problems.Select(p => p.Message))}");
+            Assert.Equal(steps.Count, steps.Select(s => s.Id).Distinct().Count());
+            Assert.NotEqual(MacroBlueprints.Build(info.Blueprint)[0].Id, steps[0].Id); // new objects every time
+        }
+
+        Assert.Equal(4, MacroBlueprints.All.Count);
+    }
+
+    [Fact]
+    public void Blueprints_have_the_requested_shapes()
+    {
+        var vision = MacroBlueprints.Build(MacroBlueprint.VisionClickWithFallback);
+        Assert.Equal(new[] { StepKind.If, StepKind.MouseClick, StepKind.Else, StepKind.Delay, StepKind.EndIf }, vision.Select(s => s.Kind));
+        Assert.Equal(ConditionKind.ImageVisible, ((IfStep)vision[0]).Condition.Kind);
+        Assert.Equal(ClickTargetMode.LastFoundMatch, ((MouseClickStep)vision[1]).TargetMode);
+        Assert.Equal(500, ((DelayStep)vision[3]).DurationMs);
+
+        var afk = MacroBlueprints.Build(MacroBlueprint.HumanizedAntiAfkLoop);
+        Assert.Equal(new[] { StepKind.Repeat, StepKind.KeyPress, StepKind.Delay, StepKind.EndRepeat }, afk.Select(s => s.Kind));
+        Assert.Equal((RepeatMode.Times, 50), (((RepeatStep)afk[0]).Mode, ((RepeatStep)afk[0]).Count));
+        Assert.Equal(0x20, ((KeyPressStep)afk[1]).VirtualKey);
+        Assert.Equal(1500, ((DelayStep)afk[2]).DurationMs);
+        Assert.True(MacroBlueprints.Info(MacroBlueprint.HumanizedAntiAfkLoop).EnablesHumanize);
+
+        var color = (FindColorStep)Assert.Single(MacroBlueprints.Build(MacroBlueprint.PixelColorTrigger));
+        Assert.Equal((5000, FoundTextAction.Click), (color.TimeoutMs, color.Action));
+
+        var minigame = MacroBlueprints.Build(MacroBlueprint.MinigameTrackingLoop);
+        Assert.Equal(new[] { StepKind.Repeat, StepKind.FeedbackLoop, StepKind.EndRepeat }, minigame.Select(s => s.Kind));
+        Assert.Equal(10, ((RepeatStep)minigame[0]).Count);
+        Assert.Equal(1000, ((FeedbackLoopStep)minigame[1]).MaxRuntimeMs);
+    }
+
+    [Fact]
+    public void Blueprints_and_Test_Step_are_in_the_command_palette()
+    {
+        var blueprints = StudioCommandCatalog.Filter("blueprint");
+        Assert.Equal(4, blueprints.Count);
+        Assert.All(blueprints, c => Assert.Equal(StudioCommandKind.AddBlueprint, c.Kind));
+        Assert.Equal(MacroBlueprints.All.Select(b => (MacroBlueprint?)b.Blueprint), blueprints.Select(c => c.Blueprint));
+
+        var test = Assert.Single(StudioCommandCatalog.Filter("test step"));
+        Assert.Equal((StudioCommandKind.TestStep, "Ctrl+T"), (test.Kind, test.Shortcut));
+    }
+}
+
+public class ManualCatalogTests
+{
+    [Fact]
+    public void Every_category_has_guides_and_every_blueprint_has_a_recipe_card()
+    {
+        foreach (var category in Enum.GetValues<ManualCategory>())
+            Assert.NotEmpty(ManualCatalog.Filter(null, category));
+
+        foreach (var blueprint in Enum.GetValues<MacroBlueprint>())
+        {
+            var card = ManualCatalog.RecipeFor(blueprint);
+            Assert.Equal(ManualCategory.MacroRecipes, card.Category);
+            Assert.True(card.IsRecipe);
+        }
+
+        Assert.Equal(ManualCatalog.All.Count, ManualCatalog.All.Select(a => a.Id).Distinct().Count());
+    }
+
+    [Fact]
+    public void Search_finds_guides_by_any_words_in_title_text_or_keywords()
+    {
+        Assert.Contains(ManualCatalog.Filter("black screen"), a => a.Id == "black-capture");
+        Assert.Contains(ManualCatalog.Filter("ADMINISTRATOR"), a => a.Id == "admin");
+        Assert.Contains(ManualCatalog.Filter("near miss"), a => a.Id == "test-step");
+        Assert.Contains(ManualCatalog.Filter("hot spot"), a => a.Id == "hot-spot");
+        Assert.All(ManualCatalog.Filter("loop", ManualCategory.MacroRecipes), a => Assert.True(a.IsRecipe));
+        Assert.Empty(ManualCatalog.Filter("zzz-nothing-here"));
+        Assert.Equal(ManualCatalog.All.Count, ManualCatalog.Filter("  ").Count);
+    }
+
+    [Fact]
+    public void The_cheat_sheet_lists_the_real_keys()
+    {
+        var rows = ManualCatalog.Shortcuts("Ctrl+Shift+F9", "Ctrl+Shift+F10", "F8");
+        string Action(string keys) => rows.Single(r => r.Keys == keys).Action;
+
+        Assert.Contains("recording", Action("Ctrl+Shift+F9"));
+        Assert.Contains("Play", Action("Ctrl+Shift+F10"));
+        Assert.Contains("Pause", Action("F8"));
+        Assert.Contains("Test Step", Action("Ctrl+T"));
+        Assert.Contains("Command Palette", Action("Ctrl+K"));
+        Assert.Contains("Play from", Action("Shift+F5"));
+        Assert.DoesNotContain(rows, r => r.Keys is "F6" or "F7" or "Ctrl+R");
+
+        Assert.Equal("Ctrl+K", Assert.Single(ManualCatalog.FilterShortcuts(rows, "palette")).Keys);
+        Assert.Contains(ManualCatalog.FilterShortcuts(rows, "ctrl+t"), r => r.Keys == "Ctrl+T");
     }
 }

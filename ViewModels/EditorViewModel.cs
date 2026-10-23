@@ -141,10 +141,173 @@ public sealed class EditorViewModel : ObservableObject
         BreakIntoStepsCommand = new RelayCommand(BreakIntoSteps,
             p => HasMacro && (p as InputSequenceStepViewModel ?? SelectedStep as InputSequenceStepViewModel) is { CanBreakIntoSteps: true });
 
+        if (visionTools is not null) TestVisionStepHandler = visionTools.TestStepAsync;
+        TestSelectedStepCommand = new AsyncRelayCommand(TestSelectedStepAsync, HandleUnexpectedError,
+            () => HasMacro && SelectedStep is not null && !_isTestingStep && (CanRunSteps?.Invoke() ?? false));
+        DismissTestResultCommand = new RelayCommand(() => LastTestResultText = string.Empty, () => HasLastTestResult);
+        AddBlueprintCommand = new RelayCommand(p => AddBlueprint(p), p => HasMacro && ToBlueprint(p) is not null);
+        ToggleBlueprintsMenuCommand = new RelayCommand(() => IsBlueprintsMenuOpen = !IsBlueprintsMenuOpen, () => HasMacro);
+
         ToggleCommandPaletteCommand = new RelayCommand(() => IsCommandPaletteOpen = !IsCommandPaletteOpen, () => HasMacro || IsCommandPaletteOpen);
         CloseCommandPaletteCommand = new RelayCommand(() => IsCommandPaletteOpen = false);
         ExecutePaletteItemCommand = new RelayCommand(p => ExecutePaletteItem(p as StudioCommand ?? SelectedPaletteItem));
         RefreshPaletteItems();
+    }
+
+    // ---------------- 🧪 Test Step (Ctrl+T) ----------------
+
+    private bool _isTestingStep;
+    private string _lastTestResultText = string.Empty;
+    private bool _lastTestPassed;
+
+    /// <summary>
+    /// Set by the main window: looks at the screen once for a vision step / If / Repeat condition (SmartMacro hides for a
+    /// moment), flashes the reticle (green = found, amber = near miss) and returns the result. Null = no screen tools.
+    /// </summary>
+    public Func<MacroStep, Task<StepTestResult>>? TestVisionStepHandler { get; set; }
+
+    /// <summary>Set by the main window: the result of the latest playback (to report how an executed test step went).</summary>
+    public Func<PlaybackResult?>? LastPlaybackResult { get; set; }
+
+    /// <summary>
+    /// "🧪 Test Step" (Ctrl+T): a vision step (Find image / colour / text) or an If / Repeat with a screen condition looks at
+    /// the screen ONCE, right now, without playing anything: "🧪 Test Passed: Found at (X, Y) · 96% confidence · 0.8ms" or
+    /// "🧪 Test Failed: Not found (Closest match on screen: 79% at X, Y — step requires 85%)". Any other step is executed
+    /// once (like ▶ Run step): "🧪 Executed step #N: …".
+    /// </summary>
+    public AsyncRelayCommand TestSelectedStepCommand { get; }
+
+    /// <summary>The result pill of the latest test (empty = no pill).</summary>
+    public string LastTestResultText
+    {
+        get => _lastTestResultText;
+        private set
+        {
+            if (SetProperty(ref _lastTestResultText, value ?? string.Empty)) OnPropertyChanged(nameof(HasLastTestResult));
+        }
+    }
+
+    /// <summary>Green pill when the test passed, amber when not.</summary>
+    public bool LastTestPassed
+    {
+        get => _lastTestPassed;
+        private set => SetProperty(ref _lastTestPassed, value);
+    }
+
+    public bool HasLastTestResult => _lastTestResultText.Length > 0;
+
+    public RelayCommand DismissTestResultCommand { get; }
+
+    private async Task TestSelectedStepAsync()
+    {
+        if (SelectedStep is not { } step) return;
+        var index = Steps.IndexOf(step);
+        if (index < 0) return;
+
+        _isTestingStep = true;
+        System.Windows.Input.CommandManager.InvalidateRequerySuggested();
+        try
+        {
+            if (StepTester.IsVisionTest(step.Model))
+            {
+                if (TestVisionStepHandler is null)
+                {
+                    ShowTestResult("🧪 Screen tests aren't available here.", passed: false);
+                    return;
+                }
+
+                // Test exactly what is in the editor right now (unsaved edits included), on a copy.
+                ShowTestResult($"🧪 Testing step #{index + 1}…", passed: true);
+                var result = await TestVisionStepHandler(MacroJson.CloneStep(step.Model));
+                ShowTestResult(result.Text, result.Passed);
+                return;
+            }
+
+            // An action step (click, move, key, delay…): run it once, like ▶ Run step.
+            if (RunSingleStepHandler is null) return;
+            var macro = MacroJson.Clone(BuildMacro());
+            macro.Steps[index].Enabled = true;
+            await RunSingleStepHandler(macro, index);
+            var outcome = LastPlaybackResult?.Invoke();
+            ShowTestResult(outcome?.Outcome switch
+            {
+                PlaybackOutcome.Stopped => $"🧪 Step #{index + 1} was stopped.",
+                PlaybackOutcome.Failed => $"🧪 Step #{index + 1} failed: {outcome!.Error}",
+                _ => StepTester.ExecutedText(index + 1, step.Model),
+            }, outcome is null or { Outcome: PlaybackOutcome.Completed });
+        }
+        finally
+        {
+            _isTestingStep = false;
+            System.Windows.Input.CommandManager.InvalidateRequerySuggested();
+        }
+    }
+
+    private void ShowTestResult(string text, bool passed)
+    {
+        LastTestPassed = passed;
+        LastTestResultText = text;
+        _setStatus(text, passed ? StatusKind.Success : StatusKind.Warning);
+    }
+
+    // ---------------- 📚 Blueprints ----------------
+
+    private bool _isBlueprintsMenuOpen;
+
+    /// <summary>The four 1-click blueprints (toolbar menu, Ctrl+K palette, Manual recipe cards).</summary>
+    public IReadOnlyList<MacroBlueprintInfo> Blueprints => MacroBlueprints.All;
+
+    /// <summary>The "📚 Blueprints" toolbar popup is open.</summary>
+    public bool IsBlueprintsMenuOpen
+    {
+        get => _isBlueprintsMenuOpen;
+        set => SetProperty(ref _isBlueprintsMenuOpen, value);
+    }
+
+    public RelayCommand ToggleBlueprintsMenuCommand { get; }
+
+    /// <summary>Inserts a blueprint (parameter: <see cref="MacroBlueprint"/>, its info, or its name) where new steps go.</summary>
+    public RelayCommand AddBlueprintCommand { get; }
+
+    private static MacroBlueprint? ToBlueprint(object? parameter) => parameter switch
+    {
+        MacroBlueprint b => b,
+        MacroBlueprintInfo info => info.Blueprint,
+        string name when Enum.TryParse<MacroBlueprint>(name, out var parsed) => parsed,
+        _ => null,
+    };
+
+    /// <summary>
+    /// Inserts a blueprint's steps after the selected step (or at the end), never inside a folded block, as one Undo step.
+    /// Returns false when no macro is open. Also used by the Manual's "➕ Load Example into Editor".
+    /// </summary>
+    public bool AddBlueprint(object? parameter)
+    {
+        IsBlueprintsMenuOpen = false;
+        if (!HasMacro || ToBlueprint(parameter) is not { } blueprint) return false;
+
+        var info = MacroBlueprints.Info(blueprint);
+        var models = MacroBlueprints.Build(blueprint);
+        RecordUndo();
+        var selectedIndex = SelectedStep is null ? -1 : Steps.IndexOf(SelectedStep);
+        var index = InsertOutsideFolded(StepListEditing.InsertIndex(Steps.Count, selectedIndex, AddAtEnd ? InsertPosition.AtEnd : InsertPosition.AfterSelected));
+        var added = new List<StepViewModel>();
+        foreach (var model in models)
+        {
+            var vm = CreateStepViewModel(model);
+            Steps.Insert(index + added.Count, vm);
+            added.Add(vm);
+        }
+
+        if (info.EnablesHumanize) HumanizePlayback = true;
+        _selection = added.Count > 1 ? added : new List<StepViewModel>();
+        SelectedStep = added[0];
+        if (added.Count > 1) SelectStepsRequested?.Invoke(this, added);
+        Touch();
+        _setStatus($"📚 Added \"{info.Title}\" as step{(added.Count == 1 ? "" : "s")} {index + 1}{(added.Count == 1 ? "" : $"–{index + added.Count}")}" +
+                   (info.EnablesHumanize ? " and turned Humanize on" : "") +
+                   ". The Problems list shows what is left to set up (images / colours). Ctrl+Z undoes it.", StatusKind.Success);
+        return true;
     }
 
     // ---------------- AAA Studio UI: Ctrl+K Command Palette ----------------
@@ -271,6 +434,12 @@ public sealed class EditorViewModel : ObservableObject
             case StudioCommandKind.ToggleHumanize:
                 HumanizePlayback = !HumanizePlayback;
                 _setStatus(HumanizePlayback ? "🎲 Humanize on: small random click offsets and timing." : "🎲 Humanize off: exact positions and timing.", StatusKind.Info);
+                break;
+            case StudioCommandKind.TestStep:
+                Run(TestSelectedStepCommand, null, "Select a step first (and make sure nothing is playing), then 🧪 Test Step.");
+                break;
+            case StudioCommandKind.AddBlueprint when command.Blueprint is { } blueprint:
+                AddBlueprint(blueprint);
                 break;
             case StudioCommandKind.SetSpeed when command.Speed > 0:
                 Speed = command.Speed;
@@ -592,7 +761,7 @@ public sealed class EditorViewModel : ObservableObject
 
         RecordUndo();
         var selectedIndex = SelectedStep is null ? -1 : Steps.IndexOf(SelectedStep);
-        var index = StepListEditing.InsertIndex(Steps.Count, selectedIndex, AddAtEnd ? InsertPosition.AtEnd : InsertPosition.AfterSelected);
+        var index = InsertOutsideFolded(StepListEditing.InsertIndex(Steps.Count, selectedIndex, AddAtEnd ? InsertPosition.AtEnd : InsertPosition.AfterSelected));
         var added = new List<StepViewModel>();
         foreach (var model in pasted)
         {
@@ -1082,7 +1251,7 @@ public sealed class EditorViewModel : ObservableObject
         var models = QuickPatterns.Build(pattern);
         RecordUndo();
         var selectedIndex = SelectedStep is null ? -1 : Steps.IndexOf(SelectedStep);
-        var index = StepListEditing.InsertIndex(Steps.Count, selectedIndex, position);
+        var index = InsertOutsideFolded(StepListEditing.InsertIndex(Steps.Count, selectedIndex, position));
         var added = new List<StepViewModel>();
         foreach (var model in models)
         {
@@ -1527,6 +1696,10 @@ public sealed class EditorViewModel : ObservableObject
             ? StepListEditing.InsertIndex(Steps.Count, selectedIndex, position)
             : StepListEditing.InsertIndex(models, selectedIndex, position, kind);
 
+        // A folded If / Repeat is one row on screen: "after the selected step" means after its whole block, never
+        // inside the hidden part (the new step would be selected but invisible).
+        index = InsertOutsideFolded(index);
+
         // A standalone Else / End If / End Repeat is only added where it closes (or splits) an open block, so the
         // toolbox can't create orphan markers (an End If at the top of the macro with no If before it).
         if (StepListEditing.CheckMarkerInsert(models, index, model) is { } markerProblem)
@@ -1575,7 +1748,11 @@ public sealed class EditorViewModel : ObservableObject
             return;
         }
 
-        var inner = BlockStructure.Analyze(Steps.Skip(first).Take(selected.Count).Select(s => s.Model).ToList());
+        // A folded If / Repeat in the selection is one row on screen: wrap its whole block (header through its End).
+        (first, last, _) = StepListEditing.GrowToCollapsedBlocks(Steps.Select(s => s.Model).ToList(), first, last, _collapsed);
+        var count = last - first + 1;
+
+        var inner = BlockStructure.Analyze(Steps.Skip(first).Take(count).Select(s => s.Model).ToList());
         if (!inner.IsValid)
         {
             _setStatus("The selection contains only part of a block. Select whole blocks (from If to End If, or Repeat to End Repeat) to wrap them.", StatusKind.Warning);
@@ -1589,7 +1766,7 @@ public sealed class EditorViewModel : ObservableObject
         Steps.Insert(first, opener);
         SelectedStep = opener;
         Touch();
-        _setStatus($"Wrapped {selected.Count} step{(selected.Count == 1 ? "" : "s")} in {StepDescriber.DisplayName(kind)}. Set it up in Properties.", StatusKind.Success);
+        _setStatus($"Wrapped {count} step{(count == 1 ? "" : "s")} in {StepDescriber.DisplayName(kind)}. Set it up in Properties.", StatusKind.Success);
     }
 
     /// <summary>
@@ -1720,6 +1897,13 @@ public sealed class EditorViewModel : ObservableObject
                 ? $"Duplicated the whole block ({plan.Count} steps), right after the original."
                 : $"Duplicated {plan.Count} steps.", StatusKind.Info);
     }
+
+    /// <summary>
+    /// An insert position moved out of folded blocks (see <see cref="StepListEditing.InsertIndexOutsideCollapsed"/>).
+    /// Used by add, paste, Quick patterns and blueprints.
+    /// </summary>
+    private int InsertOutsideFolded(int index) =>
+        StepListEditing.InsertIndexOutsideCollapsed(Steps.Select(s => s.Model).ToList(), index, _collapsed);
 
     private bool CanMove(bool up)
     {

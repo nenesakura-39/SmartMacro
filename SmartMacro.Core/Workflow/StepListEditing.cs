@@ -104,6 +104,24 @@ public static class StepListEditing
         return InsertIndex(steps.Count, selectedIndex, position);
     }
 
+    /// <summary>
+    /// Keeps an insert position out of folded blocks: <paramref name="index"/> is where new steps would go (in front of the
+    /// step now at that index, <c>steps.Count</c> = at the end). When that spot is inside the hidden part of a folded If /
+    /// Repeat (e.g. "after the selected step" while the selected step is a folded header), the steps go right after the
+    /// folded block's End instead, so a new / pasted / duplicated step can never land invisible inside a block you can't
+    /// see. Blocks that aren't folded are unaffected (adding after an open If still adds inside it).
+    /// </summary>
+    public static int InsertIndexOutsideCollapsed(IReadOnlyList<MacroStep> steps, int index, IReadOnlySet<Guid>? collapsed)
+    {
+        ArgumentNullException.ThrowIfNull(steps);
+        index = Math.Clamp(index, 0, steps.Count);
+        if (collapsed is null || collapsed.Count == 0) return index;
+
+        var fold = StepListView.Collapse(steps, collapsed);
+        while (index < steps.Count && fold.Hidden[index]) index++;
+        return index;
+    }
+
     /// <summary>Plans Move up / down / to top / to bottom for the contiguous range first..last.</summary>
     public static MovePlan PlanMove(IReadOnlyList<MacroStep> steps, int first, int last, MoveDirection direction)
     {

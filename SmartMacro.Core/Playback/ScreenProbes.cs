@@ -13,11 +13,31 @@ namespace SmartMacro.Core.Playback;
 /// similarity, the text's match; 1 for a colour patch). ElapsedMs = how long the look took in real time (capture + search,
 /// for the live "⚡ Vision: 0.6 ms" telemetry). FromHotSpot = an image found by the Hot-Spot fast path (at / near the
 /// spot where it was found last time) without scanning the whole search area.
+///
+/// Near-miss diagnostics ("🧪 Test Step"): <see cref="BestConfidence"/> is the best score seen anywhere in the area, also
+/// when nothing was good enough (e.g. 0.79 when the step needs 0.85), <see cref="BestMatch"/> / <see cref="BestX"/> /
+/// <see cref="BestY"/> where that was (empty / 0 when unknown, e.g. OCR), and <see cref="RequiredConfidence"/> what the step
+/// needs (0 = no such threshold). For a found target they describe the match itself.
 /// </summary>
 public readonly record struct ScreenProbe(bool Found, int X, int Y, string FoundText, string MissText, ScreenRect Area = default, ScreenRect Match = default,
     double Confidence = 1.0, double ElapsedMs = 0, bool FromHotSpot = false)
 {
     public static ScreenProbe Miss(string missText, ScreenRect area = default) => new(false, 0, 0, string.Empty, missText, area);
+
+    /// <summary>Best score seen (0..1), found or not.</summary>
+    public double BestConfidence { get; init; }
+
+    /// <summary>Where the best-scoring spot was (screen pixels; empty when unknown).</summary>
+    public ScreenRect BestMatch { get; init; }
+
+    /// <summary>Centre of <see cref="BestMatch"/> (0 when unknown).</summary>
+    public int BestX => BestMatch.IsEmpty ? 0 : BestMatch.CenterX;
+
+    /// <summary>Centre of <see cref="BestMatch"/> (0 when unknown).</summary>
+    public int BestY => BestMatch.IsEmpty ? 0 : BestMatch.CenterY;
+
+    /// <summary>The score the step needs (0..1; 0 when the search has no such threshold).</summary>
+    public double RequiredConfidence { get; init; }
 }
 
 /// <summary>
@@ -148,7 +168,12 @@ public sealed class ScreenProbes
                 ? ScreenProbe.Miss(DescribeLastRead(read.FullText), region)
                 : new ScreenProbe(true, match.Bounds.CenterX, match.Bounds.CenterY,
                     $"Found \"{match.Text}\" at ({match.Bounds.CenterX}, {match.Bounds.CenterY}), {match.Similarity:P0} match.", string.Empty, region, match.Bounds,
-                    match.Similarity, MsSince(started));
+                    match.Similarity, MsSince(started))
+                {
+                    BestConfidence = match.Similarity,
+                    BestMatch = match.Bounds,
+                    RequiredConfidence = step.MinSimilarityPercent / 100.0,
+                };
         });
     }
 
@@ -212,7 +237,12 @@ public sealed class ScreenProbes
                         var ms = MsSince(started);
                         return new ScreenProbe(true, hit.Bounds.CenterX, hit.Bounds.CenterY,
                             $"Found the image at ({hit.Bounds.CenterX}, {hit.Bounds.CenterY}), {hit.Score:P0} match (⚡ at its last spot, {ms:0.0} ms).",
-                            string.Empty, region, hit.Bounds, hit.Score, ms, FromHotSpot: true);
+                            string.Empty, region, hit.Bounds, hit.Score, ms, FromHotSpot: true)
+                        {
+                            BestConfidence = hit.Score,
+                            BestMatch = hit.Bounds,
+                            RequiredConfidence = options.MinScore,
+                        };
                     }
                 }
             }
@@ -241,7 +271,14 @@ public sealed class ScreenProbes
                 if (result.BestScore >= 0.5 && !step.MatchForeground)
                     miss += " If you can see the game through the button (or the background around it changes), turn on \"Ignore background\""
                             + (step.IgnoreEdgesPercent == 0 ? $" or \"Ignore the edges\" ({FindImageStep.RecommendedIgnoreEdgesPercent} %)." : ".");
-                return ScreenProbe.Miss(miss, region) with { ElapsedMs = MsSince(started) };
+                // Near miss: the best spot anywhere in the area, even though it wasn't good enough.
+                return ScreenProbe.Miss(miss, region) with
+                {
+                    ElapsedMs = MsSince(started),
+                    BestConfidence = Math.Clamp(result.BestScore, 0, 1),
+                    BestMatch = result.BestBounds.IsEmpty ? default : frame.ToScreen(result.BestBounds),
+                    RequiredConfidence = options.MinScore,
+                };
             }
 
             var bounds = frame.ToScreen(best.Bounds);
@@ -249,7 +286,12 @@ public sealed class ScreenProbes
             var more = result.Matches.Count > 1 ? $" ({result.Matches.Count} matches; the best one is used)" : "";
             return new ScreenProbe(true, bounds.CenterX, bounds.CenterY,
                 $"Found the image at ({bounds.CenterX}, {bounds.CenterY}), {best.Score:P0} match{more}.", string.Empty, region, bounds, best.Score,
-                MsSince(started));
+                MsSince(started))
+            {
+                BestConfidence = best.Score,
+                BestMatch = bounds,
+                RequiredConfidence = options.MinScore,
+            };
         });
     }
 
@@ -340,9 +382,23 @@ public sealed class ScreenProbes
 
             if (result.Largest is not { } blob)
             {
-                return ScreenProbe.Miss(result.MatchingPixels > 0
+                var missProbe = ScreenProbe.Miss(result.MatchingPixels > 0
                     ? $" {result.MatchingPixels:N0} pixel(s) of that color were found, but no patch had at least {step.MinPixels} pixels."
-                    : " No pixels of that color were found in the search area.", region) with { ElapsedMs = MsSince(started) };
+                    : " No pixels of that color were found in the search area.", region) with { ElapsedMs = MsSince(started), RequiredConfidence = 1.0 };
+
+                // Near miss: the biggest patch that was too small ("4 px of the 10 needed" = 40 %).
+                if (result.MatchingPixels > 0 && step.MinPixels > 1
+                    && ColorFinder.Find(frame.Image, color, secondaryColor, step.Tolerance, 1, maxResults: 1, t).Largest is { } small)
+                {
+                    var smallRect = new ScreenRect(frame.Bounds.X + small.Bounds.X, frame.Bounds.Y + small.Bounds.Y, small.Bounds.Width, small.Bounds.Height);
+                    missProbe = missProbe with
+                    {
+                        BestConfidence = Math.Clamp((double)small.PixelCount / step.MinPixels, 0, 0.99),
+                        BestMatch = smallRect,
+                    };
+                }
+
+                return missProbe;
             }
 
             var x = frame.Bounds.X + (int)Math.Round(blob.CenterX);
@@ -350,7 +406,12 @@ public sealed class ScreenProbes
             var more = result.Blobs.Count > 1 ? $", {result.Blobs.Count} patches; the biggest is used" : "";
             var patch = new ScreenRect(frame.Bounds.X + blob.Bounds.X, frame.Bounds.Y + blob.Bounds.Y, blob.Bounds.Width, blob.Bounds.Height);
             return new ScreenProbe(true, x, y, $"Found {what.ToLowerInvariant()} at ({x}, {y}): {blob.PixelCount:N0} pixels{more}.", string.Empty, region, patch,
-                1.0, MsSince(started));
+                1.0, MsSince(started))
+            {
+                BestConfidence = 1.0,
+                BestMatch = patch,
+                RequiredConfidence = 1.0,
+            };
         });
     }
 
