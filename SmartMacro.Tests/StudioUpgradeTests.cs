@@ -250,8 +250,10 @@ public class PlayRangeTests
     }
 
     [Fact]
-    public async Task Play_from_a_step_inside_a_loop_starts_at_the_loop()
+    public async Task Play_from_a_step_inside_a_loop_plays_the_rest_of_the_body_once()
     {
+        // Changed on purpose (audit of 6de423b, Fix 1): "Play from here" plays a block-safe slice starting exactly at the
+        // selected step; the End Repeat of a loop that started above it is left out.
         var input = new FakeInput();
         var macro = Flow.Macro(Flow.Move(1), Flow.Times(2), Flow.Move(2), Flow.Move(3), new EndRepeatStep(), Flow.Move(4));
         var messages = new List<string>();
@@ -260,12 +262,12 @@ public class PlayRangeTests
 
         await engine.PlayFromStepAsync(macro, 3);
 
-        Assert.Equal(new[] { "move 2,0", "move 3,0", "move 2,0", "move 3,0", "move 4,0" }, input.Calls);
-        Assert.Contains(messages, m => m.Contains("Starting at step 2"));
+        Assert.Equal(new[] { "move 3,0", "move 4,0" }, input.Calls);
+        Assert.Contains(messages, m => m.Contains("left out 1 block marker"));
     }
 
     [Fact]
-    public async Task Play_from_inside_a_nested_loop_finishes_the_outer_turn_once()
+    public async Task Play_from_inside_a_nested_loop_plays_one_pass_to_the_end()
     {
         var input = new FakeInput();
         var macro = Flow.Macro(
@@ -279,8 +281,9 @@ public class PlayRangeTests
 
         var result = await new PlaybackEngine(input, new FakeClock()).PlayFromStepAsync(macro, 2);
 
+        // Changed on purpose (Fix 1): one pass from the selected step; both End Repeats belong to loops above it.
         Assert.Equal(PlaybackOutcome.Completed, result.Outcome);
-        Assert.Equal(new[] { "move 5,0", "move 5,0", "move 6,0", "move 7,0" }, input.Calls);
+        Assert.Equal(new[] { "move 5,0", "move 6,0", "move 7,0" }, input.Calls);
     }
 
     [Fact]

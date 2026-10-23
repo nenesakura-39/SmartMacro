@@ -140,7 +140,7 @@ public partial class App : Application
         _runHost?.Dispose();
         _mainViewModel?.Dispose();
         _playbackClock?.Dispose();
-        ScreenCapture.ReleaseAllResources(); // reused GDI capture bitmaps (Upgrade 2)
+        ScreenCapture.ReleaseAllResources(); // the two shared, lock-protected GDI capture buffers
         DispatcherUnhandledException -=OnDispatcherUnhandledException;
         AppDomain.CurrentDomain.UnhandledException -= OnDomainUnhandledException;
         TaskScheduler.UnobservedTaskException -= OnUnobservedTaskException;

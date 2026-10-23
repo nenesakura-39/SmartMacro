@@ -28,6 +28,9 @@ public sealed record PlaybackResult(PlaybackOutcome Outcome, int IterationsCompl
 {
     /// <summary>How many whole runs (repeats) of the macro finished (same as <see cref="IterationsCompleted"/>).</summary>
     public int CompletedRuns => IterationsCompleted;
+
+    /// <summary>Post-run telemetry (steps, vision locks, time); null for results made outside the engine.</summary>
+    public PlaybackSessionStats? Stats { get; init; }
 }
 
 /// <summary>
@@ -248,6 +251,23 @@ public sealed class PlaybackEngine
     // Telemetry: the latest image / colour / Smart-Aim look time in ms (double bits, so any thread can read it safely).
     private long _lastProbeElapsedBits;
 
+    // Post-run telemetry of the current session (Upgrade 3): targets found ("vision locks") and their look times. Written
+    // by the playback flow, read by the UI: under _statsGate.
+    private readonly object _statsGate = new();
+    private int _statVisionLocks;
+    private int _statVisionTimed;
+    private double _statVisionMsTotal;
+
+    // Paused time of the current session as the UI sees it (Pause() to Resume() / Stop()), under _gate: the live step
+    // progress bar and the post-run total time don't count it.
+    private TimeSpan _statPausedTotal;
+    private TimeSpan? _statPausedSince;
+
+    // The step playing right now and how long it is expected to take (live 2 px progress bar). Replaced, never mutated.
+    private StepTiming? _stepTiming;
+
+    private sealed record StepTiming(Guid StepId, TimeSpan StartedAt, double ExpectedMs);
+
     // Humanize (per run, from the macro): random click offset (px) and timing variation (%).
     private bool _humanize;
     private int _clickJitterPx;
@@ -349,6 +369,83 @@ public sealed class PlaybackEngine
     /// <summary>The Hot-Spot memory of the current (or latest) playback session: where each image search found its picture.</summary>
     public HotSpotMemory HotSpots => _hotSpots;
 
+    /// <summary>Post-run telemetry of the latest finished (or stopped / failed) playback session; null before the first one.</summary>
+    public PlaybackSessionStats? LastSessionStats { get; private set; }
+
+    /// <summary>Targets found so far in this session ("vision locks"). Safe from any thread.</summary>
+    public int VisionMatchesCount
+    {
+        get { lock (_statsGate) return _statVisionLocks; }
+    }
+
+    /// <summary>Average look time (ms) of the vision locks so far in this session (0 when none was timed). Safe from any thread.</summary>
+    public double AverageVisionMatchMs
+    {
+        get { lock (_statsGate) return _statVisionTimed == 0 ? 0 : _statVisionMsTotal / _statVisionTimed; }
+    }
+
+    /// <summary>Counts one found target for the post-run summary (with its look time when known).</summary>
+    private void RecordVisionLock(double elapsedMs)
+    {
+        lock (_statsGate)
+        {
+            _statVisionLocks++;
+            if (elapsedMs > 0 && double.IsFinite(elapsedMs))
+            {
+                _statVisionTimed++;
+                _statVisionMsTotal += elapsedMs;
+            }
+        }
+    }
+
+    /// <summary>Clock time minus the time spent paused (as seen by Pause / Resume), frozen while paused.</summary>
+    private TimeSpan UiActiveTime()
+    {
+        lock (_gate)
+        {
+            var now = _statPausedSince ?? _clock.Elapsed;
+            return now - _statPausedTotal;
+        }
+    }
+
+    /// <summary>
+    /// Live progress of the step that is playing (for its card's 2 px progress bar), or null when nothing with a known
+    /// length plays. Safe to call from the UI thread at ~30 FPS: it only reads a snapshot and the clock.
+    /// </summary>
+    public StepProgress? GetCurrentStepProgress()
+    {
+        if (Volatile.Read(ref _stepTiming) is not { } timing) return null;
+        if (State is not (PlaybackState.Running or PlaybackState.Paused)) return null;
+        var elapsed = (UiActiveTime() - timing.StartedAt).TotalMilliseconds;
+        var fraction = timing.ExpectedMs > 0 ? Math.Clamp(elapsed / timing.ExpectedMs, 0, 1) : 0;
+        return new StepProgress(timing.StepId, fraction, timing.ExpectedMs);
+    }
+
+    /// <summary>
+    /// How long a step is expected to take on the playback timeline at <paramref name="speed"/>, in ms, or null when it
+    /// has no meaningful length: a Delay (÷ speed), a key / click hold or drag (÷ speed, never below the hold floor), Type
+    /// text (characters × delay ÷ speed), a Find step's or If condition's "keep looking for" time and a feedback loop's
+    /// max runtime (real time, not scaled).
+    /// </summary>
+    public static double? ExpectedDurationMs(MacroStep step, double speed)
+    {
+        ArgumentNullException.ThrowIfNull(step);
+        if (speed <= 0 || !double.IsFinite(speed)) speed = 1;
+        double ms = step switch
+        {
+            DelayStep d => d.DurationMs / speed,
+            KeyPressStep { Action: KeyAction.Press } k => ScaledHoldMs(k.HoldMs, speed),
+            MouseClickStep { Action: MouseClickAction.Drag } c => c.DragDurationMs / speed,
+            MouseClickStep c => ScaledHoldMs(c.HoldMs, speed),
+            TypeTextStep t => (t.Text?.Length ?? 0) * Math.Max(0, t.CharacterDelayMs) / speed,
+            ScreenSearchStep s => s.TimeoutMs,
+            IfStep { Condition.Search: { } check } => check.TimeoutMs,
+            FeedbackLoopStep f => f.MaxRuntimeMs,
+            _ => 0,
+        };
+        return ms > 0 && double.IsFinite(ms) ? ms : null;
+    }
+
     private void RecordProbeTime(double milliseconds)
     {
         if (double.IsNaN(milliseconds) || double.IsInfinity(milliseconds) || milliseconds <= 0) return;
@@ -383,6 +480,7 @@ public sealed class PlaybackEngine
     /// <summary>Tells the overlay what was found (bounds may be empty: then a small square around the spot is used).</summary>
     private void ReportTarget(int x, int y, ScreenRect bounds, double confidence, string label, double elapsedMs = 0, bool fromHotSpot = false)
     {
+        RecordVisionLock(elapsedMs);
         if (TargetDetected is not { } handler) return;
         var box = bounds.IsEmpty ? new ScreenRect(x - 12, y - 12, 24, 24) : bounds;
         try { handler(this, new TargetDetection(box, Math.Clamp(confidence, 0, 1), label, x, y, Math.Max(0, elapsedMs), fromHotSpot)); }
@@ -456,18 +554,32 @@ public sealed class PlaybackEngine
     }
 
     /// <summary>
-    /// "⏭ Play from here": plays from <paramref name="startStepIndex"/> to the end of the macro, once. A step inside a
-    /// Repeat starts at that Repeat (so the loop works normally); a step inside an If starts right there.
+    /// "⏭ Play from here" (Shift+F5): plays from <paramref name="startStepIndex"/> to the end of the macro, once.
+    /// It plays <see cref="PlaybackRanges.BuildPlayFromHereSlice"/>: a self-contained copy of the list whose blocks always
+    /// match up, even when the start is inside nested If / Repeat blocks (the Else part of an If that started above is
+    /// left out, End If / End Repeat markers whose opener is above the start are dropped, so the rest of a loop body
+    /// plays once). Progress keeps the macro's own step numbers.
     /// </summary>
     public Task<PlaybackResult> PlayFromStepAsync(Macro macro, int startStepIndex, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(macro);
-        var (start, end) = PlaybackRanges.PlayFromHere(macro.Steps, startStepIndex);
-        return RunCoreAsync(macro, new PlaybackSpan(start, end, startStepIndex), cancellationToken);
+        var (slice, info) = PlaybackRanges.BuildPlayFromHereMacro(macro, startStepIndex);
+        var issues = PlaybackRanges.ValidatePlayFromHere(macro, startStepIndex);
+        if (info.DroppedMarkers > 0 && !issues.HasErrors())
+            Message?.Invoke(this, $"Playing from step {startStepIndex + 1}: left out {info.DroppedMarkers} block marker(s)" +
+                                  (info.DroppedSteps > 0 ? $" and {info.DroppedSteps} step(s) of an \"otherwise\" part" : "") +
+                                  " that belong to blocks started above it.");
+        return RunCoreAsync(slice, new PlaybackSpan(0, slice.Steps.Count, 0, issues, info.SourceIndexes, macro.Steps.Count), cancellationToken);
     }
 
-    /// <summary>The part of the step list a run plays: steps [Start, End). Null span = the whole macro with its repeats.</summary>
-    private sealed record PlaybackSpan(int Start, int End, int RequestedIndex);
+    /// <summary>
+    /// The part of the step list a run plays: steps [Start, End). Null span = the whole macro with its repeats.
+    /// <paramref name="Issues"/>: validation already done by the caller (null = validate [Start, End) here).
+    /// <paramref name="SourceIndexes"/> / <paramref name="SourceCount"/>: when the played list is a slice of a bigger macro,
+    /// the macro's index of every played step and the macro's step count (progress shows the macro's step numbers).
+    /// </summary>
+    private sealed record PlaybackSpan(int Start, int End, int RequestedIndex,
+        IReadOnlyList<ValidationIssue>? Issues = null, IReadOnlyList<int>? SourceIndexes = null, int SourceCount = 0);
 
     private async Task<PlaybackResult> RunCoreAsync(Macro macro, PlaybackSpan? span, CancellationToken cancellationToken)
     {
@@ -475,7 +587,7 @@ public sealed class PlaybackEngine
 
         var issues = span is null
             ? MacroValidator.ValidateForExecution(macro)
-            : PlaybackRanges.ValidateRange(macro, span.Start, span.End);
+            : span.Issues ?? PlaybackRanges.ValidateRange(macro, span.Start, span.End);
         if (issues.HasErrors())
             throw new MacroValidationException(issues);
 
@@ -494,6 +606,8 @@ public sealed class PlaybackEngine
             _smartAimLastNote.Clear();
             _hotSpots.Clear();
             Interlocked.Exchange(ref _lastProbeElapsedBits, 0);
+            _statPausedTotal = TimeSpan.Zero;
+            _statPausedSince = null;
             _skipNextStep = false;
             _cursor = null;
             _glideTarget = null;
@@ -503,6 +617,15 @@ public sealed class PlaybackEngine
             TotalRuns = span is not null ? 1 : macro.RepeatCount;
         }
 
+        lock (_statsGate)
+        {
+            _statVisionLocks = 0;
+            _statVisionTimed = 0;
+            _statVisionMsTotal = 0;
+        }
+
+        Volatile.Write(ref _stepTiming, null);
+        var sessionStartedAt = UiActiveTime();
         SetState(PlaybackState.Running);
 
         // Humanize: small random click offsets and timing variation (off unless the macro turns it on).
@@ -539,7 +662,11 @@ public sealed class PlaybackEngine
 
             CurrentSpeed = macro.Speed;
             var current = new RunContext(steps, blocks, macro.Speed, held, new ScreenConditionEvaluator(_probes), totalIterations,
-                span?.Start ?? 0, span?.End ?? steps.Count);
+                span?.Start ?? 0, span?.End ?? steps.Count)
+            {
+                SourceIndexes = span?.SourceIndexes,
+                SourceCount = span?.SourceIndexes is not null ? span.SourceCount : 0,
+            };
             run = current;
 
             if (span is not null && span.Start != span.RequestedIndex)
@@ -627,9 +754,21 @@ public sealed class PlaybackEngine
             }
 
             cts.Dispose();
+            Volatile.Write(ref _stepTiming, null);
+            lock (_gate)
+            {
+                // Stopped while paused: that last pause doesn't count either.
+                if (_statPausedSince is { } since) _statPausedTotal += _clock.Elapsed - since;
+                _statPausedSince = null;
+            }
+
             SetState(PlaybackState.Idle);
         }
 
+        var stats = new PlaybackSessionStats(result.Outcome, result.IterationsCompleted, result.StepsExecuted,
+            VisionMatchesCount, AverageVisionMatchMs, UiActiveTime() - sessionStartedAt);
+        LastSessionStats = stats;
+        result = result with { Stats = stats };
         return releaseError is null ? result : result with { Warning = releaseError };
     }
 
@@ -642,6 +781,7 @@ public sealed class PlaybackEngine
             _resumeSignal = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
             _state = PlaybackState.Paused;
             _pauseRequestedAt = _clock.Elapsed; // the pause counts from the key press, not from when playback notices it
+            _statPausedSince = _clock.Elapsed;
         }
 
         // Let go of everything right now (not only when the playback thread reaches its next check, up to 50 ms later),
@@ -665,6 +805,8 @@ public sealed class PlaybackEngine
             _resumeSignal?.TrySetResult();
             _resumeSignal = null;
             _state = PlaybackState.Running;
+            if (_statPausedSince is { } since) _statPausedTotal += _clock.Elapsed - since;
+            _statPausedSince = null;
         }
 
         StateChanged?.Invoke(this, PlaybackState.Running);
@@ -894,6 +1036,19 @@ public sealed class PlaybackEngine
 
         /// <summary>Last answer of each If (by step index), so a loop doesn't log the same answer every turn.</summary>
         public Dictionary<int, bool> LastIfAnswer { get; } = new();
+
+        /// <summary>"Play from here" slice: the macro's index of each played step (null = the list IS the macro).</summary>
+        public IReadOnlyList<int>? SourceIndexes { get; init; }
+
+        /// <summary>"Play from here" slice: the macro's step count (0 = the list IS the macro).</summary>
+        public int SourceCount { get; init; }
+
+        /// <summary>1-based step number as the editor shows it (the macro's numbering, also for a slice).</summary>
+        public int StepNumberOf(int index) =>
+            SourceIndexes is { } map && index >= 0 && index < map.Count ? map[index] + 1 : index + 1;
+
+        /// <summary>Step count as the editor shows it.</summary>
+        public int StepCountShown => SourceCount > 0 ? SourceCount : Steps.Count;
     }
 
     /// <summary>State of one running Repeat block. Lives on a stack, innermost last.</summary>
@@ -938,7 +1093,7 @@ public sealed class PlaybackEngine
             {
                 run.Speed = newSpeed;
                 CurrentSpeed = newSpeed;
-                Message?.Invoke(this, $"Playback speed changed to {newSpeed:0.##}× (from step {pc + 1}).");
+                Message?.Invoke(this, $"Playback speed changed to {newSpeed:0.##}× (from step {run.StepNumberOf(pc)}).");
             }
 
             var step = steps[pc];
@@ -1086,6 +1241,12 @@ public sealed class PlaybackEngine
 
     private void Report(RunContext run, int index, List<LoopFrame> loops, string? extra = null)
     {
+        // Live progress bar: what plays now and how long it should take (only when it has a known length).
+        var step = run.Steps[index];
+        Volatile.Write(ref _stepTiming, ExpectedDurationMs(step, run.Speed) is { } expected
+            ? new StepTiming(step.Id, UiActiveTime(), expected)
+            : null);
+
         string? loopText = null;
         if (loops.Count > 0 && run.Steps[loops[^1].Start] is RepeatStep repeat)
         {
@@ -1095,7 +1256,7 @@ public sealed class PlaybackEngine
 
         if (extra is not null) loopText = loopText is null ? extra : $"{loopText} · {extra}";
 
-        ProgressChanged?.Invoke(this, new PlaybackProgress(run.Iteration, run.TotalIterations, index + 1, run.Steps.Count, run.Steps[index], loopText));
+        ProgressChanged?.Invoke(this, new PlaybackProgress(run.Iteration, run.TotalIterations, run.StepNumberOf(index), run.StepCountShown, run.Steps[index], loopText));
     }
 
     private void LogIfAnswer(RunContext run, int index, bool isTrue, string text)
@@ -1103,7 +1264,7 @@ public sealed class PlaybackEngine
         // Inside loops the same If can run thousands of times: only log the first answer and changes.
         if (run.LastIfAnswer.TryGetValue(index, out var previous) && previous == isTrue) return;
         run.LastIfAnswer[index] = isTrue;
-        Message?.Invoke(this, $"If (step {index + 1}): {(isTrue ? "yes" : "no")}. {text}");
+        Message?.Invoke(this, $"If (step {run.StepNumberOf(index)}): {(isTrue ? "yes" : "no")}. {text}");
     }
 
     /// <summary>
@@ -1236,7 +1397,7 @@ public sealed class PlaybackEngine
     /// </summary>
     private async Task RunFeedbackLoopAsync(RunContext run, int index, List<LoopFrame> loops, FeedbackLoopStep step, CancellationToken token)
     {
-        var number = index + 1;
+        var number = run.StepNumberOf(index);
         var capture = _capture ?? throw new ScreenCaptureUnavailableException("Screen capture isn't available, so Feedback loop steps can't run.");
         var sensor = new FeedbackSensor(step, capture, _clock);
         var controller = new FeedbackController(FeedbackRules.From(step));

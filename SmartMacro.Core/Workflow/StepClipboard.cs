@@ -93,7 +93,9 @@ public static class StepClipboard
             return false;
         }
 
-        foreach (var step in list) step.Id = Guid.NewGuid();
+        // Fresh IDs for every pasted step AND its nested condition searches, so a pasted If / Find image never shares
+        // an ID (and with it the engine's Hot-Spot memory or the editor's running-step highlight) with the original.
+        foreach (var step in list) MacroFactory.RenewIds(step);
         steps = list;
         error = null;
         return true;

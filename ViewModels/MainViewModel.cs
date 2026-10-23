@@ -131,6 +131,14 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         Editor.RunSingleStepHandler = (macro, index) => Automation.RunSingleStepAsync(macro, index);
         Editor.PlayFromStepHandler = (macro, index) => Automation.PlayFromStepAsync(macro, index);
         Editor.CanRunSteps = () => Automation.IsIdle;
+
+        // AAA Studio UI: the live progress bar on the playing step's card, and the Ctrl+K palette's "▶ Play Macro".
+        Automation.RunningStepProgressChanged += (_, p) => Editor.SetRunningStepProgress(p.StepId, p.Fraction, p.ShowBar);
+        Editor.PlayHandler = () =>
+        {
+            if (Automation.PlayCommand.CanExecute(null)) Automation.PlayCommand.Execute(null);
+        };
+        Editor.PlayShortcutText = () => Automation.PlayShortcut;
     }
 
     public static IReadOnlyList<Steps.Choice<RecordingMode>> RecordingModes => SettingsViewModel.ToolbarRecordingModes;

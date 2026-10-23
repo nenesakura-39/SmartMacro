@@ -140,6 +140,149 @@ public sealed class EditorViewModel : ObservableObject
         AutoFixBlocksCommand = new RelayCommand(AutoFixBlocks, () => HasMacro && CanAutoFixBlocks);
         BreakIntoStepsCommand = new RelayCommand(BreakIntoSteps,
             p => HasMacro && (p as InputSequenceStepViewModel ?? SelectedStep as InputSequenceStepViewModel) is { CanBreakIntoSteps: true });
+
+        ToggleCommandPaletteCommand = new RelayCommand(() => IsCommandPaletteOpen = !IsCommandPaletteOpen, () => HasMacro || IsCommandPaletteOpen);
+        CloseCommandPaletteCommand = new RelayCommand(() => IsCommandPaletteOpen = false);
+        ExecutePaletteItemCommand = new RelayCommand(p => ExecutePaletteItem(p as StudioCommand ?? SelectedPaletteItem));
+        RefreshPaletteItems();
+    }
+
+    // ---------------- AAA Studio UI: Ctrl+K Command Palette ----------------
+
+    private bool _isCommandPaletteOpen;
+    private string _paletteQuery = string.Empty;
+    private int _selectedPaletteIndex = -1;
+
+    /// <summary>Set by the main window: plays the open macro (same as the ▶ Play button).</summary>
+    public Action? PlayHandler { get; set; }
+
+    /// <summary>Set by the main window: the play shortcut shown next to "▶ Play Macro" (it can be customized).</summary>
+    public Func<string>? PlayShortcutText { get; set; }
+
+    /// <summary>Ctrl+K: the palette card at the top of the editor is open (its search box has the keyboard focus).</summary>
+    public bool IsCommandPaletteOpen
+    {
+        get => _isCommandPaletteOpen;
+        set
+        {
+            if (!SetProperty(ref _isCommandPaletteOpen, value)) return;
+            if (value)
+            {
+                _paletteQuery = string.Empty;
+                OnPropertyChanged(nameof(PaletteQuery));
+                RefreshPaletteItems();
+            }
+
+            System.Windows.Input.CommandManager.InvalidateRequerySuggested();
+        }
+    }
+
+    /// <summary>The palette's search text: filters <see cref="PaletteItems"/> as you type.</summary>
+    public string PaletteQuery
+    {
+        get => _paletteQuery;
+        set
+        {
+            if (SetProperty(ref _paletteQuery, value ?? string.Empty)) RefreshPaletteItems();
+        }
+    }
+
+    /// <summary>The commands matching <see cref="PaletteQuery"/> (<see cref="StudioCommandCatalog.Filter(string?)"/>).</summary>
+    public ObservableCollection<StudioCommand> PaletteItems { get; } = new();
+
+    /// <summary>The highlighted result (↑ / ↓ move it, Enter runs it).</summary>
+    public int SelectedPaletteIndex
+    {
+        get => _selectedPaletteIndex;
+        set
+        {
+            var clamped = PaletteItems.Count == 0 ? -1 : Math.Clamp(value, 0, PaletteItems.Count - 1);
+            if (SetProperty(ref _selectedPaletteIndex, clamped)) OnPropertyChanged(nameof(SelectedPaletteItem));
+        }
+    }
+
+    public StudioCommand? SelectedPaletteItem =>
+        _selectedPaletteIndex >= 0 && _selectedPaletteIndex < PaletteItems.Count ? PaletteItems[_selectedPaletteIndex] : null;
+
+    /// <summary>"No commands match" while the filter leaves nothing.</summary>
+    public bool HasNoPaletteResults => PaletteItems.Count == 0;
+
+    public RelayCommand ToggleCommandPaletteCommand { get; }
+    public RelayCommand CloseCommandPaletteCommand { get; }
+
+    /// <summary>Runs a palette command (parameter = the <see cref="StudioCommand"/>, else the highlighted one) and closes the palette.</summary>
+    public RelayCommand ExecutePaletteItemCommand { get; }
+
+    /// <summary>↑ / ↓ in the palette (wraps around).</summary>
+    public void MovePaletteSelection(int delta)
+    {
+        if (PaletteItems.Count == 0) return;
+        var next = _selectedPaletteIndex < 0 ? 0 : ((_selectedPaletteIndex + delta) % PaletteItems.Count + PaletteItems.Count) % PaletteItems.Count;
+        SelectedPaletteIndex = next;
+    }
+
+    private void RefreshPaletteItems()
+    {
+        var shortcut = PlayShortcutText?.Invoke() ?? string.Empty;
+        PaletteItems.Clear();
+        foreach (var command in StudioCommandCatalog.Filter(_paletteQuery))
+            PaletteItems.Add(command.Kind == StudioCommandKind.Play && shortcut.Length > 0 ? command with { Shortcut = shortcut } : command);
+        _selectedPaletteIndex = -1;
+        SelectedPaletteIndex = 0;
+        OnPropertyChanged(nameof(SelectedPaletteIndex));
+        OnPropertyChanged(nameof(SelectedPaletteItem));
+        OnPropertyChanged(nameof(HasNoPaletteResults));
+    }
+
+    private void ExecutePaletteItem(StudioCommand? command)
+    {
+        if (command is null) return;
+        IsCommandPaletteOpen = false;
+        if (!HasMacro)
+        {
+            _setStatus("Open a macro first.", StatusKind.Warning);
+            return;
+        }
+
+        switch (command.Kind)
+        {
+            case StudioCommandKind.AddStep when command.Step is { } kind:
+                Run(AddStepCommand, kind, "Can't add a step right now.");
+                break;
+            case StudioCommandKind.Play:
+                if (PlayHandler is null || !(CanRunSteps?.Invoke() ?? false))
+                    _setStatus("Can't play right now (something is already recording or playing).", StatusKind.Warning);
+                else
+                    PlayHandler();
+                break;
+            case StudioCommandKind.PlayFromSelected:
+                Run(PlayFromHereCommand, null, "Select a step first (and make sure nothing is playing), then Play from here.");
+                break;
+            case StudioCommandKind.AutoFixBlocks:
+                Run(AutoFixBlocksCommand, null, "The If / Repeat blocks are fine: nothing to fix.");
+                break;
+            case StudioCommandKind.CleanUp:
+                Run(CleanUpMousePathsCommand, null, "Nothing to clean up: there are no Move mouse steps.");
+                break;
+            case StudioCommandKind.ToggleCompactView:
+                IsCompactView = !IsCompactView;
+                _setStatus(IsCompactView ? "📐 Compact step view on." : "📐 Compact step view off.", StatusKind.Info);
+                break;
+            case StudioCommandKind.ToggleHumanize:
+                HumanizePlayback = !HumanizePlayback;
+                _setStatus(HumanizePlayback ? "🎲 Humanize on: small random click offsets and timing." : "🎲 Humanize off: exact positions and timing.", StatusKind.Info);
+                break;
+            case StudioCommandKind.SetSpeed when command.Speed > 0:
+                Speed = command.Speed;
+                _setStatus($"⚡ Playback speed {command.Speed.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture)}×.", StatusKind.Info);
+                break;
+        }
+
+        void Run(System.Windows.Input.ICommand target, object? parameter, string unavailable)
+        {
+            if (target.CanExecute(parameter)) target.Execute(parameter);
+            else _setStatus(unavailable, StatusKind.Warning);
+        }
     }
 
     // ---------------- ✂ Break recorded input into steps ----------------
@@ -488,8 +631,8 @@ public sealed class EditorViewModel : ObservableObject
     public AsyncRelayCommand PlayFromSelectedCommand => PlayFromHereCommand;
 
     /// <summary>
-    /// What "▶ From here" would play for the selected step: [Start, End) of the step list (the enclosing Repeat when the
-    /// step is inside a loop). Null when nothing is selected.
+    /// What "▶ From here" would play for the selected step: [Start, End) of the step list, from the first step of the
+    /// block-safe slice (<see cref="PlaybackRanges.BuildPlayFromHereSlice"/>) to the end. Null when nothing is selected.
     /// </summary>
     public (int Start, int End)? PlayFromSelectedRange
     {
@@ -511,10 +654,33 @@ public sealed class EditorViewModel : ObservableObject
         return RunSingleStepHandler(macro, index);
     }
 
+    /// <summary>
+    /// The steps "▶ From here" would actually play for the selected step (a valid, self-contained slice: Else parts and
+    /// End markers of blocks that started above it are left out). Null when nothing is selected.
+    /// </summary>
+    public PlayFromHereSlice? PlayFromSelectedSlice
+    {
+        get
+        {
+            var index = SelectedStep is null ? -1 : Steps.IndexOf(SelectedStep);
+            return index < 0 ? null : PlaybackRanges.BuildPlayFromHereSlice(Steps.Select(s => s.Model).ToList(), index);
+        }
+    }
+
     private Task PlayFromSelectedAsync()
     {
         if (SelectedStep is not { } step || PlayFromStepHandler is null) return Task.CompletedTask;
-        return PlayFromStepHandler(MacroJson.Clone(BuildMacro()), Steps.IndexOf(step));
+        var index = Steps.IndexOf(step);
+        if (index < 0) return Task.CompletedTask;
+
+        // The automation layer (and the engine) cut the copy down with PlaybackRanges.BuildPlayFromHereSlice, so a start
+        // inside any nested If / Repeat always plays a valid workflow. Say up front when markers are left out.
+        var slice = PlaybackRanges.BuildPlayFromHereSlice(Steps.Select(s => s.Model).ToList(), index);
+        if (slice.DroppedMarkers > 0)
+            _setStatus($"Playing from step {index + 1}: the rest of the blocks around it plays once" +
+                       (slice.DroppedSteps > 0 ? $", the \"otherwise\" part of the If above is skipped ({slice.DroppedSteps} step(s))." : "."),
+                StatusKind.Info);
+        return PlayFromStepHandler(MacroJson.Clone(BuildMacro()), index);
     }
 
     // ---------------- Power-user QoL: Space toggles on / off ----------------
@@ -935,36 +1101,53 @@ public sealed class EditorViewModel : ObservableObject
     // ---------------- Live step highlight while playing ----------------
 
     private StepViewModel? _runningStep;
-    private long _lastRunningStepTickMs;
+    private StepViewModel? _progressStep;
 
     /// <summary>Raised when playback moves to another step of this macro (the view scrolls it into view).</summary>
     public event EventHandler<StepViewModel>? RunningStepChanged;
 
     /// <summary>
     /// Marks the step playback is running right now (by step ID, so it works on the copy that plays); null clears it.
-    /// Steps of another macro (e.g. one played from the library) simply don't match. Throttled to at most ~20 Hz so
-    /// rapid step transitions never stall the UI dispatcher or playback threads.
+    /// Steps of another macro (e.g. one played from the library) simply don't match. The automation layer already
+    /// coalesces step changes to ~30 FPS, so every call is applied (the old extra 50 ms drop here could leave the
+    /// highlight on a step that had already finished, because the same ID is never sent twice).
     /// </summary>
     public void SetRunningStep(Guid? stepId)
     {
-        if (stepId is not null)
-        {
-            var now = Environment.TickCount64;
-            if (_runningStep is not null && now - _lastRunningStepTickMs < 50) return;
-            _lastRunningStepTickMs = now;
-        }
-        else
-        {
-            _lastRunningStepTickMs = 0;
-        }
-
         var step = stepId is { } id ? Steps.FirstOrDefault(s => s.Id == id) : null;
         if (ReferenceEquals(step, _runningStep)) return;
         if (_runningStep is not null) _runningStep.IsRunning = false;
         _runningStep = step;
-        if (step is null) return;
+        if (step is null)
+        {
+            SetRunningStepProgress(null, 0, false);
+            return;
+        }
+
         step.IsRunning = true;
         RunningStepChanged?.Invoke(this, step);
+    }
+
+    /// <summary>
+    /// The live 2 px progress bar on the playing step's card (~30 FPS from the automation layer): <paramref name="progress"/>
+    /// 0..1 of step <paramref name="stepId"/>; <paramref name="show"/> false (or a null ID) hides it.
+    /// </summary>
+    public void SetRunningStepProgress(Guid? stepId, double progress, bool show)
+    {
+        StepViewModel? step = null;
+        if (stepId is { } id && show)
+            step = _progressStep?.Id == id ? _progressStep : _runningStep?.Id == id ? _runningStep : Steps.FirstOrDefault(s => s.Id == id);
+
+        if (!ReferenceEquals(step, _progressStep) && _progressStep is not null)
+        {
+            _progressStep.ShowExecutionProgress = false;
+            _progressStep.ExecutionProgress = 0;
+        }
+
+        _progressStep = step;
+        if (step is null) return;
+        step.ExecutionProgress = progress;
+        step.ShowExecutionProgress = true;
     }
 
     public ObservableCollection<StepViewModel> Steps { get; } = new();
@@ -1464,7 +1647,8 @@ public sealed class EditorViewModel : ObservableObject
         var selected = SelectedInOrder();
         if (selected.Count == 0) return;
 
-        var plan = StepListEditing.PlanDelete(Steps.Select(s => s.Model).ToList(), selected.Select(s => Steps.IndexOf(s)));
+        // A folded If / Repeat is one row on screen: deleting it deletes the whole block (Ctrl+Z brings it back).
+        var plan = StepListEditing.PlanDelete(Steps.Select(s => s.Model).ToList(), selected.Select(s => Steps.IndexOf(s)), _collapsed);
         if (plan.Indexes.Count == 0) return;
         var toRemove = plan.Indexes.Select(i => Steps[i]).ToList();
 
@@ -1549,10 +1733,9 @@ public sealed class EditorViewModel : ObservableObject
     {
         if (!TryGetSelectedRange(out var first, out var last)) return;
         var models = Steps.Select(s => s.Model).ToList();
-        // A folded If / Repeat is one row on screen: it moves with everything it hides.
-        if (Enumerable.Range(first, last - first + 1).Any(i => Steps[i].IsCollapsed))
-            (first, last, _) = StepListEditing.GrowToWholeBlocks(models, first, last);
-        Apply(StepListEditing.PlanMove(models, first, last, direction));
+        // A folded If / Repeat is one row on screen: it moves with everything it hides (header to End, as one unit), and
+        // moving past a folded block jumps over the whole block instead of landing inside it where it can't be seen.
+        Apply(StepListEditing.PlanMove(models, first, last, direction, _collapsed));
     }
 
     /// <summary>
@@ -1695,10 +1878,13 @@ public sealed class EditorViewModel : ObservableObject
 
     private void UpdateBlockPairing(BlockStructure blocks)
     {
+        // Guide rails: amber inside an If / Else, violet inside a Repeat (the innermost block a row is in).
+        var rails = StepListView.EnclosingBlockKinds(Steps.Select(s => s.Model).ToList());
         for (var i = 0; i < Steps.Count; i++)
         {
             var depth = blocks.Depth[i];
             Steps[i].IndentLevel = depth;
+            Steps[i].BlockRailKind = depth > 0 ? rails[i] : BlockRailKind.None;
             Steps[i].SetBlockInfo(null, 0, Math.Max(0, depth - 1), null, null);
         }
 

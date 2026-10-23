@@ -193,17 +193,24 @@ public sealed class WindowsOcrService : IOcrService
 /// Copies part of the screen into a 32-bit BGRA byte array (top-down rows) using GDI. BitBlt only copies the requested
 /// rectangle, so a small area (a Smart-Aim crop, a Hot-Spot re-check, a feedback-loop bar) is cheap.
 ///
-/// AAA speed-up: each thread keeps ONE reusable memory DC + bitmap (<see cref="CaptureSurface"/>) for the size it captured
-/// last, so repeated captures of the same size (a fast loop looking at the same 80×80 spot) don't create and destroy GDI
-/// handles every time. A different size replaces it; areas bigger than <see cref="MaxReusedPixels"/> (whole monitors) are
-/// never kept, so no thread holds tens of MB of GDI memory. <see cref="ReleaseThreadResources"/> frees the current
-/// thread's surface; <see cref="ReleaseAllResources"/> (app exit) frees it and makes every other thread drop its surface
-/// on its next capture (GDI handles are only ever freed by the thread that uses them, so nothing is freed while in use).
+/// GDI handles: the whole process shares at most TWO reusable buffers (<see cref="Vision.ReusableGdiSurface"/>), each a memory
+/// DC + DIB section guarded by its own lock – a "small" one for areas up to <see cref="MaxReusedPixels"/> (Hot-Spot
+/// spots, Smart-Aim crops, feedback bars, click snapshots) and a "large" one for whole search areas / monitors up to
+/// <see cref="MaxLargeReusedPixels"/>. A buffer is only re-created when its (width, height) changes; the BitBlt and the
+/// copy into a new managed array happen inside the lock, so any thread can call this (async playback hops between
+/// thread-pool threads) without one GDI bitmap per thread being left behind. Bigger areas use a one-shot surface that
+/// is freed before returning. <see cref="ReleaseAllResources"/> (App.OnExit) frees both buffers.
 /// </summary>
 internal static class ScreenCapture
 {
-    /// <summary>Largest area (pixels) whose GDI bitmap is kept for reuse: 1024 × 1024 (4 MB).</summary>
+    /// <summary>Largest area (pixels) captured through the shared "small" buffer: 1024 × 1024 (4 MB).</summary>
     public const int MaxReusedPixels = 1024 * 1024;
+
+    /// <summary>Largest area (pixels) captured through the shared "large" buffer: one 4K monitor (≈ 33 MB).</summary>
+    public const int MaxLargeReusedPixels = 3840 * 2160;
+
+    private static readonly Vision.ReusableGdiSurface SmallSurface = new("small");
+    private static readonly Vision.ReusableGdiSurface LargeSurface = new("large");
 
     /// <summary>How long the virtual-screen rectangle (all monitors) is reused before it's asked from Windows again.</summary>
     public static readonly TimeSpan VirtualScreenCacheTime = TimeSpan.FromMilliseconds(500);
@@ -212,36 +219,6 @@ internal static class ScreenCapture
     private const int SM_YVIRTUALSCREEN = 77;
     private const int SM_CXVIRTUALSCREEN = 78;
     private const int SM_CYVIRTUALSCREEN = 79;
-
-    /// <summary>A memory DC with a bitmap of one size selected into it (kept per thread, see the class remarks).</summary>
-    private sealed class CaptureSurface
-    {
-        public IntPtr MemoryDc;
-        public IntPtr Bitmap;
-        public IntPtr PreviousBitmap; // what the fresh DC had selected; put back before deleting
-        public int Width;
-        public int Height;
-        public int Generation;
-        public bool InUse;
-        public bool Released;
-
-        public void Free()
-        {
-            if (MemoryDc != IntPtr.Zero && PreviousBitmap != IntPtr.Zero) NativeMethods.SelectObject(MemoryDc, PreviousBitmap);
-            if (Bitmap != IntPtr.Zero) NativeMethods.DeleteObject(Bitmap);
-            if (MemoryDc != IntPtr.Zero) NativeMethods.DeleteDC(MemoryDc);
-            MemoryDc = Bitmap = PreviousBitmap = IntPtr.Zero;
-            Width = Height = 0;
-        }
-    }
-
-    [ThreadStatic] private static CaptureSurface? t_surface;
-
-    // Bumped by ReleaseAllResources: surfaces made before it are dropped by their thread on its next capture.
-    private static int _generation;
-
-    // Diagnostics: GDI capture surfaces that exist right now (kept + throw-away), all threads.
-    private static int _liveSurfaces;
 
     private static readonly object VirtualScreenGate = new();
     private static ScreenRect _virtualScreen;
@@ -307,7 +284,8 @@ internal static class ScreenCapture
 
     /// <param name="shield">
     /// Hide SmartMacro's own flashy overlays first where Windows can't leave them out of captures (see
-    /// <see cref="Vision.CaptureShield"/>). False only for the click snapshot on the mouse-hook thread, which must never wait.
+    /// <see cref="Vision.CaptureShield"/>). False only for the click snapshot on the mouse-hook thread, which must never
+    /// wait: it then also never waits for the shared buffer (a one-shot surface is used if another capture is running).
     /// </param>
     public static byte[] CaptureBgra(ScreenRect area, bool shield = true)
     {
@@ -319,125 +297,42 @@ internal static class ScreenCapture
         var screenDc = NativeMethods.GetDC(IntPtr.Zero);
         if (screenDc == IntPtr.Zero) throw new Win32Exception("Could not access the screen.");
 
-        var reusable = (long)area.Width * area.Height <= MaxReusedPixels;
-        CaptureSurface? surface = null;
         try
         {
-            surface = Acquire(screenDc, area.Width, area.Height, reusable);
+            var pixelCount = (long)area.Width * area.Height;
+            var shared = pixelCount <= MaxReusedPixels ? SmallSurface
+                : pixelCount <= MaxLargeReusedPixels ? LargeSurface
+                : null;
+            if (shared is not null && shared.TryCapture(screenDc, area, wait: shield, out var pixels))
+                return pixels;
 
-            var copied = NativeMethods.BitBlt(surface.MemoryDc, 0, 0, area.Width, area.Height, screenDc, area.X, area.Y,
-                NativeMethods.SRCCOPY | NativeMethods.CAPTUREBLT);
-            var bltError = Marshal.GetLastWin32Error();
-            if (!copied)
-                throw new Win32Exception(bltError, "Windows didn't allow a screen capture (the screen may be locked).");
-
-            var info = new NativeMethods.BITMAPINFO
-            {
-                bmiHeader = new NativeMethods.BITMAPINFOHEADER
-                {
-                    biSize = (uint)Marshal.SizeOf<NativeMethods.BITMAPINFOHEADER>(),
-                    biWidth = area.Width,
-                    biHeight = -area.Height, // negative = rows top to bottom
-                    biPlanes = 1,
-                    biBitCount = 32,
-                    biCompression = NativeMethods.BI_RGB,
-                },
-            };
-
-            // GetDIBits needs the bitmap deselected; it is selected again on the next use of this surface.
-            NativeMethods.SelectObject(surface.MemoryDc, surface.PreviousBitmap);
-            var pixels = new byte[area.Width * area.Height * 4];
-            var lines = NativeMethods.GetDIBits(surface.MemoryDc, surface.Bitmap, 0, (uint)area.Height, pixels, ref info, NativeMethods.DIB_RGB_COLORS);
-            if (lines == 0) throw new Win32Exception("Could not read the captured screen pixels.");
-            return pixels;
-        }
-        catch
-        {
-            // Something went wrong with this surface: don't keep it (the next capture makes a fresh one).
-            if (surface is not null) Discard(surface);
-            surface = null;
-            throw;
+            // Huge area (several monitors at once), or the hook thread found the buffer busy: one-shot surface.
+            return Vision.ReusableGdiSurface.CaptureOnce(screenDc, area);
         }
         finally
         {
-            if (surface is not null)
-            {
-                if (reusable) surface.InUse = false;
-                else Release(surface);
-            }
-
             NativeMethods.ReleaseDC(IntPtr.Zero, screenDc);
         }
     }
 
     /// <summary>
-    /// This thread's surface when it has the right size (selected and ready for BitBlt), otherwise a new one. A surface
-    /// for a big area (<paramref name="keep"/> false) is a throw-away one and never replaces the thread's kept surface.
+    /// Kept for callers of the old per-thread cache: there is nothing per thread any more, so this does nothing.
+    /// Use <see cref="ReleaseAllResources"/> to free the shared buffers.
     /// </summary>
-    private static CaptureSurface Acquire(IntPtr screenDc, int width, int height, bool keep)
-    {
-        if (keep && t_surface is { } cached && !cached.InUse && cached.MemoryDc != IntPtr.Zero)
-        {
-            if (cached.Width == width && cached.Height == height && cached.Generation == Volatile.Read(ref _generation))
-            {
-                NativeMethods.SelectObject(cached.MemoryDc, cached.Bitmap);
-                cached.InUse = true;
-                return cached;
-            }
-
-            Discard(cached); // a different size (or released): replace it
-        }
-
-        var surface = new CaptureSurface { Width = width, Height = height, InUse = true, Generation = Volatile.Read(ref _generation) };
-        Interlocked.Increment(ref _liveSurfaces);
-        try
-        {
-            surface.MemoryDc = NativeMethods.CreateCompatibleDC(screenDc);
-            surface.Bitmap = NativeMethods.CreateCompatibleBitmap(screenDc, width, height);
-            if (surface.MemoryDc == IntPtr.Zero || surface.Bitmap == IntPtr.Zero)
-                throw new Win32Exception(Marshal.GetLastWin32Error(), "Could not prepare a screen capture.");
-            surface.PreviousBitmap = NativeMethods.SelectObject(surface.MemoryDc, surface.Bitmap);
-        }
-        catch
-        {
-            Release(surface);
-            throw;
-        }
-
-        if (keep) t_surface = surface;
-        return surface;
-    }
-
-    private static void Discard(CaptureSurface surface)
-    {
-        if (ReferenceEquals(t_surface, surface)) t_surface = null;
-        Release(surface);
-    }
-
-    private static void Release(CaptureSurface surface)
-    {
-        if (surface.Released) return; // already freed
-        surface.Released = true;
-        surface.Free();
-        Interlocked.Decrement(ref _liveSurfaces);
-    }
-
-    /// <summary>Frees the calling thread's reusable capture surface (if any). Safe to call any time.</summary>
     public static void ReleaseThreadResources()
     {
-        if (t_surface is { InUse: false } surface) Discard(surface);
     }
 
     /// <summary>
-    /// App exit / low memory: frees the calling thread's surface now and makes every other thread drop (free) its surface
-    /// on its next capture, so no handle is ever freed while another thread is using it.
+    /// App exit / low memory: frees both shared GDI buffers (waiting for a capture in progress to finish first). A later
+    /// capture simply creates them again.
     /// </summary>
     public static void ReleaseAllResources()
     {
-        Interlocked.Increment(ref _generation);
-        ReleaseThreadResources();
+        SmallSurface.Dispose();
+        LargeSurface.Dispose();
     }
 
-    /// <summary>How many GDI capture surfaces exist right now (all threads), for diagnostics.</summary>
-    public static int LiveSurfaceCount => Volatile.Read(ref _liveSurfaces);
+    /// <summary>How many GDI capture surfaces exist right now (shared + one-shot), for diagnostics.</summary>
+    public static int LiveSurfaceCount => Vision.ReusableGdiSurface.LiveSurfaceCount;
 }

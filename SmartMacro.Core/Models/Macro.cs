@@ -104,6 +104,19 @@ public sealed class Macro
 
     [JsonIgnore]
     public int EffectiveDelayJitterPercent => DelayJitterPercent ?? DefaultDelayJitterPercent;
+
+    /// <summary>
+    /// A shallow copy of this macro (same ID, name, speed, target window, Humanize, …) that plays
+    /// <paramref name="steps"/> instead of its own list. The steps themselves aren't copied. Used by "Play from here",
+    /// which plays a cleaned-up slice of the list with all the macro's other settings.
+    /// </summary>
+    public Macro CopyWithSteps(List<MacroStep> steps)
+    {
+        ArgumentNullException.ThrowIfNull(steps);
+        var copy = (Macro)MemberwiseClone();
+        copy.Steps = steps;
+        return copy;
+    }
 }
 
 /// <summary>

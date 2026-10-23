@@ -50,18 +50,19 @@
                 </DrawingBrush.Drawing>
             </DrawingBrush>
 
-            <!-- Vertical guide lines for steps inside If / Repeat blocks: one line every 24 px (one per level). -->
-            <DrawingBrush x:Key="IndentGuideTile" TileMode="Tile" Viewport="0,0,24,8" ViewportUnits="Absolute" Stretch="None">
+            <!-- Vertical guide lines for steps inside If / Repeat blocks: one faint line every 18 px (one per level,
+                 StepViewModel.IndentPerLevel). The innermost level gets the coloured rail (see the step template). -->
+            <DrawingBrush x:Key="IndentGuideTile" TileMode="Tile" Viewport="0,0,18,8" ViewportUnits="Absolute" Stretch="None">
                 <DrawingBrush.Drawing>
                     <DrawingGroup>
                         <GeometryDrawing Brush="Transparent">
                             <GeometryDrawing.Geometry>
-                                <RectangleGeometry Rect="0,0,24,8" />
+                                <RectangleGeometry Rect="0,0,18,8" />
                             </GeometryDrawing.Geometry>
                         </GeometryDrawing>
                         <GeometryDrawing Brush="{StaticResource IndentGuideBrush}">
                             <GeometryDrawing.Geometry>
-                                <RectangleGeometry Rect="11,0,1.5,8" />
+                                <RectangleGeometry Rect="8,0,1.5,8" />
                             </GeometryDrawing.Geometry>
                         </GeometryDrawing>
                     </DrawingGroup>
@@ -187,6 +188,36 @@
                     </StackPanel>
                 </Border>
             </DataTemplate>
+            <!-- Neon cyan → violet for the live step progress bar. -->
+            <LinearGradientBrush x:Key="NeonProgressBrush" StartPoint="0,0" EndPoint="1,0">
+                <GradientStop Color="#22D3EE" Offset="0" />
+                <GradientStop Color="#818CF8" Offset="0.6" />
+                <GradientStop Color="#A855F7" Offset="1" />
+            </LinearGradientBrush>
+
+            <!-- Command Palette rows: soft accent background on the highlighted one. -->
+            <Style x:Key="PaletteItemStyle" TargetType="ListBoxItem">
+                <Setter Property="Focusable" Value="False" />
+                <Setter Property="Cursor" Value="Hand" />
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="ListBoxItem">
+                            <Border x:Name="Bd" Background="Transparent" CornerRadius="7" Padding="10,7" Margin="0,1">
+                                <ContentPresenter />
+                            </Border>
+                            <ControlTemplate.Triggers>
+                                <Trigger Property="IsMouseOver" Value="True">
+                                    <Setter TargetName="Bd" Property="Background" Value="{StaticResource HoverBrush}" />
+                                </Trigger>
+                                <Trigger Property="IsSelected" Value="True">
+                                    <Setter TargetName="Bd" Property="Background" Value="{StaticResource AccentSoftBrush}" />
+                                </Trigger>
+                            </ControlTemplate.Triggers>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+            </Style>
+
             <conv:StepKindTemplateSelector x:Key="InspectorActionSelector"
                                            ScreenSearchTemplate="{StaticResource SearchActionBarTemplate}"
                                            FeedbackLoopTemplate="{StaticResource FeedbackActionBarTemplate}" />
@@ -239,6 +270,7 @@
         <KeyBinding Key="F5" Modifiers="Shift" Command="{Binding PlayFromSelectedCommand}" />
         <KeyBinding Key="F3" Command="{Binding NextMatchCommand}" />
         <KeyBinding Key="F3" Modifiers="Shift" Command="{Binding PreviousMatchCommand}" />
+        <KeyBinding Key="K" Modifiers="Control" Command="{Binding ToggleCommandPaletteCommand}" />
     </UserControl.InputBindings>
 
     <Grid>
@@ -771,12 +803,14 @@
                                                 <ColumnDefinition Width="*" />
                                             </Grid.ColumnDefinitions>
 
-                                            <!-- Indentation for steps inside If / Repeat blocks: 24 px per level with a guide line and depth accent bar. -->
+                                            <!-- Indentation for steps inside If / Repeat blocks: 18 px per level with faint guide lines, and an
+                                                 IDE-style 2.5 px guide rail in the innermost block's colour (amber = If / Else, violet = Repeat). -->
                                             <Grid Grid.Column="0" Margin="0,-6,0,0"
-                                                  Width="{Binding IndentLevel, Converter={StaticResource IndentLevel}, ConverterParameter=24}">
+                                                  Width="{Binding IndentLevel, Converter={StaticResource IndentLevel}, ConverterParameter=18}">
                                                 <Rectangle Fill="{StaticResource IndentGuideTile}" IsHitTestVisible="False" />
-                                                <Border Width="2.5" HorizontalAlignment="Right" Margin="0,2,5,2" CornerRadius="1"
-                                                        Background="{Binding BlockAccentBrush}" Opacity="0.65" IsHitTestVisible="False" />
+                                                <Border x:Name="BlockRail" Width="2.5" HorizontalAlignment="Right" Margin="0,0,5,0" CornerRadius="1.25"
+                                                        Background="{Binding BlockRailBrush}" Opacity="0.65" IsHitTestVisible="False"
+                                                        Visibility="{Binding IsInsideBlock, Converter={StaticResource BoolToVisibility}}" />
                                             </Grid>
 
                                             <Border x:Name="Card" Grid.Column="1" Background="{StaticResource StepCardBrush}"
@@ -863,6 +897,23 @@
                                                             <TextBlock Text="&#xE7BA;" Style="{StaticResource IconText}" Foreground="{StaticResource WarningBrush}"
                                                                        ToolTip="{Binding IssueText}" Visibility="{Binding HasWarning, Converter={StaticResource BoolToVisibility}}" />
                                                         </Grid>
+                                                    </Grid>
+
+                                                    <!-- Live step progress: a 2 px neon bar along the bottom edge while a long step (Delay, key hold,
+                                                         Find wait, feedback loop…) is playing; updated ~30 FPS by the automation layer. -->
+                                                    <Grid Grid.Column="0" Grid.ColumnSpan="2" Height="2" VerticalAlignment="Bottom" Margin="6,0,6,1"
+                                                          IsHitTestVisible="False"
+                                                          Visibility="{Binding ShowExecutionProgress, Converter={StaticResource BoolToVisibility}}">
+                                                        <Border Background="#1F22D3EE" CornerRadius="1" />
+                                                        <Border Background="{StaticResource NeonProgressBrush}" CornerRadius="1"
+                                                                RenderTransformOrigin="0,0.5">
+                                                            <Border.RenderTransform>
+                                                                <ScaleTransform ScaleX="{Binding ExecutionProgress}" ScaleY="1" />
+                                                            </Border.RenderTransform>
+                                                            <Border.Effect>
+                                                                <DropShadowEffect Color="#22D3EE" BlurRadius="6" ShadowDepth="0" Opacity="0.8" />
+                                                            </Border.Effect>
+                                                        </Border>
                                                     </Grid>
                                                 </Grid>
                                             </Border>
@@ -1062,6 +1113,19 @@
                         <Grid Grid.Column="2" Margin="12,0,8,0" VerticalAlignment="Center"
                               DataContext="{Binding DataContext, RelativeSource={RelativeSource AncestorType=Window}}">
                             <StackPanel Orientation="Horizontal" Visibility="{Binding Automation.IsIdle, Converter={StaticResource BoolToVisibility}}">
+                                <!-- Post-run telemetry pill: "✓ 3 runs in 8.4s · 24 steps · 6 vision locks (avg 0.8ms)" (✕ dismisses it). -->
+                                <Border CornerRadius="10" Padding="9,2,4,2" Margin="0,0,10,0" VerticalAlignment="Center"
+                                        Background="{StaticResource VisionSoftBrush}" BorderBrush="{StaticResource VisionAccentBrush}" BorderThickness="1"
+                                        Visibility="{Binding Automation.HasLastRunSummary, Converter={StaticResource BoolToVisibility}}"
+                                        ToolTip="What the last playback did: runs, time (paused time not counted), steps, and how many targets vision locked onto with their average look time.">
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock Text="{Binding Automation.LastRunSummaryText}" FontSize="11" FontWeight="SemiBold" VerticalAlignment="Center"
+                                                   Foreground="{StaticResource TextBrush}" />
+                                        <Button Style="{StaticResource IconButton}" Content="✕" FontSize="9" Width="18" Height="18" Padding="0" Margin="6,0,0,0"
+                                                Command="{Binding Automation.DismissRunSummaryCommand}" Focusable="False"
+                                                ToolTip="Hide this summary" AutomationProperties.Name="Dismiss run summary" />
+                                    </StackPanel>
+                                </Border>
                                 <TextBlock Text="{Binding Logs.Entries[0].Level, Converter={StaticResource LevelToGlyph}, FallbackValue=''}" Style="{StaticResource IconText}"
                                            FontSize="11" Foreground="{Binding Logs.Entries[0].Level, Converter={StaticResource LevelToBrush}, FallbackValue={StaticResource MutedTextBrush}}" />
                                 <TextBlock Text="{Binding Logs.Entries[0].Message, FallbackValue=''}" FontSize="11" Margin="6,0,0,0"
@@ -1146,6 +1210,49 @@
                                 </ListBox>
                             </Grid>
                         </DockPanel>
+                    </Grid>
+                </DockPanel>
+            </Border>
+        </Grid>
+
+        <!-- ============ Ctrl+K Studio Command Palette ============ -->
+        <Grid Panel.ZIndex="100" Visibility="{Binding IsCommandPaletteOpen, Converter={StaticResource BoolToVisibility}}">
+            <!-- Dim the editor; a click outside the card closes the palette. -->
+            <Border Background="#990B0F17" MouseLeftButtonDown="PaletteBackdrop_MouseLeftButtonDown" />
+            <Border x:Name="PaletteCard" Width="560" MaxHeight="440" Margin="0,64,0,0" HorizontalAlignment="Center" VerticalAlignment="Top"
+                    Background="{StaticResource SurfaceBrush}" BorderBrush="{StaticResource InputBorderBrush}" BorderThickness="1" CornerRadius="12"
+                    Padding="10">
+                <Border.Effect>
+                    <DropShadowEffect Color="#000000" BlurRadius="28" ShadowDepth="6" Opacity="0.55" />
+                </Border.Effect>
+                <DockPanel>
+                    <Grid DockPanel.Dock="Top">
+                        <TextBlock Text="&#xE721;" Style="{StaticResource IconText}" FontSize="13" Foreground="{StaticResource MutedTextBrush}"
+                                   VerticalAlignment="Center" Margin="10,0,0,0" IsHitTestVisible="False" />
+                        <TextBox x:Name="PaletteBox" Text="{Binding PaletteQuery, UpdateSourceTrigger=PropertyChanged}" FontSize="14"
+                                 Padding="32,8,8,8" Tag="Type a command or a step to add…  (↑ ↓ to choose, Enter to run, Esc to close)"
+                                 PreviewKeyDown="PaletteBox_PreviewKeyDown" AutomationProperties.Name="Command palette search" />
+                    </Grid>
+                    <TextBlock DockPanel.Dock="Bottom" Margin="4,8,0,0" FontSize="10.5" Foreground="{StaticResource SubtleTextBrush}"
+                               Text="Ctrl+K  open / close   ·   ↑ ↓  choose   ·   Enter  run   ·   Esc  close" />
+                    <Grid Margin="0,8,0,0">
+                        <TextBlock Text="No commands match." Style="{StaticResource MutedText}" Margin="8,6,0,6"
+                                   Visibility="{Binding HasNoPaletteResults, Converter={StaticResource BoolToVisibility}}" />
+                        <ListBox x:Name="PaletteList" ItemsSource="{Binding PaletteItems}" SelectedIndex="{Binding SelectedPaletteIndex, Mode=TwoWay}"
+                                 ItemContainerStyle="{StaticResource PaletteItemStyle}" Background="Transparent" BorderThickness="0"
+                                 ScrollViewer.HorizontalScrollBarVisibility="Disabled" Focusable="False"
+                                 PreviewMouseLeftButtonUp="PaletteList_PreviewMouseLeftButtonUp"
+                                 AutomationProperties.Name="Command palette results">
+                            <ListBox.ItemTemplate>
+                                <DataTemplate>
+                                    <DockPanel>
+                                        <TextBlock DockPanel.Dock="Right" Text="{Binding Shortcut}" FontSize="11" Foreground="{StaticResource SubtleTextBrush}"
+                                                   VerticalAlignment="Center" Margin="12,0,0,0" />
+                                        <TextBlock Text="{Binding Title}" FontSize="13" Foreground="{StaticResource TextBrush}" TextTrimming="CharacterEllipsis" />
+                                    </DockPanel>
+                                </DataTemplate>
+                            </ListBox.ItemTemplate>
+                        </ListBox>
                     </Grid>
                 </DockPanel>
             </Border>

@@ -256,12 +256,66 @@ public abstract class StepViewModel : ObservableObject
         get => _indentLevel;
         set
         {
-            if (SetProperty(ref _indentLevel, value)) OnPropertyChanged(nameof(IndentMargin));
+            if (!SetProperty(ref _indentLevel, value)) return;
+            OnPropertyChanged(nameof(IndentMargin));
+            OnPropertyChanged(nameof(IsInsideBlock));
         }
     }
 
+    /// <summary>Pixels of indentation per block level (the step list's indent gutter uses the same value).</summary>
+    public const double IndentPerLevel = 18;
+
     /// <summary>Left indentation of the row in the step list.</summary>
-    public System.Windows.Thickness IndentMargin => new(_indentLevel * 22, 0, 0, 0);
+    public System.Windows.Thickness IndentMargin => new(_indentLevel * IndentPerLevel, 0, 0, 0);
+
+    // ---------------- AAA Studio UI: block guide rails + live step progress ----------------
+
+    private static readonly System.Windows.Media.Brush IfRailBrush = CreateFrozenBrush(0xF5, 0x9E, 0x0B);     // amber
+    private static readonly System.Windows.Media.Brush RepeatRailBrush = CreateFrozenBrush(0x8B, 0x5C, 0xF6); // violet
+
+    private Core.Workflow.BlockRailKind _railKind;
+    private double _executionProgress;
+    private bool _showExecutionProgress;
+
+    /// <summary>True when the step sits inside an If / Repeat block (its card gets the coloured vertical guide rail).</summary>
+    public bool IsInsideBlock => _indentLevel > 0;
+
+    /// <summary>The innermost block the step is inside (set by the editor from <see cref="Core.Workflow.StepListView.EnclosingBlockKinds"/>).</summary>
+    public Core.Workflow.BlockRailKind BlockRailKind
+    {
+        get => _railKind;
+        internal set
+        {
+            if (!SetProperty(ref _railKind, value)) return;
+            OnPropertyChanged(nameof(BlockRailColorHex));
+            OnPropertyChanged(nameof(BlockRailBrush));
+        }
+    }
+
+    /// <summary>"#F59E0B" (amber) inside an If / Else, "#8B5CF6" (violet) inside a Repeat, empty at the top level.</summary>
+    public string BlockRailColorHex => Core.Workflow.StepListView.RailColorHex(_railKind);
+
+    /// <summary>The rail colour as a frozen brush (what the 2.5 px guide rail draws with).</summary>
+    public System.Windows.Media.Brush? BlockRailBrush => _railKind switch
+    {
+        Core.Workflow.BlockRailKind.If => IfRailBrush,
+        Core.Workflow.BlockRailKind.Repeat => RepeatRailBrush,
+        _ => null,
+    };
+
+    /// <summary>0..1: how far the step that is playing right now is (Delay, key hold, Find wait, feedback loop…).</summary>
+    public double ExecutionProgress
+    {
+        get => _executionProgress;
+        internal set => SetProperty(ref _executionProgress, Math.Clamp(double.IsFinite(value) ? value : 0, 0, 1));
+    }
+
+    /// <summary>True while this step plays and takes long enough (over 200 ms) for its 2 px progress bar to be shown.</summary>
+    public bool ShowExecutionProgress
+    {
+        get => _showExecutionProgress;
+        internal set => SetProperty(ref _showExecutionProgress, value);
+    }
 
     /// <summary>True for If / Else / End If / Repeat / End Repeat.</summary>
     public bool IsBlockStep => WorkflowSteps.IsBlockStep(Model);

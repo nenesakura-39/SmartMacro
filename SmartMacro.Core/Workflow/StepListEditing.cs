@@ -127,6 +127,89 @@ public static class StepListEditing
     }
 
     /// <summary>
+    /// Move up / down / to top / to bottom with folded blocks (Alt+↑ / Alt+↓ in the editor). What the user sees is what
+    /// moves, and where it lands:
+    /// - A folded (collapsed) If / Repeat in the range is ONE row on screen, so its whole block (If … Else … End If,
+    ///   Repeat … End Repeat, every hidden step inside) moves as a single unit. Moving only the header would tear it
+    ///   away from its hidden steps and its End.
+    /// - Moving up / down over a folded block jumps past the WHOLE folded block (header to End) in one press, instead of
+    ///   dropping the moved steps inside a block you can't see.
+    /// Blocks that aren't folded behave exactly like <see cref="PlanMove(IReadOnlyList{MacroStep}, int, int, MoveDirection)"/>
+    /// (one place at a time, so a block can still be made bigger or smaller). The usual block-safety check still applies.
+    /// </summary>
+    public static MovePlan PlanMove(IReadOnlyList<MacroStep> steps, int first, int last, MoveDirection direction,
+        IReadOnlySet<Guid>? collapsed)
+    {
+        ArgumentNullException.ThrowIfNull(steps);
+        if (collapsed is null || collapsed.Count == 0) return PlanMove(steps, first, last, direction);
+        if (!IsRange(steps, first, last)) return MovePlan.Nothing(Math.Max(0, first), Math.Max(0, last));
+
+        var (start, end, grew) = GrowToCollapsedBlocks(steps, first, last, collapsed);
+        if (direction is MoveDirection.ToTop or MoveDirection.ToBottom)
+        {
+            var plan = PlanMove(steps, start, end, direction);
+            return grew && plan.Allowed ? plan with { TookWholeBlocks = true } : plan;
+        }
+
+        var fold = StepListView.Collapse(steps, collapsed);
+        var count = end - start + 1;
+        int newFirst;
+        if (direction == MoveDirection.Up)
+        {
+            var above = start - 1;
+            if (above < 0) return MovePlan.Nothing(start, end);
+
+            // The row above is the hidden End of a folded block: jump above that block's (visible) header.
+            while (above > 0 && fold.Hidden[above]) above--;
+            newFirst = above;
+        }
+        else
+        {
+            var below = end + 1;
+            if (below >= steps.Count) return MovePlan.Nothing(start, end);
+
+            // The row below is a folded header: the whole folded block (header + everything it hides) is one row.
+            var rowEnd = below;
+            while (rowEnd + 1 < steps.Count && fold.Hidden[rowEnd + 1]) rowEnd++;
+            newFirst = rowEnd - count + 1;
+        }
+
+        return Check(steps, start, end, newFirst, grew);
+    }
+
+    /// <summary>
+    /// Grows first..last so every FOLDED If / Repeat in it brings its whole block along (header through End, nested
+    /// blocks included). Unfolded blocks are left as they are. Only with matching blocks.
+    /// </summary>
+    public static (int First, int Last, bool Grew) GrowToCollapsedBlocks(IReadOnlyList<MacroStep> steps, int first, int last,
+        IReadOnlySet<Guid> collapsed)
+    {
+        ArgumentNullException.ThrowIfNull(steps);
+        ArgumentNullException.ThrowIfNull(collapsed);
+        if (!IsRange(steps, first, last) || collapsed.Count == 0) return (first, last, false);
+        var blocks = BlockStructure.Analyze(steps);
+        if (!blocks.IsValid) return (first, last, false);
+
+        int start = first, end = last;
+        for (var i = start; i <= end; i++) // end can grow while looping: nested folded blocks are covered too
+        {
+            if (steps[i] is not (IfStep or RepeatStep) || !collapsed.Contains(steps[i].Id)) continue;
+            var blockEnd = blocks.EndOf(i);
+            if (blockEnd > end) end = blockEnd;
+        }
+
+        // A folded block's header pulls in its block; if that block now overlaps a partly selected outer block, take
+        // the outer block whole too (the normal rule), so the moved range always holds complete blocks.
+        if (end != last)
+        {
+            var (s2, e2, _) = GrowToWholeBlocks(steps, start, end);
+            (start, end) = (s2, e2);
+        }
+
+        return (start, end, start != first || end != last);
+    }
+
+    /// <summary>
     /// Plans a drag-and-drop: the range first..last is dropped in front of the step that is at
     /// <paramref name="dropIndex"/> now (<c>steps.Count</c> = after the last step).
     /// </summary>
@@ -232,6 +315,43 @@ public static class StepListEditing
         }
 
         return new DeletePlan(remove.ToList(), added, note);
+    }
+
+    /// <summary>
+    /// Delete with folded blocks: a selected FOLDED If / Repeat is one row on screen, so deleting it deletes the whole
+    /// block with every hidden step inside (Ctrl+Z brings it back). Everything else follows
+    /// <see cref="PlanDelete(IReadOnlyList{MacroStep}, IEnumerable{int})"/> (an unfolded If loses only its markers).
+    /// </summary>
+    public static DeletePlan PlanDelete(IReadOnlyList<MacroStep> steps, IEnumerable<int> selected, IReadOnlySet<Guid>? collapsed)
+    {
+        ArgumentNullException.ThrowIfNull(steps);
+        ArgumentNullException.ThrowIfNull(selected);
+        var picked = selected.Where(i => i >= 0 && i < steps.Count).Distinct().ToList();
+        if (collapsed is null || collapsed.Count == 0) return PlanDelete(steps, picked);
+
+        var blocks = BlockStructure.Analyze(steps);
+        if (!blocks.IsValid) return PlanDelete(steps, picked);
+
+        var whole = new SortedSet<int>();
+        var foldedBlocks = 0;
+        foreach (var index in picked)
+        {
+            if (steps[index] is not (IfStep or RepeatStep) || !collapsed.Contains(steps[index].Id)) continue;
+            var end = blocks.EndOf(index);
+            if (end <= index) continue;
+            foldedBlocks++;
+            for (var i = index; i <= end; i++) whole.Add(i);
+        }
+
+        if (foldedBlocks == 0) return PlanDelete(steps, picked);
+
+        var rest = PlanDelete(steps, picked.Where(i => !whole.Contains(i)));
+        foreach (var i in rest.Indexes) whole.Add(i);
+        var hiddenSteps = whole.Count(i => !WorkflowSteps.IsBlockStep(steps[i]));
+        var note = (foldedBlocks == 1 ? "Deleted the folded block" : $"Deleted {foldedBlocks} folded blocks") +
+                   $" with {hiddenSteps} step{(hiddenSteps == 1 ? "" : "s")} inside. Ctrl+Z brings {(foldedBlocks == 1 ? "it" : "them")} back.";
+        if (rest.Note is not null) note += " " + rest.Note;
+        return new DeletePlan(whole.ToList(), rest.AddedMarkers, note);
     }
 
     /// <summary>

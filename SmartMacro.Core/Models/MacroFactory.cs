@@ -46,8 +46,24 @@ public static class MacroFactory
         copy.CreatedAt = now;
         copy.ModifiedAt = now;
         foreach (var step in copy.Steps)
-            step.Id = Guid.NewGuid();
+            RenewIds(step);
         return copy;
+    }
+
+    /// <summary>
+    /// Gives a step a brand-new ID, and also every search step nested inside it (the Find image / colour / text "Check"
+    /// of an If / Repeat condition and of a Feedback loop's Done / Failed conditions). Those nested searches have IDs of
+    /// their own, and the playback engine's Hot-Spot memory remembers "where did this search find its picture" by that
+    /// ID: a copied If that kept its condition's ID would share (and overwrite) the original If's remembered spot.
+    /// </summary>
+    public static void RenewIds(MacroStep step)
+    {
+        ArgumentNullException.ThrowIfNull(step);
+        step.Id = Guid.NewGuid();
+        foreach (var condition in WorkflowSteps.ConditionsOf(step))
+        {
+            if (condition.Check is { } check) check.Id = Guid.NewGuid();
+        }
     }
 
     /// <summary>
@@ -103,11 +119,11 @@ public static class MacroFactory
         return step;
     }
 
-    /// <summary>Copy of a step with a fresh ID.</summary>
+    /// <summary>Copy of a step with a fresh ID (its nested condition searches get fresh IDs too, see <see cref="RenewIds"/>).</summary>
     public static MacroStep DuplicateStep(MacroStep step)
     {
         var copy = MacroJson.CloneStep(step);
-        copy.Id = Guid.NewGuid();
+        RenewIds(copy);
         return copy;
     }
 

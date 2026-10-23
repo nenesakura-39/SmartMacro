@@ -199,6 +199,12 @@ public sealed class ScreenProbes
                     var hit = spot is null ? null : FindNearLastSpot(spot, last, template, hotOptions, t);
                     searchTime += _clock.Elapsed - s0;
 
+                    // Coordinate guard: FindNearLastSpot already returns GLOBAL virtual-screen pixels (the spot frame's
+                    // Bounds are where the capture was taken, translated exactly once). A hit that isn't inside the
+                    // area we asked for can only be a translation mistake (e.g. a capture that reports (0, 0) as its
+                    // origin): never click there – fall back to the normal full search instead.
+                    if (hit is not null && !Contains(spotArea, hit.Bounds)) hit = null;
+
                     if (hit is not null)
                     {
                         timer?.Add(captureTime, searchTime);
@@ -256,6 +262,10 @@ public sealed class ScreenProbes
     /// </summary>
     public static ScreenRect HotSpotArea(ScreenRect lastMatch, ScreenRect searchArea) =>
         Grow(lastMatch, HotSpotMarginPx).Intersect(searchArea);
+
+    /// <summary>True when <paramref name="inner"/> lies completely inside <paramref name="outer"/>.</summary>
+    internal static bool Contains(ScreenRect outer, ScreenRect inner) =>
+        !inner.IsEmpty && inner.X >= outer.X && inner.Y >= outer.Y && inner.Right <= outer.Right && inner.Bottom <= outer.Bottom;
 
     private static ScreenRect Grow(ScreenRect r, int by) => new(r.X - by, r.Y - by, r.Width + 2 * by, r.Height + 2 * by);
 

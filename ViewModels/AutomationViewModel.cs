@@ -100,6 +100,12 @@ public sealed class AutomationViewModel : ObservableObject, IDisposable
 
     // Bumped (playback thread) whenever there is something new to show; a UI tick with nothing new does no work.
     private int _progressVersion;
+
+    // Ghost-highlight guard: bumped on every Play and every Stop. A throttled UI update (timer tick, state change, target
+    // lock) only draws when it still belongs to the session that is playing NOW, so a callback queued just before Stop
+    // or the end of playback can never re-highlight a step, flip the mode back or overwrite the final status.
+    private long _playbackSessionId;
+    private long _activeSessionId = -1;
     private int _renderedVersion = -1;
     private long _renderedSecond = -1;
     private AutomationMode _renderedMode = AutomationMode.Idle;
@@ -147,6 +153,59 @@ public sealed class AutomationViewModel : ObservableObject, IDisposable
         PlayCommand = new AsyncRelayCommand(PlayAsync, HandleError, () => Mode == AutomationMode.Idle);
         PauseResumeCommand = new RelayCommand(TogglePause, () => Mode is AutomationMode.Playing or AutomationMode.Paused);
         StopCommand = new RelayCommand(StopPlayback, () => Mode is AutomationMode.Playing or AutomationMode.Paused);
+        DismissRunSummaryCommand = new RelayCommand(() => LastRunSummaryText = string.Empty, () => HasLastRunSummary);
+    }
+
+    // ---------------- Post-run telemetry pill ----------------
+
+    private string _lastRunSummaryText = string.Empty;
+
+    /// <summary>
+    /// What the last playback did, e.g. "✓ 3 runs in 8.4s · 24 steps · 6 vision locks (avg 0.8ms)" (from the engine's
+    /// <see cref="PlaybackSessionStats"/>); empty while playing, before the first run and after ✕.
+    /// </summary>
+    public string LastRunSummaryText
+    {
+        get => _lastRunSummaryText;
+        private set
+        {
+            if (SetProperty(ref _lastRunSummaryText, value ?? string.Empty)) OnPropertyChanged(nameof(HasLastRunSummary));
+        }
+    }
+
+    /// <summary>True while the summary pill has something to show.</summary>
+    public bool HasLastRunSummary => _lastRunSummaryText.Length > 0;
+
+    /// <summary>The pill's ✕.</summary>
+    public RelayCommand DismissRunSummaryCommand { get; }
+
+    // Live step progress bar: what was sent last (so a 30 FPS tick only raises the event when something changed).
+    private Guid _sentProgressStep;
+    private double _sentProgress = -1;
+    private bool _sentProgressShown;
+
+    private void PushStepProgress(StepProgress? progress)
+    {
+        if (progress is { ShowBar: true } p)
+        {
+            if (_sentProgressShown && p.StepId == _sentProgressStep && Math.Abs(p.Fraction - _sentProgress) < 0.002) return;
+            _sentProgressShown = true;
+            _sentProgressStep = p.StepId;
+            _sentProgress = p.Fraction;
+            RunningStepProgressChanged?.Invoke(this, p);
+            return;
+        }
+
+        HideStepProgress();
+    }
+
+    private void HideStepProgress()
+    {
+        if (!_sentProgressShown) return;
+        _sentProgressShown = false;
+        _sentProgress = -1;
+        _sentProgressStep = Guid.Empty;
+        RunningStepProgressChanged?.Invoke(this, default);
     }
 
     /// <summary>
@@ -154,6 +213,12 @@ public sealed class AutomationViewModel : ObservableObject, IDisposable
     /// editor can highlight the running step.
     /// </summary>
     public event EventHandler<Guid?>? RunningStepChanged;
+
+    /// <summary>
+    /// Raised on the UI thread (~30 FPS, only when it changed) with the live progress of the playing step, for the 2 px
+    /// bar on its card; <see cref="StepProgress.ShowBar"/> false hides the bar (short steps, step finished, stopped).
+    /// </summary>
+    public event EventHandler<StepProgress>? RunningStepProgressChanged;
 
     public AsyncRelayCommand RecordCommand { get; }
     public AsyncRelayCommand StopRecordingCommand { get; }
@@ -658,7 +723,7 @@ public sealed class AutomationViewModel : ObservableObject, IDisposable
         }
 
         var checkedMacro = macro;
-        int rangeStart = 0, rangeEnd = macro.Steps.Count;
+        IReadOnlyList<ValidationIssue> issues;
         if (range is not null)
         {
             if (range.StepIndex < 0 || range.StepIndex >= macro.Steps.Count)
@@ -667,16 +732,24 @@ public sealed class AutomationViewModel : ObservableObject, IDisposable
                 return;
             }
 
-            var (start, end) = range.SingleStep
-                ? PlaybackRanges.SingleStep(macro.Steps, range.StepIndex)
-                : (PlaybackRanges.FromStep(macro.Steps, range.StepIndex), macro.Steps.Count);
-            (rangeStart, rangeEnd) = (start, end);
-            checkedMacro = new Macro { Name = macro.Name, Steps = macro.Steps.GetRange(start, end - start) };
+            if (range.SingleStep)
+            {
+                var (start, end) = PlaybackRanges.SingleStep(macro.Steps, range.StepIndex);
+                checkedMacro = macro.CopyWithSteps(macro.Steps.GetRange(start, end - start));
+                issues = PlaybackRanges.ValidateRange(macro, start, end);
+            }
+            else
+            {
+                // "Play from here" (Shift+F5) plays a block-safe slice: Else parts / End markers of blocks that started
+                // above the selected step are left out, so the played list is always a valid workflow.
+                checkedMacro = PlaybackRanges.BuildPlayFromHereMacro(macro, range.StepIndex).Macro;
+                issues = PlaybackRanges.ValidatePlayFromHere(macro, range.StepIndex);
+            }
         }
-
-        var issues = range is null
-            ? MacroValidator.ValidateForExecution(macro)
-            : PlaybackRanges.ValidateRange(macro, rangeStart, rangeEnd);
+        else
+        {
+            issues = MacroValidator.ValidateForExecution(macro);
+        }
         if (issues.HasErrors())
         {
             var list = string.Join("\n", issues.Where(i => i.Severity == IssueSeverity.Error).Take(8).Select(i => "• " + i.DisplayText));
@@ -693,6 +766,9 @@ public sealed class AutomationViewModel : ObservableObject, IDisposable
             return;
         }
 
+        _activeSessionId = Interlocked.Increment(ref _playbackSessionId);
+        _pendingTarget = null;
+        LastRunSummaryText = string.Empty;
         _runningMacroName = range is null ? macro.Name
             : range.SingleStep ? $"{macro.Name}, step {range.StepIndex + 1}" : $"{macro.Name} from step {range.StepIndex + 1}";
         _runningMacroId = macro.Id;
@@ -763,10 +839,16 @@ public sealed class AutomationViewModel : ObservableObject, IDisposable
         }
         finally
         {
+            // Playback is over: no queued ~30 FPS update of this session may draw any more.
+            Interlocked.Increment(ref _playbackSessionId);
+            _activeSessionId = -1;
+            _pendingTarget = null;
             _progressTimer.Stop();
             _emergency.Stop();
             _host.Exit();
+            HideStepProgress();
             SetRunningStep(null);
+            LastRunSummaryText = result?.Stats?.SummaryText ?? string.Empty;
             Mode = AutomationMode.Idle;
             ProgressValue = 0;
             ProgressText = string.Empty;
@@ -855,20 +937,37 @@ public sealed class AutomationViewModel : ObservableObject, IDisposable
     private void OnTargetDetected(object? sender, TargetDetection target)
     {
         if (!_hooks.Settings().ShowRunOverlay) return;
+        var session = Interlocked.Read(ref _playbackSessionId);
         if (Interlocked.Exchange(ref _pendingTarget, target) is not null) return; // a draw is already queued; it takes this one
         _dispatcher.InvokeAsync(() =>
         {
             var latest = Interlocked.Exchange(ref _pendingTarget, null);
-            if (latest is not null && IsPlaying) _host.ShowTargetLock(latest);
+            if (latest is not null && IsCurrentSession(session)) _host.ShowTargetLock(latest);
         });
     }
 
     private void StopPlayback()
     {
         if (!IsPlaying) return;
+
+        // From now on nothing queued by the throttled UI updates may draw (no "ghost" highlight after Stop): new session
+        // number, the pending tick is cancelled and the running-step highlight goes away right now.
+        Interlocked.Increment(ref _playbackSessionId);
+        _progressTimer.Stop();
+        _pendingTarget = null;
+        HideStepProgress();
+        SetRunningStep(null);
+
         if (Mode != AutomationMode.Stopping) Mode = AutomationMode.Stopping;
         _engine.Stop();
     }
+
+    /// <summary>
+    /// True when a UI update captured in session <paramref name="session"/> may still draw: something is playing and it
+    /// is still that same session (no Stop / end of playback / new Play since).
+    /// </summary>
+    private bool IsCurrentSession(long session) =>
+        IsPlaying && session == _activeSessionId && session == Interlocked.Read(ref _playbackSessionId);
 
     private void OnEmergencyStop(object? sender, EventArgs e)
     {
@@ -903,9 +1002,11 @@ public sealed class AutomationViewModel : ObservableObject, IDisposable
     // Pause / resume / stopping: shown at once (forced refresh), not at the next ~30 FPS tick.
     private void OnEngineStateChanged(object? sender, PlaybackState state)
     {
+        var session = Interlocked.Read(ref _playbackSessionId);
         _dispatcher.InvokeAsync(() =>
         {
             if (Mode is AutomationMode.Idle or AutomationMode.Recording) return;
+            if (!IsCurrentSession(session)) return; // queued before Stop / the end of playback: stale
             switch (state)
             {
                 case PlaybackState.Running:
@@ -946,6 +1047,13 @@ public sealed class AutomationViewModel : ObservableObject, IDisposable
         }
 
         if (!IsPlaying) return;
+
+        // A tick that was already queued when Stop was pressed (or playback ended) must not draw a ghost highlight.
+        if (!IsCurrentSession(_activeSessionId)) return;
+
+        // Live 2 px progress bar of the playing step: moves every tick while a long step (Delay, hold, Find wait,
+        // feedback loop…) runs, even when nothing else changed.
+        PushStepProgress(_engine.GetCurrentStepProgress());
 
         var version = Volatile.Read(ref _progressVersion);
         var second = (long)PlayingElapsed.TotalSeconds;
@@ -1009,8 +1117,12 @@ public sealed class AutomationViewModel : ObservableObject, IDisposable
     {
         if (_runningStepId == id) return;
         _runningStepId = id;
+        OnPropertyChanged(nameof(CurrentPlayingStepId));
         RunningStepChanged?.Invoke(this, id);
     }
+
+    /// <summary>The step that is highlighted as playing right now (null when nothing plays, also right after Stop).</summary>
+    public Guid? CurrentPlayingStepId => _runningStepId;
 
     /// <summary>
     /// The floating status pill's text, e.g. "SmartMacro: Step 2/5 — Finding image \"SHAKE\" on the main monitor… (Esc to stop)".

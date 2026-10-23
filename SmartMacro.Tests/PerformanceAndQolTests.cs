@@ -2,6 +2,7 @@ using SmartMacro.Core.Models;
 using SmartMacro.Core.Ocr;
 using SmartMacro.Core.Playback;
 using SmartMacro.Core.Storage;
+using SmartMacro.Core.Validation;
 using SmartMacro.Core.Vision;
 using SmartMacro.Core.Workflow;
 
@@ -592,8 +593,8 @@ public class PlayFromHereTests
     [InlineData(0, 0)]  // a normal step: right there
     [InlineData(2, 2)]  // inside an If: right there
     [InlineData(3, 4)]  // an Else: its "otherwise" part
-    [InlineData(7, 6)]  // inside a Repeat: the Repeat, so the loop stays whole
-    [InlineData(8, 6)]  // an End Repeat: its Repeat
+    [InlineData(7, 7)]  // inside a Repeat: right there (the rest of the loop body plays once; its End Repeat is left out)
+    [InlineData(8, 9)]  // an End Repeat whose Repeat is above: left out, so the slice starts after it
     [InlineData(9, 9)]
     public void Builds_the_slice_from_the_selected_step_to_the_end(int selected, int expectedStart)
     {
@@ -618,15 +619,17 @@ public class PlayFromHereTests
     }
 
     [Fact]
-    public async Task Playing_from_inside_a_loop_starts_the_loop_from_its_Repeat()
+    public async Task Playing_from_inside_a_loop_plays_the_rest_of_the_body_once_and_continues()
     {
+        // Fix 1 of the 6de423b audit: "Play from here" plays a block-safe slice from the selected step; the End Repeat
+        // whose Repeat is above the start is left out (a single, predictable pass instead of re-entering the loop).
         var input = new FakeInput();
         var engine = new PlaybackEngine(input, new FakeClock(), capture: new FakeCapture(Flow.Screen(green: false)));
 
         var result = await engine.PlayFromStepAsync(Workflow(), 7);
 
         Assert.Equal(PlaybackOutcome.Completed, result.Outcome);
-        Assert.Equal(new[] { "move 5,0", "move 5,0", "move 6,0" }, input.Calls);
+        Assert.Equal(new[] { "move 5,0", "move 6,0" }, input.Calls);
     }
 
     [Fact]
@@ -756,5 +759,553 @@ public class StepListViewTests
         Assert.Equal("", StepListView.MatchPosition(-1, 3));
         Assert.Equal("[1 step hidden]", StepListView.HiddenBadge(1));
         Assert.Equal("[empty]", StepListView.HiddenBadge(0));
+    }
+}
+
+// ---------------- Audit of 6de423b: Fixes 1, 2 and 4 ----------------
+
+public class PlayFromHereSliceTests
+{
+    // 0 Move 1 | 1 If A | 2 Move 2 | 3 Move 3 | 4 Else | 5 Move 4 | 6 End If | 7 Move 5
+    private static List<MacroStep> IfElse() => new()
+    {
+        Flow.Move(1), Flow.If(Flow.Text("A")), Flow.Move(2), Flow.Move(3), new ElseStep(), Flow.Move(4), new EndIfStep(), Flow.Move(5),
+    };
+
+    // 0 Repeat ×3 | 1 If A | 2 Move 1 | 3 If B | 4 Move 2 | 5 End If B | 6 Else (A) | 7 Move 3 | 8 End If A | 9 Move 4
+    // | 10 End Repeat | 11 Move 5
+    private static List<MacroStep> Nested() => new()
+    {
+        Flow.Times(3), Flow.If(Flow.Text("A")), Flow.Move(1), Flow.If(Flow.Text("B")), Flow.Move(2), new EndIfStep(),
+        new ElseStep(), Flow.Move(3), new EndIfStep(), Flow.Move(4), new EndRepeatStep(), Flow.Move(5),
+    };
+
+    private static void AssertValid(IReadOnlyList<MacroStep> steps)
+    {
+        var blocks = BlockStructure.Analyze(steps);
+        Assert.True(blocks.IsValid, string.Join("; ", blocks.Problems.Select(p => $"{p.StepIndex}: {p.Message}")));
+    }
+
+    [Fact]
+    public void Starting_inside_the_then_branch_strips_the_unmatched_Else_part_and_its_End_If()
+    {
+        var steps = IfElse();
+
+        var slice = PlaybackRanges.BuildPlayFromHereSlice(steps, 2);
+
+        Assert.Equal(new[] { 2, 3, 7 }, slice.SourceIndexes);
+        Assert.Equal(new[] { 2, 3, 5 }, slice.Steps.Select(s => ((MouseMoveStep)s).X));
+        Assert.Equal(2, slice.DroppedMarkers); // Else + End If
+        Assert.Equal(1, slice.DroppedSteps);   // Move 4 (the "otherwise" part)
+        AssertValid(slice.Steps);
+        Assert.Same(steps[2], slice.Steps[0]); // the same objects (same IDs for the running-step highlight)
+    }
+
+    [Fact]
+    public void Starting_right_before_the_Else_strips_the_Else_part()
+    {
+        var slice = PlaybackRanges.BuildPlayFromHereSlice(IfElse(), 3);
+
+        Assert.Equal(new[] { 3, 7 }, slice.SourceIndexes);
+        AssertValid(slice.Steps);
+    }
+
+    [Fact]
+    public void Starting_on_an_Else_plays_its_otherwise_part_and_drops_the_orphan_End_If()
+    {
+        var slice = PlaybackRanges.BuildPlayFromHereSlice(IfElse(), 4);
+
+        Assert.Equal(new[] { 5, 7 }, slice.SourceIndexes);
+        Assert.Equal(1, slice.DroppedMarkers);
+        AssertValid(slice.Steps);
+    }
+
+    [Theory]
+    [InlineData(2, new[] { 2, 3, 4, 5, 9, 11 })] // inside If A: inner If B stays whole, A's Else part + End If and the End Repeat go
+    [InlineData(4, new[] { 4, 9, 11 })]          // inside If B (inside If A inside the Repeat)
+    [InlineData(5, new[] { 9, 11 })]             // B's End If: orphan, left out
+    [InlineData(6, new[] { 7, 9, 11 })]          // A's Else: its otherwise part
+    [InlineData(9, new[] { 9, 11 })]             // last step of the loop body
+    [InlineData(10, new[] { 11 })]               // the End Repeat itself
+    [InlineData(0, new[] { 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11 })] // the Repeat: everything, unchanged
+    public void Nested_blocks_always_give_a_valid_slice(int start, int[] expected)
+    {
+        var slice = PlaybackRanges.BuildPlayFromHereSlice(Nested(), start);
+
+        Assert.Equal(expected, slice.SourceIndexes);
+        AssertValid(slice.Steps);
+    }
+
+    [Fact]
+    public void Every_start_in_every_list_gives_a_valid_block_structure()
+    {
+        var lists = new[]
+        {
+            IfElse(),
+            Nested(),
+            new List<MacroStep>
+            {
+                Flow.If(Flow.Text("A")), Flow.Times(2), Flow.If(Flow.Text("B")), Flow.Move(1), new ElseStep(), Flow.Times(2),
+                Flow.Move(2), new EndRepeatStep(), new EndIfStep(), new EndRepeatStep(), new ElseStep(), Flow.Move(3), new EndIfStep(),
+            },
+        };
+
+        foreach (var steps in lists)
+        {
+            AssertValid(steps);
+            for (var start = 0; start < steps.Count; start++)
+                AssertValid(PlaybackRanges.BuildPlayFromHereSlice(steps, start).Steps);
+        }
+    }
+
+    [Fact]
+    public async Task The_engine_plays_the_slice_once_from_deep_inside_nested_blocks()
+    {
+        var input = new FakeInput();
+        var engine = new PlaybackEngine(input, new FakeClock());
+        var macro = Flow.Macro(Nested().ToArray());
+        macro.RepeatCount = 5;
+        var progress = new List<(int Number, int Count)>();
+        engine.ProgressChanged += (_, p) => progress.Add((p.StepNumber, p.StepCount));
+
+        // Step 5 (inside If B inside If A inside Repeat ×3): no condition is checked (no OCR needed), no orphan marker.
+        var result = await engine.PlayFromStepAsync(macro, 4);
+
+        Assert.Equal(PlaybackOutcome.Completed, result.Outcome);
+        Assert.Equal(new[] { "move 2,0", "move 4,0", "move 5,0" }, input.Calls);
+        Assert.Equal(1, result.IterationsCompleted);
+        Assert.Equal(new[] { (5, 12), (10, 12), (12, 12) }, progress); // the macro's own step numbers
+    }
+
+    [Fact]
+    public void Validation_uses_the_macros_step_numbers_and_ignores_steps_that_wont_play()
+    {
+        var macro = Flow.Macro(IfElse().ToArray());
+        ((MouseMoveStep)macro.Steps[5]).X = 999_999; // in the "otherwise" part, which is skipped
+        macro.Steps.Add(new DelayStep { DurationMs = -5 }); // step 9: plays → its error counts
+
+        var issues = PlaybackRanges.ValidatePlayFromHere(macro, 2);
+
+        var error = Assert.Single(issues, i => i.Severity == IssueSeverity.Error);
+        Assert.Equal(8, error.StepIndex);
+    }
+
+    [Fact]
+    public void Broken_blocks_in_the_macro_are_still_refused()
+    {
+        var macro = Flow.Macro(Flow.Move(1), new EndIfStep(), Flow.Move(2));
+
+        var issues = PlaybackRanges.ValidatePlayFromHere(macro, 0);
+
+        Assert.Contains(issues, i => i.Severity == IssueSeverity.Error && i.Property == "Block");
+    }
+}
+
+public class UniqueIdAndHotSpotTests
+{
+    private static List<MacroStep> ImageIfBlock() => new()
+    {
+        Flow.Move(1), new IfStep { Condition = Aaa.ImageCondition(Turbo.Target) }, Aaa.FindImage(Turbo.Target), new EndIfStep(), Flow.Move(2),
+    };
+
+    private static IEnumerable<Guid> AllIds(IEnumerable<MacroStep> steps) =>
+        steps.SelectMany(s => new[] { s.Id }.Concat(WorkflowSteps.ConditionsOf(s).Where(c => c.Check is not null).Select(c => c.Check!.Id)));
+
+    [Fact]
+    public void Duplicating_an_If_block_gives_every_copy_and_its_condition_search_a_fresh_ID()
+    {
+        var steps = ImageIfBlock();
+        var plan = StepListEditing.PlanDuplicate(steps, 1, 1);
+
+        var after = StepListEditing.ApplyDuplicate(steps, plan);
+
+        Assert.Equal((1, 3, 4), (plan.First, plan.Last, plan.InsertAt));
+        var ids = AllIds(after).ToList();
+        Assert.Equal(ids.Count, ids.Distinct().Count()); // no step and no nested condition search shares an ID
+        var originalCheck = (FindImageStep)((IfStep)after[1]).Condition!.Check!;
+        var copiedCheck = (FindImageStep)((IfStep)after[4]).Condition!.Check!;
+        Assert.NotEqual(HotSpotMemory.KeyOf(originalCheck), HotSpotMemory.KeyOf(copiedCheck));
+        Assert.NotEqual(HotSpotMemory.KeyOf((FindImageStep)after[2]), HotSpotMemory.KeyOf((FindImageStep)after[5]));
+    }
+
+    [Fact]
+    public void Pasted_steps_and_their_condition_searches_get_fresh_IDs()
+    {
+        var steps = ImageIfBlock();
+        var text = StepClipboard.Serialize(steps.GetRange(1, 3));
+
+        Assert.True(StepClipboard.TryParse(text, out var pasted, out var error), error);
+
+        var before = AllIds(steps).ToHashSet();
+        Assert.All(AllIds(pasted), id => Assert.DoesNotContain(id, before));
+    }
+
+    [Fact]
+    public void A_recaptured_template_never_reuses_the_old_hot_spot()
+    {
+        var step = Turbo.FindTarget();
+        var oldKey = HotSpotMemory.KeyOf(step);
+
+        step.TemplateData = TemplateCodec.Encode(TestImages.Icon(32, 32, seed: 78)); // same size, new picture
+
+        Assert.NotEqual(oldKey, HotSpotMemory.KeyOf(step));
+        Assert.Equal(oldKey.StepId, HotSpotMemory.KeyOf(step).StepId);
+    }
+
+    [Fact]
+    public async Task Hot_spot_matches_are_global_virtual_screen_coordinates_on_a_monitor_left_of_the_main_one()
+    {
+        // Virtual screen starts at (-1920, -200): the target sits at (900, 500) inside the picture = (-1020, 300) on screen.
+        var capture = new OffsetCapture(Turbo.FullHdScreenWithTarget(900, 500), -1920, -200);
+        var probes = new ScreenProbes(null, capture, new FakeClock(), null, new HotSpotMemory());
+        var step = Turbo.FindTarget();
+
+        var first = await probes.ProbeImageAsync(step);
+        var second = await probes.ProbeImageAsync(step);
+
+        Assert.Equal(new ScreenRect(-1020, 300, 32, 32), first.Match);
+        Assert.True(second.FromHotSpot);
+        Assert.Equal(new ScreenRect(-1020, 300, 32, 32), second.Match); // translated exactly once
+        Assert.Equal((-1004, 316), (second.X, second.Y));
+        Assert.True(Turbo.IsHotSpotSized(capture.Regions[1]), $"captured {capture.Regions[1]}");
+    }
+
+    [Fact]
+    public async Task A_capture_that_reports_the_wrong_origin_can_never_produce_a_hot_spot_click()
+    {
+        // Simulates the double-offset bug: small captures claim to start at (0, 0). The guard throws such a "hit" away
+        // and the normal full search gives the right place.
+        var capture = new OffsetCapture(Turbo.FullHdScreenWithTarget(900, 500), 0, 0) { LieAboutSmallOrigins = true };
+        var probes = new ScreenProbes(null, capture, new FakeClock(), null, new HotSpotMemory());
+        var step = Turbo.FindTarget();
+        Assert.True((await probes.ProbeImageAsync(step)).Found);
+
+        var again = await probes.ProbeImageAsync(step);
+
+        Assert.True(again.Found, again.MissText);
+        Assert.False(again.FromHotSpot);
+        Assert.Equal(new ScreenRect(900, 500, 32, 32), again.Match);
+    }
+
+    /// <summary>A screen whose virtual-screen origin is (<c>left</c>, <c>top</c>), copying only the requested pixels.</summary>
+    private sealed class OffsetCapture : IScreenCapture
+    {
+        private readonly BgraImage _screen;
+        private readonly int _left;
+        private readonly int _top;
+
+        public OffsetCapture(BgraImage screen, int left, int top)
+        {
+            _screen = screen;
+            _left = left;
+            _top = top;
+        }
+
+        public bool LieAboutSmallOrigins { get; init; }
+        public List<ScreenRect> Regions { get; } = new();
+        public bool PrefersSmallCaptures => true;
+
+        public ScreenRect GetVirtualScreen() => new(_left, _top, _screen.Width, _screen.Height);
+
+        public Task<ScreenFrame> CaptureAsync(ScreenRect region, CancellationToken cancellationToken)
+        {
+            Regions.Add(region);
+            var area = region.Intersect(GetVirtualScreen());
+            if (area.IsEmpty) throw new ArgumentException("The search area is outside the screen.");
+            var pixels = _screen.Crop(new ScreenRect(area.X - _left, area.Y - _top, area.Width, area.Height));
+            var bounds = LieAboutSmallOrigins && area.Width < 200 ? new ScreenRect(0, 0, area.Width, area.Height) : area;
+            return Task.FromResult(new ScreenFrame(bounds, pixels));
+        }
+    }
+}
+
+public class CollapsedBlockMoveTests
+{
+    // 0 Move 1 | 1 If | 2 Move 2 | 3 Else | 4 Move 3 | 5 End If | 6 Move 4
+    private static List<MacroStep> Sample() => new()
+    {
+        Flow.Move(1), Flow.If(Flow.Text("OK")), Flow.Move(2), new ElseStep(), Flow.Move(3), new EndIfStep(), Flow.Move(4),
+    };
+
+    private static HashSet<Guid> Folded(params MacroStep[] steps) => steps.Select(s => s.Id).ToHashSet();
+
+    private static int[] Xs(IEnumerable<MacroStep> steps) => steps.OfType<MouseMoveStep>().Select(m => m.X).ToArray();
+
+    [Fact]
+    public void Moving_a_collapsed_If_down_moves_the_whole_If_Else_End_If_block()
+    {
+        var steps = Sample();
+
+        var plan = StepListEditing.PlanMove(steps, 1, 1, MoveDirection.Down, Folded(steps[1]));
+        var after = StepListEditing.Apply(steps, plan);
+
+        Assert.True(plan.Allowed, plan.Problem);
+        Assert.True(plan.TookWholeBlocks);
+        Assert.Equal((1, 5, 2), (plan.First, plan.Last, plan.NewFirst));
+        Assert.Equal(new[] { StepKind.MouseMove, StepKind.MouseMove, StepKind.If, StepKind.MouseMove, StepKind.Else, StepKind.MouseMove, StepKind.EndIf },
+            after.Select(s => s.Kind));
+        Assert.Equal(new[] { 1, 4, 2, 3 }, Xs(after));
+        Assert.True(BlockStructure.Analyze(after).IsValid);
+    }
+
+    [Fact]
+    public void Moving_a_collapsed_If_up_moves_the_whole_block()
+    {
+        var steps = Sample();
+
+        var plan = StepListEditing.PlanMove(steps, 1, 1, MoveDirection.Up, Folded(steps[1]));
+        var after = StepListEditing.Apply(steps, plan);
+
+        Assert.True(plan.Allowed, plan.Problem);
+        Assert.Equal(new[] { StepKind.If, StepKind.MouseMove, StepKind.Else, StepKind.MouseMove, StepKind.EndIf, StepKind.MouseMove, StepKind.MouseMove },
+            after.Select(s => s.Kind));
+        Assert.True(BlockStructure.Analyze(after).IsValid);
+    }
+
+    [Fact]
+    public void A_step_moving_up_jumps_over_a_collapsed_block_instead_of_landing_inside_it()
+    {
+        var steps = Sample();
+
+        var unfolded = StepListEditing.PlanMove(steps, 6, 6, MoveDirection.Up, new HashSet<Guid>());
+        var folded = StepListEditing.PlanMove(steps, 6, 6, MoveDirection.Up, Folded(steps[1]));
+
+        Assert.Equal(5, unfolded.NewFirst); // unfolded: one place up (into the visible block, as before)
+        Assert.True(folded.Allowed, folded.Problem);
+        Assert.Equal(1, folded.NewFirst);   // folded: above the whole block
+        var after = StepListEditing.Apply(steps, folded);
+        Assert.Equal(new[] { 1, 4, 2, 3 }, Xs(after));
+        Assert.True(BlockStructure.Analyze(after).IsValid);
+        Assert.Equal(-1, BlockStructure.Analyze(after).StartOf(1)); // not inside the If
+        Assert.Equal(0, BlockStructure.Analyze(after).Depth[1]);
+    }
+
+    [Fact]
+    public void A_step_moving_down_jumps_over_a_collapsed_block()
+    {
+        var steps = Sample();
+
+        var plan = StepListEditing.PlanMove(steps, 0, 0, MoveDirection.Down, Folded(steps[1]));
+        var after = StepListEditing.Apply(steps, plan);
+
+        Assert.Equal(5, plan.NewFirst);
+        Assert.Equal(new[] { 2, 3, 1, 4 }, Xs(after));
+        Assert.Equal(0, BlockStructure.Analyze(after).Depth[5]);
+    }
+
+    [Fact]
+    public void A_collapsed_block_jumps_over_another_collapsed_block_as_one_row()
+    {
+        var steps = new List<MacroStep>
+        {
+            Flow.Times(2), Flow.Move(1), new EndRepeatStep(),             // 0..2 (folded)
+            Flow.If(Flow.Text("A")), Flow.Move(2), new EndIfStep(),         // 3..5 (folded)
+            Flow.Move(3),
+        };
+
+        var plan = StepListEditing.PlanMove(steps, 3, 3, MoveDirection.Up, Folded(steps[0], steps[3]));
+        var after = StepListEditing.Apply(steps, plan);
+
+        Assert.True(plan.Allowed, plan.Problem);
+        Assert.Equal((3, 5, 0), (plan.First, plan.Last, plan.NewFirst));
+        Assert.Equal(new[] { StepKind.If, StepKind.MouseMove, StepKind.EndIf, StepKind.Repeat, StepKind.MouseMove, StepKind.EndRepeat, StepKind.MouseMove },
+            after.Select(s => s.Kind));
+    }
+
+    [Fact]
+    public void Deleting_a_collapsed_If_deletes_the_whole_folded_block()
+    {
+        var steps = Sample();
+
+        var folded = StepListEditing.PlanDelete(steps, new[] { 1 }, Folded(steps[1]));
+        var unfolded = StepListEditing.PlanDelete(steps, new[] { 1 }, new HashSet<Guid>());
+
+        Assert.Equal(new[] { 1, 2, 3, 4, 5 }, folded.Indexes);
+        Assert.Contains("folded block", folded.Note);
+        Assert.Equal(new[] { 1, 3, 5 }, unfolded.Indexes); // unfolded: only the markers, inner steps kept (as before)
+    }
+}
+
+// ---------------- AAA Studio UI Upgrades 1–3: guide rails, live step progress, Ctrl+K palette, run summary ----------------
+
+public class CommandPaletteTests
+{
+    private static string[] Titles(string query) => StudioCommandCatalog.Filter(query).Select(c => c.Title).ToArray();
+
+    [Fact]
+    public void Find_matches_the_three_vision_step_insertions()
+    {
+        Assert.Equal(new[] { "➕ Add: Find Image on Screen", "➕ Add: Find Color on Screen", "➕ Add: Find Text (OCR)" }, Titles("find"));
+        Assert.Equal(Titles("find"), Titles("  FIND "));
+        Assert.All(StudioCommandCatalog.Filter("find"), c => Assert.Equal(StudioCommandKind.AddStep, c.Kind));
+    }
+
+    [Fact]
+    public void Studio_commands_are_found_by_keyword()
+    {
+        var compact = Assert.Single(StudioCommandCatalog.Filter("compact"));
+        Assert.Equal(StudioCommandKind.ToggleCompactView, compact.Kind);
+
+        var fix = Assert.Single(StudioCommandCatalog.Filter("fix"));
+        Assert.Equal(StudioCommandKind.AutoFixBlocks, fix.Kind);
+        Assert.Equal("✨ Auto-Fix Block Structure", fix.Title);
+
+        Assert.Equal(StudioCommandKind.ToggleHumanize, StudioCommandCatalog.Filter("humanize")[0].Kind);
+        Assert.Equal(StudioCommandKind.CleanUp, StudioCommandCatalog.Filter("clean")[0].Kind);
+        Assert.Equal(StudioCommandKind.PlayFromSelected, Assert.Single(StudioCommandCatalog.Filter("play selected")).Kind);
+    }
+
+    [Fact]
+    public void Every_word_must_match_and_keywords_count_too()
+    {
+        var speed = Assert.Single(StudioCommandCatalog.Filter("speed 2x"));
+        Assert.Equal(2.0, speed.Speed);
+        Assert.Equal(StepKind.FindText, Assert.Single(StudioCommandCatalog.Filter("ocr")).Step);      // title
+        Assert.Equal(StepKind.Delay, StudioCommandCatalog.Filter("sleep")[0].Step);                    // keyword only
+        Assert.Equal(new[] { StepKind.Repeat, StepKind.FeedbackLoop }, StudioCommandCatalog.Filter("loop").Select(c => c.Step!.Value));
+        Assert.Empty(StudioCommandCatalog.Filter("zzz-nothing"));
+    }
+
+    [Fact]
+    public void An_empty_query_lists_every_command_including_the_requested_ones()
+    {
+        var all = StudioCommandCatalog.Filter("");
+
+        Assert.Equal(StudioCommandCatalog.All.Count, all.Count);
+        Assert.Equal(all.Count, all.Select(c => c.Id).Distinct().Count());
+        foreach (var kind in new[] { StepKind.FindImage, StepKind.FindColor, StepKind.FindText, StepKind.If, StepKind.Repeat,
+                     StepKind.MouseClick, StepKind.MouseMove, StepKind.KeyPress, StepKind.Delay, StepKind.FeedbackLoop })
+            Assert.Contains(all, c => c.Kind == StudioCommandKind.AddStep && c.Step == kind);
+        Assert.Equal(new[] { 0.5, 1.0, 2.0, 5.0 }, all.Where(c => c.Kind == StudioCommandKind.SetSpeed).Select(c => c.Speed));
+        Assert.Contains(all, c => c.Kind == StudioCommandKind.Play);
+        Assert.Contains(all, c => c.Kind == StudioCommandKind.PlayFromSelected && c.Shortcut == "Shift+F5");
+    }
+}
+
+public class StudioRailAndProgressTests
+{
+    [Fact]
+    public void Guide_rails_take_the_colour_of_the_innermost_block()
+    {
+        // 0 Move | 1 Repeat | 2 Move | 3 If | 4 Move | 5 Else | 6 Move | 7 End If | 8 End Repeat | 9 Move
+        var steps = new List<MacroStep>
+        {
+            Flow.Move(1), Flow.Times(2), Flow.Move(2), Flow.If(Flow.Text("A")), Flow.Move(3), new ElseStep(), Flow.Move(4),
+            new EndIfStep(), new EndRepeatStep(), Flow.Move(5),
+        };
+
+        var rails = StepListView.EnclosingBlockKinds(steps);
+
+        Assert.Equal(new[]
+        {
+            BlockRailKind.None, BlockRailKind.None, BlockRailKind.Repeat, BlockRailKind.Repeat, BlockRailKind.If, BlockRailKind.Repeat,
+            BlockRailKind.If, BlockRailKind.Repeat, BlockRailKind.None, BlockRailKind.None,
+        }, rails);
+        Assert.Equal("#F59E0B", StepListView.RailColorHex(BlockRailKind.If));
+        Assert.Equal("#8B5CF6", StepListView.RailColorHex(BlockRailKind.Repeat));
+        Assert.Equal("", StepListView.RailColorHex(BlockRailKind.None));
+    }
+
+    [Fact]
+    public void Expected_step_durations_drive_the_progress_bar()
+    {
+        Assert.Equal((double?)1000, PlaybackEngine.ExpectedDurationMs(new DelayStep { DurationMs = 1000 }, 1));
+        Assert.Equal((double?)500, PlaybackEngine.ExpectedDurationMs(new DelayStep { DurationMs = 1000 }, 2));
+        Assert.Equal((double?)800, PlaybackEngine.ExpectedDurationMs(new KeyPressStep { HoldMs = 800 }, 1));
+        Assert.Null(PlaybackEngine.ExpectedDurationMs(new KeyPressStep { HoldMs = 0 }, 1));
+        Assert.Equal((double?)5000, PlaybackEngine.ExpectedDurationMs(Turbo.FindTarget(s => s.TimeoutMs = 5000), 2)); // real time, not scaled
+        Assert.Equal((double?)30_000, PlaybackEngine.ExpectedDurationMs(new FeedbackLoopStep { MaxRuntimeMs = 30_000 }, 1));
+        Assert.Equal((double?)3000, PlaybackEngine.ExpectedDurationMs(Flow.If(Flow.Text("A", timeoutMs: 3000)), 1));
+        Assert.Null(PlaybackEngine.ExpectedDurationMs(Flow.Move(1), 1));
+        Assert.False(new StepProgress(Guid.NewGuid(), 0.5, 150).ShowBar); // too short to bother
+        Assert.True(new StepProgress(Guid.NewGuid(), 0.5, 250).ShowBar);
+    }
+
+    [Fact]
+    public async Task The_engine_reports_live_progress_of_the_playing_step()
+    {
+        var delay = new DelayStep { DurationMs = 1000 };
+        var engine = new PlaybackEngine(new FakeInput(), new FakeClock());
+        var seen = new List<StepProgress?>();
+        engine.ProgressChanged += (_, p) => seen.Add(engine.GetCurrentStepProgress());
+
+        await engine.RunAsync(Flow.Macro(Flow.Move(1), delay));
+
+        Assert.Null(seen[0]); // Move mouse: no known length
+        var atStart = Assert.IsType<StepProgress>(seen[1]);
+        Assert.Equal(delay.Id, atStart.StepId);
+        Assert.Equal(1000, atStart.ExpectedMs);
+        Assert.InRange(atStart.Fraction, 0, 0.01);
+        Assert.Null(engine.GetCurrentStepProgress()); // nothing plays any more
+    }
+}
+
+public class RunSummaryTests
+{
+    [Fact]
+    public void Summary_text_formats()
+    {
+        var done = new PlaybackSessionStats(PlaybackOutcome.Completed, 3, 24, 6, 0.8, TimeSpan.FromSeconds(8.4));
+        Assert.Equal("✓ 3 runs in 8.4s · 24 steps · 6 vision locks (avg 0.8ms)", done.SummaryText);
+
+        var one = new PlaybackSessionStats(PlaybackOutcome.Completed, 1, 1, 0, 0, TimeSpan.FromMilliseconds(420));
+        Assert.Equal("✓ 1 run in 0.4s · 1 step", one.SummaryText);
+
+        var stopped = new PlaybackSessionStats(PlaybackOutcome.Stopped, 2, 17, 1, 12.4, TimeSpan.FromSeconds(65));
+        Assert.Equal("⏹ Stopped after 1m 05s · 2 runs finished · 17 steps · 1 vision lock (avg 12ms)", stopped.SummaryText);
+
+        Assert.StartsWith("⚠ Failed after", new PlaybackSessionStats(PlaybackOutcome.Failed, 0, 3, 0, 0, TimeSpan.FromSeconds(1)).SummaryText);
+    }
+
+    [Fact]
+    public void Summary_text_is_culture_independent()
+    {
+        var culture = Thread.CurrentThread.CurrentCulture;
+        try
+        {
+            Thread.CurrentThread.CurrentCulture = new System.Globalization.CultureInfo("de-DE");
+            var stats = new PlaybackSessionStats(PlaybackOutcome.Completed, 1200, 24_000, 6, 0.8, TimeSpan.FromSeconds(8.4));
+            Assert.Equal("✓ 1,200 runs in 8.4s · 24,000 steps · 6 vision locks (avg 0.8ms)", stats.SummaryText);
+        }
+        finally
+        {
+            Thread.CurrentThread.CurrentCulture = culture;
+        }
+    }
+
+    [Fact]
+    public async Task The_engine_counts_runs_steps_vision_locks_and_time()
+    {
+        var capture = new RegionCapture(Turbo.FullHdScreenWithTarget(900, 500));
+        var engine = new PlaybackEngine(new FakeInput(), new FakeClock(), capture: capture);
+        var macro = Aaa.MacroWith(Turbo.FindTarget(), new DelayStep { DurationMs = 1000 });
+        macro.RepeatCount = 3;
+
+        var result = await engine.RunAsync(macro);
+
+        var stats = Assert.IsType<PlaybackSessionStats>(result.Stats);
+        Assert.Same(stats, engine.LastSessionStats);
+        Assert.Equal(PlaybackOutcome.Completed, stats.Outcome);
+        Assert.Equal(3, stats.CompletedRuns);
+        Assert.Equal(6, stats.TotalStepsExecuted);
+        Assert.Equal(3, stats.VisionMatchesCount);
+        Assert.True(stats.AverageVisionMatchMs > 0);
+        Assert.InRange(stats.TotalElapsed.TotalSeconds, 2.9, 3.5); // 3 × 1 s of delays on the fake clock
+        Assert.StartsWith("✓ 3 runs in 3.", stats.SummaryText);
+        Assert.Contains("· 6 steps · 3 vision locks (avg ", stats.SummaryText);
+    }
+
+    [Fact]
+    public async Task A_new_playback_starts_counting_from_zero()
+    {
+        var capture = new RegionCapture(Turbo.FullHdScreenWithTarget(900, 500));
+        var engine = new PlaybackEngine(new FakeInput(), new FakeClock(), capture: capture);
+        await engine.RunAsync(Aaa.MacroWith(Turbo.FindTarget()));
+
+        var second = await engine.RunAsync(Aaa.MacroWith(Flow.Move(1)));
+
+        Assert.Equal(0, second.Stats!.VisionMatchesCount);
+        Assert.Equal(1, second.Stats.TotalStepsExecuted);
+        Assert.Equal("✓ 1 run in 0.0s · 1 step", second.Stats.SummaryText);
     }
 }

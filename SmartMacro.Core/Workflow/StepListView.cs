@@ -21,6 +21,18 @@ public enum StepFilter
     Disabled,
 }
 
+/// <summary>The innermost block a step sits inside, for the editor's coloured guide rail (none = top level).</summary>
+public enum BlockRailKind
+{
+    None,
+
+    /// <summary>Inside an If (its "then" or "otherwise" part): amber rail.</summary>
+    If,
+
+    /// <summary>Inside a Repeat loop: violet rail.</summary>
+    Repeat,
+}
+
 /// <summary>
 /// Which steps a collapsed If / Repeat hides. <see cref="Hidden"/>[i] = step i is folded away; <see cref="HiddenCount"/>[i]
 /// = for a collapsed If / Repeat, how many steps it hides (the steps inside, not counting its own Else / End marker).
@@ -73,6 +85,54 @@ public static class StepListView
 
         return new CollapseResult(hidden, counts);
     }
+
+    /// <summary>
+    /// For every step, the kind of the innermost block it is INSIDE (the block whose guide rail runs along it): steps
+    /// between an If and its End If (both branches) → <see cref="BlockRailKind.If"/>, steps inside a Repeat →
+    /// <see cref="BlockRailKind.Repeat"/>. Markers belong to the level they sit on: an If / Else / End If row nested in a
+    /// Repeat gets the Repeat's rail, a top-level If row gets none. Broken structure: best effort, never throws.
+    /// </summary>
+    public static IReadOnlyList<BlockRailKind> EnclosingBlockKinds(IReadOnlyList<MacroStep> steps)
+    {
+        ArgumentNullException.ThrowIfNull(steps);
+        var result = new BlockRailKind[steps.Count];
+        var open = new List<MacroStep>(); // innermost last
+
+        for (var i = 0; i < steps.Count; i++)
+        {
+            var step = steps[i];
+            switch (step)
+            {
+                case EndIfStep when open.Count > 0 && open[^1] is IfStep:
+                case EndRepeatStep when open.Count > 0 && open[^1] is RepeatStep:
+                    open.RemoveAt(open.Count - 1);
+                    break;
+            }
+
+            // An Else sits on its If's level: the rail is the one around that If.
+            var enclosing = step is ElseStep && open.Count > 0 && open[^1] is IfStep
+                ? (open.Count > 1 ? open[^2] : null)
+                : (open.Count > 0 ? open[^1] : null);
+            result[i] = enclosing switch
+            {
+                IfStep => BlockRailKind.If,
+                RepeatStep => BlockRailKind.Repeat,
+                _ => BlockRailKind.None,
+            };
+
+            if (step is IfStep or RepeatStep) open.Add(step);
+        }
+
+        return result;
+    }
+
+    /// <summary>The rail colour: amber for If / Else, violet for Repeat (empty for none).</summary>
+    public static string RailColorHex(BlockRailKind kind) => kind switch
+    {
+        BlockRailKind.If => "#F59E0B",
+        BlockRailKind.Repeat => "#8B5CF6",
+        _ => string.Empty,
+    };
 
     /// <summary>"[4 steps hidden]" for a collapsed If / Repeat ("[empty]" when there is nothing inside).</summary>
     public static string HiddenBadge(int count) => count switch

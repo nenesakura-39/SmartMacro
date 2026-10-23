@@ -13,7 +13,7 @@ namespace SmartMacro.Services.Vision;
 /// game in windowed / borderless mode usually fixes that. SmartMacro's own windows are excluded from captures
 /// while a macro runs or a test is done.
 /// </summary>
-public sealed class GdiScreenCapture : IScreenCapture
+public sealed class GdiScreenCapture : IScreenCapture, IDisposable
 {
     /// <summary>
     /// All monitors (physical pixels). Shared with OCR and re-read from Windows at most every 500 ms
@@ -35,7 +35,9 @@ public sealed class GdiScreenCapture : IScreenCapture
 
     /// <summary>
     /// Captures the on-screen part of the area right away (on the calling thread). Only these pixels are copied
-    /// (BitBlt of exactly this rectangle, into a reused per-thread GDI bitmap when the size repeats).
+    /// (BitBlt of exactly this rectangle into one of the two process-wide, lock-protected GDI buffers, which are only
+    /// re-created when the size changes; the pixels are copied into a new array before the lock is released, so the
+    /// returned frame is never shared and no GDI handle is tied to the calling thread).
     /// </summary>
     public ScreenFrame CaptureRegion(ScreenRect region) => Capture(region);
 
@@ -49,4 +51,7 @@ public sealed class GdiScreenCapture : IScreenCapture
         var pixels = ScreenCapture.CaptureBgra(area);
         return new ScreenFrame(area, new BgraImage(area.Width, area.Height, pixels));
     }
+
+    /// <summary>Frees the shared GDI capture buffers (also done by App.OnExit). Later captures re-create them.</summary>
+    public void Dispose() => ScreenCapture.ReleaseAllResources();
 }

@@ -1,6 +1,11 @@
 # SmartMacro – Project Status / Handoff
 
-_Last updated: 2026-10-23 (AAA Performance upgrade – Upgrades 4–6: Shift+F5 / Space / Ctrl+F search + filter pills,
+_Last updated: 2026-10-23 (AAA Studio UI Upgrades 1–3 – guide rails + live step progress bar, Ctrl+K Command Palette,
+post-run summary pill: **built + tested on the owner's PC: 0 warnings, 0 errors, 979 / 979 passed**; not committed, runtime
+look not checked by hand. Before it: Audit of `6de423b` – Fixes 1–5: block-safe Play from here slice, fresh nested IDs + Hot-Spot
+coordinate guard, shared lock-protected GDI buffers, folded-block move / delete, ghost-highlight guard: **built + tested on the
+owner's PC: 0 warnings, 0 errors, 968 / 968 tests passed**. Before it:
+AAA Performance upgrade – Upgrades 4–6 (now built + tested as part of the same run): Shift+F5 / Space / Ctrl+F search + filter pills,
 block-aware duplicate, folding If / Repeat, compact view, ⚡ vision telemetry, tests – NOT built or tested. Before it:
 Upgrade 1 build fix + Upgrades 2 (GDI capture reuse) and 3 (frozen
 thumbnail cache, ~30 FPS playback UI, pixel-scroll virtualization): NOT built or tested. Before it: Upgrade 1 "Vision Engine Turbo" on top of `adbdd5a`: template cache +
@@ -30,6 +35,73 @@ Developer: Riku (リク) · Brand: KuroLogic_
 | Release package | `publish\SmartMacro-1.0.0-win-x64\SmartMacro.exe` is an OLD build (made right after `159d6b3`, before Stage 1) | – | ignored by git |
 
 
+
+## AAA Studio UI Upgrades 1–3 (2026-10-23, on top of the `6de423b` audit fixes): **built + tested** (`tools\verify.cmd` on the owner's PC: 0 warnings, 0 errors, **979 / 979 passed**)
+Not committed to git yet. XAML compiles; the look at runtime is not checked by hand yet.
+1. **Guide rails + live step progress**:
+   - Core `StepListView.EnclosingBlockKinds` → `BlockRailKind` (None / If / Repeat = innermost block a row is inside; Else /
+     End markers sit on their block's level) + `RailColorHex` (#F59E0B amber, #8B5CF6 violet).
+   - `StepViewModel`: `IsInsideBlock`, `BlockRailKind`, `BlockRailColorHex`, `BlockRailBrush` (frozen), `IndentMargin` =
+     18 px / level (`IndentPerLevel`), `ExecutionProgress` (0..1), `ShowExecutionProgress`. Editor `UpdateBlockPairing` sets
+     the rails. Step template: gutter 18 px / level (guide tile 18 px), 2.5 px rail at 0.65 opacity in the rail colour (was
+     the depth accent), 2 px neon (cyan → violet, glow) bar along the bottom of the card (ScaleX = progress).
+   - Engine: `ExpectedDurationMs(step, speed)` (Delay ÷ speed, key / click hold via `ScaledHoldMs`, drag, Type text, Find
+     timeout, If condition timeout, feedback max runtime – real time for the last three), `Report` stores a `StepTiming`
+     snapshot, `GetCurrentStepProgress()` → `StepProgress(StepId, Fraction, ExpectedMs)`, `ShowBar` > 200 ms. Paused time
+     excluded (`_statPausedTotal` / `_statPausedSince`, kept in Pause / Resume / end).
+   - `AutomationViewModel.RunningStepProgressChanged` (only on change, every ~30 FPS tick, also when nothing else changed;
+     hidden on Stop / end) → `EditorViewModel.SetRunningStepProgress`. Also removed the editor's extra 50 ms drop in
+     `SetRunningStep` (with the upstream 30 FPS coalescing it could leave the highlight on a finished step).
+2. **Ctrl+K Command Palette**: Core `Workflow/StudioCommands.cs` (`StudioCommand`, `StudioCommandKind`,
+   `StudioCommandCatalog.All` / `Filter`: every query word in title or keywords, title-word-prefix matches first). Editor:
+   `IsCommandPaletteOpen`, `PaletteQuery`, `PaletteItems`, `SelectedPaletteIndex`, `MovePaletteSelection`,
+   `Toggle/Close/ExecutePaletteItemCommand`; runs Add step (toolbox rules), Play (`PlayHandler` from MainViewModel; shows the
+   configured play shortcut), Play from selected, Auto-Fix, Clean up mouse paths, Compact view, Humanize, speed 0.5 / 1 / 2
+   / 5×; unavailable commands explain why in the status bar. View: dimmed overlay + 560 px card at the top centre, search
+   box (↑ ↓ / Enter / Esc in `PaletteBox_PreviewKeyDown`), click a row to run it, click outside to close; Ctrl+K KeyBinding.
+3. **Post-run summary pill**: Core `PlaybackSessionStats` (Outcome, CompletedRuns, TotalStepsExecuted,
+   VisionMatchesCount, AverageVisionMatchMs, TotalElapsed without pauses; `SummaryText` "✓ 3 runs in 8.4s · 24 steps · 6
+   vision locks (avg 0.8ms)", "⏹ Stopped after …", "⚠ Failed after …", invariant culture). Engine counts vision locks in
+   `ReportTarget` (Find image / colour / text, If / Repeat conditions that saw their target, Smart-Aim), `LastSessionStats`,
+   `PlaybackResult.Stats`. `AutomationViewModel.LastRunSummaryText` / `HasLastRunSummary` / `DismissRunSummaryCommand`;
+   pill (violet) at the left of the bottom bar while idle, ✕ hides it, cleared when the next playback starts.
+- Tests (`PerformanceAndQolTests.cs`): `CommandPaletteTests` ("find", "compact", "fix", keyword / multi-word, full list),
+  `StudioRailAndProgressTests` (rail kinds, expected durations, live progress from the engine), `RunSummaryTests` (texts,
+  culture, engine counts over 3 runs, reset per playback).
+- To check by hand: rail colours in nested blocks, the neon bar on a 2 s Delay / Find wait / key hold (and frozen while
+  paused), Ctrl+K → type "find" → Enter adds Find image, ↑ ↓ / Esc / click outside, the pill after Play / Stop and its ✕.
+
+## Audit of `6de423b` – Fixes 1–5 (2026-10-23): **built + tested** (`tools\verify.cmd` run by the AI on the owner's PC: 0 warnings, 0 errors, **968 / 968 passed**)
+This run also is the first build of Upgrades 1–6 below (they compiled and their tests pass). Not committed to git yet.
+1. **Play from here (Shift+F5)** – `PlaybackRanges.BuildPlayFromHereSlice(steps, start)` → `PlayFromHereSlice` (Steps = same
+   objects, SourceIndexes, DroppedMarkers / DroppedSteps). Walks from the start with a stack of blocks opened after it: an Else
+   whose If is above the start drops itself, its whole "otherwise" part and its End If; an orphan End If / End Repeat is dropped
+   (the rest of a loop body plays ONCE – behaviour change: before, a step inside a Repeat restarted the loop at its Repeat).
+   Selecting an Else plays its otherwise part. `BuildPlayFromHereMacro` (= `Macro.CopyWithSteps`, played once),
+   `ValidatePlayFromHere` (slice errors mapped back to the macro's step numbers + whole-macro block errors). Engine
+   `PlayFromStepAsync` plays the slice; progress / If log / feedback log show the macro's own step numbers
+   (`RunContext.StepNumberOf`). `PlayFromHere` returns the slice's first source index. AutomationViewModel + EditorViewModel use it.
+   Tests changed on purpose: `PlayFromHereTests` theory rows (7→7, 8→9) + loop test, `StudioUpgradeTests` 2 loop tests.
+2. **Hot-Spot + IDs** – translation audited: correct (frames carry their screen origin; translated once). Added a guard: a
+   Hot-Spot hit outside the requested spot area is thrown away → full search. Real bug fixed: duplicate (Ctrl+D) / paste kept the
+   IDs of the nested condition searches (If / Repeat / Feedback Done-Failed `Condition.Check`), and the Hot-Spot key uses that
+   ID → `MacroFactory.RenewIds` (step + nested checks), used by `DuplicateStep`, `Duplicate` (macro) and `StepClipboard.TryParse`.
+   Re-captured templates: already keyed by (StepId, size, length, hash) – tested.
+3. **GDI capture** – `[ThreadStatic]` surfaces removed. New `Services/Vision/ReusableGdiSurface.cs`: memory DC + top-down 32-bit
+   DIB section, re-created only when (w, h) changes, BitBlt + `GdiFlush` + `Marshal.Copy` into a new array inside a lock.
+   `ScreenCapture` keeps two: small (≤ 1024² px) and large (≤ 3840×2160); bigger = one-shot surface freed at once; the hook
+   thread (`shield: false`) never waits (one-shot if busy). `ReleaseAllResources` (App.OnExit) / `GdiScreenCapture.Dispose`
+   free both. `ReleaseThreadResources` is now a no-op. `NativeMethods.CreateDIBSection` / `GdiFlush` added.
+4. **Folded blocks** – `StepListEditing.PlanMove(..., collapsed)`: a folded If / Repeat moves as one unit (header → End), and
+   Alt+↑ / Alt+↓ over a folded block jumps past the whole block (`GrowToCollapsedBlocks`). `PlanDelete(..., collapsed)`: deleting
+   a folded If / Repeat deletes its whole block (Ctrl+Z restores). Editor uses both with `_collapsed`.
+5. **Ghost highlight** – `AutomationViewModel._playbackSessionId` bumped on Play, Stop and end of playback; the ~30 FPS tick,
+   the state-change callback and the target-lock draw only run for the current session (`IsCurrentSession`). Stop cancels the
+   tick and clears the highlight at once. New `CurrentPlayingStepId`.
+- New tests (`PerformanceAndQolTests.cs`): `PlayFromHereSliceTests`, `UniqueIdAndHotSpotTests` (negative-origin monitor, lying
+  capture), `CollapsedBlockMoveTests`.
+- Not verified by hand: Shift+F5 inside nested blocks in the app, Alt+↑/↓ / Delete on folded rows, GDI object count in Task
+  Manager during a long Find image loop (should stay flat), Stop during a fast loop (no highlight left behind).
 
 ## AAA Performance upgrade – Upgrades 4, 5, 6 (2026-10-23, on top of 1–3); written WITHOUT a .NET SDK: **NOT built, NOT tested**
 Also fixed before it: the Upgrade 3 edit of `StepViewModels.cs` had duplicated a block of the file (7 × CS0101 / CS0111:
@@ -1173,6 +1245,7 @@ no .NET SDK in the AI's environment)
   csproj Company/Authors "Riku", Copyright "© 2026 Riku", README "© 2026 Riku") – change awaits owner approval.
 
 ## Next task
+- Owner: try the Studio UI Upgrades 1–3 by hand (list in their section), then commit Fixes 1–5 + Upgrades 1–6 + Studio UI 1–3.
 - Owner: `tools\verify.cmd` for Upgrades 1–6 (never fully compiled), then try: Shift+F5, Space on an If, Ctrl+D on an If,
   Ctrl+F search + pills, ▼ / ▶ folding, Compact view, ⚡ Vision in the header pill / mini-HUD during a Find image loop.
 - Owner: `tools\verify.cmd` for the audit fixes of `a33c29f` + Upgrade 7 (never compiled; send `artifacts\build.log` /
