@@ -2,7 +2,8 @@
 
 Parts covered: **Smart Click Snapshots** (Part 1), **"Last found target" + If "When found, also:" + click / move on the
 last found spot** (Part 2), **Pause F8 / speed selector / Humanize** (Part 3, sections G–I), **target-lock overlay +
-mini-HUD** (Part 4, sections J–K) and **✨ Auto-Fix Block Structure** (Part 5, section L). Part 6 is the unit tests
+mini-HUD** (Part 4, sections J–K), **✨ Auto-Fix Block Structure** (Part 5, section L) and the **audit fixes of
+`a33c29f` + Upgrade 7** (section M). Part 6 is the unit tests
 (`tools\verify.cmd` runs them).
 
 Before you start: run `tools\verify.cmd`. If the build or tests fail, send `artifacts\build.log` / `artifacts\test.log`.
@@ -142,3 +143,43 @@ Send back: anything that failed (screenshot + the Activity log lines), and how t
    then it can be saved and played.
 8. [ ] A macro whose blocks are fine never shows the banner. Nesting more than 8 blocks deep shows the problem in the
    Problems list but no Auto-Fix button (that one can't be guessed).
+
+---
+
+## M. Audit fixes of `a33c29f` (+ Upgrade 7)
+
+Run `tools\verify.cmd` first (new tests: `AuditFixTests`).
+
+1. [ ] **Reticle never photobombs**: a Repeat (0 = forever) with Find image → Click, overlay on, in a fast game. The second
+   turn always finds the target (the neon box is never "seen"). On Windows 10 older than 2004 the reticle disappears a
+   bit early instead (that's the fallback).
+2. [ ] **Pause inside recorded input**: record (Smart or Game mode) holding W for ~5 s while turning the camera. Play, press
+   **F8** in the middle: the character stops at once (W released). Wait 10 s, press **F8**: W is held again and the
+   rest of the recording plays with the same timing (it doesn't skip ahead).
+3. [ ] **Pause during a long key hold**: Key press W, hold 3000 ms. F8 after 1 s, wait, F8: it walks ~2 s more, not 3.
+4. [ ] **Pause during a Find wait / feedback loop**: Find image with "wait up to" 5 s (thing not on screen), F8 for 10 s,
+   F8: it still waits the remaining time (no timeout because of the pause). Same for a Feedback loop: the key is
+   released while paused and the max runtime doesn't count the pause.
+5. [ ] **Speed + holds**: Key press W hold 1000 ms at **2×**: walks half as far (500 ms). A 30 ms tap still registers.
+6. [ ] **Last found spot, nothing found yet**: a Mouse click "on the last found spot" as the first step, or after a Find
+   image set to "continue" that doesn't find anything: the Activity log shows a yellow
+   "⚠ Skipped click at Last Found Target because no prior step has found a target in this run." and the cursor never
+   jumps to the top-left corner. The macro keeps going (it used to stop).
+7. [ ] Same click with **▶ Run step**: skipped the same way.
+8. [ ] Problems list: that click shows the warning "…so when played it's skipped…" until a Find / If is above it.
+9. [ ] **Auto-adjust coordinates** on (macro made at another resolution): clicks "on the last found spot" still land on
+   the found target + offset (the offset is not stretched).
+10. [ ] **Fast clicking while recording** (Smart, 10+ clicks per second for a few seconds): the recording stays smooth, all
+    clicks are recorded, the clicks still have pictures.
+11. [ ] **✂ Break into steps**: Smart recording, Exact 1:1 mode (or menu clicks while holding a key), clicking a few
+    buttons. Select the "Recorded input" step → **✂ Break into steps**: it becomes Delay / Move / Mouse click / Key
+    press steps, the clicks show their ✨ picture, Smart-Aim can be turned on. **Ctrl+Z** puts the recording back.
+12. [ ] A game-mode / camera recording: the button is greyed out and the hint says why.
+13. [ ] **🎯 Test Smart-Aim** (a recorded click with a picture): with the window where it was → "✓ Found at (x, y) — 98%
+    match in N ms. It's exactly where it was recorded." and a flash on the button. Move the window ~40 px → "It moved
+    by (+40, +30) px". Move it far → "…farther than the 120 px search distance… raise Search distance to at least N px".
+    Close the window → "✗ Not found within 120 px…". Nothing is ever clicked.
+14. [ ] **🎯 Pick offset from screen** (If "When found, also:" or a click on the last found spot): when the target is on
+    screen, the picker shows a green **◎ Target center (x, y)** mark, a dashed arrow from it to the cursor and a live
+    "Offset (+120, -40)" label. Clicking sets exactly that offset.
+

@@ -560,13 +560,21 @@ public class LastFoundTargetTests
     }
 
     [Fact]
-    public async Task Last_found_spot_before_anything_was_found_stops_with_a_clear_error()
+    public async Task Last_found_spot_before_anything_was_found_is_skipped_with_a_warning()
     {
-        var result = await new PlaybackEngine(new FakeInput(), new FakeClock()).RunAsync(Aaa.MacroWith(
-            new MouseMoveStep { TargetMode = ClickTargetMode.LastFoundMatch }));
+        // Changed on purpose (AAA audit fix 4): it used to stop the macro; now the move is skipped and the run goes on.
+        var input = new FakeInput();
+        var engine = new PlaybackEngine(input, new FakeClock());
+        var messages = new List<string>();
+        engine.Message += (_, m) => messages.Add(m);
 
-        Assert.Equal(PlaybackOutcome.Failed, result.Outcome);
-        Assert.Contains("last found spot", result.Error);
+        var result = await engine.RunAsync(Aaa.MacroWith(
+            new MouseMoveStep { TargetMode = ClickTargetMode.LastFoundMatch },
+            new MouseMoveStep { X = 7, Y = 8 }));
+
+        Assert.Equal(PlaybackOutcome.Completed, result.Outcome);
+        Assert.Equal(new[] { "move 7,8" }, input.Calls);
+        Assert.Contains(PlaybackEngine.SkippedMoveNoTarget, messages);
     }
 
     [Fact]
@@ -1176,5 +1184,340 @@ public class BlockRepairTests
             Assert.Equal(normal, steps.Where(s => s is not (ElseStep or EndIfStep or EndRepeatStep)).ToList()); // nothing else lost or moved
             Assert.False(StepCleanup.RepairBlockStructure(steps).Changed);
         }
+    }
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Audit of a33c29f: pause inside long steps, speed on key holds / recorded input, "last found spot" before anything was
+// found (skip, never (0, 0)), never scaling the found spot, click pictures inside recorded input + "✂ Break into steps",
+// lazy PNG encoding of click snapshots and the shared Smart-Aim locator.
+// ---------------------------------------------------------------------------------------------------------------------
+
+public class AuditFixTests
+{
+    private static List<(string Call, TimeSpan At)> Timed(FakeInput input)
+    {
+        lock (input.Calls) return input.Calls.Zip(input.Times, (c, t) => (c, t)).ToList();
+    }
+
+    // ---------------- Fix 2: pause inside a step ----------------
+
+    [Fact]
+    public async Task Pause_inside_recorded_input_lets_go_and_resume_presses_again_with_the_rest_of_the_timing()
+    {
+        var clock = new FakeClock();
+        var input = new FakeInput { Clock = clock };
+        var engine = new PlaybackEngine(input, clock);
+        input.OnCall = call =>
+        {
+            if (call == "rel 5,0") Assert.True(engine.Pause()); // F8 while W is held and the camera turns
+        };
+        var sequence = new InputSequenceStep
+        {
+            Events = { InputEvent.KeyDown(0, 0x57), InputEvent.Move(100_000, 5, 0), InputEvent.KeyUp(1_000_000, 0x57) },
+        };
+
+        var run = engine.RunAsync(Aaa.MacroWith(sequence));
+        await Waits.Until(() => Waits.Has(input, "key 87 up"));
+        Assert.True(engine.IsPaused);
+        Assert.Equal(1, input.ReleaseAllCount); // everything let go the moment F8 was pressed
+
+        clock.Advance(TimeSpan.FromSeconds(5));
+        Assert.True(engine.Resume());
+        var result = await run.WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.Equal(PlaybackOutcome.Completed, result.Outcome);
+        var calls = Timed(input);
+        Assert.Equal(new[] { "key 87 down", "rel 5,0", "key 87 up", "key 87 down", "key 87 up" }, calls.Select(c => c.Call));
+        Assert.Equal(100, calls[2].At.TotalMilliseconds, precision: 3);                  // W released while paused
+        Assert.Equal(5_100, calls[3].At.TotalMilliseconds, precision: 3);                // W pressed again on resume
+        Assert.Equal(900, (calls[4].At - calls[3].At).TotalMilliseconds, precision: 3);  // only the 900 ms that were left
+    }
+
+    [Fact]
+    public async Task Pause_during_a_long_key_hold_releases_it_and_resume_finishes_the_hold()
+    {
+        var clock = new FakeClock();
+        var input = new FakeInput { Clock = clock };
+        var engine = new PlaybackEngine(input, clock);
+        var first = true;
+        input.OnCall = call =>
+        {
+            if (call != "key 87 down" || !first) return;
+            first = false;
+            Assert.True(engine.Pause());
+        };
+
+        var run = engine.RunAsync(Aaa.MacroWith(new KeyPressStep { VirtualKey = 0x57, HoldMs = 1000 }));
+        await Waits.Until(() => Waits.Has(input, "key 87 up"));
+        Assert.True(engine.IsPaused);
+        clock.Advance(TimeSpan.FromSeconds(10));
+        Assert.True(engine.Resume());
+        var result = await run.WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.Equal(PlaybackOutcome.Completed, result.Outcome);
+        var calls = Timed(input);
+        Assert.Equal(("key 87 up", 0.0), (calls[1].Call, calls[1].At.TotalMilliseconds));      // released for the pause
+        Assert.Equal(("key 87 down", 10_000.0), (calls[2].Call, calls[2].At.TotalMilliseconds)); // pressed again
+        Assert.Equal("key 87 up", calls[^1].Call);
+        Assert.Equal(11_000, calls[^1].At.TotalMilliseconds, precision: 3); // still held 1 s in total, paused time not counted
+        Assert.Equal(2, calls.Count(c => c.Call == "key 87 up"));
+    }
+
+    // ---------------- Fix 5: speed on movement holds and recorded input ----------------
+
+    [Fact]
+    public async Task Speed_2_halves_a_1000_ms_movement_hold_and_keeps_short_taps_at_least_25_ms()
+    {
+        var clock = new FakeClock();
+        var input = new FakeInput { Clock = clock };
+        var macro = Aaa.MacroWith(
+            new KeyPressStep { VirtualKey = 0x57, HoldMs = 1000 }, // walk forward 1 s
+            new KeyPressStep { VirtualKey = 0x41, HoldMs = 30 });  // a 30 ms tap
+        macro.PlaybackSpeed = 2.0;
+
+        await new PlaybackEngine(input, clock).RunAsync(macro);
+
+        var calls = Timed(input);
+        var walk = calls.Single(c => c.Call == "key 87 up").At - calls.First(c => c.Call == "key 87 down").At;
+        var tap = calls.Single(c => c.Call == "key 65 up").At - calls.Single(c => c.Call == "key 65 down").At;
+        Assert.Equal(500, walk.TotalMilliseconds, precision: 3);
+        Assert.Equal(25, tap.TotalMilliseconds, precision: 3);
+        Assert.True(tap.TotalMilliseconds >= PlaybackEngine.MinScaledHoldMs);
+    }
+
+    [Fact]
+    public async Task Recorded_camera_turns_and_movement_keys_stay_locked_together_at_2x()
+    {
+        var clock = new FakeClock();
+        var input = new FakeInput { Clock = clock };
+        var macro = Aaa.MacroWith(new InputSequenceStep
+        {
+            Events = { InputEvent.KeyDown(0, 0x57), InputEvent.Move(400_000, 7, 0), InputEvent.KeyUp(1_000_000, 0x57) },
+        });
+        macro.PlaybackSpeed = 2.0;
+
+        await new PlaybackEngine(input, clock).RunAsync(macro);
+
+        Assert.Equal(new[] { ("key 87 down", 0.0), ("rel 7,0", 200.0), ("key 87 up", 500.0) },
+            Timed(input).Select(c => (c.Call, Math.Round(c.At.TotalMilliseconds, 3))));
+    }
+
+    // ---------------- Fix 4: the last found spot ----------------
+
+    [Fact]
+    public async Task Click_on_the_last_found_spot_before_anything_was_found_is_skipped_never_at_0_0()
+    {
+        var input = new FakeInput();
+        var engine = new PlaybackEngine(input, new FakeClock());
+        var messages = new List<string>();
+        engine.Message += (_, m) => messages.Add(m);
+
+        var result = await engine.RunAsync(Aaa.MacroWith(
+            new MouseClickStep { TargetMode = ClickTargetMode.LastFoundMatch, OffsetX = 10 },
+            new KeyPressStep { VirtualKey = 0x41 }));
+
+        Assert.Equal(PlaybackOutcome.Completed, result.Outcome);
+        Assert.Equal(new[] { "key 65 down", "key 65 up" }, input.Calls); // no move, no click
+        Assert.Contains(PlaybackEngine.SkippedClickNoTarget, messages);
+        Assert.StartsWith("⚠", PlaybackEngine.SkippedClickNoTarget); // logged as a warning by the app
+    }
+
+    [Fact]
+    public async Task Run_step_on_a_last_found_click_alone_is_skipped_too()
+    {
+        var screen = TestImages.Blocky(400, 300, seed: 20);
+        var icon = TestImages.Icon(40, 30, seed: 21);
+        TestImages.Paste(screen, icon, 100, 50);
+        var input = new FakeInput();
+        var macro = Aaa.MacroWith(Aaa.FindImage(icon), new MouseClickStep { TargetMode = ClickTargetMode.LastFoundMatch });
+
+        var result = await new PlaybackEngine(input, new FakeClock(), capture: new FakeCapture(screen)).PlaySingleStepAsync(macro, 1);
+
+        Assert.Equal(PlaybackOutcome.Completed, result.Outcome);
+        Assert.Empty(input.Calls);
+    }
+
+    [Fact]
+    public void Validator_flags_a_last_found_step_with_no_vision_step_before_it()
+    {
+        var lonely = MacroValidator.Validate(Aaa.MacroWith(new MouseClickStep { TargetMode = ClickTargetMode.LastFoundMatch }));
+        Assert.Contains(lonely, i => i.Severity == IssueSeverity.Warning && i.StepIndex == 0 && i.Message.Contains("skipped"));
+
+        var lonelyMove = MacroValidator.Validate(Aaa.MacroWith(new MouseMoveStep { TargetMode = ClickTargetMode.LastFoundMatch }));
+        Assert.Contains(lonelyMove, i => i.Severity == IssueSeverity.Warning && i.StepIndex == 0 && i.Message.Contains("skipped"));
+
+        // After an If with an image condition (or any Find step) it's fine.
+        var guarded = MacroValidator.Validate(Aaa.MacroWith(
+            new IfStep { Condition = Aaa.ImageCondition(Aaa.Button) },
+            new MouseClickStep { TargetMode = ClickTargetMode.LastFoundMatch },
+            new EndIfStep()));
+        Assert.DoesNotContain(guarded, i => i.Property == nameof(MouseClickStep.UseLastFoundText));
+    }
+
+    [Fact]
+    public async Task Auto_adjust_coordinates_never_scales_the_found_spot_or_its_offset()
+    {
+        // The macro was made on a 200×150 screen, it plays on 400×300 (×2). Fixed positions double; the found spot is
+        // live screen pixels already, and the offset belongs to a template matched at its recorded size.
+        var screen = TestImages.Blocky(400, 300, seed: 20);
+        var icon = TestImages.Icon(40, 30, seed: 21);
+        TestImages.Paste(screen, icon, 100, 50); // center (120, 65)
+        var layout = new FakeLayout();
+        layout.Monitors.Add(new MonitorInfo(1, new ScreenRect(0, 0, 400, 300), true));
+        var macro = Aaa.MacroWith(
+            new MouseMoveStep { X = 50, Y = 50 },
+            Aaa.FindImage(icon),
+            new MouseClickStep { TargetMode = ClickTargetMode.LastFoundMatch, OffsetX = 10, OffsetY = -5 });
+        macro.ScaleCoordinatesToWindow = true;
+        (macro.ReferenceWidth, macro.ReferenceHeight) = (200, 150);
+        var input = new FakeInput();
+
+        var result = await new PlaybackEngine(input, new FakeClock(), capture: new FakeCapture(screen), layout: layout).RunAsync(macro);
+
+        Assert.Equal(PlaybackOutcome.Completed, result.Outcome);
+        Assert.Equal(new[] { "move 100,100", "move 130,60", "mouse Left down", "mouse Left up" }, input.Calls);
+    }
+
+    // ---------------- Fix 3: click pictures inside recorded input, "✂ Break into steps", lazy PNGs ----------------
+
+    private static InputSequenceStep MenuRecording(string picture) => new()
+    {
+        Events =
+        {
+            InputEvent.Move(20_000, 3, 0, 100, 100),
+            InputEvent.ButtonDown(250_000, MacroMouseButton.Left, 128, 78),
+            InputEvent.ButtonUp(330_000, MacroMouseButton.Left, 128, 78),
+            InputEvent.KeyDown(600_000, 0x41),
+            InputEvent.KeyUp(680_000, 0x41),
+        },
+        MouseSegments = new List<MouseSegment> { new() { StartUs = 0, Detected = MouseMovementMode.CursorPosition } },
+        ClickTargets = new List<SequenceClickTarget> { new() { EventIndex = 1, TargetThumbnailBase64 = picture, AnchorX = 28, AnchorY = 28 } },
+        Comment = "open the menu",
+    };
+
+    [Fact]
+    public void Break_into_steps_keeps_the_click_picture()
+    {
+        var picture = PngCodec.EncodeBase64(Aaa.Button);
+        var sequence = MenuRecording(picture);
+        Assert.Null(StepCleanup.WhyNotExpandable(sequence));
+
+        var steps = StepCleanup.ExpandInputSequence(sequence);
+
+        var click = Assert.Single(steps.OfType<MouseClickStep>());
+        Assert.Equal((128, 78, MouseClickAction.Click), (click.X, click.Y, click.Action));
+        Assert.Equal(picture, click.TargetThumbnailBase64);
+        Assert.Equal((28, 28), (click.TargetAnchorX!.Value, click.TargetAnchorY!.Value));
+        Assert.Contains(steps, s => s is KeyPressStep { VirtualKey: 0x41 });
+        Assert.Equal(20, Assert.IsType<DelayStep>(steps[0]).DurationMs); // the time before the first event
+        Assert.Equal("open the menu", steps[0].Comment);
+        Assert.Null(SmartClickConversion.WhyNotConvertible(click)); // the picture is usable (Smart-Aim / Convert)
+    }
+
+    [Fact]
+    public void Smart_recording_keeps_pictures_inside_recorded_input_and_break_into_steps_gives_them_back()
+    {
+        var snapshot = new ClickTargetSnapshot(PngCodec.Encode(Aaa.Button), 20, 30);
+        var events = new List<CapturedInputEvent>();
+        for (var k = 0; k < 10; k++)
+            events.Add(new CapturedInputEvent(InputEvent.Move(k * 10_000L, 5, 0, 150 + 5 * (k + 1), 100)));
+        events.Add(new CapturedInputEvent(InputEvent.ButtonDown(200_000, MacroMouseButton.Left, 200, 100), CursorFlags.None, snapshot));
+        events.Add(new CapturedInputEvent(InputEvent.ButtonUp(280_000, MacroMouseButton.Left, 200, 100)));
+
+        // Exact 1:1 mode keeps the whole recording as one "Recorded input" step.
+        var result = SmartRecordingConverter.Convert(events, new SmartRecordingOptions { ExactTimeline = true });
+
+        var sequence = Assert.IsType<InputSequenceStep>(Assert.Single(result.Steps));
+        var target = Assert.Single(sequence.ClickTargets!);
+        Assert.Equal(InputEventKind.MouseDown, sequence.Events[target.EventIndex].Kind);
+        Assert.Equal(Convert.ToBase64String(snapshot.Png), target.TargetThumbnailBase64);
+        Assert.Equal((20, 30), (target.AnchorX, target.AnchorY));
+
+        var click = Assert.Single(StepCleanup.ExpandInputSequence(sequence).OfType<MouseClickStep>());
+        Assert.Equal((200, 100), (click.X, click.Y));
+        Assert.Equal(target.TargetThumbnailBase64, click.TargetThumbnailBase64);
+    }
+
+    [Fact]
+    public void Camera_recordings_cannot_be_broken_into_steps()
+    {
+        var game = new InputSequenceStep
+        {
+            Events = { InputEvent.Move(0, 5, 0), InputEvent.ButtonDown(10_000, MacroMouseButton.Left), InputEvent.ButtonUp(50_000, MacroMouseButton.Left) },
+        };
+        Assert.Contains("game mode", StepCleanup.WhyNotExpandable(game));
+        Assert.Throws<InvalidOperationException>(() => StepCleanup.ExpandInputSequence(game));
+
+        var camera = MenuRecording(PngCodec.EncodeBase64(Aaa.Button));
+        camera.MouseSegments![0].Detected = MouseMovementMode.Relative;
+        Assert.Contains("camera", StepCleanup.WhyNotExpandable(camera));
+
+        var keysOnly = new InputSequenceStep { Events = { InputEvent.KeyDown(0, 0x57), InputEvent.KeyUp(500_000, 0x57) } };
+        Assert.Null(StepCleanup.WhyNotExpandable(keysOnly));
+        Assert.Equal(500, Assert.Single(StepCleanup.ExpandInputSequence(keysOnly).OfType<KeyPressStep>()).HoldMs);
+    }
+
+    [Fact]
+    public void Pictures_inside_recorded_input_are_saved_need_format_12_and_are_checked()
+    {
+        var plain = new InputSequenceStep { Events = { InputEvent.KeyDown(0, 0x41), InputEvent.KeyUp(1000, 0x41) } };
+        Assert.DoesNotContain("clickTargets", MacroJson.Serialize<MacroStep>(plain));
+        Assert.True(MacroDocument.RequiredSchemaVersion(Aaa.MacroWith(plain)) < 12);
+
+        var sequence = MenuRecording(PngCodec.EncodeBase64(Aaa.Button));
+        Assert.Equal(12, MacroDocument.RequiredSchemaVersion(Aaa.MacroWith(sequence)));
+        var json = MacroJson.Serialize<MacroStep>(sequence);
+        Assert.Contains("clickTargets", json);
+        Assert.Contains("\"thumbnail\"", json);
+        var copy = Assert.IsType<InputSequenceStep>(MacroJson.CloneStep(sequence));
+        var target = Assert.Single(copy.ClickTargets!);
+        Assert.Equal((1, 28, 28), (target.EventIndex, target.AnchorX, target.AnchorY));
+        Assert.Equal(sequence.ClickTargets![0].TargetThumbnailBase64, target.TargetThumbnailBase64);
+        Assert.DoesNotContain(MacroValidator.Validate(Aaa.MacroWith(sequence)), i => i.Property == nameof(InputSequenceStep.ClickTargets));
+
+        target.EventIndex = 0; // a Move, not a button press
+        Assert.Contains(MacroValidator.Validate(Aaa.MacroWith(copy)),
+            i => i.Severity == IssueSeverity.Warning && i.Property == nameof(InputSequenceStep.ClickTargets));
+    }
+
+    [Fact]
+    public async Task Click_snapshots_encode_their_png_later_and_only_once()
+    {
+        var snapshot = ClickSnapshots.Create(Aaa.Button, new ScreenRect(100, 50, 56, 56), 128, 78)!;
+        Assert.False(snapshot.IsEncoded); // the hook thread only paid for the pixel copy
+        Assert.Equal((28, 28), (snapshot.AnchorX, snapshot.AnchorY));
+
+        snapshot.EncodeInBackground();
+        await Waits.Until(() => snapshot.IsEncoded);
+        var png = snapshot.Png;
+        Assert.Same(png, snapshot.Png); // encoded once
+        Assert.True(PngCodec.TryDecodeBase64(Convert.ToBase64String(png), out var image, out _));
+        Assert.Equal(Aaa.Button.GetPixel(10, 40), image!.GetPixel(10, 40));
+
+        var step = new MouseClickStep();
+        ClickSnapshots.Attach(step, ClickSnapshots.Create(Aaa.Button, new ScreenRect(0, 0, 56, 56), 28, 28)); // encoded on demand
+        Assert.True(step.HasTargetThumbnail);
+    }
+
+    // ---------------- Upgrade 7: the shared Smart-Aim locator ("🎯 Test Smart-Aim" uses it too) ----------------
+
+    [Fact]
+    public void Smart_aim_locator_finds_the_moved_target_like_playback()
+    {
+        var click = Aaa.RecordedClick(Aaa.Screen(100, 50), 128, 78);
+        var template = SmartClickConversion.TryDecodeThumbnail(click, out _)!;
+
+        Assert.Equal(new ScreenRect(100 - 120, 50 - 120, 56 + 240, 56 + 240), SmartAim.SearchArea(click, template));
+
+        var (hit, _) = SmartAim.Locate(click, template, new ScreenFrame(new ScreenRect(0, 0, 400, 300), Aaa.Screen(140, 80)));
+        Assert.NotNull(hit);
+        Assert.Equal((168, 108, 40, 30), (hit!.X, hit.Y, hit.ShiftX, hit.ShiftY));
+        Assert.True(hit.Moved);
+        Assert.Equal(new ScreenRect(140, 80, 56, 56), hit.Bounds);
+
+        var (miss, best) = SmartAim.Locate(click, template, new ScreenFrame(new ScreenRect(0, 0, 400, 300), Aaa.Screen()));
+        Assert.Null(miss);
+        Assert.True(best < click.SmartAimAccuracy);
     }
 }

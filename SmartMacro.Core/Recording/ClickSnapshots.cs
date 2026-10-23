@@ -7,8 +7,81 @@ namespace SmartMacro.Core.Recording;
 /// <summary>
 /// Smart Click Snapshot: a small picture of what was under the cursor when a button went down during recording, plus
 /// where in that picture the click was. <see cref="Png"/> is a normal PNG file (see <see cref="PngCodec"/>).
+/// A snapshot made from raw pixels (<see cref="FromPixels"/>) encodes its PNG only when it's first needed (or in the
+/// background via <see cref="EncodeInBackground"/>), so the recorder's mouse hook only pays for the tiny screen copy.
+/// Thread-safe: the PNG is encoded exactly once.
 /// </summary>
-public sealed record ClickTargetSnapshot(byte[] Png, int AnchorX, int AnchorY);
+public sealed class ClickTargetSnapshot
+{
+    private readonly object _gate = new();
+    private byte[]? _png;
+    private BgraImage? _pixels;
+
+    /// <summary>A snapshot from an already encoded PNG.</summary>
+    public ClickTargetSnapshot(byte[] png, int anchorX, int anchorY)
+    {
+        _png = png ?? throw new ArgumentNullException(nameof(png));
+        AnchorX = anchorX;
+        AnchorY = anchorY;
+    }
+
+    private ClickTargetSnapshot(BgraImage pixels, int anchorX, int anchorY)
+    {
+        _pixels = pixels;
+        AnchorX = anchorX;
+        AnchorY = anchorY;
+    }
+
+    /// <summary>A snapshot from raw captured pixels; the PNG is made later (first use, or <see cref="EncodeInBackground"/>).</summary>
+    public static ClickTargetSnapshot FromPixels(BgraImage pixels, int anchorX, int anchorY) =>
+        new(pixels ?? throw new ArgumentNullException(nameof(pixels)), anchorX, anchorY);
+
+    /// <summary>Where in the picture the click was (px from its top-left corner).</summary>
+    public int AnchorX { get; }
+
+    public int AnchorY { get; }
+
+    /// <summary>True once the PNG exists (always for a snapshot made from a PNG).</summary>
+    public bool IsEncoded
+    {
+        get { lock (_gate) return _png is not null; }
+    }
+
+    /// <summary>The picture as a PNG file (encoded now if that hasn't happened yet).</summary>
+    public byte[] Png
+    {
+        get
+        {
+            lock (_gate)
+            {
+                if (_png is null)
+                {
+                    _png = PngCodec.Encode(_pixels!);
+                    _pixels = null; // the raw copy isn't needed any more
+                }
+
+                return _png;
+            }
+        }
+    }
+
+    /// <summary>Encodes the PNG on a thread-pool thread (never on the caller's thread). Errors are ignored.</summary>
+    public void EncodeInBackground()
+    {
+        if (IsEncoded) return;
+        ThreadPool.QueueUserWorkItem(static state =>
+        {
+            try
+            {
+                _ = ((ClickTargetSnapshot)state!).Png;
+            }
+            catch (Exception)
+            {
+                // A broken picture just isn't kept (Attach skips it).
+            }
+        }, this);
+    }
+}
 
 /// <summary>
 /// Helpers for Smart Click Snapshots: which screen rectangle to capture around a click, how to turn the captured pixels
@@ -50,16 +123,45 @@ public static class ClickSnapshots
         if (captured.Width <= 0 || captured.Height <= 0) return null;
         var anchorX = Math.Clamp(x - rect.X, 0, captured.Width - 1);
         var anchorY = Math.Clamp(y - rect.Y, 0, captured.Height - 1);
-        return new ClickTargetSnapshot(PngCodec.Encode(captured), anchorX, anchorY);
+        return ClickTargetSnapshot.FromPixels(captured, anchorX, anchorY); // PNG encoded later, off the hook thread
     }
 
-    /// <summary>Puts a recorded snapshot on a click step (nothing happens when there is none).</summary>
+    /// <summary>Puts a recorded snapshot on a click step (nothing happens when there is none or it can't be encoded).</summary>
     public static void Attach(MouseClickStep step, ClickTargetSnapshot? snapshot)
     {
         ArgumentNullException.ThrowIfNull(step);
-        if (snapshot is null || snapshot.Png.Length == 0) return;
-        step.TargetThumbnailBase64 = Convert.ToBase64String(snapshot.Png);
-        step.TargetAnchorX = snapshot.AnchorX;
+        if (TryBase64(snapshot) is not { } base64) return;
+        step.TargetThumbnailBase64 = base64;
+        step.TargetAnchorX = snapshot!.AnchorX;
         step.TargetAnchorY = snapshot.AnchorY;
+    }
+
+    /// <summary>The snapshot as Base64 PNG text, or null (none / empty / couldn't be encoded).</summary>
+    public static string? TryBase64(ClickTargetSnapshot? snapshot)
+    {
+        if (snapshot is null) return null;
+        try
+        {
+            var png = snapshot.Png;
+            return png.Length == 0 ? null : Convert.ToBase64String(png);
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or NullReferenceException or OverflowException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>A snapshot back from a stored Base64 thumbnail (recorded-input clicks), or null when it's damaged.</summary>
+    public static ClickTargetSnapshot? FromBase64(string? base64, int anchorX, int anchorY)
+    {
+        if (string.IsNullOrEmpty(base64)) return null;
+        try
+        {
+            return new ClickTargetSnapshot(Convert.FromBase64String(base64), anchorX, anchorY);
+        }
+        catch (FormatException)
+        {
+            return null;
+        }
     }
 }

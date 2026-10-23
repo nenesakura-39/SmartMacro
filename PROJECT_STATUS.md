@@ -1,9 +1,10 @@
 # SmartMacro – Project Status / Handoff
 
-_Last updated: 2026-10-23 (AAA Studio Upgrade Parts 5 + 6 – `StepCleanup.RepairBlockStructure` + "✨ Auto-Fix Block Structure"
-banner / button with Undo + tests: written WITHOUT a .NET SDK, NOT built or tested. Before it: AAA Parts 3 + 4 – Pause F8 / live speed selector / Humanize ±4 % ±2 px arcs,
-TargetDetected + target-lock reticle, AAA mini-HUD with ⏸ / ⏹ buttons: written WITHOUT a .NET SDK, NOT built or tested.
-Before it: AAA Parts 1 + 2 on top of `553abfb` – owner build + tests all green. Before it: live-test fix of `538326c` (committed as `553abfb`): Part B – Run #2+ skipping movement + run counter, written WITHOUT a
+_Last updated: 2026-10-23 (Audit fixes of `a33c29f` + Upgrade 7 – capture shield for overlays, pause measured from F8,
+"last found spot" skip instead of stop, click pictures inside recorded input + "✂ Break into steps", lazy click-snapshot
+PNGs, shared Smart-Aim locator + "🎯 Test Smart-Aim", anchor arrow in "Pick offset": written WITHOUT a .NET SDK, NOT built
+or tested. Before it: the whole AAA Studio Upgrade Parts 1–6, committed as `a33c29f`: owner build 0 warnings / 0 errors,
+**882 / 882 tests passed**. Before it: live-test fix of `538326c` (committed as `553abfb`): Part B – Run #2+ skipping movement + run counter, written WITHOUT a
 .NET SDK, NOT built or tested; Part A – image match "0 % similar" + orphan End If, owner build + tests all green. Before it: Studio upgrades batch on top of `cdd0919` – failsafe release, Run step / Play from here, Undo / Redo +
 copy / paste, target window + coordinate scaling, on-screen highlight, Humanize, Studio Library / Settings / Logs: written WITHOUT a
 .NET SDK, NOT built or tested. Before it: Studio UI redesign on top of `d54c087` – new palette, pill switch / segmented controls,
@@ -26,7 +27,55 @@ Developer: Riku (リク) · Brand: KuroLogic_
 
 
 
-## AAA Studio Upgrade – Parts 5 + 6 (2026-10-23, on top of Parts 3 + 4, which are NOT built yet); written WITHOUT a .NET SDK: **NOT built, NOT tested**
+## Audit fixes of `a33c29f` + Upgrade 7 (2026-10-23); written WITHOUT a .NET SDK: **NOT built, NOT tested**
+Checked by script only (brace balance, XAML well-formed). Next step for the owner: `tools\verify.cmd`, then section M of
+`docs/AAA_UPGRADE_MANUAL_TESTS.md`. The audit's 5 items were checked against the code first; several were already
+handled, so only the real gaps were changed:
+1. **Overlays in captures** – already: WDA_EXCLUDEFROMCAPTURE on the reticle, highlight, HUD and picker banner, and a
+   hide-before-capture fallback for the reticle on playback captures only. Changed:
+   - New `Services/Vision/CaptureShield.cs`: `TryExclude(hwnd)` (only on Windows build ≥ 19041; older builds treat 0x11 as
+     WDA_MONITOR = a black box in captures), `MarkVisible / MarkHidden`, `BeforeCapture()` (hides unexcluded overlays on
+     their UI thread, ≤ 200 ms each).
+   - `ScreenCapture.CaptureBgra(area, shield = true)` (the one GDI BitBlt used by GdiScreenCapture, OCR, VisionTools) calls
+     `CaptureShield.BeforeCapture()`, so Find text (OCR) and editor tests are covered too, not just playback image
+     captures. The click-snapshot capture passes `shield: false` (hook thread must never wait).
+   - TargetLockOverlay + ScreenHighlightOverlay use the shield; RunModeHost HUD uses `TryExclude` (no fallback: hiding the
+     HUD for every capture would flicker; it's small and in a corner).
+2. **Pause inside long steps** – already: every wait (`WaitForTimelineAsync` / `WaitAsync`) checks pause; recorded input,
+   key holds (incl. typematic loop), Find / If / Repeat waits and feedback loops pause mid-step; held keys / buttons are
+   released (engine `HeldInput`) and pressed again on resume; timeouts / loop limits use active time. Changed: the paused
+   time now counts from the moment `Pause()` was called (`_pauseRequestedAt`), not from when the playback thread noticed
+   (up to one 50 ms wait chunk later), so the rest of a delay / hold / recording is exact.
+3. **Click snapshots** – `ClickTargetSnapshot` is now a class that can hold raw pixels and encodes its PNG lazily
+   (thread-safe, once); the snapshotter only copies the 56×56 pixels on the hook thread and queues the encoding on the
+   thread pool (`EncodeInBackground`). A press within 60 ms and 8 px of the last snapshot reuses it.
+   Pictures of clicks inside recorded input: new `InputSequenceStep.ClickTargets` (list of `SequenceClickTarget`
+   {eventIndex, thumbnail (Base64 PNG), anchorX/Y}), filled by `SmartRecordingConverter` (Exact 1:1 mode, clicks during a
+   held key). Kept as a separate JSON list (not inside the compact `u1` event text), format 12 (not released yet, so no
+   bump), validated (warning if they don't match button-down events).
+   New "✂ Break into steps" (`StepCleanup.WhyNotExpandable` / `ExpandInputSequence`, editor `BreakIntoStepsCommand`, button
+   on the Recorded input card): cursor-position recordings become Delay / Move / Click / Key press steps via
+   `RecordingConverter` (leading delay kept, comment → first step, disabled → disabled), clicks keep their picture. Refused
+   for game-mode / camera (relative) movement or clicks with no known position. This feature didn't exist before.
+4. **Last found spot** – already: never scaled by "auto-adjust coordinates" (only stored positions are mapped), validator
+   warning existed. Changed: a click / move "on the last found spot" with nothing found yet is now **skipped** with
+   "⚠ Skipped click at Last Found Target because no prior step has found a target in this run." (logged as a warning;
+   engine messages starting with ⚠ go to the log as warnings) instead of stopping the macro. Offsets are deliberately
+   NOT scaled either (templates match at their recorded pixel size). Two tests updated on purpose
+   (`OcrTests.Click_on_found_text_without_a_match_is_skipped`, `LastFoundTargetTests.Last_found_spot_before_anything_was_found_is_skipped_with_a_warning`).
+5. **Speed** – already correct: key holds scale by 1 / speed with the ≥ 25 ms floor (`ScaledHoldMs`, typematic loop too),
+   recorded input scales every event time and the mouse-part switch times stay on the recorded clock. Kept 25 ms (not 30)
+   to match the existing click floor and the requested test. Only tests added.
+6. **Upgrade 7** – new `Core/Workflow/SmartAim.cs` (search area, options, `Locate` with nearest-copy rule) now used by the
+   engine and by `IVisionTools.TestSmartAimAsync` ("🎯 Test Smart-Aim" button next to Convert; local search first, then
+   whole screen; result text with match %, ms, shift, and a "raise Search distance to N px" hint; highlight flash).
+   "Pick offset": the reference target was already auto-located; now the picker (`RegionPicker.PickAsync(..., anchor)`)
+   draws a green ◎ at the target center, a dashed arrow to the cursor (across monitors) and a live "Offset (+x, +y)".
+- Tests: `AuditFixTests` in `AaaUpgradeTests.cs` (pause in recorded input / key hold, 2× key hold + 30 ms tap, 2×
+  recorded input, last-found skip incl. Run step, validator, no scaling of found spot, Break into steps keeps pictures
+  incl. smart Exact 1:1 recording, refusal cases, JSON / format / validation of ClickTargets, lazy PNG, SmartAim.Locate).
+
+## AAA Studio Upgrade – Parts 5 + 6 (2026-10-23, on top of Parts 3 + 4) – committed as `a33c29f` with Parts 1–4: owner build + tests **all green (882 / 882)**
 Checked by script only (brace balance, XAML well-formed) + a Python port of the repair rules fuzzed on 200,000 random
 marker lists (always valid afterwards, idempotent, no normal step lost or moved, "changed" ⇔ "was invalid"). Next step
 for the owner: `tools\verify.cmd` (covers Parts 3–6), then sections G–L of `docs/AAA_UPGRADE_MANUAL_TESTS.md`.
@@ -52,7 +101,7 @@ for the owner: `tools\verify.cmd` (covers Parts 3–6), then sections G–L of `
    3,000-list random test. The other Part 6 items (If "When found" click + offset, last-found click, Smart-Aim at
    (+40, +30), pause / resume, 2× speed with valid holds) were already covered by the Parts 1–4 tests.
 
-## AAA Studio Upgrade – Parts 3 + 4 (2026-10-23, on top of Parts 1 + 2, which the owner built: all green); written WITHOUT a .NET SDK: **NOT built, NOT tested**
+## AAA Studio Upgrade – Parts 3 + 4 (2026-10-23, on top of Parts 1 + 2) – committed as `a33c29f`: owner build + tests **all green (882 / 882)**
 Checked by script only (brace / bracket balance, XAML well-formed). Next step for the owner: `tools\verify.cmd`, then sections
 G–K of `docs/AAA_UPGRADE_MANUAL_TESTS.md`. Parts 5–6 were added on top (see above).
 Much of Part 3 already existed (engine `Pause()` / `Resume()` with held-input release + timeline shift, `Macro.Speed`,
@@ -999,12 +1048,10 @@ no .NET SDK in the AI's environment)
   csproj Company/Authors "Riku", Copyright "© 2026 Riku", README "© 2026 Riku") – change awaits owner approval.
 
 ## Next task
-- Owner: `tools\verify.cmd` for AAA Parts 3–6 (never compiled; send `artifacts\build.log` / `artifacts\test.log` if anything
-  fails), then sections G–L of `docs/AAA_UPGRADE_MANUAL_TESTS.md` (A–F for Parts 1 + 2 if not done yet). Then commit the
-  whole AAA upgrade.
-- Owner: `tools\\verify.cmd` for Part B of the `538326c` live-test fix (never compiled), then a live run with Play = 0
-  and Play = 5 (every run should move the same; watch the run counter in the header, bottom bar and mini overlay).
-  Then commit Parts A + B together with the earlier uncommitted timeline changes.
+- Owner: `tools\verify.cmd` for the audit fixes of `a33c29f` + Upgrade 7 (never compiled; send `artifacts\build.log` /
+  `artifacts\test.log` if anything fails), then section M of `docs/AAA_UPGRADE_MANUAL_TESTS.md` (and G–L if not done yet).
+- Owner: live run of the `538326c` Part B fix (built + tested green as part of `a33c29f`) with Play = 0 and Play = 5
+  (every run should move the same; watch the run counter in the header, bottom bar and mini overlay).
 - Owner: `tools\verify.cmd` for the brand icon / logo change too, then look at the sidebar logo, the mini overlay,
   the taskbar / Alt+Tab / Explorer icon (16 → 256 px).
 - Owner: `tools\verify.cmd` for the Studio upgrades batch (never compiled; send `artifacts\build.log` /

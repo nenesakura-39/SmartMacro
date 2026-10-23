@@ -35,12 +35,17 @@ internal static class RegionPicker
     public const string FrozenBanner = "Screen Frozen — Drag to select or click a pixel  |  Press [Space] to unfreeze & capture a new frame  |  [Esc] Cancel";
 
     /// <summary>Picks an area (or a point) and returns only the rectangle.</summary>
-    public static async Task<ScreenRect?> PickAsync(string? hint = null, bool pickPoint = false) =>
-        (await PickFrozenAsync(hint, pickPoint))?.Rect;
+    /// <param name="anchor">
+    /// Point mode only: a reference spot (e.g. the center of the target "Pick offset" measures from). It's marked on screen,
+    /// with an arrow from it to the cursor and the live offset next to the cursor.
+    /// </param>
+    public static async Task<ScreenRect?> PickAsync(string? hint = null, bool pickPoint = false, ScreenPoint? anchor = null) =>
+        (await PickFrozenAsync(hint, pickPoint, anchor))?.Rect;
 
     /// <param name="hint">Instruction shown at the top of each monitor.</param>
     /// <param name="pickPoint">True = a single click picks one pixel (returned as a 1×1 rectangle) instead of dragging a box.</param>
-    public static async Task<PickerResult?> PickFrozenAsync(string? hint = null, bool pickPoint = false)
+    /// <param name="anchor">Point mode: a reference spot to mark, with an arrow + offset to the cursor (see <see cref="PickAsync"/>).</param>
+    public static async Task<PickerResult?> PickFrozenAsync(string? hint = null, bool pickPoint = false, ScreenPoint? anchor = null)
     {
         var delay = ScreenFreezeOptions.Instance.DelaySeconds;
         if (delay > 0 && !await FreezeCountdown.RunAsync(delay)) return null;
@@ -100,7 +105,7 @@ internal static class RegionPicker
             }
         }
 
-        var session = new PickerSession(UnionBounds(monitors, frozen?.Bounds));
+        var session = new PickerSession(UnionBounds(monitors, frozen?.Bounds)) { Anchor = pickPoint ? anchor : null };
         foreach (var monitor in monitors)
             windows.Add(new RegionPickerWindow(monitor, session, Finish, hint ?? DefaultHint, pickPoint, CropFor(frozen, monitor), Refreeze));
 
@@ -197,6 +202,10 @@ internal sealed class PickerSession
     public PickerSession(ScreenRect virtualBounds) => VirtualBounds = virtualBounds;
 
     public ScreenRect VirtualBounds { get; }
+
+    /// <summary>Point mode: the reference spot to mark (with an arrow to the cursor), or null.</summary>
+    public ScreenPoint? Anchor { get; init; }
+
     public NativeMethods.POINT? Start { get; set; }
     public bool PointPressed { get; set; }
     public IReadOnlyList<RegionPickerWindow> Windows { get; set; } = Array.Empty<RegionPickerWindow>();
@@ -330,6 +339,12 @@ internal sealed class RegionPickerWindow : Window
     private readonly Image _loupeImage;
     private readonly Border _loupeSwatch;
     private readonly TextBlock _loupeText;
+    private readonly Ellipse _anchorRing;
+    private readonly Ellipse _anchorDot;
+    private readonly Line _anchorLine;
+    private readonly Polygon _anchorHead;
+    private readonly TextBlock _anchorLabel;
+    private readonly TextBlock _offsetLabel;
     private BgraImage? _frozen;
     private BitmapSource? _frozenSource;
     private bool _closed;
@@ -445,8 +460,34 @@ internal sealed class RegionPickerWindow : Window
             IsHitTestVisible = false,
         };
 
+        // "Pick offset": the target's center (◎), an arrow from it to the cursor and the live offset.
+        var anchorBrush = new SolidColorBrush(Color.FromRgb(0x22, 0xFF, 0x7A));
+        anchorBrush.Freeze();
+        var labelBack = new SolidColorBrush(Color.FromArgb(0xE6, 0x0E, 0x16, 0x26));
+        labelBack.Freeze();
+        _anchorRing = new Ellipse { Width = 22, Height = 22, Stroke = anchorBrush, StrokeThickness = 2, Visibility = Visibility.Collapsed, IsHitTestVisible = false };
+        _anchorDot = new Ellipse { Width = 6, Height = 6, Fill = anchorBrush, Visibility = Visibility.Collapsed, IsHitTestVisible = false };
+        _anchorLine = new Line { Stroke = anchorBrush, StrokeThickness = 2, StrokeDashArray = new DoubleCollection { 4, 3 }, Visibility = Visibility.Collapsed, IsHitTestVisible = false };
+        _anchorHead = new Polygon { Fill = anchorBrush, Visibility = Visibility.Collapsed, IsHitTestVisible = false };
+        _anchorLabel = new TextBlock
+        {
+            Foreground = anchorBrush, Background = labelBack, Padding = new Thickness(6, 2, 6, 2), FontSize = 12, FontWeight = FontWeights.SemiBold,
+            Visibility = Visibility.Collapsed, IsHitTestVisible = false,
+        };
+        _offsetLabel = new TextBlock
+        {
+            Foreground = Brushes.White, Background = labelBack, Padding = new Thickness(6, 2, 6, 2), FontSize = 13, FontWeight = FontWeights.SemiBold,
+            Visibility = Visibility.Collapsed, IsHitTestVisible = false,
+        };
+
         _canvas.Children.Add(_crossX);
         _canvas.Children.Add(_crossY);
+        _canvas.Children.Add(_anchorLine);
+        _canvas.Children.Add(_anchorHead);
+        _canvas.Children.Add(_anchorRing);
+        _canvas.Children.Add(_anchorDot);
+        _canvas.Children.Add(_anchorLabel);
+        _canvas.Children.Add(_offsetLabel);
         _canvas.Children.Add(_selection);
         _canvas.Children.Add(_sizeLabel);
         _canvas.Children.Add(_loupe);
@@ -483,7 +524,11 @@ internal sealed class RegionPickerWindow : Window
                 _refreeze();
             }
         };
-        Loaded += (_, _) => ApplyBounds();
+        Loaded += (_, _) =>
+        {
+            ApplyBounds();
+            Dispatcher.InvokeAsync(() => UpdateAnchor(RegionPicker.GetPhysicalCursorPos())); // after the layout is final
+        };
         Closed += (_, _) =>
         {
             _closed = true;
@@ -599,6 +644,7 @@ internal sealed class RegionPickerWindow : Window
         if (_pickPoint)
         {
             ShowCrosshair(point);
+            foreach (var w in _session.Windows) w.UpdateAnchor(point); // the arrow may cross monitors
             return;
         }
 
@@ -639,6 +685,64 @@ internal sealed class RegionPickerWindow : Window
         {
             // Too small (probably a stray click): let the user try again.
             foreach (var w in _session.Windows) w.ClearSelection();
+        }
+    }
+
+    /// <summary>
+    /// "Pick offset": marks the anchor (◎ + its position) and draws a dashed arrow from it to the cursor, with the live
+    /// offset ("Offset (+120, -40)") next to the cursor on the monitor the cursor is on. Every overlay draws its own part
+    /// of the arrow, so it also works across monitors.
+    /// </summary>
+    internal void UpdateAnchor(NativeMethods.POINT cursor)
+    {
+        if (_session.Anchor is not { } anchor || _closed) return;
+        var a = PhysicalToCanvas(anchor.X, anchor.Y);
+        var c = PhysicalToCanvas(cursor.X, cursor.Y);
+
+        var anchorHere = Contains(anchor.X, anchor.Y);
+        Canvas.SetLeft(_anchorRing, a.X - _anchorRing.Width / 2);
+        Canvas.SetTop(_anchorRing, a.Y - _anchorRing.Height / 2);
+        Canvas.SetLeft(_anchorDot, a.X - _anchorDot.Width / 2);
+        Canvas.SetTop(_anchorDot, a.Y - _anchorDot.Height / 2);
+        _anchorLabel.Text = $"◎ Target center ({anchor.X}, {anchor.Y})";
+        Canvas.SetLeft(_anchorLabel, a.X + 16);
+        Canvas.SetTop(_anchorLabel, a.Y - 30);
+        _anchorRing.Visibility = _anchorDot.Visibility = _anchorLabel.Visibility = anchorHere ? Visibility.Visible : Visibility.Collapsed;
+
+        _anchorLine.X1 = a.X;
+        _anchorLine.Y1 = a.Y;
+        _anchorLine.X2 = c.X;
+        _anchorLine.Y2 = c.Y;
+        var dx = c.X - a.X;
+        var dy = c.Y - a.Y;
+        var length = Math.Sqrt(dx * dx + dy * dy);
+        _anchorLine.Visibility = length >= 2 ? Visibility.Visible : Visibility.Collapsed;
+        if (length >= 14)
+        {
+            // Arrowhead at the cursor end: 12 px long, 12 px wide.
+            var ux = dx / length;
+            var uy = dy / length;
+            var baseX = c.X - ux * 12;
+            var baseY = c.Y - uy * 12;
+            _anchorHead.Points = new PointCollection { new Point(c.X, c.Y), new Point(baseX - uy * 6, baseY + ux * 6), new Point(baseX + uy * 6, baseY - ux * 6) };
+            _anchorHead.Visibility = Visibility.Visible;
+        }
+        else
+        {
+            _anchorHead.Visibility = Visibility.Collapsed;
+        }
+
+        if (Contains(cursor.X, cursor.Y))
+        {
+            _offsetLabel.Text = $"Offset ({cursor.X - anchor.X:+0;-0;0}, {cursor.Y - anchor.Y:+0;-0;0})";
+            // Above-left of the cursor (the magnifier sits below-right), flipped near the edges.
+            Canvas.SetLeft(_offsetLabel, c.X - 170 < 0 ? c.X + 16 : c.X - 170);
+            Canvas.SetTop(_offsetLabel, c.Y - 40 < 0 ? c.Y + 16 : c.Y - 40);
+            _offsetLabel.Visibility = Visibility.Visible;
+        }
+        else
+        {
+            _offsetLabel.Visibility = Visibility.Collapsed;
         }
     }
 

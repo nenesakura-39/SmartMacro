@@ -111,6 +111,59 @@ public sealed class EditorViewModel : ObservableObject
         ConvertClickToFindImageCommand = new RelayCommand(ConvertClickToFindImage,
             p => HasMacro && (p as MouseClickStepViewModel ?? SelectedStep as MouseClickStepViewModel) is { CanConvertToFindImage: true });
         AutoFixBlocksCommand = new RelayCommand(AutoFixBlocks, () => HasMacro && CanAutoFixBlocks);
+        BreakIntoStepsCommand = new RelayCommand(BreakIntoSteps,
+            p => HasMacro && (p as InputSequenceStepViewModel ?? SelectedStep as InputSequenceStepViewModel) is { CanBreakIntoSteps: true });
+    }
+
+    // ---------------- ✂ Break recorded input into steps ----------------
+
+    /// <summary>
+    /// Replaces a recorded-input step (parameter = its editor, or the selected step) with normal editable steps
+    /// (see <see cref="StepCleanup.ExpandInputSequence"/>); clicks keep their Smart Click Snapshot. Undo puts it back.
+    /// </summary>
+    public RelayCommand BreakIntoStepsCommand { get; }
+
+    private void BreakIntoSteps(object? parameter)
+    {
+        if (!HasMacro) return;
+        if ((parameter as InputSequenceStepViewModel ?? SelectedStep as InputSequenceStepViewModel) is not { } sequence) return;
+        var index = Steps.IndexOf(sequence);
+        if (index < 0 || sequence.Model is not InputSequenceStep model) return;
+
+        List<MacroStep> expanded;
+        try
+        {
+            expanded = StepCleanup.ExpandInputSequence(model);
+        }
+        catch (InvalidOperationException ex)
+        {
+            _setStatus($"Can't break this recording into steps: {ex.Message}", StatusKind.Warning);
+            return;
+        }
+
+        if (expanded.Count == 0)
+        {
+            _setStatus("This recording has nothing that would become a step.", StatusKind.Info);
+            return;
+        }
+
+        RecordUndo();
+        Steps.RemoveAt(index); // the collection handler unhooks the old editor
+        var added = new List<StepViewModel>(expanded.Count);
+        for (var i = 0; i < expanded.Count; i++)
+        {
+            var vm = CreateStepViewModel(expanded[i]);
+            Steps.Insert(index + i, vm);
+            added.Add(vm);
+        }
+
+        _selection.Clear();
+        SelectedStep = added[0];
+        SelectStepsRequested?.Invoke(this, added.ToArray());
+        Touch();
+        var pictures = expanded.OfType<MouseClickStep>().Count(c => c.HasTargetThumbnail);
+        _setStatus($"Step {index + 1} is now {expanded.Count} normal step(s)" +
+                   (pictures > 0 ? $"; {pictures} click(s) kept their \"what you clicked\" picture" : "") + ". Ctrl+Z undoes it.", StatusKind.Success);
     }
 
     // ---------------- ✨ Auto-Fix block structure ----------------

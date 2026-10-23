@@ -250,15 +250,25 @@
                         </StackPanel>
                     </Grid>
 
-                    <Button Command="{Binding DataContext.ConvertClickToFindImageCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
-                            CommandParameter="{Binding}" Style="{StaticResource TestActionButton}" Margin="0,12,0,0" HorizontalAlignment="Left"
-                            ToolTip="{Binding ConvertHint}" ToolTipService.ShowOnDisabled="True"
-                            AutomationProperties.Name="Convert step to Find image and click">
-                        <StackPanel Orientation="Horizontal">
-                            <TextBlock Text="&#xE8B9;" Style="{StaticResource IconText}" />
-                            <TextBlock Text="🔍 Convert Step to Full 'Find Image &amp; Click'" Margin="8,0,0,0" />
-                        </StackPanel>
-                    </Button>
+                    <WrapPanel Margin="0,12,0,0">
+                        <Button Command="{Binding TestSmartAimCommand}" Style="{StaticResource TestActionButton}" Margin="0,0,8,6"
+                                ToolTip="Looks for this picture on the screen right now: first within the search distance around X / Y, then on the whole screen. The spot it finds flashes on screen. Nothing is clicked."
+                                AutomationProperties.Name="Test Smart-Aim now">
+                            <TextBlock Text="🎯 Test Smart-Aim" />
+                        </Button>
+                        <Button Command="{Binding DataContext.ConvertClickToFindImageCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                CommandParameter="{Binding}" Style="{StaticResource TestActionButton}" Margin="0,0,0,6"
+                                ToolTip="{Binding ConvertHint}" ToolTipService.ShowOnDisabled="True"
+                                AutomationProperties.Name="Convert step to Find image and click">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="&#xE8B9;" Style="{StaticResource IconText}" />
+                                <TextBlock Text="🔍 Convert Step to Full 'Find Image &amp; Click'" Margin="8,0,0,0" />
+                            </StackPanel>
+                        </Button>
+                    </WrapPanel>
+                    <TextBlock Text="{Binding SmartAimTestResult}" FontSize="12" FontWeight="SemiBold" Margin="0,2,0,0" TextWrapping="Wrap"
+                               AutomationProperties.LiveSetting="Polite"
+                               Visibility="{Binding SmartAimTestResult, Converter={StaticResource NullToVisibility}}" />
                     <TextBlock Text="{Binding ConvertHint}" Style="{StaticResource MutedText}" FontSize="11" Margin="0,4,0,0" TextWrapping="Wrap" />
                 </StackPanel>
             </Border>
@@ -1050,6 +1060,15 @@
 
             <TextBlock Style="{StaticResource MutedText}" FontSize="11" Margin="0,8,0,0" TextWrapping="Wrap"
                        Text="{Binding PlaybackExplanation}" />
+
+            <!-- ✂ Break into steps: cursor-position recordings become normal editable steps (click pictures kept). -->
+            <Button Command="{Binding DataContext.BreakIntoStepsCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                    CommandParameter="{Binding}" Style="{StaticResource TestActionButton}" Margin="0,12,0,0" HorizontalAlignment="Left"
+                    ToolTip="{Binding BreakIntoStepsHint}" ToolTipService.ShowOnDisabled="True"
+                    AutomationProperties.Name="Break recorded input into steps">
+                <TextBlock Text="✂ Break into steps" />
+            </Button>
+            <TextBlock Text="{Binding BreakIntoStepsHint}" Style="{StaticResource MutedText}" FontSize="11" Margin="0,4,0,0" TextWrapping="Wrap" />
 
             <!-- Smart recordings: how each part plays the mouse (exactly one way per part). -->
             <StackPanel Margin="0,16,0,0" Visibility="{Binding HasMouseParts, Converter={StaticResource BoolToVisibility}}">

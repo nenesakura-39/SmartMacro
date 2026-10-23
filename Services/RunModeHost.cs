@@ -508,8 +508,9 @@ internal sealed class RunOverlayWindow : Window
         style |= NativeMethods.WS_EX_TRANSPARENT | NativeMethods.WS_EX_LAYERED | NativeMethods.WS_EX_NOACTIVATE | NativeMethods.WS_EX_TOOLWINDOW;
         NativeMethods.SetWindowLongValue(hwnd, NativeMethods.GWL_EXSTYLE, style);
 
-        // Keep the HUD out of screen captures so OCR / Find image don't read it (Windows 10 2004+; best effort).
-        NativeMethods.SetWindowDisplayAffinity(hwnd, NativeMethods.WDA_EXCLUDEFROMCAPTURE);
+        // Keep the HUD out of screen captures so OCR / Find image don't read it (Windows 10 2004+; best effort). On older
+        // Windows it stays visible to captures: it's small and in a corner, and hiding it for every capture would flicker.
+        CaptureShield.TryExclude(hwnd);
         PositionAtCorner();
     }
 

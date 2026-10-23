@@ -8,6 +8,7 @@ using SmartMacro.Core.Ocr;
 using SmartMacro.Core.Playback;
 using SmartMacro.Core.Storage;
 using SmartMacro.Core.Vision;
+using SmartMacro.Core.Workflow;
 using SmartMacro.Services.Input;
 using SmartMacro.Services.Ocr;
 
@@ -53,6 +54,13 @@ public interface IVisionTools
 
     /// <summary>Looks for the step's image once, shows a preview with the matches, and describes the result.</summary>
     Task<string> TestImageAsync(FindImageStep step);
+
+    /// <summary>
+    /// "🎯 Test Smart-Aim": looks for a recorded click's picture right now, exactly like playback (within the Smart-Aim
+    /// distance around X / Y), then on the whole screen if it isn't there; flashes what it found and describes it
+    /// ("✓ Found at (512, 340) — 98% match in 3 ms" / "✗ Not found within 120 px …"). Nothing is clicked.
+    /// </summary>
+    Task<string> TestSmartAimAsync(MouseClickStep step);
 
     /// <summary>Looks for the step's colour once, shows a preview with the patches, and describes the result.</summary>
     Task<string> TestColorAsync(FindColorStep step);
@@ -178,9 +186,10 @@ public sealed class VisionTools : IVisionTools
         }
 
         // 3. The spot to click / move to, relative to that center.
+        // The picker draws the target's center and an arrow from it to the cursor with the live offset.
         var picked = await RegionPicker.PickAsync(
-            $"Now click where the macro should click, relative to the target at ({anchor.Value.X}, {anchor.Value.Y}).   Esc or right-click to cancel.",
-            pickPoint: true);
+            $"Now click where the macro should click, relative to the target at ({anchor.Value.X}, {anchor.Value.Y}) (the ◎ mark; the arrow shows the offset).   Esc or right-click to cancel.",
+            pickPoint: true, anchor: anchor);
         if (picked is not { } spot) return (OffsetPick?)null;
 
         return (OffsetPick?)new OffsetPick(spot.X - anchor.Value.X, spot.Y - anchor.Value.Y, anchor.Value, reference is not null && note is null, note);
@@ -250,6 +259,71 @@ public sealed class VisionTools : IVisionTools
     {
         using var _ = NativeMethods.PhysicalPixelsScope.Enter();
         return NativeMethods.GetCursorPos(out var point) ? new ScreenPoint(point.X, point.Y) : null;
+    }
+
+    public async Task<string> TestSmartAimAsync(MouseClickStep step)
+    {
+        ArgumentNullException.ThrowIfNull(step);
+        _lastMatch = null;
+        var template = SmartClickConversion.TryDecodeThumbnail(step, out var error);
+        if (template is null) return $"✗ Can't test: {error}";
+        ClosePreview();
+
+        var radius = SmartAim.RadiusOf(step);
+        var needs = SmartAim.OptionsFor(step).MinScore;
+        try
+        {
+            var (hit, best, nearby, area, elapsed) = await WhileInvisibleAsync(() => Task.Run(() =>
+            {
+                var watch = Stopwatch.StartNew();
+                var screen = _capture.GetVirtualScreen();
+                var local = SmartAim.SearchArea(step, template).Intersect(screen);
+                SmartAimHit? found = null;
+                double bestScore = 0;
+                if (local.Width >= template.Width && local.Height >= template.Height)
+                    (found, bestScore) = SmartAim.Locate(step, template, _capture.Capture(local));
+                var foundNearby = found is not null;
+                if (found is null)
+                {
+                    // Not where playback would look: try the whole desktop, so the test can say how far it really moved.
+                    var (anywhere, anywhereBest) = SmartAim.Locate(step, template, _capture.Capture(screen));
+                    found = anywhere;
+                    bestScore = Math.Max(bestScore, anywhereBest);
+                }
+
+                return (found, bestScore, foundNearby, local, watch.Elapsed);
+            }));
+
+            var ms = elapsed.TotalMilliseconds;
+            if (hit is null)
+            {
+                ScreenHighlightOverlay.ShowResult(area.IsEmpty ? null : area, null, found: false, $"✗ Not found (best {best * 100:0}%)");
+                return $"✗ Not found within {radius} px (best {best:P0}, needs {needs:P0}), and not anywhere else on screen either. " +
+                       $"Playing now would click the recorded spot ({step.X}, {step.Y}). Took {ms:0} ms.";
+            }
+
+            _lastMatch = new ScreenPoint(hit.X, hit.Y);
+            ScreenHighlightOverlay.ShowResult(nearby ? area : null, hit.Bounds, found: true, $"🎯 {hit.Score * 100:0}% Match");
+            var text = $"✓ Found at ({hit.X}, {hit.Y}) — {hit.Score * 100:0}% match in {ms:0} ms. ";
+            text += !hit.Moved
+                ? "It's exactly where it was recorded."
+                : $"It moved by ({hit.ShiftX:+0;-0;0}, {hit.ShiftY:+0;-0;0}) px since recording.";
+            if (!nearby)
+            {
+                var needed = Math.Max(Math.Abs(hit.ShiftX), Math.Abs(hit.ShiftY));
+                text += $" That's farther than the {radius} px search distance, so playback would NOT find it there: raise \"Search distance\" to at least {needed} px (or use \"Convert to Find image & click\").";
+            }
+            else if (!step.SmartAimAtTarget)
+            {
+                text += " Turn on Smart-Aim to click it there when playing.";
+            }
+
+            return text;
+        }
+        catch (Exception ex)
+        {
+            return $"✗ Test failed: {ex.Message}";
+        }
     }
 
     public async Task<string> TestImageAsync(FindImageStep step)

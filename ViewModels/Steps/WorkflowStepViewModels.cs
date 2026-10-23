@@ -30,6 +30,7 @@ public sealed record ScreenTools(IFindTextTools? Text, IVisionTools? Vision, ISc
                 click.PositionPicker.Tools = Vision;
                 click.EndPoint.PositionPicker.Tools = Vision;
                 click.OffsetPicker.Tools = Vision;
+                click.VisionTools = Vision; // 🎯 Test Smart-Aim
                 break;
             case MouseScrollStepViewModel scroll:
                 scroll.PositionPicker.Tools = Vision;

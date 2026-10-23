@@ -195,12 +195,15 @@ public class FindTextPlaybackTests
     }
 
     [Fact]
-    public async Task Click_on_found_text_without_a_match_fails()
+    public async Task Click_on_found_text_without_a_match_is_skipped()
     {
-        var result = await new PlaybackEngine(new FakeInput(), new FakeClock(), new FakeOcr()).RunAsync(MacroWith(
+        // Changed on purpose (AAA audit fix 4): nothing found yet = the click is skipped with a warning, never sent to (0, 0).
+        var input = new FakeInput();
+        var result = await new PlaybackEngine(input, new FakeClock(), new FakeOcr()).RunAsync(MacroWith(
             new MouseClickStep { UseLastFoundText = true }));
 
-        Assert.Equal(PlaybackOutcome.Failed, result.Outcome);
+        Assert.Equal(PlaybackOutcome.Completed, result.Outcome);
+        Assert.Empty(input.Calls);
     }
 
     [Fact]

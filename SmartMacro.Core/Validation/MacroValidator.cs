@@ -155,10 +155,10 @@ public static class MacroValidator
 
             if (step is MouseClickStep { UseLastFoundText: true } && !hasFindTextBefore)
                 issues.Add(new ValidationIssue(IssueSeverity.Warning,
-                    "This click uses the last found spot, but there's no \"Find text\", \"Find image\" or \"Find color\" step (or If / Repeat condition) before it.", i, step.Id, nameof(MouseClickStep.UseLastFoundText)));
+                    "This click uses the last found spot, but there's no \"Find text\", \"Find image\" or \"Find color\" step (or If / Repeat condition) before it, so when played it's skipped (it never clicks a default spot).", i, step.Id, nameof(MouseClickStep.UseLastFoundText)));
             if (step is MouseMoveStep { TargetMode: ClickTargetMode.LastFoundMatch } && !hasFindTextBefore)
                 issues.Add(new ValidationIssue(IssueSeverity.Warning,
-                    "This move goes to the last found spot, but there's no \"Find text\", \"Find image\" or \"Find color\" step (or If / Repeat condition) before it.", i, step.Id, nameof(MouseMoveStep.TargetMode)));
+                    "This move goes to the last found spot, but there's no \"Find text\", \"Find image\" or \"Find color\" step (or If / Repeat condition) before it, so when played it's skipped.", i, step.Id, nameof(MouseMoveStep.TargetMode)));
             if (step is ScreenSearchStep { Enabled: true, Goal: WaitGoal.Appear }) hasFindTextBefore = true;
             if (step.Enabled && WorkflowSteps.ConditionsOf(step).Any()) hasFindTextBefore = true; // conditions remember what they saw
 
@@ -798,6 +798,30 @@ public static class MacroValidator
             issues.Add(Warning("Some keys or buttons are still held at the end of the recording; they'll be released when this step finishes.", property));
 
         ValidateMouseSegments(issues, step);
+        ValidateSequenceClickTargets(issues, step);
+    }
+
+    /// <summary>
+    /// Pictures of clicks inside recorded input: each must belong to a button-down event, once, and stay a sane size.
+    /// Only "✂ Break into steps" reads them, so problems are warnings that say the pictures will be dropped.
+    /// </summary>
+    private static void ValidateSequenceClickTargets(List<ValidationIssue> issues, InputSequenceStep step)
+    {
+        if (step.ClickTargets is not { Count: > 0 } targets) return;
+        const string property = nameof(InputSequenceStep.ClickTargets);
+        var seen = new HashSet<int>();
+        foreach (var target in targets)
+        {
+            var bad = target is null
+                      || target.EventIndex < 0 || target.EventIndex >= step.Events.Count
+                      || step.Events[target.EventIndex].Kind != InputEventKind.MouseDown
+                      || !seen.Add(target.EventIndex)
+                      || string.IsNullOrEmpty(target.TargetThumbnailBase64) || target.TargetThumbnailBase64.Length > MaxThumbnailLength
+                      || target.AnchorX is < 0 or > MaxTemplateSize || target.AnchorY is < 0 or > MaxTemplateSize;
+            if (!bad) continue;
+            issues.Add(Warning("Some \"what you clicked\" pictures inside this recorded input don't match its clicks; they won't be used when you break it into steps.", property));
+            return;
+        }
     }
 
     /// <summary>

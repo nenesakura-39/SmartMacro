@@ -589,8 +589,12 @@ public sealed class AutomationViewModel : ObservableObject, IDisposable
     private void LogClickSnapshots(IReadOnlyList<MacroStep> steps)
     {
         var withPicture = steps.Count(s => s is MouseClickStep { HasTargetThumbnail: true });
-        if (withPicture == 0) return;
-        _log.Info($"✨ Smart Click Snapshots: {withPicture} click(s) remember what they clicked. Select one in the editor to see it, turn on Smart-Aim, or convert it to a \"Find image & click\" step.");
+        var inRecordedInput = steps.Sum(s => s is InputSequenceStep { ClickTargets: { } targets } ? targets.Count : 0);
+        if (withPicture == 0 && inRecordedInput == 0) return;
+        if (withPicture > 0)
+            _log.Info($"✨ Smart Click Snapshots: {withPicture} click(s) remember what they clicked. Select one in the editor to see it, turn on Smart-Aim, or convert it to a \"Find image & click\" step.");
+        if (inRecordedInput > 0)
+            _log.Info($"✨ Smart Click Snapshots: {inRecordedInput} click(s) inside \"Recorded input\" steps kept their picture too; \"✂ Break into steps\" gives them back to the Mouse click steps.");
     }
 
     // ---------------- Playback ----------------
@@ -832,7 +836,12 @@ public sealed class AutomationViewModel : ObservableObject, IDisposable
     }
 
     // Engine events arrive on the playback thread (the log service is thread-safe).
-    private void OnEngineMessage(object? sender, string message) => _log.Info(message);
+    // Engine notes starting with "⚠" (e.g. a click on the last found spot that was skipped) go to the log as warnings.
+    private void OnEngineMessage(object? sender, string message)
+    {
+        if (message.StartsWith('⚠')) _log.Warning(message);
+        else _log.Info(message);
+    }
 
     private void OnEngineProgress(object? sender, PlaybackProgress progress) => _latestProgress = progress;
 

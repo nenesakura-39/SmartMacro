@@ -220,8 +220,14 @@ public sealed class WindowsOcrService : IOcrService
 /// <summary>Copies part of the screen into a 32-bit BGRA byte array (top-down rows) using GDI.</summary>
 internal static class ScreenCapture
 {
-    public static byte[] CaptureBgra(ScreenRect area)
+    /// <param name="shield">
+    /// Hide SmartMacro's own flashy overlays first where Windows can't leave them out of captures (see
+    /// <see cref="Vision.CaptureShield"/>). False only for the click snapshot on the mouse-hook thread, which must never wait.
+    /// </param>
+    public static byte[] CaptureBgra(ScreenRect area, bool shield = true)
     {
+        if (shield) Vision.CaptureShield.BeforeCapture();
+
         // Physical pixels on every monitor, whatever thread this runs on (see PhysicalPixelsScope).
         using var dpi = NativeMethods.PhysicalPixelsScope.Enter();
         var screenDc = NativeMethods.GetDC(IntPtr.Zero);

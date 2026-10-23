@@ -19,8 +19,8 @@ namespace SmartMacro.Services.Vision;
 /// flashes on it for <see cref="HoldTime"/>, then fades.
 /// One reusable window (no window is created per detection): click-through (WS_EX_TRANSPARENT | WS_EX_LAYERED |
 /// WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW), always on top, never activated, and left out of screen captures. If Windows
-/// can't leave it out of captures (older than Windows 10 2004), <see cref="BeforeCapture"/> hides it before every
-/// playback capture, so it never "photobombs" the next frame a Find step looks at.
+/// can't leave it out of captures (older than Windows 10 2004), <see cref="CaptureShield"/> hides it before every
+/// GDI capture, so it never "photobombs" the next frame a Find step looks at.
 /// Call <see cref="ShowTarget"/> on the UI thread.
 /// </summary>
 public sealed class TargetLockOverlay : Window
@@ -37,9 +37,6 @@ public sealed class TargetLockOverlay : Window
     private static readonly Color Neon = Color.FromRgb(0x22, 0xD3, 0xEE);
     private static readonly Color NeonBright = Color.FromRgb(0xA5, 0xF3, 0xFC);
     private static readonly Color Lock = Color.FromRgb(0x22, 0xFF, 0x7A);
-
-    // The overlay that may need hiding before a capture (only when capture exclusion isn't supported).
-    private static volatile TargetLockOverlay? _unexcludedVisible;
 
     private readonly Canvas _canvas = new() { IsHitTestVisible = false };
     private readonly DispatcherTimer _holdTimer;
@@ -81,21 +78,12 @@ public sealed class TargetLockOverlay : Window
 
     /// <summary>
     /// Call from any thread right before playback captures the screen. Hides a visible reticle first, but only on PCs
-    /// where it couldn't be excluded from captures (normally it's invisible to captures and nothing needs to happen).
+    /// where it couldn't be excluded from captures (see <see cref="CaptureShield"/>).
     /// </summary>
-    public static void BeforeCapture()
-    {
-        if (_unexcludedVisible is not { } overlay) return;
-        try
-        {
-            if (overlay.Dispatcher.CheckAccess()) overlay.HideNow();
-            else overlay.Dispatcher.Invoke(overlay.HideNow, DispatcherPriority.Send, CancellationToken.None, TimeSpan.FromMilliseconds(200));
-        }
-        catch (Exception)
-        {
-            // Cosmetic only: never block or break a capture.
-        }
-    }
+    public static void BeforeCapture() => CaptureShield.BeforeCapture();
+
+    /// <summary>True when Windows leaves the reticle out of captures (false until it was shown once).</summary>
+    public bool IsExcludedFromCapture => _excludedFromCapture;
 
     /// <summary>Flashes the reticle on a detected target (replaces the previous one right away). UI thread.</summary>
     public void ShowTarget(TargetDetection target)
@@ -112,7 +100,7 @@ public sealed class TargetLockOverlay : Window
         if (!IsVisible) Show(); // first time: OnSourceInitialized sets the styles and places it
         ApplyBounds();
         Draw();
-        if (!_excludedFromCapture) _unexcludedVisible = this;
+        if (!_excludedFromCapture) CaptureShield.MarkVisible(this, HideNow);
 
         _holdTimer.Stop();
         _holdTimer.Start();
@@ -123,7 +111,7 @@ public sealed class TargetLockOverlay : Window
     {
         _holdTimer.Stop();
         BeginAnimation(OpacityProperty, null);
-        if (ReferenceEquals(_unexcludedVisible, this)) _unexcludedVisible = null;
+        CaptureShield.MarkHidden(this);
         if (IsVisible) Hide();
     }
 
@@ -135,7 +123,7 @@ public sealed class TargetLockOverlay : Window
         style |= NativeMethods.WS_EX_TRANSPARENT | NativeMethods.WS_EX_LAYERED | NativeMethods.WS_EX_NOACTIVATE | NativeMethods.WS_EX_TOOLWINDOW;
         NativeMethods.SetWindowLongValue(hwnd, NativeMethods.GWL_EXSTYLE, style);
         // The next Find step must never "see" the reticle.
-        _excludedFromCapture = NativeMethods.SetWindowDisplayAffinity(hwnd, NativeMethods.WDA_EXCLUDEFROMCAPTURE);
+        _excludedFromCapture = CaptureShield.TryExclude(hwnd);
         ApplyBounds();
     }
 

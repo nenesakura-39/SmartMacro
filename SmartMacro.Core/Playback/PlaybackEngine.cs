@@ -233,6 +233,7 @@ public sealed class PlaybackEngine
     private PlaybackState _state = PlaybackState.Idle;
     private CancellationTokenSource? _cts;
     private TaskCompletionSource? _resumeSignal;
+    private TimeSpan? _pauseRequestedAt; // clock time of the latest Pause() call (under _gate)
 
     /// <param name="layout">
     /// Monitors and app windows, for Find steps / conditions that look at one monitor or inside one window. Without it the
@@ -594,6 +595,7 @@ public sealed class PlaybackEngine
             if (_state != PlaybackState.Running) return false;
             _resumeSignal = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
             _state = PlaybackState.Paused;
+            _pauseRequestedAt = _clock.Elapsed; // the pause counts from the key press, not from when playback notices it
         }
 
         // Let go of everything right now (not only when the playback thread reaches its next check, up to 50 ms later),
@@ -659,10 +661,19 @@ public sealed class PlaybackEngine
     private async Task WaitIfPausedAsync(CancellationToken token)
     {
         Task? wait;
-        lock (_gate) wait = _resumeSignal?.Task;
+        TimeSpan? requestedAt;
+        lock (_gate)
+        {
+            wait = _resumeSignal?.Task;
+            requestedAt = _pauseRequestedAt;
+        }
+
         if (wait is null) return;
 
+        // Paused since F8 was pressed (up to one 50 ms wait chunk before this check noticed it), so the rest of a delay,
+        // key hold or recorded input after resume is exactly what was left at that moment.
         var pausedAt = _clock.Elapsed;
+        if (requestedAt is { } pressed && pressed < pausedAt) pausedAt = pressed;
         var held = _held;
         List<HeldKey>? keys = null;
         List<MacroMouseButton>? buttons = null;
@@ -1426,6 +1437,8 @@ public sealed class PlaybackEngine
                 _glideAbsorbedBy = null;
                 if (MoveTargetOf(m) is { } moveTo)
                     await MoveCursorAsync(moveTo.X, moveTo.Y, m.MoveStyle, m.MoveDurationMs, speed, onTimeline: true, token).ConfigureAwait(false);
+                else if (m.TargetMode == ClickTargetMode.LastFoundMatch)
+                    Message?.Invoke(this, SkippedMoveNoTarget);
                 else
                     Message?.Invoke(this, "Move by an offset: the cursor position isn't known, so the cursor wasn't moved.");
                 break;
@@ -1443,8 +1456,17 @@ public sealed class PlaybackEngine
                 if (c.UseLastFoundText)
                 {
                     // "On the last found spot": its center plus the step's offset (e.g. a cell 100 px right of a board).
-                    var center = _lastFound ?? throw new TextNotFoundException(
-                        "This click uses the last found spot, but no Find text / image / color step (or If / Repeat condition) has found anything yet in this run.");
+                    // Nothing found yet (a Find step set to continue missed, or "Run step" on this step alone): skip it,
+                    // never click some default spot like (0, 0).
+                    if (_lastFound is not { } center)
+                    {
+                        Message?.Invoke(this, SkippedClickNoTarget);
+                        break;
+                    }
+
+                    // The found spot is already in live screen pixels (it was found on this screen in this run), so
+                    // "auto-adjust coordinates" never scales it; the offset isn't scaled either, because the template
+                    // was matched at its recorded pixel size, so the UI around it has that size too.
                     (int X, int Y) found = (center.X + c.OffsetX, center.Y + c.OffsetY);
                     if (jitters) found = Jitter(found.X, found.Y, _lastFoundBounds);
                     await MoveCursorAsync(found.X, found.Y, c.MoveStyle, c.MoveDurationMs, speed, onTimeline: true, token).ConfigureAwait(false);
@@ -2040,8 +2062,7 @@ public sealed class PlaybackEngine
         {
             case ClickTargetMode.LastFoundMatch:
             {
-                var center = _lastFound ?? throw new TextNotFoundException(
-                    "This Move mouse step goes to the last found spot, but no Find text / image / color step (or If / Repeat condition) has found anything yet in this run.");
+                if (_lastFound is not { } center) return null; // nothing found yet: the caller skips the move
                 return (center.X + m.OffsetX, center.Y + m.OffsetY);
             }
 
@@ -2060,7 +2081,13 @@ public sealed class PlaybackEngine
     }
 
     /// <summary>Largest Smart-Aim search distance (px each way).</summary>
-    public const int MaxSmartAimRadiusPx = 2_000;
+    public const int MaxSmartAimRadiusPx = SmartAim.MaxRadiusPx;
+
+    /// <summary>Logged (as a warning) when a click "on the last found spot" runs before anything was found.</summary>
+    public const string SkippedClickNoTarget = "⚠ Skipped click at Last Found Target because no prior step has found a target in this run.";
+
+    /// <summary>Logged (as a warning) when a move "to the last found spot" runs before anything was found.</summary>
+    public const string SkippedMoveNoTarget = "⚠ Skipped move to Last Found Target because no prior step has found a target in this run.";
 
     /// <summary>
     /// Smart-Aim (Smart Click Snapshots): looks for the click's recorded thumbnail in a small area around where it was
@@ -2087,11 +2114,8 @@ public sealed class PlaybackEngine
 
         if (template is null) return (recorded, default);
 
-        var (anchorX, anchorY) = SmartClickConversion.Anchor(c, template.Width, template.Height);
-        var expectedX = c.X - anchorX; // where the thumbnail's top-left corner was when it was recorded
-        var expectedY = c.Y - anchorY;
-        var radius = Math.Clamp(c.SmartAimRadiusPx, 0, MaxSmartAimRadiusPx);
-        var region = new ScreenRect(expectedX - radius, expectedY - radius, template.Width + 2 * radius, template.Height + 2 * radius);
+        var radius = SmartAim.RadiusOf(c);
+        var region = SmartAim.SearchArea(c, template);
 
         ScreenFrame frame;
         try
@@ -2114,42 +2138,18 @@ public sealed class PlaybackEngine
             return (recorded, default);
         }
 
-        var options = new TemplateMatchOptions
+        var (hit, bestScore) = SmartAim.Locate(c, template, frame, token);
+        if (hit is null)
         {
-            MinScore = Math.Clamp(c.SmartAimAccuracy, 0.5, 1.0),
-            MaxResults = 10,
-        };
-        var result = TemplateMatcher.Find(frame.Image, template, options, token);
-        if (result.Matches.Count == 0)
-        {
-            NoteSmartAim(c, $"Smart-Aim: the clicked target wasn't found within {radius} px (best {result.BestScore:P0}, needs {options.MinScore:P0}); clicking the recorded spot ({c.X}, {c.Y}).");
+            NoteSmartAim(c, $"Smart-Aim: the clicked target wasn't found within {radius} px (best {bestScore:P0}, needs {SmartAim.OptionsFor(c).MinScore:P0}); clicking the recorded spot ({c.X}, {c.Y}).");
             return (recorded, default);
         }
 
-        // Several look-alikes (e.g. identical grid cells): take the one closest to where the target was.
-        VisualMatch? best = null;
-        var bestDistance = long.MaxValue;
-        foreach (var match in result.Matches)
-        {
-            var bounds = frame.ToScreen(match.Bounds);
-            long dx = bounds.X - expectedX, dy = bounds.Y - expectedY;
-            var distance = dx * dx + dy * dy;
-            if (distance < bestDistance)
-            {
-                bestDistance = distance;
-                best = match;
-            }
-        }
-
-        var found = frame.ToScreen(best!.Bounds);
-        ReportTarget(found.CenterX, found.CenterY, found, best.Score, "Smart-Aim");
-        var shiftX = found.X - expectedX;
-        var shiftY = found.Y - expectedY;
-        (int X, int Y) spot = (c.X + shiftX, c.Y + shiftY);
-        NoteSmartAim(c, shiftX == 0 && shiftY == 0
-            ? $"Smart-Aim: the clicked target is where it was recorded ({best.Score:P0} match)."
-            : $"Smart-Aim: the clicked target moved by ({shiftX:+0;-0;0}, {shiftY:+0;-0;0}) px; clicking it at ({spot.X}, {spot.Y}) ({best.Score:P0} match).");
-        return (spot, found);
+        ReportTarget(hit.Bounds.CenterX, hit.Bounds.CenterY, hit.Bounds, hit.Score, "Smart-Aim");
+        NoteSmartAim(c, !hit.Moved
+            ? $"Smart-Aim: the clicked target is where it was recorded ({hit.Score:P0} match)."
+            : $"Smart-Aim: the clicked target moved by ({hit.ShiftX:+0;-0;0}, {hit.ShiftY:+0;-0;0}) px; clicking it at ({hit.X}, {hit.Y}) ({hit.Score:P0} match).");
+        return ((hit.X, hit.Y), hit.Bounds);
     }
 
     /// <summary>Logs a Smart-Aim note, but not the same note for the same step twice in a row (clicks inside loops).</summary>

@@ -130,9 +130,9 @@ public sealed class MacroDocument
     ///     (click hold, double-click gap, wait after click) on Mouse click and Find steps.
     /// 11 = adds macro settings: a target window with "auto-adjust coordinates" (reference rectangle) and "Humanize"
     ///     (click jitter / delay variation).
-    /// 12 = adds Smart Click Snapshots (a recorded "what you clicked" picture + Smart-Aim on Mouse click steps) and
-    ///     "on the last found spot + offset" / "by an offset from the cursor" targets with X / Y offsets on Move mouse and
-    ///     Mouse click steps.
+    /// 12 = adds Smart Click Snapshots (a recorded "what you clicked" picture + Smart-Aim on Mouse click steps, and the
+    ///     pictures of clicks inside recorded input) and "on the last found spot + offset" / "by an offset from the
+    ///     cursor" targets with X / Y offsets on Move mouse and Mouse click steps.
     /// </summary>
     public const int CurrentSchemaVersion = 12;
 
@@ -190,6 +190,7 @@ public sealed class MacroDocument
                             || c.TargetAnchorY is not null || c.SmartAimAccuracyOverride is not null || c.SmartAimRadiusOverride is not null
                             || c.OffsetX != 0 || c.OffsetY != 0,
         MouseMoveStep m => m.TargetMode != ClickTargetMode.Coordinates || m.OffsetX != 0 || m.OffsetY != 0,
+        InputSequenceStep q => q.ClickTargets is { Count: > 0 },
         _ => false,
     };
 

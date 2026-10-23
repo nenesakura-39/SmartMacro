@@ -521,11 +521,57 @@ public sealed class MouseClickStepViewModel : StepViewModel
         });
         ResetDurationCommand = new RelayCommand(_ => HoldMs = 0);
         SetDurationCommand = AddDurationCommand;
+        TestSmartAimCommand = new AsyncRelayCommand(TestSmartAimAsync, ex => SmartAimTestResult = $"✗ Test failed: {ex.Message}",
+            () => _visionTools is not null && !_testingSmartAim && HasTargetThumbnail);
     }
 
     public RelayCommand SetDurationCommand { get; }
     public RelayCommand AddDurationCommand { get; }
     public RelayCommand ResetDurationCommand { get; }
+
+    // ---------------- 🎯 Test Smart-Aim ----------------
+
+    private IVisionTools? _visionTools;
+    private bool _testingSmartAim;
+    private string? _smartAimTestResult;
+
+    /// <summary>Screen tools from the editor (set right after the step editor is created).</summary>
+    public IVisionTools? VisionTools
+    {
+        get => _visionTools;
+        set
+        {
+            _visionTools = value;
+            System.Windows.Input.CommandManager.InvalidateRequerySuggested();
+        }
+    }
+
+    /// <summary>"🎯 Test Smart-Aim": looks for the recorded picture right now (nothing is clicked) and shows the result.</summary>
+    public AsyncRelayCommand TestSmartAimCommand { get; }
+
+    /// <summary>"✓ Found at (512, 340) — 98% match in 3 ms…" / "✗ Not found within 120 px…", or null before the first test.</summary>
+    public string? SmartAimTestResult
+    {
+        get => _smartAimTestResult;
+        private set => SetProperty(ref _smartAimTestResult, value);
+    }
+
+    private async Task TestSmartAimAsync()
+    {
+        if (_visionTools is not { } tools || _testingSmartAim) return;
+        _testingSmartAim = true;
+        System.Windows.Input.CommandManager.InvalidateRequerySuggested();
+        try
+        {
+            SmartAimTestResult = "Looking for the picture on screen…";
+            SmartAimTestResult = await tools.TestSmartAimAsync(_step);
+        }
+        finally
+        {
+            _testingSmartAim = false;
+            System.Windows.Input.CommandManager.InvalidateRequerySuggested();
+        }
+    }
 
     public static IReadOnlyList<MacroMouseButton> Buttons { get; } = Enum.GetValues<MacroMouseButton>();
 
@@ -2159,8 +2205,21 @@ public sealed class InputSequenceStepViewModel : StepViewModel
     {
         _summary = StepDescriber.Summarize(_step);
         OnPropertyChanged(nameof(MouseText));
+        OnPropertyChanged(nameof(CanBreakIntoSteps));
+        OnPropertyChanged(nameof(BreakIntoStepsHint));
         NotifyChanged(nameof(MouseParts));
     }
+
+    /// <summary>"✂ Break into steps" is possible (cursor-position input only).</summary>
+    public bool CanBreakIntoSteps => SmartMacro.Core.Workflow.StepCleanup.WhyNotExpandable(_step) is null;
+
+    /// <summary>What "✂ Break into steps" does, or why it can't here.</summary>
+    public string BreakIntoStepsHint => SmartMacro.Core.Workflow.StepCleanup.WhyNotExpandable(_step) is { } why
+        ? $"Can't break this one into steps: {why}"
+        : $"Turns this recording into normal steps you can edit one by one (Delay, Move mouse, Mouse click, Key press…). " +
+          (_step.ClickTargets is { Count: > 0 } targets
+              ? $"{targets.Count} click(s) keep their \"what you clicked\" picture, so Smart-Aim still works. "
+              : "") + "Ctrl+Z undoes it.";
 
     public string KeysText => _summary.KeyPresses == 0
         ? "None"

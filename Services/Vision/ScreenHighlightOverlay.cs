@@ -137,7 +137,8 @@ public sealed class ScreenHighlightOverlay : Window
         var style = NativeMethods.GetWindowLongValue(hwnd, NativeMethods.GWL_EXSTYLE);
         style |= NativeMethods.WS_EX_TRANSPARENT | NativeMethods.WS_EX_LAYERED | NativeMethods.WS_EX_NOACTIVATE | NativeMethods.WS_EX_TOOLWINDOW;
         NativeMethods.SetWindowLongValue(hwnd, NativeMethods.GWL_EXSTYLE, style);
-        NativeMethods.SetWindowDisplayAffinity(hwnd, NativeMethods.WDA_EXCLUDEFROMCAPTURE); // a test must never "find" the highlight
+        // A test (or the next playback capture) must never "find" the highlight; old Windows: hidden before captures.
+        if (!CaptureShield.TryExclude(hwnd)) CaptureShield.MarkVisible(this, CloseNow);
         ApplyBounds();
         Draw();
         StartTimer();
@@ -271,6 +272,7 @@ public sealed class ScreenHighlightOverlay : Window
         if (_closed) return;
         _closed = true;
         if (ReferenceEquals(_current, this)) _current = null;
+        CaptureShield.MarkHidden(this);
         try { Close(); }
         catch (InvalidOperationException) { /* already closing */ }
     }

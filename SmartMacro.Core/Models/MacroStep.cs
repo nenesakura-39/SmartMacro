@@ -746,6 +746,36 @@ public sealed class InputSequenceStep : MacroStep
     /// </summary>
     public bool MoveCursorToStart { get; set; }
 
+    /// <summary>
+    /// Smart Click Snapshots of the clicks inside this recorded input (smart recordings with a visible cursor; format 12),
+    /// one per button-down event that had a picture, by its index in <see cref="Events"/>. Kept so "✂ Break into steps"
+    /// can give each resulting Mouse click its picture (and Smart-Aim). Null when there are none. Playback ignores it.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public List<SequenceClickTarget>? ClickTargets { get; set; }
+
+    /// <summary>The picture recorded for the button-down event at <paramref name="eventIndex"/>, or null.</summary>
+    public SequenceClickTarget? ClickTargetFor(int eventIndex) =>
+        ClickTargets?.FirstOrDefault(t => t is not null && t.EventIndex == eventIndex);
+
     [JsonIgnore]
     public override StepKind Kind => StepKind.InputSequence;
+}
+
+/// <summary>
+/// "What you clicked" for one click inside a recorded-input step: the 56×56 PNG (Base64) of the button-down event at
+/// <see cref="EventIndex"/>, and where in it the click was (same meaning as on <see cref="MouseClickStep"/>).
+/// </summary>
+public sealed class SequenceClickTarget
+{
+    /// <summary>Index of the MouseDown event in <see cref="InputSequenceStep.Events"/>.</summary>
+    public int EventIndex { get; set; }
+
+    /// <summary>The picture as a Base64 PNG (like <see cref="MouseClickStep.TargetThumbnailBase64"/>).</summary>
+    [JsonPropertyName("thumbnail")]
+    public string TargetThumbnailBase64 { get; set; } = string.Empty;
+
+    public int AnchorX { get; set; }
+
+    public int AnchorY { get; set; }
 }

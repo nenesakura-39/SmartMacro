@@ -476,6 +476,7 @@ public static class SmartRecordingConverter
         var last = events[chunk.Last].Input.TimeUs;
 
         var list = new List<InputEvent>(chunk.Last - chunk.First + 1);
+        List<SequenceClickTarget>? clickTargets = null;
         int? startX = null, startY = null;
         for (var i = chunk.First; i <= chunk.Last; i++)
         {
@@ -484,6 +485,19 @@ public static class SmartRecordingConverter
             {
                 startX = e.X;
                 startY = e.Y;
+            }
+
+            // Smart Click Snapshot of a click that lands inside recorded input: kept for "✂ Break into steps".
+            if (e.Kind == InputEventKind.MouseDown && ClickSnapshots.TryBase64(events[i].ClickedTarget) is { } picture)
+            {
+                clickTargets ??= new List<SequenceClickTarget>();
+                clickTargets.Add(new SequenceClickTarget
+                {
+                    EventIndex = list.Count,
+                    TargetThumbnailBase64 = picture,
+                    AnchorX = events[i].ClickedTarget!.AnchorX,
+                    AnchorY = events[i].ClickedTarget!.AnchorY,
+                });
             }
 
             list.Add(e with { TimeUs = e.TimeUs - origin });
@@ -521,6 +535,7 @@ public static class SmartRecordingConverter
             StartX = hasExplicitStart ? options.StartX : (startX ?? options.StartX),
             StartY = hasExplicitStart ? options.StartY : (startY ?? options.StartY),
             MoveCursorToStart = hasExplicitStart && parts[0].Detected == MouseMovementMode.CursorPosition,
+            ClickTargets = clickTargets,
         };
     }
 }

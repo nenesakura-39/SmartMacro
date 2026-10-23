@@ -1,4 +1,5 @@
 using SmartMacro.Core.Models;
+using SmartMacro.Core.Recording;
 using SmartMacro.Core.Validation;
 
 namespace SmartMacro.Core.Workflow;
@@ -105,6 +106,115 @@ public static class StepCleanup
         }
 
         return new MousePathCleanupResult(result, removed, runs);
+    }
+
+    // ---------------- ✂ Break recorded input into steps ----------------
+
+    /// <summary>
+    /// Null when <see cref="ExpandInputSequence"/> can turn this recorded input into normal steps, otherwise a plain
+    /// sentence why not. Only cursor-position input can: camera (relative) mouse movement has no screen spot, so only a
+    /// "Recorded input" step can replay it; the same goes for clicks / wheel with no known cursor position.
+    /// </summary>
+    public static string? WhyNotExpandable(InputSequenceStep step)
+    {
+        ArgumentNullException.ThrowIfNull(step);
+        if (step.Events is not { Count: > 0 } events) return "This recorded input is empty.";
+
+        var segments = step.HasMouseSegments ? step.MouseSegments!.Where(m => m is not null).ToList() : null;
+        if (segments is null && events.Any(e => e.IsMouse))
+            return "This was recorded in game mode (relative mouse movement only), so it can only be played as recorded input.";
+
+        var segmentIndex = 0;
+        var mode = segments is { Count: > 0 } ? segments[0].Effective : MouseMovementMode.Relative;
+        var known = step.MoveCursorToStart || step.StartX != 0 || step.StartY != 0;
+        foreach (var e in events)
+        {
+            while (segments is not null && segmentIndex + 1 < segments.Count && segments[segmentIndex + 1].StartUs <= e.TimeUs)
+                mode = segments[++segmentIndex].Effective;
+            if (!e.IsMouse) continue;
+            if (e.Kind == InputEventKind.MouseMove && (e.Dx != 0 || e.Dy != 0 || e.HasPosition)
+                && (mode == MouseMovementMode.Relative || !e.HasPosition))
+                return "It contains camera (relative) mouse movement, which only a \"Recorded input\" step can replay. Set its mouse parts to \"Cursor position\" first if they're really menu / button movement.";
+            if (e.HasPosition) known = true;
+            else if (!known) return "It has clicks or scrolling without a recorded cursor position.";
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// "✂ Break into steps": turns a recorded-input step (cursor-position parts only, see <see cref="WhyNotExpandable"/>)
+    /// into normal editable steps with the same converter desktop recordings use: Delay, Move mouse (simplified path),
+    /// Mouse click (with its hold time), Key press… A leading Delay keeps the time before the first event. Clicks that had
+    /// a Smart Click Snapshot (<see cref="InputSequenceStep.ClickTargets"/>) keep their picture, so Smart-Aim and
+    /// "Convert to Find image &amp; click" work on them. The comment goes to the first step; a turned-off step gives
+    /// turned-off steps. Throws <see cref="InvalidOperationException"/> with the reason when it can't.
+    /// </summary>
+    public static List<MacroStep> ExpandInputSequence(InputSequenceStep step)
+    {
+        if (WhyNotExpandable(step) is { } problem) throw new InvalidOperationException(problem);
+
+        var raw = new List<RawInputEvent>(step.Events.Count);
+        int x = step.StartX, y = step.StartY;
+        for (var i = 0; i < step.Events.Count; i++)
+        {
+            var e = step.Events[i];
+            if (e.HasPosition && e.IsMouse)
+            {
+                x = e.X;
+                y = e.Y;
+            }
+
+            var ms = (e.TimeUs + 500) / 1000;
+            switch (e.Kind)
+            {
+                case InputEventKind.MouseMove:
+                    if (e.HasPosition) raw.Add(new RawInputEvent(ms, RawInputKind.MouseMove, X: x, Y: y));
+                    break;
+                case InputEventKind.MouseDown:
+                {
+                    var target = step.ClickTargetFor(i);
+                    var picture = target is null ? null : ClickSnapshots.FromBase64(target.TargetThumbnailBase64, target.AnchorX, target.AnchorY);
+                    raw.Add(new RawInputEvent(ms, RawInputKind.MouseDown, X: x, Y: y, Button: e.Button, ClickedTarget: picture));
+                    break;
+                }
+                case InputEventKind.MouseUp:
+                    raw.Add(new RawInputEvent(ms, RawInputKind.MouseUp, X: x, Y: y, Button: e.Button));
+                    break;
+                case InputEventKind.Wheel:
+                case InputEventKind.HorizontalWheel:
+                    raw.Add(new RawInputEvent(ms, e.Kind == InputEventKind.Wheel ? RawInputKind.Wheel : RawInputKind.HorizontalWheel, X: x, Y: y, Delta: e.Delta));
+                    break;
+                case InputEventKind.KeyDown:
+                    raw.Add(new RawInputEvent(ms, RawInputKind.KeyDown, VirtualKey: SmartRecordingConverter.SpecificVirtualKey(e)));
+                    break;
+                case InputEventKind.KeyUp:
+                    raw.Add(new RawInputEvent(ms, RawInputKind.KeyUp, VirtualKey: SmartRecordingConverter.SpecificVirtualKey(e)));
+                    break;
+            }
+        }
+
+        var steps = new List<MacroStep>();
+        if (raw.Count == 0) return steps;
+
+        AddDelay(steps, raw[0].TimeMs); // the time before the first event
+        steps.AddRange(RecordingConverter.Convert(raw, new RecordingOptions
+        {
+            RecordMouseMoves = true,
+            KeepHoldTime = true,
+            SimplifyMousePath = true,
+            MaxTapDurationMs = MacroValidator.MaxHoldMs,
+            StartX = step.MoveCursorToStart ? step.StartX : null,
+            StartY = step.MoveCursorToStart ? step.StartY : null,
+        }));
+
+        if (steps.Count > 0 && !string.IsNullOrWhiteSpace(step.Comment)) steps[0].Comment = step.Comment;
+        if (!step.Enabled)
+        {
+            foreach (var s in steps) s.Enabled = false;
+        }
+
+        return steps;
     }
 
     // ---------------- ✨ Auto-Fix block structure ----------------
