@@ -86,10 +86,10 @@ public class RecordingConverterTests
             KeyUp(0, 0x11),                // released after recording started (start hotkey)
             Up(10, 0, 0),                  // same for a mouse button
             KeyDown(20, 0x41),             // pressed but never released
-            KeyDown(900, 0x41),            // auto-repeat
+            KeyDown(900, 0x41),            // auto-repeat: not a new press (recording timing fix 2)
         }, new RecordingOptions { MinDelayMs = 100000 });
 
-        Assert.Equal("Hold down A | Hold down A | Release A", Describe(steps));
+        Assert.Equal("Hold down A | Release A", Describe(steps));
     }
 
     [Fact]

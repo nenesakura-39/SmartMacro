@@ -66,6 +66,9 @@ public sealed class GameRecordingOptions
     /// </summary>
     public IReadOnlyCollection<int> TrimTrailingKeys { get; init; } = Array.Empty<int>();
 
+    /// <summary>SmartMacro's own Record / Play shortcuts: their chords are removed anywhere in the recording.</summary>
+    public IReadOnlyCollection<HotkeyBinding> IgnoredHotkeys { get; init; } = Array.Empty<HotkeyBinding>();
+
     /// <summary>
     /// 0 (default) keeps every mouse sample exactly as recorded. A value above 0 merges consecutive mouse
     /// samples that arrive within this many microseconds of the first one into a single event with the summed
@@ -116,6 +119,7 @@ public static class GameRecordingConverter
         options ??= new GameRecordingOptions();
 
         var events = rawEvents.Take(MaxRecordedEvents).ToList();
+        if (options.IgnoredHotkeys.Count > 0) events = HotkeyChordFilter.Remove(events, options.IgnoredHotkeys);
         var count = TrailingCut(events, options.TrimTrailingKeys);
 
         var output = new List<InputEvent>(count);

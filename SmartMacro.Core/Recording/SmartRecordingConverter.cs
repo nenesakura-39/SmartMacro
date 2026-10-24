@@ -36,6 +36,12 @@ public sealed class SmartRecordingOptions
     public IReadOnlyCollection<int> TrimTrailingKeys { get; init; } = Array.Empty<int>();
 
     /// <summary>
+    /// SmartMacro's own Record / Play shortcuts: their chords (key + the modifiers held for it) are removed anywhere in
+    /// the recording, so starting / stopping never leaves trailing Ctrl / Shift / F9 steps in the macro.
+    /// </summary>
+    public IReadOnlyCollection<HotkeyBinding> IgnoredHotkeys { get; init; } = Array.Empty<HotkeyBinding>();
+
+    /// <summary>
     /// Keep cursor movement in the editable parts (Move steps). Turning it off only drops Move steps; camera
     /// movement inside "Recorded input" steps is always kept, because without it there's no camera movement at all.
     /// </summary>
@@ -55,6 +61,17 @@ public sealed class SmartRecordingOptions
     /// <see cref="RecordingOptions.CollapseMousePaths"/>). Off by default here; the app sets it from Settings.
     /// </summary>
     public bool CollapseMousePaths { get; init; }
+
+    /// <summary>
+    /// Recording fidelity preset for the editable parts (Exact 1:1 / Smart Optimized / Clicks &amp; Keys Only). When set it
+    /// replaces <see cref="RecordMouseMoves"/>, <see cref="KeepHoldTime"/>, <see cref="SimplifyMousePath"/> and
+    /// <see cref="CollapseMousePaths"/> (see <see cref="RecordingFidelityPresets"/>). Camera parts and Exact 1:1 / rhythm
+    /// recordings always keep every event.
+    /// </summary>
+    public RecordingFidelity? Fidelity { get; init; }
+
+    /// <summary>Editable parts: when cursor movement becomes relative mouse deltas (3D camera). Off by default.</summary>
+    public RelativeMouseMode RelativeMouse { get; init; } = RelativeMouseMode.Off;
 
     public int StartX { get; init; }
 
@@ -172,6 +189,7 @@ public static class SmartRecordingConverter
 
     internal static List<CapturedInputEvent> Normalize(IReadOnlyList<CapturedInputEvent> raw, SmartRecordingOptions options)
     {
+        if (options.IgnoredHotkeys.Count > 0) raw = HotkeyChordFilter.Remove(raw, options.IgnoredHotkeys);
         var count = Math.Min(raw.Count, MaxRecordedEvents);
         var inputs = new List<InputEvent>(count);
         for (var i = 0; i < count; i++) inputs.Add(raw[i].Input);
@@ -394,7 +412,7 @@ public static class SmartRecordingConverter
             switch (e.Kind)
             {
                 case InputEventKind.MouseMove:
-                    if (options.RecordMouseMoves && e.HasPosition) raw.Add(new RawInputEvent(ms, RawInputKind.MouseMove, X: x, Y: y));
+                    if ((options.RecordMouseMoves || options.Fidelity is not null) && e.HasPosition) raw.Add(new RawInputEvent(ms, RawInputKind.MouseMove, X: x, Y: y));
                     break;
                 case InputEventKind.MouseDown:
                     raw.Add(new RawInputEvent(ms, RawInputKind.MouseDown, X: x, Y: y, Button: e.Button, ClickedTarget: events[i].ClickedTarget));
@@ -427,6 +445,8 @@ public static class SmartRecordingConverter
             SimplifyMousePath = options.SimplifyMousePath,
             CollapseMousePaths = options.CollapseMousePaths,
             MaxTapDurationMs = options.KeepHoldTime ? MacroValidator.MaxHoldMs : 500,
+            Fidelity = options.Fidelity,
+            RelativeMouse = options.RelativeMouse,
             StartX = hasStart ? options.StartX : null,
             StartY = hasStart ? options.StartY : null,
         });

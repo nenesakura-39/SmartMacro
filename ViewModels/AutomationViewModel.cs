@@ -41,6 +41,9 @@ public sealed class AutomationHooks
 
     public Action<RecordingMode>? SetRecordingMode { get; init; }
 
+    /// <summary>Saves the recording fidelity chosen next to the Record button.</summary>
+    public Action<RecordingFidelity>? SetRecordingFidelity { get; init; }
+
     public required Action<string, StatusKind> SetStatus { get; init; }
 }
 
@@ -243,6 +246,24 @@ public sealed class AutomationViewModel : ObservableObject, IDisposable
         }
     }
 
+    public static IReadOnlyList<Steps.Choice<RecordingFidelity>> RecordingFidelities => SettingsViewModel.RecordingFidelityChoices;
+
+    /// <summary>The recording fidelity selector next to the Record button (saved in Settings at once).</summary>
+    public RecordingFidelity RecordingFidelity
+    {
+        get => _hooks.Settings().RecordingFidelity;
+        set
+        {
+            if (_hooks.Settings().RecordingFidelity == value) return;
+            _hooks.SetRecordingFidelity?.Invoke(value);
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(RecordingFidelityTooltip));
+        }
+    }
+
+    public string RecordingFidelityTooltip =>
+        $"Recording fidelity: {RecordingFidelityPresets.Label(RecordingFidelity)}. {RecordingFidelityPresets.Help(RecordingFidelity)}";
+
     // Shortcuts come from Settings (they can be customized).
     public string RecordShortcut => _hooks.Settings().RecordHotkey.ToString();
     public string PlayShortcut => _hooks.Settings().PlayHotkey.ToString();
@@ -259,7 +280,7 @@ public sealed class AutomationViewModel : ObservableObject, IDisposable
     /// <summary>Call after the shortcut settings change so labels and tooltips update.</summary>
     public void RefreshShortcuts()
     {
-        foreach (var name in new[] { nameof(RecordingMode), nameof(RecordShortcut), nameof(PlayShortcut), nameof(PauseShortcut), nameof(RecordTooltip),
+        foreach (var name in new[] { nameof(RecordingMode), nameof(RecordingFidelity), nameof(RecordingFidelityTooltip), nameof(RecordShortcut), nameof(PlayShortcut), nameof(PauseShortcut), nameof(RecordTooltip),
                      nameof(StopRecordingTooltip), nameof(PlayTooltip), nameof(PauseTooltip), nameof(StopTooltip), nameof(EmergencyHint),
                      nameof(PauseButtonText) })
             OnPropertyChanged(name);
@@ -572,6 +593,10 @@ public sealed class AutomationViewModel : ObservableObject, IDisposable
             RecordMouseMoves = settings.RecordMouseMovement,
             KeepHoldTime = settings.KeepTapHoldTime,
             TrimTrailingKeys = settings.RecordHotkey.AllKeys(),
+            IgnoredHotkeys = RecordingHotkeys(settings),
+            // The fidelity selector (Exact 1:1 / Smart Optimized / Clicks & Keys Only) decides sampling, simplification and holds.
+            Fidelity = settings.RecordingFidelity,
+            RelativeMouse = settings.RelativeMouseMode,
             SimplifyMousePath = true, // a few meaningful Move steps instead of one every 30 ms
             CollapseMousePaths = false, // Desktop-only mode keeps simplified mouse paths so pure movements & oscillations work
             MaxTapDurationMs = settings.KeepTapHoldTime ? MacroValidator.MaxHoldMs : 500,
@@ -611,6 +636,7 @@ public sealed class AutomationViewModel : ObservableObject, IDisposable
         var step = GameRecordingConverter.Convert(raw, new GameRecordingOptions
         {
             TrimTrailingKeys = _hooks.Settings().RecordHotkey.AllKeys(),
+            IgnoredHotkeys = RecordingHotkeys(_hooks.Settings()),
             StartX = _gameRecorder.StartX,
             StartY = _gameRecorder.StartY,
         });
@@ -651,6 +677,9 @@ public sealed class AutomationViewModel : ObservableObject, IDisposable
         var options = new SmartRecordingOptions
         {
             TrimTrailingKeys = settings.RecordHotkey.AllKeys(),
+            IgnoredHotkeys = RecordingHotkeys(settings),
+            Fidelity = isRhythm ? null : settings.RecordingFidelity,
+            RelativeMouse = isRhythm ? RelativeMouseMode.Off : settings.RelativeMouseMode,
             RecordMouseMoves = isRhythm || settings.RecordMouseMovement,
             KeepHoldTime = isRhythm || settings.KeepTapHoldTime,
             SimplifyMousePath = !isRhythm,
@@ -686,6 +715,14 @@ public sealed class AutomationViewModel : ObservableObject, IDisposable
         await _hooks.RecordingFinished(result.Steps);
         RefreshTarget();
     }
+
+    /// <summary>
+    /// SmartMacro's own shortcuts that Windows delivers to SmartMacro (never to the recorded app) while recording: Record
+    /// and Play / Stop. Their chords are removed from the recording wherever they appear. Pause (F8) isn't one of them:
+    /// it is only a global shortcut while a macro plays, so during recording F8 goes to the app like any other key.
+    /// </summary>
+    private static IReadOnlyCollection<HotkeyBinding> RecordingHotkeys(AppSettings settings) =>
+        new[] { settings.RecordHotkey, settings.PlayHotkey }.Where(h => h is not null).ToArray();
 
     /// <summary>One log line about Smart Click Snapshots, when the recording has any.</summary>
     private void LogClickSnapshots(IReadOnlyList<MacroStep> steps)

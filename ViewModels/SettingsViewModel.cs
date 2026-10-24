@@ -26,6 +26,8 @@ public sealed class SettingsViewModel : ObservableObject
     private bool _showRunOverlay;
     private bool _recordMouseMovement;
     private RecordingMode _recordingMode;
+    private RecordingFidelity _recordingFidelity = RecordingFidelity.Exact1To1;
+    private bool _useRelativeMouseDeltas;
     private bool _keepTapHoldTime;
     private bool _simplifyMousePaths;
     private bool _captureClickSnapshots = true;
@@ -214,6 +216,32 @@ public sealed class SettingsViewModel : ObservableObject
 
     public IReadOnlyList<Choice<RecordingMode>> RecordingModes => ToolbarRecordingModes;
 
+    /// <summary>🎯 100% Exact 1:1 Replay / ✨ Smart Optimized / 🖱️ Clicks &amp; Keys Only (Settings and the editor's Record bar).</summary>
+    public static IReadOnlyList<Choice<RecordingFidelity>> RecordingFidelityChoices { get; } =
+        Enum.GetValues<RecordingFidelity>().Select(f => new Choice<RecordingFidelity>(f, RecordingFidelityPresets.Label(f))).ToArray();
+
+    public IReadOnlyList<Choice<RecordingFidelity>> RecordingFidelities => RecordingFidelityChoices;
+
+    public RecordingFidelity RecordingFidelity
+    {
+        get => _recordingFidelity;
+        set
+        {
+            if (!SetProperty(ref _recordingFidelity, value)) return;
+            IsDirty = true;
+            OnPropertyChanged(nameof(RecordingFidelityHelp));
+        }
+    }
+
+    public string RecordingFidelityHelp => RecordingFidelityPresets.Help(_recordingFidelity);
+
+    /// <summary>"Use relative mouse deltas for 3D camera" (every recorded movement relative; cursor-locked games).</summary>
+    public bool UseRelativeMouseDeltas
+    {
+        get => _useRelativeMouseDeltas;
+        set { if (SetProperty(ref _useRelativeMouseDeltas, value)) IsDirty = true; }
+    }
+
     public RecordingMode RecordingMode
     {
         get => _recordingMode;
@@ -304,6 +332,8 @@ public sealed class SettingsViewModel : ObservableObject
         _showRunOverlay = settings.ShowRunOverlay;
         _recordMouseMovement = settings.RecordMouseMovement;
         _recordingMode = settings.RecordingMode;
+        _recordingFidelity = settings.RecordingFidelity;
+        _useRelativeMouseDeltas = settings.UseRelativeMouseDeltas;
         _keepTapHoldTime = settings.KeepTapHoldTime;
         _simplifyMousePaths = settings.SimplifyMousePaths;
         _captureClickSnapshots = settings.CaptureClickSnapshots;
@@ -328,6 +358,8 @@ public sealed class SettingsViewModel : ObservableObject
             ShowRunOverlay = ShowRunOverlay,
             RecordMouseMovement = RecordMouseMovement,
             RecordingMode = RecordingMode,
+            RecordingFidelity = RecordingFidelity,
+            UseRelativeMouseDeltas = UseRelativeMouseDeltas,
             KeepTapHoldTime = KeepTapHoldTime,
             SimplifyMousePaths = SimplifyMousePaths,
             CaptureClickSnapshots = CaptureClickSnapshots,
@@ -367,6 +399,9 @@ public sealed class SettingsViewModel : ObservableObject
         _minimizeDuringRun = updated.MinimizeDuringRun;
         _showRunOverlay = updated.ShowRunOverlay;
         _recordingMode = updated.RecordingMode;
+        _recordingFidelity = updated.RecordingFidelity;
+        OnPropertyChanged(nameof(RecordingFidelity));
+        OnPropertyChanged(nameof(RecordingFidelityHelp));
         OnPropertyChanged(nameof(MinimizeDuringRun));
         OnPropertyChanged(nameof(ShowRunOverlay));
         OnPropertyChanged(nameof(ShowOverlaysInObsAndRecording));

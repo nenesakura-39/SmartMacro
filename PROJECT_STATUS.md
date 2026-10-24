@@ -1,6 +1,11 @@
 # SmartMacro – Project Status / Handoff
 
-_Last updated: 2026-10-24 (Stability & accuracy pass over the uncommitted Round 1 + Upgrades 1–3 (5 fixes): **built + tested
+_Last updated: 2026-10-24 (1:1 Precision Replay: recording fidelity presets + 3D camera relative mouse moves: **built + tested
+with `tools\verify.cmd` on the owner's PC: 0 warnings, 0 errors, 1129 / 1129 passed**; not committed, not tried by hand.
+Before it: Recording / playback timing fixes 1–5 (deadline-synced timeline, auto-repeat + chords, exact click
+hold + drags, hotkey bleed + stop releases, Stopwatch timestamps): **built + tested with `tools\verify.cmd` on the owner's PC:
+0 warnings, 0 errors, 1110 / 1110 passed**; not committed, not tried by hand.
+Before it: Stability & accuracy pass over the uncommitted Round 1 + Upgrades 1–3 (5 fixes): **built + tested
 with `tools\verify.cmd` on the owner's PC: 0 warnings, 0 errors, 1090 / 1090 passed**; not committed, not tried by hand.
 Before it: Upgrade 3 of 3 – new steps "Wait for screen change" (VISION & AI), "Focus window" and "Take
 screenshot" (new UTILITY & GAME toolbox section + Ctrl+K palette): **built + tested with `tools\verify.cmd` on the owner's PC:
@@ -49,6 +54,79 @@ Developer: Riku (リク) · Brand: KuroLogic_
 | Release package | `publish\SmartMacro-1.0.0-win-x64\SmartMacro.exe` is an OLD build (made right after `159d6b3`, before Stage 1) | – | ignored by git |
 
 
+
+## 1:1 Precision Replay – fidelity presets, 3D camera relative moves (2026-10-24): **built + tested** (`tools\verify.cmd` run by the AI on the owner's PC: 0 warnings, 0 errors, **1129 / 1129 passed**)
+Not committed, not tried by hand. Names in the request that don't exist: `Win32InputRecorder` = `WindowsInputRecorder` /
+converters, `Win32InputInjector` / `IInputInjector` = `Win32InputSimulator` / `IInputSimulator`, `StepModels.cs` =
+`Models/MacroStep.cs`, `MacroSerializer` = `MacroFileFormat` / `MacroJson`. The existing `RecordingMode` setting (Smart /
+Desktop / Game / Rhythm = which recorder) was kept; the new choice is a separate `RecordingFidelity`.
+1. **Fidelity presets** (new Core `Recording/RecordingFidelity.cs`): `RecordingFidelity { Exact1To1 (default), SmartOptimized,
+   ClicksAndKeysOnly }` + `RecordingFidelityPresets.Apply` (Exact: 8 ms / 125 Hz move sampling, 1 px, no simplification,
+   MinDelay 1 ms, holds kept, any tap length; Smart Optimized: RDP path simplification 3 px (`MousePathSimplifier`), holds
+   kept; Clicks & Keys: free hover dropped (`CollapseMousePaths`), drags + the spot before a key press kept).
+   `RecordingOptions.Fidelity` / `SmartRecordingOptions.Fidelity` (null = old individual options; the app always passes it,
+   except Rhythm). `AppSettings.RecordingFidelity` (schema 4: old files with "record mouse movement" off →
+   Clicks & Keys Only); it replaces RecordMouseMovement / KeepTapHoldTime / SimplifyMousePaths in recording (kept in the
+   file; their Settings switches were replaced). UI: second combo next to Record in `EditorView.xaml`
+   (`AutomationViewModel.RecordingFidelity` → `MainViewModel` QuickSet), Settings → Recording Defaults combo + help.
+2. **Relative mouse deltas**: `MouseMoveStep.UseRelativeDelta / DeltaX / DeltaY` (written only when on; file format 14 =
+   `MacroDocument.CurrentSchemaVersion`; `FeedbackLoop2Tests` round-trip assert changed to the literal 13 on purpose).
+   Converter `RelativeMouseMode { Off, CameraDrags, Always }`: deltas = pt − last emitted pt (telescoping, so thinning never
+   loses movement); CameraDrags = while RIGHT / MIDDLE is held (left drags stay absolute: sliders + pointer acceleration),
+   their release `UseCurrentPosition`; Always = every move relative, clicks / down / up / wheel at the cursor, no start
+   move. App: `AppSettings.UseRelativeMouseDeltas` ("🎮 Use relative mouse deltas for 3D camera") → Always, else CameraDrags.
+   Engine: relative step → `SendRelativeMoveLossless` (existing `MoveMouseRelative` = SendInput MOUSEEVENTF_MOVE without
+   ABSOLUTE; no new interface method needed), `_cursor = null`; excluded from glide jump targets and Clean up mouse paths.
+   Validator (±100,000 counts, 0/0 warning, X / Y not checked), describer "Turn the mouse by (+5, -5) · relative (3D
+   camera)", editor checkbox + Delta X / Y fields (absolute fields hidden).
+3. **Pre-click anchor / 65535 precision**: already in place (press steps always carry the down event's X / Y; the thinned
+   move before a press is flushed; `Win32InputSimulator.MoveMouse` = MOUSEEVENTF_MOVE | ABSOLUTE | VIRTUALDESK with
+   `AbsoluteMouseMath.Normalize` (Math.Round) + SetCursorPos). Tests added, no code change.
+- Tests: `SmartMacro.Tests/PrecisionReplayTests.cs` (19).
+- To check by hand: Roblox right-click camera turn recorded + replayed (Smart mode's camera parts are still "Recorded
+  input"; this matters for Desktop mode / editable parts), shift-lock with the relative switch on, the two combos.
+
+## Recording / playback timing fixes 1–5 (2026-10-24): **built + tested** (`tools\verify.cmd` run by the AI on the owner's PC: 0 warnings, 0 errors, **1110 / 1110 passed**)
+Not committed, not tried by hand. Request file names didn't all exist: `Win32InputRecorder` = `WindowsInputRecorder`
+(`Services/Input/LowLevelInputHook.cs`) + `RawInputRecorder` (smart / game); `StepModels.cs` = `Models/MacroStep.cs`;
+`HighPrecisionTimer.cs` = `HighResolutionTimerScope` (already in `Win32InputSimulator.cs`) + `PrecisePlaybackClock` + new Core
+`Playback/HighPrecisionWait.cs`. Found on arrival: the engine already had a deadline timeline, 1 ms timer during playback,
+smart / game recordings already used Stopwatch µs times and dropped auto-repeat; the real gaps are below.
+1. **Deadline-synced playback** (`PlaybackEngine`): Key press and Mouse click steps at a position / the cursor
+   (`IsDeadlineSynced`; not last-found / Smart-Aim clicks) run through `ExecuteDeadlineSyncedAsync`: time the timeline had to
+   skip while sending input (Win32 hover nudge + settle ≈ 35 ms per press) is put back as owed time and taken out of the next
+   Delay / Move (`MaxStepOverheadCatchUp` = 100 ms; bigger stalls are still skipped, no bursts; paused time never put back).
+   Before: `SyncTimelineToNow()` after every click / key hold → ~40 ms drift per click. `_lagAllowance` (15 ms normally,
+   100 ms right after such a step, back to 15 once caught up / on any Sync / Reset, so vision steps, pauses and
+   recorded-input steps behave as before). `PrecisePlaybackClock`: waits > 16 ms = Task.Delay(remaining − 10 ms) + precise
+   waitable-timer / yield-spin to the Stopwatch deadline. 1 ms Windows timer now also while recording (both recorders).
+2. **Auto-repeat + chords**: `WindowsInputRecorder` keeps `_heldKeys` (+ `_keyDownTimestamps`) and drops a key-down for a
+   held key. `RecordingConverter.MarkAutoRepeats`: repeats never become extra "Hold down" steps (test
+   `Orphan_releases…` updated on purpose: "Hold down A | Release A") and don't break a tap / click of another key
+   (W held while clicking → Click step stays one step). Tap = one Press with its exact hold when nothing else (key, click,
+   wheel, recorded move) happens in between; otherwise Down … Up at the exact release (unchanged rule).
+3. **Click hold + drags**: `MouseClickStep.HoldDurationMs` / `KeyPressStep.HoldDurationMs` = [JsonIgnore] aliases of `HoldMs`
+   (files unchanged). Recorded clicks: hold = clamp(held, 12, 60,000) (`RecordingConverter.MinRecordedClickHoldMs`; the
+   next Delay starts after the played hold, so totals stay exact). Click vs drag: `MaxClickDistance` 4 → 6 px, measured as the
+   FARTHEST point from the press while held (a drag that returns to its start is a drag). Engine: Click with HoldMs > 0 holds
+   `Math.Max(12, HoldDurationMs)` ÷ speed (`MinClickHoldMs`); 0 = instant as before. Editor label "Hold duration (ms, 0 =
+   instant click)" (`StepEditorTemplates.xaml`, VM `HoldDurationMs`).
+4. **Hotkey bleed / own UI**: new Core `Recording/HotkeyChordFilter.cs` (a shortcut = its key going down while EXACTLY its
+   modifiers are held, like RegisterHotKey; drops that press + auto-repeat + release and the modifiers' presses; same keys
+   alone are kept). `IgnoredHotkeys` on Recording / SmartRecording / GameRecording options; the app passes Record + Play /
+   Stop. Pause (F8) is NOT filtered on purpose: it's only registered while playing, so during recording F8 goes to the app.
+   Own-window click check also tries `GetAncestor(GA_ROOT)`. Stop(): both recorders append KeyUp / MouseUp at the exact stop
+   time for anything still held (`RecordingCleanup.ReleasesAtStop`); the stop chord's releases are removed by the filter.
+5. **Timestamps**: desktop hook times = `Stopwatch.GetTimestamp()` taken first in the hook callback → `RecordingClock`
+   (rounds the exact time since start each event: ≤ 0.5 ms error, zero accumulated drift; monotonic). `DelayQuantizer`
+   (remainder-carrying ms quantizer) added for callers that only have intervals.
+- Tests: `SmartMacro.Tests/RecordingTimingFixesTests.cs` (20: 50 clicks + keys with 40 ms sending cost = 14,000 ms exact and
+  280 ms rhythm (old code ≈ 16,100 ms), stall skipped, wait split, repeats, overlapping W + Space replay, 550 ms cast, 12 ms
+  floor + exact total, wobble vs return drag, hold at 1× / 2× / floor, JSON, stop chord + releases, chords mid-recording,
+  smart generic modifiers, releases at stop, 1,000 events zero drift, monotonic clock).
+- To check by hand: record holding W while tapping Space (Desktop + Smart mode), a 550 ms click hold in Fisch, a slider drag
+  that ends where it began, stop with Ctrl+Shift+F9 while holding W (no Ctrl / Shift / F9 steps, W released at the stop),
+  a long AFK loop of clicks keeps its timing (compare loop time with the recording).
 
 ## Stability & accuracy pass (2026-10-24): **built + tested** (`tools\verify.cmd`: 0 warnings, 0 errors, **1090 / 1090 passed**)
 1. Streamer mode vs. vision: the capturable reticle leaves a 24×24 px unpainted core on the click point

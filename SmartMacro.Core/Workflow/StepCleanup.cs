@@ -377,7 +377,7 @@ public static class StepCleanup
 
     // A Move to "the last found spot" or "by an offset" isn't a recorded cursor point, so it's never folded away.
     private static bool IsRunPart(MacroStep? step) =>
-        step is (DelayStep or MouseMoveStep { TargetMode: ClickTargetMode.Coordinates }) and { Enabled: true, Comment: null or "" };
+        step is (DelayStep or MouseMoveStep { TargetMode: ClickTargetMode.Coordinates, UseRelativeDelta: false }) and { Enabled: true, Comment: null or "" };
 
     /// <summary>True if the step moves the cursor to its own spot first, so a Move right before it is not needed.</summary>
     private static bool PositionsItself(MacroStep? step) => step switch

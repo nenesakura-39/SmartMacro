@@ -220,6 +220,23 @@ public sealed class MouseMoveStep : MacroStep
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public int OffsetY { get; set; }
 
+    /// <summary>
+    /// 3D game camera / cursor-locked games: play this move as RELATIVE mouse movement (SendInput MOUSEEVENTF_MOVE without
+    /// ABSOLUTE) of <see cref="DeltaX"/>, <see cref="DeltaY"/> counts, the way a physical mouse turns a camera, instead of
+    /// putting the cursor on X / Y (games that lock the cursor in the middle of the screen never see absolute moves).
+    /// X / Y then only remember where the cursor was when it was recorded. Written only when on (file format 14).
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public bool UseRelativeDelta { get; set; }
+
+    /// <summary>Relative movement (mouse counts, + = right) when <see cref="UseRelativeDelta"/> is on.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public int DeltaX { get; set; }
+
+    /// <summary>Relative movement (mouse counts, + = down) when <see cref="UseRelativeDelta"/> is on.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public int DeltaY { get; set; }
+
     [JsonIgnore]
     public override StepKind Kind => StepKind.MouseMove;
 }
@@ -268,6 +285,18 @@ public sealed class MouseClickStep : MacroStep
     /// </summary>
     [JsonIgnore]
     public int ClickHoldMs
+    {
+        get => HoldMs;
+        set => HoldMs = value;
+    }
+
+    /// <summary>
+    /// "Hold duration (ms, 0 = instant click)": how long the button stays down for a Click — the same stored value as
+    /// <see cref="HoldMs"/> (files keep using "holdMs"). Recordings fill in the exact hold (a 550 ms rod cast stays 550 ms,
+    /// never less than 12 ms); playback keeps the button down that long (÷ speed) before releasing it.
+    /// </summary>
+    [JsonIgnore]
+    public int HoldDurationMs
     {
         get => HoldMs;
         set => HoldMs = value;
@@ -415,6 +444,14 @@ public sealed class KeyPressStep : MacroStep
     /// so a short W tap that moved a game character for 120 ms still lasts 120 ms when played back.
     /// </summary>
     public int HoldMs { get; set; }
+
+    /// <summary>The exact recorded hold of a Press (same stored value as <see cref="HoldMs"/>).</summary>
+    [JsonIgnore]
+    public int HoldDurationMs
+    {
+        get => HoldMs;
+        set => HoldMs = value;
+    }
 
     [JsonIgnore]
     public override StepKind Kind => StepKind.KeyPress;

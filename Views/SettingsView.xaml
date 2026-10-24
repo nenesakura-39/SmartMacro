@@ -179,15 +179,18 @@
                                       AutomationProperties.Name="Recording mode" />
                             <TextBlock Style="{StaticResource SettingHelp}" Text="{Binding RecordingModeHelp}" Margin="0,6,0,0" />
 
-                            <CheckBox Style="{StaticResource SettingSwitch}" IsChecked="{Binding RecordMouseMovement}" IsEnabled="{Binding MakesEditableSteps}"
-                                      Content="Record cursor movement in editable steps"
-                                      AutomationProperties.Name="Record cursor movement" />
-                            <TextBlock Style="{StaticResource SettingHelp}" Text="Turn off to record only clicks, scrolls and keys. Camera movement is always kept." />
-                            <CheckBox Style="{StaticResource SettingSwitch}" IsChecked="{Binding KeepTapHoldTime}" IsEnabled="{Binding MakesEditableSteps}"
-                                      Content="Keep how long each key / click was held" AutomationProperties.Name="Keep hold time" />
-                            <CheckBox Style="{StaticResource SettingSwitch}" IsChecked="{Binding SimplifyMousePaths}" IsEnabled="{Binding MakesEditableSteps}"
-                                      Content="Simplify mouse paths (recommended for menus and shops)" AutomationProperties.Name="Simplify mouse paths"
-                                      ToolTip="Cursor travel between clicks isn't turned into Move mouse steps: each click already remembers where it happens. Dragging with a button held (sliders, items) and the spot you hover before pressing a key are still kept." />
+                            <TextBlock Text="Recording fidelity" Style="{StaticResource FieldLabel}" Margin="0,12,0,4" />
+                            <ComboBox ItemsSource="{Binding RecordingFidelities}" DisplayMemberPath="Label" SelectedValuePath="Value"
+                                      SelectedValue="{Binding RecordingFidelity}" MaxWidth="520" HorizontalAlignment="Left"
+                                      IsEnabled="{Binding MakesEditableSteps}" AutomationProperties.Name="Recording fidelity" />
+                            <TextBlock Style="{StaticResource SettingHelp}" Text="{Binding RecordingFidelityHelp}" Margin="0,6,0,0" />
+                            <TextBlock Style="{StaticResource SettingHelp}" Margin="0,2,0,0"
+                                       Text="Applies to the editable steps of Smart and Desktop recordings. Camera parts, Game mode and Exact 1:1 / Rhythm always keep every event." />
+                            <CheckBox Style="{StaticResource SettingSwitch}" IsChecked="{Binding UseRelativeMouseDeltas}" IsEnabled="{Binding MakesEditableSteps}"
+                                      Content="🎮 Use relative mouse deltas for 3D camera" AutomationProperties.Name="Use relative mouse deltas for 3D camera"
+                                      ToolTip="Every recorded mouse movement becomes a relative move (dx, dy), and clicks happen where the cursor is: for shift-lock, first-person and other games that lock the cursor in the middle. Off: only movement while you hold the right or middle button (turning the camera) is relative." />
+                            <TextBlock Style="{StaticResource SettingHelp}"
+                                       Text="Movement while the right or middle button is held (turning the camera) is always recorded as relative deltas. Left-button drags (sliders) keep exact screen positions." />
                             <CheckBox Style="{StaticResource SettingSwitch}" IsChecked="{Binding CaptureClickSnapshots}" IsEnabled="{Binding MakesEditableSteps}"
                                       Content="✨ Smart Click Snapshots: save a small picture of what I click" AutomationProperties.Name="Smart Click Snapshots"
                                       ToolTip="Every recorded click keeps a 56×56 picture of what was under the cursor. The editor shows it, Smart-Aim can find the button again if it moved a little, and one click turns the step into a 'Find image &amp; click'. The pictures are saved inside the macro file, so turn this off if your screen shows private things while you record." />

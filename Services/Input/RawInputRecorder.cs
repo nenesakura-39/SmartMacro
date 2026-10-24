@@ -51,6 +51,7 @@ public sealed class RawInputRecorder : IRelativeInputRecorder, IDisposable
     private Session? _session;
     private Session? _lastSession;
     private bool _captureClickSnapshots = true;
+    private HighResolutionTimerScope? _timerResolution; // 1 ms Windows timer while recording
 
     /// <summary>
     /// Smart recording only: keep a small picture of what each click hit (Smart Click Snapshots). Read when a recording
@@ -97,7 +98,18 @@ public sealed class RawInputRecorder : IRelativeInputRecorder, IDisposable
 
         var session = new Session(_captureCursor, snapshots);
         _lastSession = session;
-        session.Start(); // throws with a readable message if Windows refuses
+        _timerResolution ??= new HighResolutionTimerScope();
+        try
+        {
+            session.Start(); // throws with a readable message if Windows refuses
+        }
+        catch
+        {
+            _timerResolution?.Dispose();
+            _timerResolution = null;
+            throw;
+        }
+
         _session = session;
     }
 
@@ -109,9 +121,18 @@ public sealed class RawInputRecorder : IRelativeInputRecorder, IDisposable
         var session = _session;
         if (session is null) return _lastSession?.Snapshot() ?? new List<CapturedInputEvent>();
 
+        var stopTimestamp = Stopwatch.GetTimestamp();
         _session = null;
         session.Stop();
-        return session.Snapshot();
+        _timerResolution?.Dispose();
+        _timerResolution = null;
+
+        // Anything still physically held when recording stops is released at that exact moment, so the hold keeps its
+        // real length and the recording never ends with an unclosed key-down / button-down. (SmartMacro's own Stop
+        // shortcut is removed again by the converter's hotkey filter.)
+        var events = session.Snapshot();
+        if (events.Count > 0) events.AddRange(RecordingCleanup.ReleasesAtStop(events, session.TimeUsAt(stopTimestamp)));
+        return events;
     }
 
     public void Dispose() => StopCaptured();
@@ -209,6 +230,9 @@ public sealed class RawInputRecorder : IRelativeInputRecorder, IDisposable
         {
             lock (_lock) return _events.ToList();
         }
+
+        /// <summary>A Stopwatch timestamp as microseconds since this session started (the events' clock).</summary>
+        public long TimeUsAt(long timestamp) => (long)((timestamp - _startTimestamp) * (1_000_000.0 / Stopwatch.Frequency));
 
         public void Start()
         {

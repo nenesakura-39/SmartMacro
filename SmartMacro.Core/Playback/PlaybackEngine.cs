@@ -158,6 +158,23 @@ public sealed class PlaybackEngine
     public static readonly TimeSpan MaxTimelineLag = TimeSpan.FromMilliseconds(15);
 
     /// <summary>
+    /// Deadline-synced playback of recorded-style steps (Delay, Move mouse, Mouse click at a position, Key press): the time
+    /// a click or key press itself takes to send (Windows' hover nudge + settle before a press can be ~35 ms, a stalled
+    /// UI thread a few ms more) stays ON the virtual timeline and is taken out of the next wait, instead of being added
+    /// to the macro after every step. Over hundreds of steps / a 5-hour AFK loop that extra time used to add up to
+    /// seconds of drift. Up to this much is caught up this way; anything later than that (a real PC stall) is skipped,
+    /// so playback never fires a burst of late input.
+    /// </summary>
+    public static readonly TimeSpan MaxStepOverheadCatchUp = TimeSpan.FromMilliseconds(100);
+
+    /// <summary>
+    /// A Mouse click step with a hold (recorded clicks always have one) keeps the button down at least this long
+    /// (÷ speed, with the <see cref="MinScaledHoldMs"/> floor at high speeds), so games that read input once per frame see it.
+    /// HoldMs 0 = instant click, as before.
+    /// </summary>
+    public const int MinClickHoldMs = 12;
+
+    /// <summary>
     /// Pause after clicking found text / an image / a colour ("post-action delay") so the clicked window (or game UI)
     /// can react before the next step looks at the screen again.
     /// </summary>
@@ -308,6 +325,7 @@ public sealed class PlaybackEngine
     private HeldInput? _held;
     private TimeSpan _timelineTarget;   // clock time at which the current step / event is due
     private TimeSpan _timelineShift;    // total time the timeline was pushed back (pauses, stalls)
+    private TimeSpan _lagAllowance = MaxTimelineLag; // how far behind the timeline may be and still catch up (see MaxStepOverheadCatchUp)
     private TimeSpan _pausedTotal;      // total time spent paused in this run (not counted by timeouts / loop limits)
     private bool _skipNextStep;         // set by a Find step that timed out with "skip the next step"
 
@@ -475,6 +493,7 @@ public sealed class PlaybackEngine
             DelayStep d => d.DurationMs / speed,
             KeyPressStep { Action: KeyAction.Press } k => ScaledHoldMs(k.HoldMs, speed),
             MouseClickStep { Action: MouseClickAction.Drag } c => c.DragDurationMs / speed,
+            MouseClickStep { Action: MouseClickAction.Click, HoldMs: > 0 } c => ScaledHoldMs(Math.Max(MinClickHoldMs, c.HoldMs), speed),
             MouseClickStep c => ScaledHoldMs(c.HoldMs, speed),
             TypeTextStep t => (t.Text?.Length ?? 0) * Math.Max(0, t.CharacterDelayMs) / speed,
             ScreenSearchStep s => s.TimeoutMs,
@@ -948,7 +967,18 @@ public sealed class PlaybackEngine
 
     // ---------------- Timeline ----------------
 
-    private void ResetTimeline() => _timelineTarget = _clock.Elapsed;
+    private void ResetTimeline()
+    {
+        _timelineTarget = _clock.Elapsed;
+        _lagAllowance = MaxTimelineLag;
+    }
+
+    /// <summary>
+    /// After a recorded-style step (click at a position, key press): the time the step took beyond its own schedule
+    /// (sending the input) stays on the timeline and the next waits are shortened by it (up to
+    /// <see cref="MaxStepOverheadCatchUp"/>), so the macro keeps the recording's exact rhythm instead of drifting.
+    /// </summary>
+    private void KeepStepOverheadOnTimeline() => _lagAllowance = MaxStepOverheadCatchUp;
 
     /// <summary>
     /// Ensures <see cref="_timelineTarget"/> is never more than <see cref="MaxTimelineLag"/> behind <see cref="_clock"/>
@@ -958,7 +988,7 @@ public sealed class PlaybackEngine
     {
         var now = _clock.Elapsed;
         var lag = now - _timelineTarget;
-        if (lag > MaxTimelineLag)
+        if (lag > _lagAllowance)
         {
             _timelineShift += lag;
             _timelineTarget = now;
@@ -971,6 +1001,7 @@ public sealed class PlaybackEngine
     /// </summary>
     private void SyncTimelineToNow()
     {
+        _lagAllowance = MaxTimelineLag;
         var now = _clock.Elapsed;
         if (now > _timelineTarget)
         {
@@ -1001,14 +1032,18 @@ public sealed class PlaybackEngine
             if (remaining <= TimeSpan.Zero)
             {
                 // Far behind (the PC stalled)? Skip ahead rather than firing a burst of late input.
-                if (-remaining > MaxTimelineLag)
+                if (-remaining > _lagAllowance)
                 {
                     _timelineShift += now - _timelineTarget;
                     _timelineTarget = now;
+                    _lagAllowance = MaxTimelineLag;
                 }
 
                 return;
             }
+
+            // Ahead of the deadline again: any step overhead has been caught up.
+            _lagAllowance = MaxTimelineLag;
 
             await _clock.DelayAsync(remaining < MaxDelayChunk ? remaining : MaxDelayChunk, token).ConfigureAwait(false);
         }
@@ -1250,7 +1285,10 @@ public sealed class PlaybackEngine
                         _glideTarget = step is DelayStep && pc + 1 < steps.Count ? JumpTargetOf(steps[pc + 1]) : null;
                         _glideDuringDelay = step is DelayStep delay && pc + 1 < steps.Count ? RecordedGlideAfter(delay, steps[pc + 1]) : null;
                         Report(run, pc, loops);
-                        await ExecuteStepAsync(step, run.Speed, run.Held, token).ConfigureAwait(false);
+                        if (IsDeadlineSynced(step))
+                            await ExecuteDeadlineSyncedAsync(step, run.Speed, run.Held, token).ConfigureAwait(false);
+                        else
+                            await ExecuteStepAsync(step, run.Speed, run.Held, token).ConfigureAwait(false);
                         run.StepsExecuted++;
                     }
 
@@ -1659,6 +1697,38 @@ public sealed class PlaybackEngine
 
     // ---------------- Steps ----------------
 
+    /// <summary>
+    /// Recorded-style input steps that play on the deadline-synced virtual timeline: a key press and a mouse click at a
+    /// position (or where the cursor is). Clicks on something vision found (last found spot, Smart-Aim) are not: looking
+    /// takes as long as it takes, so their timing starts again after the look.
+    /// </summary>
+    private static bool IsDeadlineSynced(MacroStep step) =>
+        step is KeyPressStep || step is MouseClickStep { UseLastFoundText: false, SmartAimAtTarget: false };
+
+    /// <summary>
+    /// Plays a recorded-style step so its own schedule (its hold) is exact AND the macro's timeline doesn't move: time
+    /// the timeline had to skip while sending the input (Windows' hover nudge + settle before a press, ~35 ms) is put
+    /// back as "owed" time, which the next Delay / Move then takes out of its wait (up to
+    /// <see cref="MaxStepOverheadCatchUp"/>). Paused time is never put back. Before this, every click and key press
+    /// pushed the rest of the macro back by its sending time: seconds of drift over a 5-hour AFK loop.
+    /// </summary>
+    private async Task ExecuteDeadlineSyncedAsync(MacroStep step, double speed, HeldInput held, CancellationToken token)
+    {
+        var shiftAtStart = _timelineShift;
+        var pausedAtStart = _pausedTotal;
+        await ExecuteStepAsync(step, speed, held, token).ConfigureAwait(false);
+
+        var skipped = (_timelineShift - shiftAtStart) - (_pausedTotal - pausedAtStart);
+        var owed = _clock.Elapsed - _timelineTarget;
+        if (skipped > TimeSpan.Zero && owed + skipped <= MaxStepOverheadCatchUp)
+        {
+            _timelineTarget -= skipped;
+            _timelineShift -= skipped;
+        }
+
+        KeepStepOverheadOnTimeline();
+    }
+
     private async Task ExecuteStepAsync(MacroStep step, double speed, HeldInput held, CancellationToken token)
     {
         switch (step)
@@ -1701,6 +1771,14 @@ public sealed class PlaybackEngine
                 }
 
                 await WaitForTimelineAsync(token).ConfigureAwait(false);
+                break;
+
+            case MouseMoveStep { UseRelativeDelta: true } r:
+                // 3D camera / cursor-locked game: relative mouse counts (SendInput MOUSEEVENTF_MOVE, not ABSOLUTE), the
+                // way a real mouse turns the camera. Big deltas are sent in small slices so nothing is lost or clamped.
+                _glideAbsorbedBy = null;
+                SendRelativeMoveLossless(r.DeltaX, r.DeltaY);
+                _cursor = null; // where the (possibly hidden) cursor ended up is now unknown
                 break;
 
             case MouseMoveStep m when ReferenceEquals(_glideAbsorbedBy, m):
@@ -1797,10 +1875,11 @@ public sealed class PlaybackEngine
                 switch (c.Action)
                 {
                     case MouseClickAction.Click when c.HoldMs > 0:
-                        // Keep the button down for the recorded time (tracked, so Stop still releases it).
+                        // Keep the button down for the recorded time (HoldDurationMs, at least MinClickHoldMs, ÷ speed;
+                        // tracked, so Stop still releases it): a 550 ms rod cast stays a 550 ms cast.
                         _input.MouseButton(c.Button, true);
                         held.Buttons.Add(c.Button);
-                        AdvanceTimeline(ScaledHoldMs(c.HoldMs, speed));
+                        AdvanceTimeline(ScaledHoldMs(Math.Max(MinClickHoldMs, c.HoldDurationMs), speed));
                         await WaitForTimelineAsync(token).ConfigureAwait(false);
                         _input.MouseButton(c.Button, false);
                         held.Buttons.Remove(c.Button);
@@ -1846,7 +1925,8 @@ public sealed class PlaybackEngine
                         break;
                 }
 
-                SyncTimelineToNow();
+                // Deadline-synced: the time Windows took to send the click is taken out of the next Delay, not added.
+                KeepStepOverheadOnTimeline();
                 break;
 
             case MouseScrollStep s:
@@ -1905,7 +1985,6 @@ public sealed class PlaybackEngine
                             held.Keys.Remove(new HeldKey(modifiers[i]));
                         }
 
-                        SyncTimelineToNow();
                         break;
                     }
                     case KeyAction.Press:
@@ -1926,6 +2005,9 @@ public sealed class PlaybackEngine
                         held.Keys.Remove(new HeldKey(k.VirtualKey));
                         break;
                 }
+
+                // Deadline-synced like clicks: sending the key doesn't push the rest of the macro back.
+                KeepStepOverheadOnTimeline();
                 break;
 
             case TypeTextStep t:
@@ -2705,7 +2787,7 @@ public sealed class PlaybackEngine
     /// </summary>
     private static (int X, int Y)? JumpTargetOf(MacroStep? step) => step switch
     {
-        MouseMoveStep { Enabled: true, TargetMode: ClickTargetMode.Coordinates, MoveStyle: null or MouseMoveStyle.Instant } m => (m.X, m.Y),
+        MouseMoveStep { Enabled: true, UseRelativeDelta: false, TargetMode: ClickTargetMode.Coordinates, MoveStyle: null or MouseMoveStyle.Instant } m => (m.X, m.Y),
         MouseClickStep { Enabled: true, UseLastFoundText: false, UseCurrentPosition: false, SmartAimAtTarget: false, MoveStyle: null or MouseMoveStyle.Instant } c => (c.X, c.Y),
         MouseScrollStep { Enabled: true, UseCurrentPosition: false } s => (s.X, s.Y),
         _ => null,
@@ -2716,7 +2798,7 @@ public sealed class PlaybackEngine
     /// null: only an enabled Move mouse step with Smooth glide / Human curve whose glide is longer than a short Delay.
     /// </summary>
     private static MouseMoveStep? RecordedGlideAfter(DelayStep delay, MacroStep next) =>
-        next is MouseMoveStep { Enabled: true, TargetMode: ClickTargetMode.Coordinates, MoveStyle: MouseMoveStyle.SmoothGlide or MouseMoveStyle.HumanCurve } move
+        next is MouseMoveStep { Enabled: true, UseRelativeDelta: false, TargetMode: ClickTargetMode.Coordinates, MoveStyle: MouseMoveStyle.SmoothGlide or MouseMoveStyle.HumanCurve } move
         && delay.DurationMs > 0 && delay.DurationMs <= RecordedPointMaxDelayMs && move.MoveDurationMs > delay.DurationMs
             ? move
             : null;

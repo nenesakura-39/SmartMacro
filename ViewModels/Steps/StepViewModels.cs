@@ -570,6 +570,34 @@ public sealed class MouseMoveStepViewModel : StepViewModel
 
     public bool UsesOffset => _step.TargetMode != ClickTargetMode.Coordinates;
 
+    /// <summary>"🎮 Relative mouse delta (3D camera)": play DeltaX / DeltaY as relative mouse movement.</summary>
+    public bool UseRelativeDelta
+    {
+        get => _step.UseRelativeDelta;
+        set
+        {
+            if (_step.UseRelativeDelta == value) return;
+            _step.UseRelativeDelta = value;
+            NotifyChanged();
+            OnPropertyChanged(nameof(IsAbsolute));
+        }
+    }
+
+    /// <summary>The normal (absolute position / offset) settings apply.</summary>
+    public bool IsAbsolute => !_step.UseRelativeDelta;
+
+    public int DeltaX
+    {
+        get => _step.DeltaX;
+        set { if (_step.DeltaX == value) return; _step.DeltaX = value; NotifyChanged(); }
+    }
+
+    public int DeltaY
+    {
+        get => _step.DeltaY;
+        set { if (_step.DeltaY == value) return; _step.DeltaY = value; NotifyChanged(); }
+    }
+
     public int OffsetX
     {
         get => _step.OffsetX;
@@ -1004,7 +1032,20 @@ public sealed class MouseClickStepViewModel : StepViewModel
     public int HoldMs
     {
         get => _step.HoldMs;
-        set { if (_step.HoldMs == value) return; _step.HoldMs = value; NotifyChanged(); }
+        set
+        {
+            if (_step.HoldMs == value) return;
+            _step.HoldMs = value;
+            NotifyChanged();
+            OnPropertyChanged(nameof(HoldDurationMs));
+        }
+    }
+
+    /// <summary>"Hold duration (ms, 0 = instant click)" — the step's HoldDurationMs (same value as <see cref="HoldMs"/>).</summary>
+    public int HoldDurationMs
+    {
+        get => _step.HoldDurationMs;
+        set => HoldMs = value;
     }
 
     /// <summary>How the cursor travels to the click spot (older steps: Instant).</summary>

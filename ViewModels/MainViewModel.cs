@@ -104,6 +104,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
                 RecordingFinished = SaveRecordingAsync,
                 Settings = () => _settings,
                 SetRecordingMode = mode => RecordingMode = mode,
+                SetRecordingFidelity = fidelity => _ = Settings.QuickSetAsync(s => s.RecordingFidelity = fidelity),
                 SetStatus = SetStatus,
             });
 
@@ -164,6 +165,19 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         {
             if (_settings.RecordingMode == value) return;
             _ = Settings.QuickSetAsync(s => s.RecordingMode = value);
+        }
+    }
+
+    public static IReadOnlyList<Steps.Choice<RecordingFidelity>> RecordingFidelities => SettingsViewModel.RecordingFidelityChoices;
+
+    /// <summary>Recording fidelity selector (Exact 1:1 / Smart Optimized / Clicks &amp; Keys Only; saved in Settings immediately).</summary>
+    public RecordingFidelity RecordingFidelity
+    {
+        get => _settings.RecordingFidelity;
+        set
+        {
+            if (_settings.RecordingFidelity == value) return;
+            _ = Settings.QuickSetAsync(s => s.RecordingFidelity = value);
         }
     }
 
@@ -402,6 +416,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(MinimizeWhilePlaying));
         OnPropertyChanged(nameof(ShowOverlaysInObs));
         OnPropertyChanged(nameof(RecordingMode));
+        OnPropertyChanged(nameof(RecordingFidelity));
         Automation?.RefreshShortcuts();
         SettingsApplied?.Invoke(this, settings);
     }

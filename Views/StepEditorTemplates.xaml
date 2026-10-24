@@ -167,6 +167,30 @@
     <DataTemplate DataType="{x:Type steps:MouseMoveStepViewModel}">
         <StackPanel>
             <ContentControl Content="{Binding}" ContentTemplate="{StaticResource StepHeaderTemplate}" Focusable="False" Visibility="{Binding IsStandalone, Converter={StaticResource BoolToVisibility}}" />
+            <!-- 3D camera: relative mouse movement (dx, dy) instead of a screen position. -->
+            <CheckBox IsChecked="{Binding UseRelativeDelta}" Margin="0,16,0,0" AutomationProperties.Name="Relative mouse delta for 3D camera"
+                      Content="🎮 Relative mouse delta (3D camera / cursor-locked games)"
+                      ToolTip="Sends relative mouse movement (like a real mouse) instead of putting the cursor on X / Y. Games that lock the cursor (right-click camera, shift-lock, first person) turn the camera by it." />
+            <StackPanel Visibility="{Binding UseRelativeDelta, Converter={StaticResource BoolToVisibility}}">
+                <Grid Margin="0,8,0,0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="12" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <StackPanel Grid.Column="0">
+                        <TextBlock Text="Delta X (+ = right)" Style="{StaticResource FieldLabel}" />
+                        <TextBox Text="{Binding DeltaX, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}" AutomationProperties.Name="Delta X" />
+                    </StackPanel>
+                    <StackPanel Grid.Column="2">
+                        <TextBlock Text="Delta Y (+ = down)" Style="{StaticResource FieldLabel}" />
+                        <TextBox Text="{Binding DeltaY, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}" AutomationProperties.Name="Delta Y" />
+                    </StackPanel>
+                </Grid>
+                <TextBlock Style="{StaticResource MutedText}" FontSize="11" Margin="0,6,0,0" TextWrapping="Wrap"
+                           Text="Mouse counts, like a physical mouse reports them. The camera turns by the same amount as when you recorded it (same in-game sensitivity). Windows' pointer acceleration can bend the visible cursor's path; games that read raw input aren't affected." />
+            </StackPanel>
+            <StackPanel Visibility="{Binding IsAbsolute, Converter={StaticResource BoolToVisibility}}">
             <TextBlock Text="Where to move" Style="{StaticResource FieldLabel}" Margin="0,18,0,4" />
             <ComboBox ItemsSource="{x:Static steps:MouseMoveStepViewModel.Targets}" DisplayMemberPath="Label" SelectedValuePath="Value"
                       SelectedValue="{Binding TargetMode}" AutomationProperties.Name="Where to move"
@@ -191,6 +215,7 @@
                          AutomationProperties.Name="Glide duration in milliseconds" ToolTip="How long the glide takes. 120 ms feels natural; it's added to the macro's run time." />
             </StackPanel>
             <TextBlock Text="{Binding MoveHelp}" Style="{StaticResource MutedText}" FontSize="11" Margin="0,8,0,0" TextWrapping="Wrap" />
+            </StackPanel>
             <ContentControl Content="{Binding}" ContentTemplate="{StaticResource StepFooterTemplate}" Focusable="False" Visibility="{Binding IsStandalone, Converter={StaticResource BoolToVisibility}}" />
         </StackPanel>
     </DataTemplate>
@@ -289,11 +314,11 @@
             <TextBlock Text="{Binding ActionHelp}" Style="{StaticResource MutedText}" FontSize="11" Margin="0,4,0,0" TextWrapping="Wrap" />
 
             <StackPanel Visibility="{Binding UsesHoldTime, Converter={StaticResource BoolToVisibility}}">
-                <TextBlock Text="Click hold duration (ms)" Style="{StaticResource FieldLabel}"
-                           ToolTip="How long the button stays down. Click / double click: 35 ms is reliable in games (0 = instant). Hold for a duration: e.g. 850 for a casting meter." />
-                <TextBox Text="{Binding HoldMs, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}"
-                         AutomationProperties.Name="Hold time in milliseconds"
-                         ToolTip="How long the button stays down. Click / double click: 35 ms is reliable in games (0 = instant; recordings fill in how long you held it). Hold for a duration: e.g. 850 for a casting meter." />
+                <TextBlock Text="Hold duration (ms, 0 = instant click)" Style="{StaticResource FieldLabel}"
+                           ToolTip="How long the button stays down before it's released. Recordings fill in exactly how long you held it (e.g. a 550 ms rod cast; never less than 12 ms). Click / double click: 35 ms is reliable in games. Hold for a duration: e.g. 850 for a casting meter." />
+                <TextBox Text="{Binding HoldDurationMs, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}"
+                         AutomationProperties.Name="Hold duration in milliseconds"
+                         ToolTip="How long the button stays down before it's released (0 = instant click; recordings fill in exactly how long you held it). Speed divides it, e.g. 550 ms at 2× = 275 ms." />
                 <!-- Quick presets wrap onto a second line on narrow panels instead of being squeezed / cut off. -->
                 <WrapPanel Margin="0,6,0,0">
                     <Button Content="+100ms" Command="{Binding AddDurationCommand}" CommandParameter="+100" Padding="10,5" Margin="0,0,6,6" />

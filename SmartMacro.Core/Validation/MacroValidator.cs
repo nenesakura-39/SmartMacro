@@ -345,6 +345,14 @@ public static class MacroValidator
                     issues.Add(Error($"The delay can be at most {MaxDelayMs:N0} ms (1 hour).", nameof(DelayStep.DurationMs)));
                 break;
 
+            case MouseMoveStep { UseRelativeDelta: true } r:
+                // Relative (3D camera) move: X / Y are only where it was recorded, the deltas are what plays.
+                if (Math.Abs((long)r.DeltaX) > MaxRelativeMove || Math.Abs((long)r.DeltaY) > MaxRelativeMove)
+                    issues.Add(Error($"A relative mouse move can be at most {MaxRelativeMove:N0} counts in each direction.", nameof(MouseMoveStep.DeltaX)));
+                else if (r.DeltaX == 0 && r.DeltaY == 0)
+                    issues.Add(Warning("This relative mouse move is 0, 0, so it does nothing.", nameof(MouseMoveStep.DeltaX)));
+                break;
+
             case MouseMoveStep m:
                 if (!Enum.IsDefined(m.TargetMode))
                     issues.Add(Error("Unknown \"where to move\" choice. The macro may be damaged.", nameof(MouseMoveStep.TargetMode)));

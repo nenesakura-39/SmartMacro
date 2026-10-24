@@ -10,8 +10,10 @@ public sealed class AppSettings
     /// because version 1 only offered Desktop / Game; both are still available as advanced options.
     /// 3 = the pause / resume shortcut defaults to F8 (AAA upgrade); files that still have the old default Ctrl+Shift+F11
     /// are moved to F8 once. A shortcut the user picked themselves is kept.
+    /// 4 = adds the recording fidelity selector (<see cref="RecordingFidelity"/>, default 🎯 100% Exact 1:1 Replay). Files
+    /// that had "record mouse movement" turned off start on 🖱️ Clicks &amp; Keys Only instead.
     /// </summary>
-    public const int CurrentSchemaVersion = 3;
+    public const int CurrentSchemaVersion = 4;
     public const int MaxDefaultDelayMs = 60_000;
 
     public int SchemaVersion { get; set; } = CurrentSchemaVersion;
@@ -47,6 +49,25 @@ public sealed class AppSettings
     /// one per part. Desktop / Game = the older single-purpose recorders, kept as advanced fallbacks.
     /// </summary>
     public RecordingMode RecordingMode { get; set; } = RecordingMode.Smart;
+
+    /// <summary>
+    /// The selector next to the Record button: 🎯 100% Exact 1:1 Replay (default), ✨ Smart Optimized or 🖱️ Clicks &amp; Keys
+    /// Only. Decides mouse sampling / simplification and hold times of the editable steps of Smart and Desktop recordings
+    /// (it replaces <see cref="RecordMouseMovement"/>, <see cref="SimplifyMousePaths"/> and <see cref="KeepTapHoldTime"/>,
+    /// which are kept in the file only for older versions).
+    /// </summary>
+    public RecordingFidelity RecordingFidelity { get; set; } = RecordingFidelity.Exact1To1;
+
+    /// <summary>
+    /// "Use relative mouse deltas for 3D camera": every recorded cursor movement becomes a relative mouse move (for
+    /// shift-lock / first-person / cursor-locked games). Off (default): only movement while the right or middle button is
+    /// held (turning the camera) is relative.
+    /// </summary>
+    public bool UseRelativeMouseDeltas { get; set; }
+
+    /// <summary>The relative-mouse mode recordings use, from <see cref="UseRelativeMouseDeltas"/>.</summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public RelativeMouseMode RelativeMouseMode => UseRelativeMouseDeltas ? RelativeMouseMode.Always : RelativeMouseMode.CameraDrags;
 
     /// <summary>
     /// Desktop recordings: keep how long each key / click was held (a short W tap stays as long as it was).
@@ -92,6 +113,10 @@ public sealed class AppSettings
         if (DefaultDelayMs < 0) DefaultDelayMs = 0;
         if (DefaultDelayMs > MaxDefaultDelayMs) DefaultDelayMs = MaxDefaultDelayMs;
         if (!Enum.IsDefined(RecordingMode)) RecordingMode = RecordingMode.Smart;
+        if (!Enum.IsDefined(RecordingFidelity)) RecordingFidelity = RecordingFidelity.Exact1To1;
+
+        // Settings saved before the fidelity selector: "don't record mouse movement" becomes Clicks & Keys Only once.
+        if (SchemaVersion < 4 && !RecordMouseMovement) RecordingFidelity = RecordingFidelity.ClicksAndKeysOnly;
 
         // Settings saved before Smart recording existed: start using it (Desktop / Game stay in Settings → Advanced).
         if (SchemaVersion < 2) RecordingMode = RecordingMode.Smart;

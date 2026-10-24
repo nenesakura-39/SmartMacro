@@ -34,6 +34,7 @@ public static class StepDescriber
         DelayStep d => d.DurationMs >= 1000
             ? $"Wait {d.DurationMs / 1000.0:0.###} s"
             : $"Wait {d.DurationMs} ms",
+        MouseMoveStep { UseRelativeDelta: true } r => $"Turn the mouse by ({r.DeltaX:+0;-0;0}, {r.DeltaY:+0;-0;0}) · relative (3D camera)",
         MouseMoveStep m => $"{DescribeMoveTarget(m)}{MotionSuffix(m.MoveStyle, m.MoveDurationMs)}",
         MouseClickStep c => DescribeClick(c),
         MouseScrollStep s => $"Scroll {ScrollDirection(s)} {Notches(s.Delta)} {Where(s.UseCurrentPosition, s.X, s.Y)}",

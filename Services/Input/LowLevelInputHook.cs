@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 using SmartMacro.Core.Models;
 using SmartMacro.Core.Recording;
@@ -6,10 +7,14 @@ using static SmartMacro.Services.Input.NativeMethods;
 
 namespace SmartMacro.Services.Input;
 
-/// <summary>One event seen by a low-level hook, plus where it came from.</summary>
+/// <summary>
+/// One event seen by a low-level hook, plus where it came from. Time = the hook's own millisecond tick (GetTickCount,
+/// ~15.6 ms steps); Timestamp = Stopwatch.GetTimestamp() taken first thing in the callback (sub-microsecond).
+/// </summary>
 internal readonly record struct HookEvent(
     RawInputKind Kind,
     uint Time,
+    long Timestamp,
     int X,
     int Y,
     MacroMouseButton Button,
@@ -100,6 +105,8 @@ internal sealed class LowLevelInputHook : IDisposable
     {
         if (nCode >= 0)
         {
+            // Timestamp first, before any other work (the hook's own time only moves in ~15.6 ms steps).
+            var timestamp = Stopwatch.GetTimestamp();
             try
             {
                 var data = Marshal.PtrToStructure<MSLLHOOKSTRUCT>(lParam);
@@ -125,7 +132,7 @@ internal sealed class LowLevelInputHook : IDisposable
                 {
                     // Checking the window under the cursor is cheap enough for clicks, but skip it for moves.
                     var overOwn = k != RawInputKind.MouseMove && IsOwnWindow(WindowFromPoint(data.pt));
-                    Raise(new HookEvent(k, data.time, data.pt.X, data.pt.Y, button, delta, 0,
+                    Raise(new HookEvent(k, data.time, timestamp, data.pt.X, data.pt.Y, button, delta, 0,
                         (data.flags & LLMHF_INJECTED) != 0, data.dwExtraInfo == SmartMacroInputTag, overOwn));
                 }
             }
@@ -142,6 +149,7 @@ internal sealed class LowLevelInputHook : IDisposable
     {
         if (nCode >= 0)
         {
+            var timestamp = Stopwatch.GetTimestamp();
             try
             {
                 var data = Marshal.PtrToStructure<KBDLLHOOKSTRUCT>(lParam);
@@ -155,7 +163,7 @@ internal sealed class LowLevelInputHook : IDisposable
 
                 if (kind is RawInputKind k)
                 {
-                    Raise(new HookEvent(k, data.time, 0, 0, MacroMouseButton.Left, 0, (int)data.vkCode,
+                    Raise(new HookEvent(k, data.time, timestamp, 0, 0, MacroMouseButton.Left, 0, (int)data.vkCode,
                         (data.flags & LLKHF_INJECTED) != 0, data.dwExtraInfo == SmartMacroInputTag,
                         IsOwnWindow(GetForegroundWindow())));
                 }
@@ -181,11 +189,19 @@ internal sealed class LowLevelInputHook : IDisposable
         }
     }
 
-    private static bool IsOwnWindow(IntPtr hwnd)
+    /// <summary>
+    /// True when the window (or the top-level window it belongs to) is one of SmartMacro's own: its main window, the
+    /// Stop button, a dialog... Clicks there are not part of the recording.
+    /// </summary>
+    internal static bool IsOwnWindow(IntPtr hwnd)
     {
         if (hwnd == IntPtr.Zero) return false;
         GetWindowThreadProcessId(hwnd, out var pid);
-        return pid == OwnProcessId;
+        if (pid == OwnProcessId) return true;
+        var root = GetAncestor(hwnd, GA_ROOT);
+        if (root == IntPtr.Zero || root == hwnd) return false;
+        GetWindowThreadProcessId(root, out var rootPid);
+        return rootPid == OwnProcessId;
     }
 }
 
@@ -196,10 +212,15 @@ public sealed class WindowsInputRecorder : IInputRecorder, IDisposable
     public const int MaxEvents = 500_000;
 
     private readonly List<RawInputEvent> _events = new();
-    private readonly HashSet<int> _keysRecordedDown = new(); // pressed in another app, not released yet
+
+    // Keys physically held right now (recorded key-down, no key-up yet), with when they went down (Stopwatch). A second
+    // key-down for a held key is Windows' auto-repeat (~30 per second while held), not a new press: never recorded.
+    private readonly HashSet<int> _heldKeys = new();
+    private readonly Dictionary<int, long> _keyDownTimestamps = new();
     private readonly ClickSnapshotter _snapshots = new();
     private LowLevelInputHook? _hook;
-    private uint _startTick;
+    private RecordingClock? _clock;
+    private HighResolutionTimerScope? _timerResolution;
 
     /// <summary>Smart Click Snapshots: keep a small picture of what each click hit (Settings; on by default).</summary>
     public bool CaptureClickSnapshots
@@ -226,10 +247,15 @@ public sealed class WindowsInputRecorder : IInputRecorder, IDisposable
         if (IsRecording) throw new InvalidOperationException("Already recording.");
 
         _events.Clear();
-        _keysRecordedDown.Clear();
+        _heldKeys.Clear();
+        _keyDownTimestamps.Clear();
         _snapshots.Reset();
         LimitReached = false;
-        _startTick = unchecked((uint)Environment.TickCount);
+
+        // Sub-millisecond event times from one Stopwatch clock (see RecordingClock), and the 1 ms Windows timer while
+        // recording, so the UI thread that runs the hook wakes up on time.
+        _timerResolution = new HighResolutionTimerScope();
+        _clock = RecordingClock.StartNew();
         if (GetCursorPos(out var pt))
         {
             StartX = pt.X;
@@ -243,10 +269,25 @@ public sealed class WindowsInputRecorder : IInputRecorder, IDisposable
 
         var hook = new LowLevelInputHook(mouse: true, keyboard: true);
         hook.Received += OnReceived;
-        hook.Install(); // throws if Windows refuses the hook
+        try
+        {
+            hook.Install(); // throws if Windows refuses the hook
+        }
+        catch
+        {
+            _timerResolution?.Dispose();
+            _timerResolution = null;
+            throw;
+        }
+
         _hook = hook;
     }
 
+    /// <summary>
+    /// Stops recording. Anything still physically held down at this moment (a W held to the end, a button in the middle of a
+    /// drag) gets its release here, at the exact stop time, so the recording never leaves an unclosed key-down or
+    /// button-down and the hold keeps its real length. (SmartMacro's own Stop shortcut is removed by the converter.)
+    /// </summary>
     public IReadOnlyList<RawInputEvent> Stop()
     {
         if (_hook is not null)
@@ -254,8 +295,15 @@ public sealed class WindowsInputRecorder : IInputRecorder, IDisposable
             _hook.Received -= OnReceived;
             _hook.Dispose();
             _hook = null;
+
+            if (_clock is { } clock && _events.Count > 0)
+                _events.AddRange(RecordingCleanup.ReleasesAtStop(_events, clock.ToMilliseconds(Stopwatch.GetTimestamp())));
+            _heldKeys.Clear();
+            _keyDownTimestamps.Clear();
         }
 
+        _timerResolution?.Dispose();
+        _timerResolution = null;
         return _events.ToList();
     }
 
@@ -267,7 +315,7 @@ public sealed class WindowsInputRecorder : IInputRecorder, IDisposable
     /// WM_SYSKEYDOWN / WM_SYSKEYUP (sent while Alt is held) arrive here as KeyDown / KeyUp like the normal messages.
     /// </summary>
     private bool ContinuesRecordedCombo(HookEvent e) =>
-        e.Kind == RawInputKind.KeyUp ? _keysRecordedDown.Contains(e.VirtualKey) : _keysRecordedDown.Count > 0;
+        e.Kind == RawInputKind.KeyUp ? _heldKeys.Contains(e.VirtualKey) : _heldKeys.Count > 0;
 
     private void OnReceived(HookEvent e)
     {
@@ -277,8 +325,17 @@ public sealed class WindowsInputRecorder : IInputRecorder, IDisposable
         if (e.OverOwnWindow && !(isKey && ContinuesRecordedCombo(e))) return;
         if (isKey)
         {
-            if (e.Kind == RawInputKind.KeyDown) _keysRecordedDown.Add(e.VirtualKey);
-            else _keysRecordedDown.Remove(e.VirtualKey);
+            if (e.Kind == RawInputKind.KeyDown)
+            {
+                // OS auto-repeat (WM_KEYDOWN / WM_SYSKEYDOWN again while the key is held): not a new physical press.
+                if (!_heldKeys.Add(e.VirtualKey)) return;
+                _keyDownTimestamps[e.VirtualKey] = e.Timestamp;
+            }
+            else
+            {
+                _heldKeys.Remove(e.VirtualKey);
+                _keyDownTimestamps.Remove(e.VirtualKey);
+            }
         }
 
         if (_events.Count >= MaxEvents)
@@ -287,8 +344,9 @@ public sealed class WindowsInputRecorder : IInputRecorder, IDisposable
             return;
         }
 
-        // Hook times are milliseconds since boot (wrapping); make them relative to the start.
-        var time = Math.Max(0, unchecked((int)(e.Time - _startTick)));
+        // Sub-millisecond Stopwatch time since the start, rounded once per event from the exact value, so rounding never
+        // adds up over thousands of events (the hook's own e.Time only moves in ~15.6 ms steps).
+        var time = _clock?.ToMilliseconds(e.Timestamp) ?? 0;
 
         // Smart Click Snapshot: the hook runs before the clicked app sees the press, so this is the button as clicked.
         var target = e.Kind == RawInputKind.MouseDown ? _snapshots.TryCapture(e.X, e.Y) : null;

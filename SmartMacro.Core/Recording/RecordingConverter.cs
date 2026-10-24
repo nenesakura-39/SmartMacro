@@ -104,8 +104,31 @@ public sealed class RecordingOptions
     /// <summary>A cursor that stays still at least this long keeps that spot (it may have been hovering on purpose).</summary>
     public int RestMs { get; init; } = 120;
 
-    /// <summary>If the mouse moved more than this between down and up, it's a drag, not a click.</summary>
-    public int MaxClickDistance { get; init; } = 4;
+    /// <summary>
+    /// If the cursor got more than this far (pixels) from where the button went down at ANY moment before the release,
+    /// it's a drag (or a camera turn), not a click: Down, the path, and Up at the exact release spot and time. A path
+    /// that wanders off and comes back to the same spot is still a drag.
+    /// </summary>
+    public int MaxClickDistance { get; init; } = DefaultMaxClickDistance;
+
+    /// <summary>Default <see cref="MaxClickDistance"/>: 6 px of hand wobble still counts as a click.</summary>
+    public const int DefaultMaxClickDistance = 6;
+
+    /// <summary>
+    /// SmartMacro's own global shortcuts (Record, Play / Stop). Their chords are removed wherever they appear in the
+    /// recording (see <see cref="HotkeyChordFilter"/>), not only at the end. Empty = keep every key.
+    /// </summary>
+    public IReadOnlyCollection<HotkeyBinding> IgnoredHotkeys { get; init; } = Array.Empty<HotkeyBinding>();
+
+    /// <summary>
+    /// Recording fidelity preset (Exact 1:1 / Smart Optimized / Clicks &amp; Keys Only). When set, it decides the mouse
+    /// sampling, simplification, hold and delay options (see <see cref="RecordingFidelityPresets.Apply"/>); null = use the
+    /// individual options as they are.
+    /// </summary>
+    public RecordingFidelity? Fidelity { get; init; }
+
+    /// <summary>When cursor movement becomes relative mouse deltas (3D game camera). Off by default.</summary>
+    public RelativeMouseMode RelativeMouse { get; init; } = RelativeMouseMode.Off;
 
     /// <summary>Optional initial cursor coordinate at t = 0 so repeated runs reset to the starting point.</summary>
     public int? StartX { get; init; }
@@ -128,16 +151,25 @@ public sealed class RecordingOptions
 /// </summary>
 public static class RecordingConverter
 {
+    /// <summary>
+    /// A recorded click (button down + up at the same spot) keeps at least this hold (ms), so games that read input once
+    /// per frame always see it. Longer holds keep their exact recorded length (up to <see cref="MacroValidator.MaxHoldMs"/>).
+    /// </summary>
+    public const int MinRecordedClickHoldMs = 12;
+
     public static List<MacroStep> Convert(IReadOnlyList<RawInputEvent> rawEvents, RecordingOptions? options = null)
     {
         ArgumentNullException.ThrowIfNull(rawEvents);
-        options ??= new RecordingOptions();
+        options = RecordingFidelityPresets.Apply(options ?? new RecordingOptions(), options?.Fidelity);
+        var relativeAlways = options.RelativeMouse == RelativeMouseMode.Always;
 
-        var events = rawEvents.ToList();
+        // SmartMacro's own Record / Play shortcuts (and the modifiers of their chords) never go into the macro.
+        var events = options.IgnoredHotkeys.Count > 0 ? HotkeyChordFilter.Remove(rawEvents, options.IgnoredHotkeys) : rawEvents.ToList();
         TrimTrailing(events, options.TrimTrailingKeys);
         if (events.Count > 0
             && options.RecordMouseMoves
             && !options.CollapseMousePaths
+            && !relativeAlways // relative moves start from wherever the cursor is
             && options.StartX is int sx
             && options.StartY is int sy
             && events.Any(e => e.Kind == RawInputKind.MouseMove)
@@ -152,6 +184,7 @@ public static class RecordingConverter
 
         var steps = new List<MacroStep>();
         var consumed = new bool[events.Count];
+        var isRepeat = MarkAutoRepeats(events);
         var keysDown = new List<int>();
         var buttonsDown = new List<MacroMouseButton>();
 
@@ -186,11 +219,46 @@ public static class RecordingConverter
             if (endTime > time) accounted += endTime - time;
         }
 
+        // 3D camera: relative deltas always, or while the right / middle button turns the camera.
+        bool RelativeNow() =>
+            relativeAlways
+            || (options.RelativeMouse == RelativeMouseMode.CameraDrags
+                && (buttonsDown.Contains(MacroMouseButton.Right) || buttonsDown.Contains(MacroMouseButton.Middle)));
+
         void EmitMove(RawInputEvent move)
         {
-            Emit(new MouseMoveStep { X = move.X, Y = move.Y }, move.TimeMs, move.TimeMs);
+            if (RelativeNow())
+            {
+                // dx = pt.X − lastPt.X, dy = pt.Y − lastPt.Y, measured from the last spot a step was made for, so
+                // thinned-out samples are never lost: the deltas always add up to the whole movement.
+                if (lastMovePosition is { } from)
+                {
+                    Emit(new MouseMoveStep
+                    {
+                        UseRelativeDelta = true,
+                        DeltaX = move.X - from.X,
+                        DeltaY = move.Y - from.Y,
+                        X = move.X,
+                        Y = move.Y,
+                    }, move.TimeMs, move.TimeMs);
+                }
+
+                // (The very first known spot only becomes the origin for the next delta.)
+            }
+            else
+            {
+                Emit(new MouseMoveStep { X = move.X, Y = move.Y }, move.TimeMs, move.TimeMs);
+            }
+
             lastMoveTime = move.TimeMs;
             lastMovePosition = (move.X, move.Y);
+        }
+
+        // Always-relative recordings: clicks / presses / releases / wheel happen where the cursor is, and their recorded
+        // spots don't move the delta origin (the cursor only moves by the deltas in between).
+        void NoteButtonPosition(int x, int y)
+        {
+            if (!relativeAlways) lastMovePosition = (x, y);
         }
 
         void FlushPendingMove()
@@ -201,6 +269,10 @@ public static class RecordingConverter
 
         int HoldFor(long downTime, long upTime) =>
             options.KeepHoldTime ? (int)Math.Clamp(upTime - downTime, 0, MacroValidator.MaxHoldMs) : 0;
+
+        // A mouse click keeps its exact hold, but never less than MinRecordedClickHoldMs.
+        int ClickHoldFor(long downTime, long upTime) =>
+            options.KeepHoldTime ? (int)Math.Clamp(upTime - downTime, MinRecordedClickHoldMs, MacroValidator.MaxHoldMs) : 0;
 
         for (var i = 0; i < events.Count; i++)
         {
@@ -232,28 +304,35 @@ public static class RecordingConverter
 
                 case RawInputKind.MouseDown:
                 {
-                    var up = FindPartner(events, i, RawInputKind.MouseUp, e.Button, 0, skipMoves: true, out _);
+                    var up = FindPartner(events, i, RawInputKind.MouseUp, e.Button, 0, skipMoves: true, isRepeat, out _);
                     if (up >= 0
                         && events[up].TimeMs - e.TimeMs <= options.MaxTapDurationMs
-                        && Distance(e, events[up]) <= options.MaxClickDistance)
+                        && FarthestFromStart(events, i, up) <= options.MaxClickDistance)
                     {
+                        var hold = ClickHoldFor(e.TimeMs, events[up].TimeMs);
                         var click = new MouseClickStep
                         {
                             Button = e.Button, Action = MouseClickAction.Click, X = e.X, Y = e.Y,
-                            HoldMs = HoldFor(e.TimeMs, events[up].TimeMs),
+                            HoldMs = hold, UseCurrentPosition = relativeAlways,
                         };
                         // Smart Click Snapshot: remember what was clicked (shown in the editor, used by Smart-Aim).
                         ClickSnapshots.Attach(click, e.ClickedTarget);
-                        Emit(click, e.TimeMs, events[up].TimeMs);
+                        // The click covers the time until its release, or its (minimum) hold if that's longer, so the
+                        // next Delay starts where playback really is and the total time stays exact.
+                        Emit(click, e.TimeMs, Math.Max(events[up].TimeMs, e.TimeMs + hold));
                         for (var k = i; k <= up; k++) consumed[k] = true;
-                        lastMovePosition = (events[up].X, events[up].Y);
+                        NoteButtonPosition(events[up].X, events[up].Y);
                     }
                     else
                     {
-                        Emit(new MouseClickStep { Button = e.Button, Action = MouseClickAction.Down, X = e.X, Y = e.Y },
+                        // Pre-click anchor: the press always happens at the exact spot where the button went down.
+                        Emit(new MouseClickStep
+                            {
+                                Button = e.Button, Action = MouseClickAction.Down, X = e.X, Y = e.Y, UseCurrentPosition = relativeAlways,
+                            },
                             e.TimeMs, e.TimeMs);
                         if (!buttonsDown.Contains(e.Button)) buttonsDown.Add(e.Button);
-                        lastMovePosition = (e.X, e.Y);
+                        NoteButtonPosition(e.X, e.Y);
                     }
 
                     break;
@@ -262,9 +341,13 @@ public static class RecordingConverter
                 case RawInputKind.MouseUp:
                 {
                     // Ignore releases of buttons that were pressed before recording started.
+                    var turnedCamera = RelativeNow(); // (checked while the button still counts as held)
                     if (!buttonsDown.Remove(e.Button)) break;
-                    Emit(new MouseClickStep { Button = e.Button, Action = MouseClickAction.Up, X = e.X, Y = e.Y }, e.TimeMs, e.TimeMs);
-                    lastMovePosition = (e.X, e.Y);
+                    // After a relative camera turn the cursor is wherever the deltas put it (or locked by the game): release
+                    // it there instead of jumping to an absolute spot, which would jerk the camera.
+                    Emit(new MouseClickStep { Button = e.Button, Action = MouseClickAction.Up, X = e.X, Y = e.Y, UseCurrentPosition = turnedCamera },
+                        e.TimeMs, e.TimeMs);
+                    NoteButtonPosition(e.X, e.Y);
                     break;
                 }
 
@@ -277,7 +360,7 @@ public static class RecordingConverter
                     {
                         Delta = delta,
                         Horizontal = e.Kind == RawInputKind.HorizontalWheel,
-                        UseCurrentPosition = false,
+                        UseCurrentPosition = relativeAlways,
                         X = e.X,
                         Y = e.Y,
                     }, e.TimeMs, e.TimeMs);
@@ -288,11 +371,14 @@ public static class RecordingConverter
                 {
                     if (!VirtualKeys.IsValid(e.VirtualKey)) break;
 
-                    // Auto-repeat (key already down) is kept as extra "Hold down" steps unless collapsed into a single Press step.
-                    if (!keysDown.Contains(e.VirtualKey))
+                    // Windows auto-repeat: a held key keeps sending key-downs (~30 per second) without a release. The key is
+                    // already down, so these are not new presses and never become extra "Hold down" steps.
+                    if (isRepeat[i] || keysDown.Contains(e.VirtualKey)) break;
+
                     {
-                        // Only a tap/hold if nothing else that gets recorded happens in between.
-                        var up = FindPartner(events, i, RawInputKind.KeyUp, default, e.VirtualKey, skipMoves: !options.RecordMouseMoves, out var hadAutoRepeat);
+                        // A tap (one Press step with its exact hold) only if no other key, click or wheel happens in
+                        // between; otherwise (e.g. W held while Space is pressed) Down here and Up at the exact release.
+                        var up = FindPartner(events, i, RawInputKind.KeyUp, default, e.VirtualKey, skipMoves: !options.RecordMouseMoves, isRepeat, out var hadAutoRepeat);
                         var maxHold = hadAutoRepeat && options.KeepHoldTime ? MacroValidator.MaxHoldMs : options.MaxTapDurationMs;
                         if (up >= 0 && events[up].TimeMs - e.TimeMs <= maxHold)
                         {
@@ -380,7 +466,8 @@ public static class RecordingConverter
     /// Finds the matching release for a press when nothing else happens in between (mouse movement is
     /// allowed only when <paramref name="skipMoves"/> is true). Anything else in between means it isn't a simple tap.
     /// </summary>
-    private static int FindPartner(List<RawInputEvent> events, int start, RawInputKind partnerKind, MacroMouseButton button, int virtualKey, bool skipMoves, out bool hadAutoRepeat)
+    private static int FindPartner(List<RawInputEvent> events, int start, RawInputKind partnerKind, MacroMouseButton button, int virtualKey, bool skipMoves,
+        bool[] isRepeat, out bool hadAutoRepeat)
     {
         hadAutoRepeat = false;
         for (var j = start + 1; j < events.Count; j++)
@@ -392,9 +479,10 @@ public static class RecordingConverter
                 return -1;
             }
 
-            if (partnerKind == RawInputKind.KeyUp && e.Kind == RawInputKind.KeyDown && e.VirtualKey == virtualKey)
+            // OS auto-repeat of a key that's already held (this one, or W held while clicking) isn't "something else".
+            if (isRepeat[j] || (partnerKind == RawInputKind.KeyUp && e.Kind == RawInputKind.KeyDown && e.VirtualKey == virtualKey))
             {
-                hadAutoRepeat = true;
+                if (e.Kind == RawInputKind.KeyDown && e.VirtualKey == virtualKey) hadAutoRepeat = true;
                 continue;
             }
 
@@ -405,6 +493,24 @@ public static class RecordingConverter
         }
 
         return -1;
+    }
+
+    /// <summary>
+    /// Marks every key-down of a key that is already down (no key-up since its press): Windows' auto-repeat while a key
+    /// is held, not a new physical press.
+    /// </summary>
+    internal static bool[] MarkAutoRepeats(IReadOnlyList<RawInputEvent> events)
+    {
+        var repeat = new bool[events.Count];
+        var held = new HashSet<int>();
+        for (var i = 0; i < events.Count; i++)
+        {
+            var e = events[i];
+            if (e.Kind == RawInputKind.KeyDown) repeat[i] = !held.Add(e.VirtualKey);
+            else if (e.Kind == RawInputKind.KeyUp) held.Remove(e.VirtualKey);
+        }
+
+        return repeat;
     }
 
     private static void TrimTrailing(List<RawInputEvent> events, IReadOnlyCollection<int> trimKeys)
@@ -427,6 +533,23 @@ public static class RecordingConverter
 
         if (cut < events.Count)
             events.RemoveRange(cut, events.Count - cut);
+    }
+
+    /// <summary>
+    /// How far (pixels) the cursor got from where the button went down (event <paramref name="down"/>), at any moment up
+    /// to and including the release (event <paramref name="up"/>).
+    /// </summary>
+    private static double FarthestFromStart(List<RawInputEvent> events, int down, int up)
+    {
+        var start = events[down];
+        var farthest = 0.0;
+        for (var j = down + 1; j <= up; j++)
+        {
+            if (events[j].Kind is not (RawInputKind.MouseMove or RawInputKind.MouseUp)) continue;
+            farthest = Math.Max(farthest, Distance(start, events[j]));
+        }
+
+        return farthest;
     }
 
     private static double Distance(RawInputEvent a, RawInputEvent b)

@@ -368,6 +368,13 @@
                                       ToolTip="Quick Recording Mode selector: switch between Smart, Desktop &amp; UI, 3D Game / FPS, and Exact 1:1 / Rhythm without leaving the editor."
                                       AutomationProperties.Name="Recording mode"
                                       Visibility="{Binding IsRecording, Converter={StaticResource BoolToVisibility}, ConverterParameter=Invert}" />
+                            <!-- Recording fidelity: how much of the input becomes steps (🎯 Exact 1:1 / ✨ Smart Optimized / 🖱️ Clicks & Keys Only). -->
+                            <ComboBox ItemsSource="{Binding RecordingFidelities}" DisplayMemberPath="Label" SelectedValuePath="Value"
+                                      SelectedValue="{Binding RecordingFidelity, Mode=TwoWay}"
+                                      MinWidth="170" MaxWidth="220" Padding="8,5" FontSize="11.5" Margin="0,0,6,0" VerticalAlignment="Center"
+                                      ToolTip="{Binding RecordingFidelityTooltip}"
+                                      AutomationProperties.Name="Recording fidelity"
+                                      Visibility="{Binding IsRecording, Converter={StaticResource BoolToVisibility}, ConverterParameter=Invert}" />
                             <Button Style="{StaticResource DangerButton}" Command="{Binding StopRecordingCommand}" Margin="0,0,6,0"
                                     ToolTip="{Binding StopRecordingTooltip}" AutomationProperties.Name="Stop recording"
                                     Visibility="{Binding IsRecording, Converter={StaticResource BoolToVisibility}}">

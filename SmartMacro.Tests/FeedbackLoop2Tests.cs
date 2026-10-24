@@ -282,7 +282,7 @@ public class FeedbackLoop2Tests
 
         var json = MacroFileFormat.Serialize(Flow.Macro(step));
         Assert.Contains("\"controlMode\"", json);
-        Assert.Contains($"\"schemaVersion\": {MacroDocument.CurrentSchemaVersion}", json);
+        Assert.Contains("\"schemaVersion\": 13", json); // Smart loops need format 13 (14 only adds relative mouse moves)
         Assert.True(MacroFileFormat.TryParse(json, out var loaded, out var error), error);
 
         var loop = Assert.IsType<FeedbackLoopStep>(Assert.Single(loaded!.Steps));
