@@ -143,7 +143,7 @@ public class FindTextPlaybackTests
         Assert.Equal(PlaybackOutcome.Completed, result.Outcome);
         Assert.Equal(3, ocr.Reads);
         Assert.Equal(new[] { "move 135,210", "mouse Left down", "mouse Left up" }, input.Calls); // center (130,210) + offset 5
-        // 2 waits of 500 ms + the 15 ms rest on the target before the press (reliable game click) + the found click's hold
+        // 2 waits of 500 ms + the TargetHoverMs rest on the target before the press (reliable game click) + the found click's hold
         // (35 ms, live-test fix) + the settle after the click.
         Assert.Equal(1000 + PlaybackEngine.TargetHoverMs + PlaybackEngine.FoundClickHoldMs + PlaybackEngine.ClickSettleMs,
             clock.TotalDelayed.TotalMilliseconds, precision: 3);

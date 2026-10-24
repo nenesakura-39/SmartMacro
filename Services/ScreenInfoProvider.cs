@@ -102,7 +102,45 @@ public sealed class ScreenInfoProvider : IScreenInfoProvider, IScreenLayout, IWi
 
         var minimized = WindowApi.IsIconic(hwnd);
         var bounds = minimized ? default : GetBounds(hwnd);
-        return new WindowInfo(hwnd.ToInt64(), title, bounds, IsMinimized: minimized);
+        return new WindowInfo(hwnd.ToInt64(), title, bounds, ProcessNameOf(processId), IsMinimized: minimized);
+    }
+
+    // Process id → app name ("RobloxPlayerBeta"), for "Focus window" by app name. Cached: windows are listed often.
+    private readonly Dictionary<uint, string> _processNames = new();
+    private readonly object _processNamesGate = new();
+
+    /// <summary>The app's file name without ".exe" (empty when Windows doesn't tell, e.g. for an elevated app's details).</summary>
+    private string ProcessNameOf(uint processId)
+    {
+        lock (_processNamesGate)
+        {
+            if (_processNames.TryGetValue(processId, out var cached)) return cached;
+        }
+
+        var name = string.Empty;
+        var handle = WindowApi.OpenProcess(WindowApi.PROCESS_QUERY_LIMITED_INFORMATION, false, processId);
+        if (handle != IntPtr.Zero)
+        {
+            try
+            {
+                var buffer = new StringBuilder(1024);
+                var size = buffer.Capacity;
+                if (WindowApi.QueryFullProcessImageName(handle, 0, buffer, ref size))
+                    name = Path.GetFileNameWithoutExtension(buffer.ToString(0, size));
+            }
+            finally
+            {
+                WindowApi.CloseHandle(handle);
+            }
+        }
+
+        lock (_processNamesGate)
+        {
+            if (_processNames.Count > 1024) _processNames.Clear(); // process ids get reused: never let the cache grow stale
+            _processNames[processId] = name;
+        }
+
+        return name;
     }
 
     /// <summary>
@@ -113,6 +151,27 @@ public sealed class ScreenInfoProvider : IScreenInfoProvider, IScreenLayout, IWi
     public bool TryFocus(WindowInfo window, bool restoreIfMinimized)
     {
         ArgumentNullException.ThrowIfNull(window);
+        // Playback runs on a background thread without a message queue, and AttachThreadInput needs one: do it on the UI
+        // thread (it has a queue, and it is the thread Windows associates with SmartMacro's own windows).
+        var dispatcher = System.Windows.Application.Current?.Dispatcher;
+        if (dispatcher is not null && !dispatcher.CheckAccess() && !dispatcher.HasShutdownStarted)
+        {
+            try
+            {
+                return dispatcher.Invoke(() => FocusNow(window, restoreIfMinimized), System.Windows.Threading.DispatcherPriority.Send,
+                    CancellationToken.None, TimeSpan.FromSeconds(1));
+            }
+            catch (Exception ex) when (ex is TaskCanceledException or InvalidOperationException)
+            {
+                return false;
+            }
+        }
+
+        return FocusNow(window, restoreIfMinimized);
+    }
+
+    private static bool FocusNow(WindowInfo window, bool restoreIfMinimized)
+    {
         var hwnd = new IntPtr(window.Handle);
         if (!WindowApi.IsWindow(hwnd)) return false;
 
@@ -239,4 +298,18 @@ internal static class WindowApi
 
     [DllImport("kernel32.dll")]
     public static extern uint GetCurrentThreadId();
+
+    // App name of a window's process ("Focus window" by app name).
+    public const uint PROCESS_QUERY_LIMITED_INFORMATION = 0x1000;
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    public static extern IntPtr OpenProcess(uint dwDesiredAccess, [MarshalAs(UnmanagedType.Bool)] bool bInheritHandle, uint dwProcessId);
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool QueryFullProcessImageName(IntPtr hProcess, uint dwFlags, StringBuilder lpExeName, ref int lpdwSize);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool CloseHandle(IntPtr hObject);
 }

@@ -37,6 +37,8 @@ public sealed class FeedbackSensor
     private readonly MarkerTracker _tracker;
     private readonly RgbColor _zoneColor;
     private readonly RgbColor? _secondaryZoneColor;
+    private readonly int _markerMinPixels;
+    private readonly int _zoneMinPixels;
 
     /// <summary>Throws <see cref="InvalidOperationException"/> when a colour can't be read (the validator reports it first).</summary>
     public FeedbackSensor(FeedbackLoopStep step, IScreenCapture capture, IPlaybackClock? clock = null)
@@ -56,7 +58,12 @@ public sealed class FeedbackSensor
             secondaryMarkerColor = parsedSecMarker;
         }
 
-        _tracker = new MarkerTracker(markerColor, step.MarkerTolerance, step.Orientation, step.MarkerMinPixels, step.MaxJumpPercent, secondaryMarkerColor);
+        // Smart Predictive measures speeds from the centroids, so a 1–2 px stray match must never count as the target
+        // or your bar (it would make the speed spike): at least MinCentroidPixels matching pixels each.
+        var smart = step.ControlMode == FeedbackControlMode.SmartPredictive;
+        _markerMinPixels = smart ? Math.Max(PredictiveFeedbackSettings.MinCentroidPixels, step.MarkerMinPixels) : step.MarkerMinPixels;
+        _zoneMinPixels = smart ? Math.Max(PredictiveFeedbackSettings.MinCentroidPixels, step.ZoneMinPixels) : step.ZoneMinPixels;
+        _tracker = new MarkerTracker(markerColor, step.MarkerTolerance, step.Orientation, _markerMinPixels, step.MaxJumpPercent, secondaryMarkerColor);
 
         if (step.ZoneMode == FeedbackZoneMode.DetectedByColor)
         {
@@ -85,6 +92,7 @@ public sealed class FeedbackSensor
             throw new InvalidOperationException($"The bar area {region} is partly outside the screen (only {frame.Bounds} is visible). Pick the area again.");
 
         var marker = _tracker.Update(frame.Image, cancellationToken);
+        var occluded = false;
         ZoneReading zone;
         if (_step.ZoneMode == FeedbackZoneMode.Fixed)
         {
@@ -94,16 +102,18 @@ public sealed class FeedbackSensor
         {
             // The marker can sit on top of the zone and cut it in two: bridge gaps up to the marker's size.
             var markerSize = marker.Bounds is { } b ? (_step.Orientation == BarOrientation.Horizontal ? b.Width : b.Height) : 0;
-            zone = ZoneFinder.Find(frame.Image, _zoneColor, _secondaryZoneColor, _step.ZoneTolerance, _step.ZoneMinPixels, _step.Orientation,
+            zone = ZoneFinder.Find(frame.Image, _zoneColor, _secondaryZoneColor, _step.ZoneTolerance, _zoneMinPixels, _step.Orientation,
                 markerSize + 2, cancellationToken);
             if (_secondaryZoneColor is { } secZone)
             {
-                marker = ApplySmartOverlap(frame.Image, _step.Orientation, marker, zone, secZone, _step.ZoneTolerance, _step.ZoneMinPixels, cancellationToken);
+                var seen = marker;
+                marker = ApplySmartOverlap(frame.Image, _step.Orientation, marker, zone, secZone, _step.ZoneTolerance, _zoneMinPixels, cancellationToken);
+                occluded = !ReferenceEquals(seen, marker);
             }
         }
 
         var t2 = _clock.Elapsed;
-        var observation = new FeedbackObservation(marker.Status, marker.PositionPercent, zone.Found, zone.StartPercent, zone.EndPercent);
+        var observation = new FeedbackObservation(marker.Status, marker.PositionPercent, zone.Found, zone.StartPercent, zone.EndPercent, occluded);
         return new FeedbackFrame(frame, marker, zone, observation, t1 - t0, t2 - t1);
     }
 

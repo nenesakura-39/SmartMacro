@@ -7,13 +7,16 @@ namespace SmartMacro.Core.Playback;
 /// What the screen showed in one frame, ready for the controller: the marker's status and position along the bar
 /// (0-100 %) and the zone (fixed, or detected this frame). Only a frame with a clearly found marker AND a zone is
 /// trusted; anything else (lost, two similar patches, an ignored jump, no zone) means "don't act on this frame".
+/// MarkerOccluded: the marker was hidden behind your bar and the sensor used the bar's centre instead (Smart overlap
+/// handling); Smart Predictive coasts through such frames for a moment instead of treating that as a jump.
 /// </summary>
 public readonly record struct FeedbackObservation(
     MarkerStatus Marker,
     double? MarkerPercent,
     bool ZoneFound,
     double ZoneStartPercent,
-    double ZoneEndPercent)
+    double ZoneEndPercent,
+    bool MarkerOccluded = false)
 {
     public bool IsTrusted => Marker == MarkerStatus.Found && MarkerPercent is not null && ZoneFound;
 }

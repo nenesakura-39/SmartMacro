@@ -6,7 +6,7 @@ namespace SmartMacro.Core.Vision;
 
 /// <summary>
 /// Where a Screenshot step's picture comes from and where it is saved: the capture rectangle, the default folder
-/// (Pictures\SmartMacro Screenshots) and a safe, unique, sortable file name ("Prefix_2026-10-24_18-05-11-042.png").
+/// (Pictures\SmartMacro Screenshots) and a safe, unique, sortable file name ("SmartMacro_20261024_180511_042.png").
 /// </summary>
 public static class ScreenshotFiles
 {
@@ -49,9 +49,9 @@ public static class ScreenshotFiles
         return clean.Length == 0 ? DefaultPrefix : clean;
     }
 
-    /// <summary>"Prefix_2026-10-24_18-05-11-042.png" (sorts by time in Explorer).</summary>
+    /// <summary>"SmartMacro_20261024_180511_042.png" (sorts by time in Explorer).</summary>
     public static string FileName(string? prefix, DateTime time) =>
-        $"{CleanPrefix(prefix)}_{time.ToString("yyyy-MM-dd_HH-mm-ss-fff", CultureInfo.InvariantCulture)}.png";
+        $"{CleanPrefix(prefix)}_{time.ToString("yyyyMMdd_HHmmss_fff", CultureInfo.InvariantCulture)}.png";
 
     /// <summary>
     /// Saves the picture as a PNG in the folder (created when missing) and returns the full path. Never overwrites a

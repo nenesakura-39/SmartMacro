@@ -54,6 +54,11 @@ public interface IRunModeHost
     {
     }
 
+    /// <summary>
+    /// Hides the target-lock reticle right now (UI thread). Returns true when one was on screen. The default does nothing.
+    /// </summary>
+    bool HideTargetLock() => false;
+
     /// <summary>The user clicked "⏸ F8" on the mini-HUD.</summary>
     event EventHandler? PauseRequested;
 
@@ -132,6 +137,13 @@ public sealed class RunModeHost : IRunModeHost, IDisposable
         {
             // Purely visual: a reticle that can't be drawn must never disturb playback.
         }
+    }
+
+    public bool HideTargetLock()
+    {
+        if (_targetLock is not { IsShowing: true } reticle) return false;
+        reticle.HideNow();
+        return true;
     }
 
     public void Exit()

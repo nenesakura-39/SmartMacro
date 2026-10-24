@@ -1047,7 +1047,7 @@ public class MouseMotionTests
         var down = input.Calls.IndexOf("mouse Left down");
         Assert.True(down > 3, string.Join(" | ", input.Calls)); // several glide moves first
         Assert.Equal("move 205,105", input.Calls[down - 1]);
-        // Updated on purpose (reliable game click): the cursor rests on the target 15 ms before the press.
+        // Updated on purpose (reliable game click): the cursor rests on the target TargetHoverMs before the press.
         Assert.Equal(120 + PlaybackEngine.TargetHoverMs, input.Times[down].TotalMilliseconds, precision: 3);
         Assert.Equal(50, (input.Times[down + 1] - input.Times[down]).TotalMilliseconds, precision: 3);
         Assert.Equal(120 + PlaybackEngine.TargetHoverMs + 50 + 200, clock.Elapsed.TotalMilliseconds, precision: 3); // the wait after the click
@@ -1126,10 +1126,13 @@ public class ClickTimingTests
         await new PlaybackEngine(input, clock, capture: new FakeCapture(Flow.Screen(green: true))).RunAsync(Flow.Macro(find));
 
         Assert.Equal(new[] { "move 205,105", "mouse Left down", "mouse Left up", "mouse Left down", "mouse Left up" }, input.Calls);
-        // Updated on purpose (reliable game click): 15 ms rest on the target before the first press, and every press is held
-        // at least 25 ms (the step asks for 20).
-        Assert.Equal(new[] { 0.0, 15, 40, 140, 165 }, input.Times.Select(t => Math.Round(t.TotalMilliseconds, 3)));
-        Assert.Equal(165, clock.Elapsed.TotalMilliseconds, precision: 3); // no wait after the click
+        // Reliable game click: TargetHoverMs (6 ms) rest on the target before the first press; every press is held for the
+        // step's own 20 ms (above the 12 ms floor), with its own 100 ms gap.
+        var rest = PlaybackEngine.TargetHoverMs;
+        var hold = Math.Max(PlaybackEngine.MinTargetClickHoldMs, 20);
+        Assert.Equal(new[] { 0.0, rest, rest + hold, rest + hold + 100, rest + 2 * hold + 100 },
+            input.Times.Select(t => Math.Round(t.TotalMilliseconds, 3)));
+        Assert.Equal(rest + 2 * hold + 100, clock.Elapsed.TotalMilliseconds, precision: 3); // no wait after the click
     }
 
     [Fact]

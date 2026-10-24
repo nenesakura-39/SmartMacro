@@ -1459,9 +1459,9 @@
                     </StackPanel>
                 </Button>
             </Grid>
-            <TextBlock Text="Window title contains" Style="{StaticResource FieldLabel}"
-                       ToolTip="Part of the window's title, for example Roblox. Case doesn't matter. An exact match wins over a partial one." />
-            <TextBox Text="{Binding WindowTitle, UpdateSourceTrigger=PropertyChanged}" Tag="e.g. Roblox" MaxLength="260" AutomationProperties.Name="Window title contains" />
+            <TextBlock Text="Window title or app name contains" Style="{StaticResource FieldLabel}"
+                       ToolTip="Part of the window's title (e.g. Roblox) or of the app's name (e.g. RobloxPlayerBeta). Case doesn't matter. A title match wins over an app-name match." />
+            <TextBox Text="{Binding WindowTitle, UpdateSourceTrigger=PropertyChanged}" Tag="e.g. Roblox" MaxLength="260" AutomationProperties.Name="Window title or app name contains" />
 
             <CheckBox Content="Restore it if it's minimized" IsChecked="{Binding RestoreIfMinimized}" Margin="0,12,0,0"
                       AutomationProperties.Name="Restore it if it's minimized" />

@@ -53,6 +53,24 @@ public static class OverlayCapturePolicy
         new(target.X - StreamReticleClearancePx, target.Y - StreamReticleClearancePx,
             target.Width + 2 * StreamReticleClearancePx, target.Height + 2 * StreamReticleClearancePx);
 
+    /// <summary>
+    /// In streamer mode the reticle leaves at least this big a square (px) completely unpainted around the click point,
+    /// even for a tiny target, so the target's core pixels are never tinted or covered.
+    /// </summary>
+    public const int StreamHollowCorePx = 24;
+
+    /// <summary>
+    /// The hollow (unpainted) area of the streamer-mode reticle: the target rectangle, grown where needed to contain a
+    /// <see cref="StreamHollowCorePx"/>-px square centred on the click point (<paramref name="centerX"/>, <paramref name="centerY"/>).
+    /// The reticle is drawn only outside <see cref="KeepClearArea"/> of this rectangle.
+    /// </summary>
+    public static ScreenRect HollowArea(ScreenRect target, int centerX, int centerY)
+    {
+        var half = StreamHollowCorePx / 2;
+        var core = new ScreenRect(centerX - half, centerY - half, StreamHollowCorePx, StreamHollowCorePx);
+        return target.IsEmpty ? core : target.Union(core);
+    }
+
     /// <summary>True when <paramref name="drawn"/> doesn't touch the keep-clear area around <paramref name="target"/>.</summary>
     public static bool IsClearOf(ScreenRect drawn, ScreenRect target) => drawn.IsEmpty || drawn.Intersect(KeepClearArea(target)).IsEmpty;
 }

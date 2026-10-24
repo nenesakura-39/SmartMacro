@@ -119,7 +119,8 @@ public sealed class TargetLockOverlay : Window
             ? h
             : OverlayCapturePolicy.ReticleHold(HoldTime, OverlayCaptureService.AllowObsCapture);
 
-        var box = target.Bounds;
+        // Streamer mode: everything is drawn around the hollow core (the target + a 24×24 px square on the click point).
+        var box = _streamSafe ? OverlayCapturePolicy.HollowArea(target.Bounds, target.X, target.Y) : target.Bounds;
         var bounds = new ScreenRect(box.X - Pad, box.Y - Pad - BadgeRoom, box.Width + 2 * Pad, box.Height + 2 * Pad + BadgeRoom)
             .Intersect(VirtualScreen());
         if (bounds.IsEmpty) return;
@@ -136,6 +137,9 @@ public sealed class TargetLockOverlay : Window
         _holdTimer.Stop();
         _holdTimer.Start();
     }
+
+    /// <summary>True while the reticle is on screen (including its fade).</summary>
+    public bool IsShowing => IsVisible;
 
     /// <summary>Hides the reticle now (playback ended, or a capture is about to happen).</summary>
     public void HideNow()
@@ -187,7 +191,8 @@ public sealed class TargetLockOverlay : Window
         _canvas.Width = _bounds.Width;
         _canvas.Height = _bounds.Height;
 
-        var r = target.Bounds;
+        // Streamer mode: the box and brackets go around the hollow core, never over the target or its click point.
+        var r = _streamSafe ? OverlayCapturePolicy.HollowArea(target.Bounds, target.X, target.Y) : target.Bounds;
         double x = r.X - _bounds.X, y = r.Y - _bounds.Y, w = Math.Max(2, r.Width), h = Math.Max(2, r.Height);
         var glow = new DropShadowEffect { Color = Neon, BlurRadius = 14, ShadowDepth = 0, Opacity = 1 };
 
@@ -252,6 +257,8 @@ public sealed class TargetLockOverlay : Window
         badge.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
         var bx = Math.Clamp(left, 0, Math.Max(0, _bounds.Width - badge.DesiredSize.Width));
         var above = top - badge.DesiredSize.Height - 4;
+        // Streamer mode: no room above → no badge (below, the window is too short and it would be pushed onto the target).
+        if (_streamSafe && above < 0) return;
         var by = above >= 0 ? above : Math.Min(bottom + 4, Math.Max(0, _bounds.Height - badge.DesiredSize.Height));
         Canvas.SetLeft(badge, bx);
         Canvas.SetTop(badge, by);

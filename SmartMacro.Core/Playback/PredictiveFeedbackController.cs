@@ -32,6 +32,21 @@ public sealed record PredictiveFeedbackSettings(
     /// <summary>A direction change of the target only counts as a "reversal" (instant brake) above this speed.</summary>
     public const double ReversalMinSpeedPxPerSecond = 40;
 
+    /// <summary>Measured speeds are clamped to ± this (px/s), so a spawn or a jump can't produce a huge derivative.</summary>
+    public const double MaxSpeedPxPerSecond = 1500;
+
+    /// <summary>Smart Predictive needs at least this many matching pixels for the target and for your bar each frame.</summary>
+    public const int MinCentroidPixels = 3;
+
+    /// <summary>A side that disappears for up to this many frames in a row coasts on its last speed instead of resetting.</summary>
+    public const int MaxCoastFrames = 5;
+
+    /// <summary>…and for at most this long since the last frame where both were seen.</summary>
+    public static readonly TimeSpan MaxCoastTime = TimeSpan.FromMilliseconds(100);
+
+    /// <summary>While coasting, the missing side's speed is multiplied by this every frame.</summary>
+    public const double CoastVelocityFactor = 0.75;
+
     /// <summary>
     /// The hold direction from the step's rules: in follow mode the target is "ahead" of the bar when the marker is AFTER
     /// the zone; with a fixed zone the target (zone) is ahead of the marker when the marker is BEFORE the zone. Holding
@@ -73,9 +88,12 @@ public sealed record PredictiveFeedbackSettings(
 /// button is held and falls back when it's released) and targets that dart around. A plain "hold while the target is
 /// ahead" controller reacts too late: it holds until AFTER the bar crossed the target, overshoots and oscillates.
 ///
-/// Every trusted frame (same input as the classic controller; positions converted to pixels):
-/// 1. Target and bar positions (centroids from the sensor). Which one is which: <see cref="PredictiveFeedbackSettings.FollowMode"/>.
-/// 2. Speeds (px/s) from the change since the last frame ÷ dt, smoothed with an exponential moving average.
+/// Every frame where both the target and your bar are seen (positions converted to pixels):
+/// 1. Target and bar positions (centroids from the sensor, at least <see cref="PredictiveFeedbackSettings.MinCentroidPixels"/>
+///    matching pixels each). Which one is which: <see cref="PredictiveFeedbackSettings.FollowMode"/>.
+/// 2. Speeds (px/s) from the change since the last frame ÷ dt, clamped to ±<see cref="PredictiveFeedbackSettings.MaxSpeedPxPerSecond"/>
+///    and smoothed with an exponential moving average. The first frame a side is seen its speed is 0 (never measured
+///    from "nothing" to the first position).
 /// 3. PD lead prediction: predictedError = (target + vTarget × lead) − (bar + vBar × lead). A bar racing toward the target
 ///    already "arrives" in the prediction, so the input is released (braking) BEFORE it crosses – and pressed again early
 ///    when the target runs away.
@@ -83,9 +101,14 @@ public sealed record PredictiveFeedbackSettings(
 ///    Inside it: PWM micro-pulsing – held for a share of every pulse period (duty = hover duty + proportional part), so
 ///    the bar hovers against gravity. The hover duty adapts slowly: a bar sinking while hovering gets a bit more.
 ///    Without PWM the current state is kept inside the dead zone.
-/// 5. Direction-reversal brake: when the target's speed changes sign above 40 px/s, the input flips at once toward the
-///    target's new direction, even inside the minimum time between changes.
-/// 6. Everything else respects the minimum time between input changes. Lost-target handling is the same as the classic
+/// 5. Direction-reversal brake: when the measured target speed changes sign above 40 px/s, the input flips at once toward
+///    the target's new direction, even inside the minimum time between changes.
+/// 6. Short dropouts (the fish passes over your bar, a splash covers it): for up to
+///    <see cref="PredictiveFeedbackSettings.MaxCoastFrames"/> frames (and <see cref="PredictiveFeedbackSettings.MaxCoastTime"/>)
+///    the missing side "coasts" – its position moves on with its last speed × <see cref="PredictiveFeedbackSettings.CoastVelocityFactor"/>
+///    (less every frame) – instead of jumping or resetting, and control continues smoothly. The first measured frame after a
+///    coast never counts as a reversal.
+/// 7. Everything else respects the minimum time between input changes. Longer losses are handled like the classic
 ///    controller (short gaps change nothing; after the lost timeout: release and wait, or end the loop).
 /// Pure logic (the caller passes the time), unit tested with scripted positions.
 /// </summary>
@@ -101,22 +124,28 @@ public sealed class PredictiveFeedbackController : IFeedbackController
     private FeedbackRegion? _region;
     private TimeSpan? _lastChangeAt;
     private TimeSpan _lastTrustedAt;
+    private TimeSpan _lastMeasuredAt;
     private TimeSpan? _prevTime;
     private double _prevTarget;
     private double _prevPlayer;
-    private bool _hasVelocity;
+    private bool _hasPrevTarget;
+    private bool _hasPrevPlayer;
+    private bool _targetSpeedMeasured; // the target's speed came from two real positions (needed for the reversal brake)
+    private bool _afterCoast;          // the previous frame coasted: no reversal on this one
+    private int _coastFrames;
 
     public PredictiveFeedbackController(PredictiveFeedbackSettings settings, TimeSpan startedAt = default)
     {
         _s = settings ?? throw new ArgumentNullException(nameof(settings));
         _lastTrustedAt = startedAt;
+        _lastMeasuredAt = startedAt;
     }
 
     public bool IsHeld { get; private set; }
     public bool IsWaiting { get; private set; }
     public FeedbackRegion? Region => _region;
 
-    // ---- Telemetry (last trusted frame) ----
+    // ---- Telemetry (last frame) ----
 
     /// <summary>Smoothed target speed, px/s (+ = toward higher positions: right / down).</summary>
     public double TargetVelocity { get; private set; }
@@ -145,22 +174,36 @@ public sealed class PredictiveFeedbackController : IFeedbackController
     /// <summary>How many times a target reversal flipped the input at once.</summary>
     public int Brakes { get; private set; }
 
+    /// <summary>True when the last frame coasted through a short dropout (a side was predicted, not seen).</summary>
+    public bool IsCoasting => _coastFrames > 0;
+
+    /// <summary>Frames that coasted through short dropouts so far.</summary>
+    public int CoastedFrames { get; private set; }
+
     public FeedbackDecision Update(FeedbackObservation observation, TimeSpan now)
     {
-        if (!observation.IsTrusted) return Untrusted(now);
+        var markerSeen = observation.Marker == MarkerStatus.Found && observation.MarkerPercent is not null && !observation.MarkerOccluded;
+        var zoneSeen = observation.ZoneFound;
+        var targetSeen = _s.FollowMode ? markerSeen : zoneSeen;
+        var playerSeen = _s.FollowMode ? zoneSeen : markerSeen;
+
+        if (!(targetSeen && playerSeen))
+        {
+            if (CanCoast(now)) return Coast(observation, now, targetSeen, playerSeen);
+            // Too long to coast. An occluded marker that the sensor replaced with your bar's centre still counts as
+            // "on target"; anything else is a real loss.
+            if (!observation.IsTrusted) return Untrusted(now);
+        }
 
         _lastTrustedAt = now;
+        _lastMeasuredAt = now;
         IsWaiting = false;
+        _coastFrames = 0;
 
-        var markerPercent = observation.MarkerPercent!.Value;
-        var pxPerPercent = _s.BarLengthPx / 100.0;
-        var marker = markerPercent * pxPerPercent;
-        var zoneCenter = (observation.ZoneStartPercent + observation.ZoneEndPercent) * 0.5 * pxPerPercent;
-        var target = _s.FollowMode ? marker : zoneCenter;
-        var player = _s.FollowMode ? zoneCenter : marker;
-        _region = FeedbackController.Classify(markerPercent, observation.ZoneStartPercent, observation.ZoneEndPercent, _region, _s.DeadBandPercent);
+        var (target, player) = Positions(observation);
+        _region = FeedbackController.Classify(observation.MarkerPercent!.Value, observation.ZoneStartPercent, observation.ZoneEndPercent, _region, _s.DeadBandPercent);
 
-        // 2. Speeds (EMA of the finite differences).
+        // 2. Speeds (EMA of clamped finite differences). A side without a previous position starts at 0.
         var reversal = false;
         var dt = 0.0;
         if (_prevTime is { } previous && now > previous)
@@ -168,18 +211,102 @@ public sealed class PredictiveFeedbackController : IFeedbackController
             dt = (now - previous).TotalSeconds;
             var previousTargetVelocity = TargetVelocity;
             var a = PredictiveFeedbackSettings.VelocitySmoothing;
-            TargetVelocity = a * ((target - _prevTarget) / dt) + (1 - a) * TargetVelocity;
-            PlayerVelocity = a * ((player - _prevPlayer) / dt) + (1 - a) * PlayerVelocity;
-            reversal = _hasVelocity
+            TargetVelocity = _hasPrevTarget ? Smooth(TargetVelocity, (target - _prevTarget) / dt, a) : 0;
+            PlayerVelocity = _hasPrevPlayer ? Smooth(PlayerVelocity, (player - _prevPlayer) / dt, a) : 0;
+            reversal = _targetSpeedMeasured && !_afterCoast && _hasPrevTarget
                        && previousTargetVelocity != 0
                        && Math.Sign(TargetVelocity) != Math.Sign(previousTargetVelocity)
                        && Math.Abs(TargetVelocity) > PredictiveFeedbackSettings.ReversalMinSpeedPxPerSecond;
-            _hasVelocity = true;
+            _targetSpeedMeasured = _hasPrevTarget;
+        }
+        else
+        {
+            TargetVelocity = _hasPrevTarget ? TargetVelocity : 0;
+            PlayerVelocity = _hasPrevPlayer ? PlayerVelocity : 0;
         }
 
+        _afterCoast = false;
         _prevTime = now;
         _prevTarget = target;
         _prevPlayer = player;
+        _hasPrevTarget = true;
+        _hasPrevPlayer = true;
+        return Decide(target, player, dt, reversal, now);
+    }
+
+    /// <summary>Clamps a measured speed to ±MaxSpeed and blends it into the running average.</summary>
+    private static double Smooth(double previous, double measured, double weight)
+    {
+        var max = PredictiveFeedbackSettings.MaxSpeedPxPerSecond;
+        var clamped = double.IsFinite(measured) ? Math.Clamp(measured, -max, max) : 0;
+        return Math.Clamp(weight * clamped + (1 - weight) * previous, -max, max);
+    }
+
+    /// <summary>The target and bar positions (px) of an observation; which is which depends on follow mode.</summary>
+    private (double Target, double Player) Positions(FeedbackObservation observation)
+    {
+        var pxPerPercent = _s.BarLengthPx / 100.0;
+        var marker = (observation.MarkerPercent ?? 0) * pxPerPercent;
+        var zoneCenter = (observation.ZoneStartPercent + observation.ZoneEndPercent) * 0.5 * pxPerPercent;
+        return _s.FollowMode ? (marker, zoneCenter) : (zoneCenter, marker);
+    }
+
+    private bool CanCoast(TimeSpan now) =>
+        _coastFrames < PredictiveFeedbackSettings.MaxCoastFrames
+        && _prevTime is not null && _hasPrevTarget && _hasPrevPlayer
+        && now - _lastMeasuredAt <= PredictiveFeedbackSettings.MaxCoastTime;
+
+    /// <summary>
+    /// A short dropout: the missing side keeps moving with its last speed × <see cref="PredictiveFeedbackSettings.CoastVelocityFactor"/>
+    /// (decaying every coasted frame); a side that is still seen uses its real position. Control continues normally.
+    /// </summary>
+    private FeedbackDecision Coast(FeedbackObservation observation, TimeSpan now, bool targetSeen, bool playerSeen)
+    {
+        _coastFrames++;
+        CoastedFrames++;
+        IsWaiting = false;
+        var dt = _prevTime is { } previous && now > previous ? (now - previous).TotalSeconds : 0;
+        var (seenTarget, seenPlayer) = Positions(observation);
+        var a = PredictiveFeedbackSettings.VelocitySmoothing;
+        var factor = PredictiveFeedbackSettings.CoastVelocityFactor;
+
+        double target, player;
+        if (targetSeen)
+        {
+            target = seenTarget;
+            if (dt > 0) TargetVelocity = Smooth(TargetVelocity, (target - _prevTarget) / dt, a);
+        }
+        else
+        {
+            TargetVelocity *= factor;
+            target = _prevTarget + TargetVelocity * dt;
+        }
+
+        if (playerSeen)
+        {
+            player = seenPlayer;
+            if (dt > 0) PlayerVelocity = Smooth(PlayerVelocity, (player - _prevPlayer) / dt, a);
+        }
+        else
+        {
+            PlayerVelocity *= factor;
+            player = _prevPlayer + PlayerVelocity * dt;
+        }
+
+        var max = Math.Max(0, _s.BarLengthPx);
+        target = Math.Clamp(target, 0, max);
+        player = Math.Clamp(player, 0, max);
+        _prevTime = now;
+        _prevTarget = target;
+        _prevPlayer = player;
+        _targetSpeedMeasured = false;
+        _afterCoast = true;
+        return Decide(target, player, dt, reversal: false, now);
+    }
+
+    /// <summary>Steps 3–7: PD prediction, hold / release / hover pulse, reversal brake, minimum change time.</summary>
+    private FeedbackDecision Decide(double target, double player, double dt, bool reversal, TimeSpan now)
+    {
         TargetPosition = target;
         PlayerPosition = player;
 
@@ -240,9 +367,13 @@ public sealed class PredictiveFeedbackController : IFeedbackController
 
     private FeedbackDecision Untrusted(TimeSpan now)
     {
-        // Speeds across a gap would be nonsense: start measuring again with the next trusted frame.
+        // Speeds across a long gap would be nonsense: start measuring again with the next trusted frame.
         _prevTime = null;
-        _hasVelocity = false;
+        _hasPrevTarget = false;
+        _hasPrevPlayer = false;
+        _targetSpeedMeasured = false;
+        _afterCoast = false;
+        _coastFrames = 0;
         TargetVelocity = 0;
         PlayerVelocity = 0;
 

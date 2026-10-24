@@ -60,6 +60,15 @@ public sealed record PlaybackRunInfo(int CurrentRun, int TotalRuns)
 public sealed record PlaybackProgress(int Iteration, int? TotalIterations, int StepNumber, int StepCount, MacroStep Step, string? LoopText = null);
 
 /// <summary>
+/// <see cref="PlaybackEngine.TargetOverlayClearRequested"/>: the handler sets <see cref="Cleared"/> when it hid a reticle
+/// that screen captures could see (then the engine waits a moment before capturing).
+/// </summary>
+public sealed class OverlayClearRequest : EventArgs
+{
+    public bool Cleared { get; set; }
+}
+
+/// <summary>
 /// "Last found target" memory: where the most recent Find text / image / color step, If / Repeat condition or feedback
 /// loop condition found something in this run (screen pixels). X / Y / Width / Height = the rectangle of what was found
 /// (0 × 0 when only a point is known); CenterX / CenterY = the spot clicks use (a colour patch's middle, a match's center).
@@ -166,13 +175,21 @@ public sealed class PlaybackEngine
     /// <summary>
     /// Reliable game click on a found target: after the cursor reaches the target, it rests there this long before the
     /// button goes down, so games that read the cursor once per frame (aim trainers, Roblox / Unity) register the new
-    /// position first. Used by every click a Find image / colour / text step (or an If "when found") makes on what it
-    /// found, and by Mouse click steps that click the last found spot or a Smart-Aim target.
+    /// position first. Used by every click a Find image / colour / text, Wait for screen change step (or an If "when
+    /// found") makes on what it found, and by Mouse click steps that click the last found spot or a Smart-Aim target.
+    /// Snappy for fast-moving targets: 6 ms is enough for the move to be applied first. Feedback loops never use it:
+    /// they press / release directly, with no delay.
     /// </summary>
-    public const int TargetHoverMs = 15;
+    public const int TargetHoverMs = 6;
 
-    /// <summary>A click on a found target keeps the button down at least this long (MouseDown → 25 ms → MouseUp).</summary>
-    public const int MinTargetClickHoldMs = 25;
+    /// <summary>
+    /// A click on a found target keeps the button down at least this long (MouseDown → 12 ms → MouseUp). A step's own
+    /// longer click hold (default 35 ms) is kept; this is only the floor for holds set lower than it.
+    /// </summary>
+    public const int MinTargetClickHoldMs = 12;
+
+    /// <summary>After SmartMacro hid its own reticle before a Wait for screen change look, it waits this long so the screen has updated.</summary>
+    public const int OverlayClearSettleMs = 50;
 
     /// <summary>
     /// Smooth mouse movement: a cursor jump made by a Move mouse step (or a click / scroll at a position) that comes
@@ -284,6 +301,9 @@ public sealed class PlaybackEngine
     private int _clickJitterPx;
     private int _delayJitterPercent;
 
+    // True while a feedback loop runs (no target-lock reticle then; see ReportTarget).
+    private bool _inFeedbackLoop;
+
     // Per-run playback state. Only touched by the playback flow itself (never by Pause/Stop callers).
     private HeldInput? _held;
     private TimeSpan _timelineTarget;   // clock time at which the current step / event is due
@@ -367,6 +387,14 @@ public sealed class PlaybackEngine
     /// a Smart-Aim click finds its target. The app draws a short "target lock" reticle there. Keep handlers fast.
     /// </summary>
     public event EventHandler<TargetDetection>? TargetDetected;
+
+    /// <summary>
+    /// Raised on the playback thread right before a look that compares the screen over time (Wait for screen change takes
+    /// its starting picture). When overlays can be captured ("🎥 Show overlays in OBS / Discord"), the handler hides the
+    /// target-lock reticle at once and sets <see cref="OverlayClearRequest.Cleared"/>, so the reticle (or it fading away)
+    /// is never mistaken for a change. Handlers must not throw.
+    /// </summary>
+    public event EventHandler<OverlayClearRequest>? TargetOverlayClearRequested;
 
     /// <summary>True while playback is paused (Pause / F8).</summary>
     public bool IsPaused => State == PlaybackState.Paused;
@@ -493,6 +521,9 @@ public sealed class PlaybackEngine
     private void ReportTarget(int x, int y, ScreenRect bounds, double confidence, string label, double elapsedMs = 0, bool fromHotSpot = false)
     {
         RecordVisionLock(elapsedMs);
+        // Never flash the reticle from inside a feedback loop: at 120 looks per second it would sit on the bar it watches
+        // (and in streamer mode the loop's own captures would see it).
+        if (_inFeedbackLoop) return;
         if (TargetDetected is not { } handler) return;
         var box = bounds.IsEmpty ? new ScreenRect(x - 12, y - 12, 24, 24) : bounds;
         try { handler(this, new TargetDetection(box, Math.Clamp(confidence, 0, 1), label, x, y, Math.Max(0, elapsedMs), fromHotSpot)); }
@@ -1409,6 +1440,19 @@ public sealed class PlaybackEngine
     /// </summary>
     private async Task RunFeedbackLoopAsync(RunContext run, int index, List<LoopFrame> loops, FeedbackLoopStep step, CancellationToken token)
     {
+        _inFeedbackLoop = true;
+        try
+        {
+            await RunFeedbackLoopCoreAsync(run, index, loops, step, token).ConfigureAwait(false);
+        }
+        finally
+        {
+            _inFeedbackLoop = false;
+        }
+    }
+
+    private async Task RunFeedbackLoopCoreAsync(RunContext run, int index, List<LoopFrame> loops, FeedbackLoopStep step, CancellationToken token)
+    {
         var number = run.StepNumberOf(index);
         var capture = _capture ?? throw new ScreenCaptureUnavailableException("Screen capture isn't available, so Feedback loop steps can't run.");
         var sensor = new FeedbackSensor(step, capture, _clock);
@@ -2234,6 +2278,7 @@ public sealed class PlaybackEngine
         TimeSpan Elapsed() => _clock.Elapsed - started - (_timelineShift - shiftAtStart);
 
         await WaitIfPausedAsync(token).ConfigureAwait(false);
+        await ClearTargetOverlayAsync(token).ConfigureAwait(false); // the reticle must not be in (or vanish from) the starting picture
         var baseline = await capture.CaptureAsync(area, token).ConfigureAwait(false);
         var best = default(ScreenChange);
 
@@ -2248,7 +2293,10 @@ public sealed class PlaybackEngine
             var frame = await capture.CaptureAsync(area, token).ConfigureAwait(false);
             if (_timelineShift != shiftBeforeWait || frame.Bounds != baseline.Bounds)
             {
-                baseline = frame; // paused (or the area moved partly off screen): start comparing from what is there now
+                // Paused (or the area moved partly off screen): start comparing from what is there now.
+                if (_timelineShift != shiftBeforeWait && await ClearTargetOverlayAsync(token).ConfigureAwait(false))
+                    frame = await capture.CaptureAsync(area, token).ConfigureAwait(false);
+                baseline = frame;
             }
             else
             {
@@ -2262,7 +2310,7 @@ public sealed class PlaybackEngine
                     ReportTarget(x, y, change.Bounds, 1.0, StepDescriber.DisplayName(step.Kind));
                     Message?.Invoke(this, string.Format(System.Globalization.CultureInfo.InvariantCulture,
                         "The watched area changed: {0:0.##} % of its pixels, around ({1}, {2}).", change.ChangedPercent, x, y));
-                    await PerformFoundActionAsync(step.Action, x, y, step.ActionHoldMs, FoundActionTiming.Default, held, token, change.Bounds)
+                    await PerformFoundActionAsync(step.Action, x, y, step.ActionHoldMs, FoundActionTiming.Snappy, held, token, change.Bounds)
                         .ConfigureAwait(false);
                     return;
                 }
@@ -2288,6 +2336,29 @@ public sealed class PlaybackEngine
         }
     }
 
+    /// <summary>
+    /// Asks the app to hide the target-lock reticle now (see <see cref="TargetOverlayClearRequested"/>); when one was hidden,
+    /// waits <see cref="OverlayClearSettleMs"/> so the next capture shows the screen without it. Returns true when it hid one.
+    /// </summary>
+    private async Task<bool> ClearTargetOverlayAsync(CancellationToken token)
+    {
+        if (TargetOverlayClearRequested is not { } handler) return false;
+        var request = new OverlayClearRequest();
+        try
+        {
+            handler(this, request);
+        }
+        catch (Exception ex)
+        {
+            Message?.Invoke(this, $"Target overlay error: {ex.Message}");
+            return false;
+        }
+
+        if (!request.Cleared) return false;
+        await WaitAsync(OverlayClearSettleMs, token).ConfigureAwait(false);
+        return true;
+    }
+
     /// <summary>How often "Focus window" looks for a window that isn't open yet.</summary>
     private const int FocusWindowPollMs = 250;
 
@@ -2309,7 +2380,7 @@ public sealed class PlaybackEngine
             await WaitIfPausedAsync(token).ConfigureAwait(false);
             token.ThrowIfCancellationRequested();
 
-            if (SearchArea.FindWindow(layout.GetWindows(), title) is { } window)
+            if (SearchArea.FindWindowByTitleOrApp(layout.GetWindows(), title) is { } window)
             {
                 if (layout is not IWindowFocuser focuser)
                 {
@@ -2328,8 +2399,8 @@ public sealed class PlaybackEngine
             if (Elapsed() >= timeout)
             {
                 var message = step.WaitForWindowMs == 0
-                    ? $"No open window has \"{title}\" in its title."
-                    : string.Format(System.Globalization.CultureInfo.InvariantCulture, "No window with \"{0}\" in its title opened within {1:0.#} s.", title, timeout.TotalSeconds);
+                    ? $"No open window has \"{title}\" in its title or app name."
+                    : string.Format(System.Globalization.CultureInfo.InvariantCulture, "No window with \"{0}\" in its title or app name opened within {1:0.#} s.", title, timeout.TotalSeconds);
                 if (step.WhenNotFound is TextNotFoundBehavior.Continue or TextNotFoundBehavior.SkipNextStep)
                 {
                     var skip = step.WhenNotFound == TextNotFoundBehavior.SkipNextStep;
@@ -2416,6 +2487,9 @@ public sealed class PlaybackEngine
     private readonly record struct FoundActionTiming(MouseMoveStyle? Style, int MoveMs, int HoldMs, int DoubleGapMs, int SettleMs)
     {
         public static FoundActionTiming Default => new(null, 0, FoundClickHoldMs, DoubleClickGapMs, ClickSettleMs);
+
+        /// <summary>Wait for screen change (no click settings of its own): jump, 6 ms rest, 12 ms hold – for things that move fast.</summary>
+        public static FoundActionTiming Snappy => new(null, 0, MinTargetClickHoldMs, DoubleClickGapMs, ClickSettleMs);
 
         public static FoundActionTiming Of(ScreenSearchStep step) =>
             new(step.MoveStyle, step.MoveDurationMs, step.ClickHoldMs, step.DoubleClickIntervalMs, step.PostActionDelayMs);

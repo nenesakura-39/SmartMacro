@@ -391,7 +391,8 @@ public class FindColorObjectTests
 
         Assert.Equal(PlaybackOutcome.Completed, result.Outcome);
         Assert.Equal(new[] { "move 150,100", "mouse Left down", "mouse Left up" }, input.Calls);
-        // Reliable game click: rest on the target 15 ms, then hold at least 25 ms (even with a 0 ms click hold).
+        // Reliable game click: rest on the target TargetHoverMs (6 ms), then hold at least MinTargetClickHoldMs (12 ms),
+        // even with a 0 ms click hold.
         Assert.Equal(PlaybackEngine.TargetHoverMs, (input.Times[1] - input.Times[0]).TotalMilliseconds, precision: 3);
         Assert.Equal(PlaybackEngine.MinTargetClickHoldMs, (input.Times[2] - input.Times[1]).TotalMilliseconds, precision: 3);
     }

@@ -57,11 +57,11 @@ public sealed class WaitForChangeStep : MacroStep
 /// <summary>
 /// "Focus window" (UTILITY &amp; GAME): brings an app window to the front (and restores it when it's minimized) so the
 /// keys and clicks after it go to that app, e.g. the game after checking something in a browser. The window is found by
-/// (part of) its title, ignoring case, like "where to look → app window" on Find steps.
+/// (part of) its title or its app (process) name, ignoring case, e.g. "Roblox" or "RobloxPlayerBeta".
 /// </summary>
 public sealed class FocusWindowStep : MacroStep
 {
-    /// <summary>(Part of) the window title, e.g. "Roblox".</summary>
+    /// <summary>(Part of) the window title or the app name, e.g. "Roblox" or "RobloxPlayerBeta.exe".</summary>
     public string WindowTitle { get; set; } = string.Empty;
 
     /// <summary>Restore the window first when it is minimized to the taskbar.</summary>
@@ -98,7 +98,7 @@ public enum ScreenshotArea
 
 /// <summary>
 /// "Take screenshot" (UTILITY &amp; GAME): saves a PNG of the screen, an area or an app window into a folder (by default
-/// Pictures\SmartMacro Screenshots), named with a prefix and the date and time, e.g. "Catch_2026-10-24_18-05-11-042.png".
+/// Pictures\SmartMacro Screenshots), named with a prefix and the date and time, e.g. "Catch_20261024_180511_042.png".
 /// Handy for logging rare catches / drops while a macro runs unattended. A screenshot that can't be taken or saved is
 /// reported in the log and the macro carries on.
 /// </summary>

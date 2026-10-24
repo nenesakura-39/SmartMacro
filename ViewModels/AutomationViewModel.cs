@@ -141,6 +141,7 @@ public sealed class AutomationViewModel : ObservableObject, IDisposable
         _engine.Message += OnEngineMessage;
         _engine.RunStarted += OnEngineRunStarted;
         _engine.TargetDetected += OnTargetDetected;
+        _engine.TargetOverlayClearRequested += OnTargetOverlayClearRequested;
         _emergency.EmergencyStopRequested += OnEmergencyStop;
         _host.PauseRequested += OnHudPauseRequested;
         _host.StopRequested += OnHudStopRequested;
@@ -470,6 +471,7 @@ public sealed class AutomationViewModel : ObservableObject, IDisposable
         _engine.Message -= OnEngineMessage;
         _engine.RunStarted -= OnEngineRunStarted;
         _engine.TargetDetected -= OnTargetDetected;
+        _engine.TargetOverlayClearRequested -= OnTargetOverlayClearRequested;
         _emergency.EmergencyStopRequested -= OnEmergencyStop;
         _host.PauseRequested -= OnHudPauseRequested;
         _host.StopRequested -= OnHudStopRequested;
@@ -948,6 +950,24 @@ public sealed class AutomationViewModel : ObservableObject, IDisposable
             var latest = Interlocked.Exchange(ref _pendingTarget, null);
             if (latest is not null && IsCurrentSession(session)) _host.ShowTargetLock(latest);
         });
+    }
+
+    // Playback thread, right before Wait for screen change takes its starting picture. A reticle that captures can see
+    // ("🎥 Show overlays in OBS / Discord") would be in that picture, then fade away and look like a change: drop a
+    // queued one and hide a visible one now (synchronously, so it's gone before the capture).
+    private void OnTargetOverlayClearRequested(object? sender, OverlayClearRequest request)
+    {
+        Interlocked.Exchange(ref _pendingTarget, null);
+        if (!Services.Vision.OverlayCaptureService.AllowObsCapture) return; // left out of captures anyway: nothing to do
+        try
+        {
+            request.Cleared = _dispatcher.Invoke(() => _host.HideTargetLock(), DispatcherPriority.Send, CancellationToken.None,
+                TimeSpan.FromMilliseconds(200));
+        }
+        catch (Exception)
+        {
+            // Purely visual: never break playback over the reticle.
+        }
     }
 
     private void StopPlayback()

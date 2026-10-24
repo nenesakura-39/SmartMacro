@@ -179,7 +179,7 @@ public class UtilityStepsTests : IDisposable
         engine.Message += (_, m) => messages.Add(m);
 
         Assert.Equal(PlaybackOutcome.Completed, (await engine.RunAsync(MacroWith(step))).Outcome);
-        Assert.Contains("No window with \"Roblox\" in its title opened within 1 s. Continuing.", messages);
+        Assert.Contains("No window with \"Roblox\" in its title or app name opened within 1 s. Continuing.", messages);
         Assert.Empty(layout.Focused);
 
         step.WhenNotFound = TextNotFoundBehavior.StopMacro;
@@ -233,8 +233,8 @@ public class UtilityStepsTests : IDisposable
     public void Screenshot_file_names_are_safe_sortable_and_never_overwrite()
     {
         var time = new DateTime(2026, 10, 24, 18, 5, 11, 42);
-        Assert.Equal("Catch_2026-10-24_18-05-11-042.png", ScreenshotFiles.FileName("Catch", time));
-        Assert.Equal("a_b_c_2026-10-24_18-05-11-042.png", ScreenshotFiles.FileName("a/b:c", time));
+        Assert.Equal("Catch_20261024_180511_042.png", ScreenshotFiles.FileName("Catch", time));
+        Assert.Equal("a_b_c_20261024_180511_042.png", ScreenshotFiles.FileName("a/b:c", time));
         Assert.Equal("SmartMacro", ScreenshotFiles.CleanPrefix("   "));
         Assert.Equal("SmartMacro", ScreenshotFiles.CleanPrefix(null));
         Assert.True(ScreenshotFiles.HasInvalidFileNameChars("rare?drop"));
@@ -243,8 +243,8 @@ public class UtilityStepsTests : IDisposable
         var folder = _dir.Combine("same");
         var first = ScreenshotFiles.Save(Screen(4, 4), folder, "Shot", time);
         var second = ScreenshotFiles.Save(Screen(4, 4), folder, "Shot", time);
-        Assert.Equal("Shot_2026-10-24_18-05-11-042.png", Path.GetFileName(first));
-        Assert.Equal("Shot_2026-10-24_18-05-11-042_2.png", Path.GetFileName(second));
+        Assert.Equal("Shot_20261024_180511_042.png", Path.GetFileName(first));
+        Assert.Equal("Shot_20261024_180511_042_2.png", Path.GetFileName(second));
         Assert.Equal(ScreenshotFiles.DefaultFolder, ScreenshotFiles.FolderOf(new ScreenshotStep()));
         Assert.EndsWith(ScreenshotFiles.DefaultFolderName, ScreenshotFiles.DefaultFolder, StringComparison.Ordinal);
     }

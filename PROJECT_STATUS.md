@@ -1,6 +1,8 @@
 # SmartMacro – Project Status / Handoff
 
-_Last updated: 2026-10-24 (Upgrade 3 of 3 – new steps "Wait for screen change" (VISION & AI), "Focus window" and "Take
+_Last updated: 2026-10-24 (Stability & accuracy pass over the uncommitted Round 1 + Upgrades 1–3 (5 fixes): **built + tested
+with `tools\verify.cmd` on the owner's PC: 0 warnings, 0 errors, 1090 / 1090 passed**; not committed, not tried by hand.
+Before it: Upgrade 3 of 3 – new steps "Wait for screen change" (VISION & AI), "Focus window" and "Take
 screenshot" (new UTILITY & GAME toolbox section + Ctrl+K palette): **built + tested with `tools\verify.cmd` on the owner's PC:
 0 warnings, 0 errors, 1074 / 1074 passed**; not committed, not tried by hand. The "Sound / Voice Alert" step was left out on
 purpose by the owner (a later update: it needs more design work first).
@@ -47,6 +49,28 @@ Developer: Riku (リク) · Brand: KuroLogic_
 | Release package | `publish\SmartMacro-1.0.0-win-x64\SmartMacro.exe` is an OLD build (made right after `159d6b3`, before Stage 1) | – | ignored by git |
 
 
+
+## Stability & accuracy pass (2026-10-24): **built + tested** (`tools\verify.cmd`: 0 warnings, 0 errors, **1090 / 1090 passed**)
+1. Streamer mode vs. vision: the capturable reticle leaves a 24×24 px unpainted core on the click point
+   (`OverlayCapturePolicy.HollowArea`; no fill, no centre mark, no badge pushed onto the target). New engine event
+   `TargetOverlayClearRequested` (+ `OverlayClearRequest`): Wait for screen change asks for it before its starting picture
+   (and after a pause); `AutomationViewModel` drops a queued reticle and hides a visible one synchronously when OBS mode
+   is on, then the engine waits `OverlayClearSettleMs` (50 ms). Feedback loops never flash the reticle (`_inFeedbackLoop`).
+   Known limit: the HUD banner is still capturable in OBS mode; don't put a watched area under it.
+2. Find image trimming: owner left the choice to Claude → kept "ball centre" (Round 1 behaviour; the offset picker
+   measures from the same point). New regression tests: asymmetric margins give the exact ball centre on the full search
+   and the Hot-Spot path, and a click offset lands exactly at ball centre + offset.
+3. Smart Predictive: ≥ 3 matching pixels for marker and bar (sensor, smart only); short dropouts (≤ 5 frames, ≤ 100 ms)
+   coast with last speed × 0.75 per frame; an occluded marker that the overlap handling replaced is coasted too
+   (`FeedbackObservation.MarkerOccluded`); speeds clamped to ±1500 px/s; first sighting / after a real loss = speed 0;
+   no reversal brake on the frame after a coast. Preview shows "coasting".
+4. Target clicks: `TargetHoverMs` 15 → 6 ms, `MinTargetClickHoldMs` 25 → 12 ms (a step's own longer click hold, default
+   35 ms, is kept); Wait for screen change uses 6 / 12 ms. Feedback loops still press / release directly.
+5. New steps: no Sound Alert / AlertStep anywhere (test added); Wait for screen change in the "Vision / If" filter;
+   screenshot names `Prefix_yyyyMMdd_HHmmss_fff.png`, folders created as needed; Focus window matches title OR app
+   (process) name (`SearchArea.FindWindowByTitleOrApp`, `ScreenInfoProvider` fills `WindowInfo.ProcessName`), restores
+   (SW_RESTORE) then SetForegroundWindow, now run on the UI thread so AttachThreadInput works.
+- Tests: `SmartMacro.Tests/StabilityFixesTests.cs`; older timing test updated to use the constants.
 
 ## Upgrade 3 – new steps (2026-10-24, Upgrade 3 of 3): **built + tested** (`tools\verify.cmd`: 0 warnings, 0 errors, **1074 / 1074 passed**)
 - Owner decision: **no "Sound / Voice Alert" (AlertStep) for now** – maybe a later update (needs more details first).

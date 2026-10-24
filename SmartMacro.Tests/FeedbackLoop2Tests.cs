@@ -133,18 +133,22 @@ public class FeedbackLoop2Tests
     }
 
     [Fact]
-    public void A_lost_bar_releases_and_resets_the_speeds()
+    public void A_short_dropout_coasts_and_a_long_loss_releases_and_resets_the_speeds()
     {
         var controller = new PredictiveFeedbackController(Settings());
         controller.Update(Follow(90, 20), TimeSpan.Zero);
         controller.Update(Follow(90, 22), Frame);
         Assert.True(controller.IsHeld);
-        Assert.NotEqual(0, controller.PlayerVelocity);
+        var speed = controller.PlayerVelocity;
+        Assert.NotEqual(0, speed);
 
         var lost = new FeedbackObservation(MarkerStatus.Lost, null, false, 0, 0);
         Assert.Equal(FeedbackCommand.None, controller.Update(lost, Frame * 2).Command); // a short gap changes nothing
-        Assert.Equal(0, controller.PlayerVelocity);
+        Assert.True(controller.IsCoasting);
+        Assert.Equal(speed * PredictiveFeedbackSettings.CoastVelocityFactor, controller.PlayerVelocity, precision: 6);
+
         var released = controller.Update(lost, TimeSpan.FromSeconds(2));
+        Assert.Equal(0, controller.PlayerVelocity);
         Assert.Equal(FeedbackCommand.Release, released.Command);
         Assert.True(released.Waiting);
     }

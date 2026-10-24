@@ -813,8 +813,9 @@ public sealed class VisionTools : IVisionTools
         // Smart Predictive telemetry: speeds of the target and your bar, the predicted gap and the hover duty.
         var smart = controller is PredictiveFeedbackController pd
             ? string.Format(System.Globalization.CultureInfo.InvariantCulture,
-                "\n🧠 Smart PD: target {0:0} px/s · bar {1:0} px/s · predicted gap {2:0} px{3} · brakes {4}",
-                pd.TargetVelocity, pd.PlayerVelocity, pd.PredictedError, pd.Duty is { } duty ? $" · hover pulse {duty * 100:0}%" : "", pd.Brakes)
+                "\n🧠 Smart PD: target {0:0} px/s · bar {1:0} px/s · predicted gap {2:0} px{3} · brakes {4}{5}",
+                pd.TargetVelocity, pd.PlayerVelocity, pd.PredictedError, pd.Duty is { } duty ? $" · hover pulse {duty * 100:0}%" : "", pd.Brakes,
+                pd.IsCoasting ? " · coasting through a short dropout" : "")
             : "";
         return $"{marker} · {zone} · {where} {action}{smart}\nInput: {state} · {stats.FramesPerSecond(elapsed):0} fps · capture {stats.AverageCaptureMs:0.0} ms · detect {stats.AverageDetectMs:0.0} ms · NO input is sent";
     }

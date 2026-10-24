@@ -127,7 +127,7 @@ public sealed class EditorViewModel : ObservableObject
         FilterPills = new[]
         {
             new StepFilterPill(StepFilter.All, "All", "Show every step"),
-            new StepFilterPill(StepFilter.VisionAndLogic, "Vision / If", "Find text / image / color, feedback loops, If and Repeat blocks"),
+            new StepFilterPill(StepFilter.VisionAndLogic, "Vision / If", "Find text / image / color, Wait for screen change, feedback loops, If and Repeat blocks"),
             new StepFilterPill(StepFilter.Mouse, "Mouse", "Move mouse, Mouse click, Scroll wheel and recorded input"),
             new StepFilterPill(StepFilter.Keyboard, "Keyboard", "Key press, Type text and recorded input"),
             new StepFilterPill(StepFilter.Disabled, "Disabled", "Steps that are turned off"),

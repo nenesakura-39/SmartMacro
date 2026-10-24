@@ -221,7 +221,7 @@ public sealed class FocusWindowStepViewModel : StepViewModel
     public override string? PlainSummary =>
         string.IsNullOrWhiteSpace(_step.WindowTitle)
             ? "• Choose the window to bring to the front (open it first, then click Refresh windows)."
-            : $"• Brings the window whose title contains \"{_step.WindowTitle.Trim()}\" to the front{(_step.RestoreIfMinimized ? ", restoring it if it's minimized" : "")}, so the keys and clicks after this step go to it."
+            : $"• Brings the window whose title or app name contains \"{_step.WindowTitle.Trim()}\" to the front{(_step.RestoreIfMinimized ? ", restoring it if it's minimized" : "")}, so the keys and clicks after this step go to it."
               + (_step.WaitForWindowMs > 0 ? $"\n• If it isn't open yet, waits up to {_step.WaitForWindowMs / 1000.0:0.#} s for it." : "");
 
     public string WindowTitle

@@ -138,6 +138,39 @@ public static class SearchArea
         }
     }
 
+    /// <summary>
+    /// "Focus window": the window whose title OR app (process) name matches, ignoring case. Best first: exact title, title
+    /// contains the text, exact app name ("RobloxPlayerBeta" or "RobloxPlayerBeta.exe"), app name contains the text; then
+    /// front to back. Minimized windows count the same (Focus window restores them). Null when nothing matches.
+    /// </summary>
+    public static WindowInfo? FindWindowByTitleOrApp(IEnumerable<WindowInfo> windows, string text)
+    {
+        ArgumentNullException.ThrowIfNull(windows);
+        if (string.IsNullOrWhiteSpace(text)) return null;
+        var wanted = text.Trim();
+        var wantedApp = wanted.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) ? wanted[..^4] : wanted;
+
+        static int Rank(WindowInfo w, string wanted, string wantedApp)
+        {
+            var title = w.Title?.Trim() ?? string.Empty;
+            var app = w.ProcessName?.Trim() ?? string.Empty;
+            if (app.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)) app = app[..^4];
+            if (title.Length > 0 && string.Equals(title, wanted, StringComparison.OrdinalIgnoreCase)) return 0;
+            if (title.Contains(wanted, StringComparison.OrdinalIgnoreCase)) return 1;
+            if (app.Length > 0 && wantedApp.Length > 0 && string.Equals(app, wantedApp, StringComparison.OrdinalIgnoreCase)) return 2;
+            if (app.Length > 0 && wantedApp.Length > 0 && app.Contains(wantedApp, StringComparison.OrdinalIgnoreCase)) return 3;
+            return 4;
+        }
+
+        return windows
+            .Select((w, i) => (Window: w, Rank: Rank(w, wanted, wantedApp), Order: i))
+            .Where(x => x.Rank < 4)
+            .OrderBy(x => x.Rank)
+            .ThenBy(x => x.Order)
+            .Select(x => x.Window)
+            .FirstOrDefault();
+    }
+
     /// <summary>The monitor with this number, or null.</summary>
     public static MonitorInfo? FindMonitor(IEnumerable<MonitorInfo> monitors, int number) =>
         monitors.FirstOrDefault(m => m.Number == number);

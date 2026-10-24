@@ -8,7 +8,7 @@ public enum StepFilter
     /// <summary>Every step.</summary>
     All,
 
-    /// <summary>Find text / image / color, feedback loops and the If / Else / End If / Repeat / End Repeat blocks.</summary>
+    /// <summary>Find text / image / color, Wait for screen change, feedback loops and the If / Else / End If / Repeat / End Repeat blocks.</summary>
     VisionAndLogic,
 
     /// <summary>Move mouse, Mouse click, Scroll wheel (and recorded input, which holds mouse input).</summary>
