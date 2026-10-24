@@ -27,6 +27,9 @@ public static class StepTypeCatalog
         new StepTypeInfo(StepKind.FindImage, StepDescriber.DisplayName(StepKind.FindImage), "\uE8B9", "Wait for a picture (button, icon…) to appear on screen or disappear, and optionally click it."),
         new StepTypeInfo(StepKind.FindColor, StepDescriber.DisplayName(StepKind.FindColor), "\uE790", "Wait for a color to appear in an area (or disappear), and optionally click it. Simple color matching, not object recognition."),
         new StepTypeInfo(StepKind.FeedbackLoop, StepDescriber.DisplayName(StepKind.FeedbackLoop), "\uE895", "Keeps a moving marker in a target zone: watches a bar on screen many times per second and holds, releases or taps one key or mouse button depending on where the marker is. Always has a max runtime; Stop and Esc work at any time."),
+        new StepTypeInfo(StepKind.WaitForChange, StepDescriber.DisplayName(StepKind.WaitForChange), "\uE890", "Waits until something changes inside an area (a bite, a pop-up, a loot window, a bar that moves). The middle of the change becomes the last found spot, and the step can click it right away."),
+        new StepTypeInfo(StepKind.FocusWindow, StepDescriber.DisplayName(StepKind.FocusWindow), "\uE8A7", "Brings an app window (e.g. your game) to the front, restoring it if it's minimized, so the keys and clicks after it go to that app."),
+        new StepTypeInfo(StepKind.Screenshot, StepDescriber.DisplayName(StepKind.Screenshot), "\uE722", "Saves a PNG of the main monitor, all monitors, an area or an app window, named with the date and time. Handy for logging rare catches and drops while a macro runs."),
         new StepTypeInfo(StepKind.InputSequence, StepDescriber.DisplayName(StepKind.InputSequence), "\uE7FC", "Mouse and keyboard input recorded on one timeline and played back with its original timing: exact key and button down/up, plus cursor positions or relative (camera) mouse movement."),
         new StepTypeInfo(StepKind.If, StepDescriber.DisplayName(StepKind.If), "\uE8AB", "Runs the steps inside only when a condition is true: some text, an image or a color is (or is not) on screen. Adding it from the toolbox adds the If and its End If."),
         new StepTypeInfo(StepKind.Else, StepDescriber.DisplayName(StepKind.Else), "\uE76C", "Optional, inside an If block: the steps after Else run when the If's condition is false."),
@@ -180,8 +183,8 @@ public abstract class StepViewModel : ObservableObject
         }
     }
 
-    /// <summary>"▼" (open) or "▶" (folded).</summary>
-    public string CollapseGlyph => _isCollapsed ? "▶" : "▼";
+    /// <summary>"▾" (open) or "▸" (folded). The step row draws its own vector chevron; this text is for menus / tooltips.</summary>
+    public string CollapseGlyph => _isCollapsed ? "▸" : "▾";
 
     public string CollapseTooltip => _isCollapsed ? "Show the steps inside this block" : "Fold this block (hide the steps inside; they still play)";
 
@@ -479,6 +482,9 @@ public abstract class StepViewModel : ObservableObject
         RepeatStep r => new RepeatStepViewModel(r),
         ElseStep or EndIfStep or EndRepeatStep => new BlockMarkerStepViewModel(step),
         FeedbackLoopStep f => new FeedbackLoopStepViewModel(f),
+        WaitForChangeStep w => new WaitForChangeStepViewModel(w),
+        FocusWindowStep w => new FocusWindowStepViewModel(w),
+        ScreenshotStep s => new ScreenshotStepViewModel(s),
         _ => throw new NotSupportedException($"No editor for step type {step.GetType().Name}."),
     };
 }
@@ -1920,13 +1926,51 @@ public sealed class FindTextStepViewModel : ScreenSearchStepViewModel
     public TextMatchMode MatchMode
     {
         get => _step.MatchMode;
-        set { if (_step.MatchMode == value) return; _step.MatchMode = value; NotifyChanged(); }
+        set
+        {
+            if (_step.MatchMode == value) return;
+            _step.MatchMode = value;
+            NotifyChanged();
+            OnPropertyChanged(nameof(MatchWholeWord));
+        }
     }
 
     public bool CaseSensitive
     {
         get => _step.CaseSensitive;
-        set { if (_step.CaseSensitive == value) return; _step.CaseSensitive = value; NotifyChanged(); }
+        set
+        {
+            if (_step.CaseSensitive == value) return;
+            _step.CaseSensitive = value;
+            NotifyChanged();
+            OnPropertyChanged(nameof(MatchCase));
+        }
+    }
+
+    /// <summary>"Match whole word only (e.g. 'art' won't match 'apart')" – same setting as <see cref="MatchMode"/>.</summary>
+    public bool MatchWholeWord
+    {
+        get => _step.MatchWholeWord;
+        set
+        {
+            if (_step.MatchWholeWord == value) return;
+            _step.MatchWholeWord = value;
+            NotifyChanged();
+            OnPropertyChanged(nameof(MatchMode));
+        }
+    }
+
+    /// <summary>"Match exact case (e.g. 'aRt' only matches 'aRt')" – same setting as <see cref="CaseSensitive"/>.</summary>
+    public bool MatchCase
+    {
+        get => _step.MatchCase;
+        set
+        {
+            if (_step.MatchCase == value) return;
+            _step.MatchCase = value;
+            NotifyChanged();
+            OnPropertyChanged(nameof(CaseSensitive));
+        }
     }
 
     public bool NormalizeLookAlikes
@@ -2119,7 +2163,11 @@ public sealed class FindColorStepViewModel : ScreenSearchStepViewModel
         PickSecondaryColorCommand = new AsyncRelayCommand(PickSecondaryColorAsync, ex => TestResult = ex.Message, () => _tools is not null && !IsBusy);
         TestCommand = new AsyncRelayCommand(TestAsync, ex => TestResult = ex.Message, () => _tools is not null && !IsBusy);
         TrackCommand = new AsyncRelayCommand(TrackAsync, ex => TestResult = ex.Message, () => _tools is not null && !IsBusy);
+        ApplyColorPresetCommand = new RelayCommand(p => ApplyColorPreset(p as string));
     }
+
+    /// <summary>One-click tuning: "exact", "game" or "glow" (see <see cref="FindColorStep.ExactUiPreset"/> and friends).</summary>
+    public RelayCommand ApplyColorPresetCommand { get; }
 
     public AsyncRelayCommand PickColorCommand { get; }
     public AsyncRelayCommand PickSecondaryColorCommand { get; }
@@ -2207,7 +2255,61 @@ public sealed class FindColorStepViewModel : ScreenSearchStepViewModel
     public int Tolerance
     {
         get => _step.Tolerance;
-        set { if (_step.Tolerance == value) return; _step.Tolerance = value; NotifyChanged(); }
+        set
+        {
+            if (_step.Tolerance == value) return;
+            _step.Tolerance = value;
+            NotifyChanged();
+            NotifyPresetChanged();
+        }
+    }
+
+    /// <summary>"Shade variation": also match darker / lighter shades of the colour (3D balls, glowing targets).</summary>
+    public bool MatchShades
+    {
+        get => _step.MatchShades;
+        set
+        {
+            if (_step.MatchShades == value) return;
+            _step.MatchShades = value;
+            NotifyChanged();
+            NotifyPresetChanged();
+        }
+    }
+
+    /// <summary>True while the settings equal the 🎯 Exact UI Color (Strict) preset.</summary>
+    public bool IsExactPreset => IsPreset(FindColorStep.ExactUiPreset);
+
+    /// <summary>True while the settings equal the 🔴 Game Target / Solid Object (Recommended) preset.</summary>
+    public bool IsGamePreset => IsPreset(FindColorStep.GameTargetPreset);
+
+    /// <summary>True while the settings equal the 🌅 Lighting / Glowing Object (Broad) preset.</summary>
+    public bool IsGlowPreset => IsPreset(FindColorStep.GlowingObjectPreset);
+
+    private bool IsPreset((string Name, int Tolerance, bool MatchShades) preset) =>
+        _step.Tolerance == preset.Tolerance && _step.MatchShades == preset.MatchShades;
+
+    private void NotifyPresetChanged()
+    {
+        OnPropertyChanged(nameof(IsExactPreset));
+        OnPropertyChanged(nameof(IsGamePreset));
+        OnPropertyChanged(nameof(IsGlowPreset));
+    }
+
+    private void ApplyColorPreset(string? key)
+    {
+        (string Name, int Tolerance, bool MatchShades)? preset = key switch
+        {
+            "exact" => FindColorStep.ExactUiPreset,
+            "game" => FindColorStep.GameTargetPreset,
+            "glow" => FindColorStep.GlowingObjectPreset,
+            _ => null,
+        };
+        if (preset is not { } p) return;
+
+        Tolerance = p.Tolerance;
+        MatchShades = p.MatchShades;
+        TestResult = $"Preset \"{p.Name}\": tolerance {p.Tolerance}, shade variation {(p.MatchShades ? "on" : "off")}.";
     }
 
     public int MinPixels

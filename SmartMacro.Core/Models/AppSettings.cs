@@ -31,6 +31,14 @@ public sealed class AppSettings
     /// <summary>Show the small always-on-top status banner while recording or playing.</summary>
     public bool ShowRunOverlay { get; set; } = true;
 
+    /// <summary>
+    /// Streamer mode, "🎥 Show overlays in OBS / Discord": the run HUD, status banner, target-lock reticle and region
+    /// highlight boxes are left IN screen captures (Windows display affinity WDA_NONE), so OBS, Discord screen share, Xbox
+    /// Game Bar and other recorders show them. Off (default) = they are left out of every capture (WDA_EXCLUDEFROMCAPTURE),
+    /// which is also what keeps SmartMacro's own Find steps from ever seeing them. Changes apply at once to open overlays.
+    /// </summary>
+    public bool ShowOverlaysInObsAndRecording { get; set; }
+
     /// <summary>Record mouse movement (not just clicks) while recording.</summary>
     public bool RecordMouseMovement { get; set; } = true;
 

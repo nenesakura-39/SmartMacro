@@ -109,6 +109,8 @@ public partial class App : Application
         };
         mainViewModel.SettingsApplied += (_, settings) =>
         {
+            // "🎥 Show overlays in OBS / Discord": re-applies the capture rule to every open overlay right away.
+            Services.Vision.OverlayCaptureService.AllowObsCapture = settings.ShowOverlaysInObsAndRecording;
             var failed = _hotkeys.Apply(settings);
             if (failed.Count > 0)
                 mainViewModel.SetStatus($"These shortcuts are used by another program and won't work: {string.Join(", ", failed)}. Change them in Settings.", StatusKind.Warning);

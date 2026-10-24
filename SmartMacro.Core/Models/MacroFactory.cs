@@ -94,7 +94,17 @@ public static class MacroFactory
         StepKind.EndIf => new EndIfStep(),
         StepKind.Repeat => new RepeatStep(),
         StepKind.EndRepeat => new EndRepeatStep(),
-        StepKind.FeedbackLoop => new FeedbackLoopStep(),
+        // Feedback Loop 2.0: new loops use Smart Predictive control (older files and code keep Classic).
+        StepKind.FeedbackLoop => new FeedbackLoopStep
+        {
+            ControlMode = FeedbackControlMode.SmartPredictive, // Feedback Loop 2.0 is the default for new loops
+            MaxCapturesPerSecond = FeedbackPresets.SmartCapturesPerSecond,
+            MinInputChangeMs = FeedbackPresets.SmartMinInputChangeMs,
+            PulsePeriodMs = FeedbackPresets.SmartPulsePeriodMs,
+        },
+        StepKind.WaitForChange => new WaitForChangeStep(),
+        StepKind.FocusWindow => new FocusWindowStep(),
+        StepKind.Screenshot => new ScreenshotStep(),
         StepKind.InputSequence => throw new ArgumentException("Recorded input steps are created by recording in game mode, not added by hand.", nameof(kind)),
         _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unknown step type."),
     };

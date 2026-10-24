@@ -40,13 +40,43 @@ public enum FeedbackCommand
 /// Deferred: a change was wanted but held back by the "minimum time between input changes" (it's retried next frame).
 /// Waiting: the target has been missing longer than the lost timeout and the policy is "release and wait".
 /// TargetLost: the target has been missing longer than the lost timeout and the policy says the loop must end.
+/// Braked: (Smart Predictive) the target reversed direction and the input was flipped at once to brake the bar.
 /// </summary>
 public readonly record struct FeedbackDecision(
     FeedbackCommand Command,
     FeedbackRegion? Region,
     bool Deferred = false,
     bool Waiting = false,
-    bool TargetLost = false);
+    bool TargetLost = false,
+    bool Braked = false);
+
+/// <summary>A feedback loop "brain": the classic region rules (<see cref="FeedbackController"/>) or Smart Predictive (<see cref="PredictiveFeedbackController"/>).</summary>
+public interface IFeedbackController
+{
+    /// <summary>True while the controller wants the key / button held down.</summary>
+    bool IsHeld { get; }
+
+    /// <summary>True while the target is missing and the controller released and waits for it.</summary>
+    bool IsWaiting { get; }
+
+    /// <summary>The marker's current region (null before the first trusted frame and while waiting).</summary>
+    FeedbackRegion? Region { get; }
+
+    /// <param name="now">Time since any fixed point (the same one for every call; paused time should not count).</param>
+    FeedbackDecision Update(FeedbackObservation observation, TimeSpan now);
+}
+
+/// <summary>Picks the controller a Feedback loop step asks for.</summary>
+public static class FeedbackControllers
+{
+    public static IFeedbackController Create(FeedbackLoopStep step, TimeSpan startedAt = default)
+    {
+        ArgumentNullException.ThrowIfNull(step);
+        return step.ControlMode == FeedbackControlMode.SmartPredictive
+            ? new PredictiveFeedbackController(PredictiveFeedbackSettings.From(step), startedAt)
+            : new FeedbackController(FeedbackRules.From(step), startedAt);
+    }
+}
 
 /// <summary>The rule settings the controller needs (taken from a <see cref="FeedbackLoopStep"/>).</summary>
 public sealed record FeedbackRules(
@@ -99,7 +129,7 @@ public sealed record FeedbackRules(
 /// 4. A wanted change is only made if the last change was at least the minimum time ago; otherwise it waits for a
 ///    later frame (Deferred).
 /// </summary>
-public sealed class FeedbackController
+public sealed class FeedbackController : IFeedbackController
 {
     private readonly FeedbackRules _rules;
     private FeedbackRegion? _region;

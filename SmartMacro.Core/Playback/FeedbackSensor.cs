@@ -160,6 +160,9 @@ public sealed class FeedbackStats
     /// <summary>Changes held back by "minimum time between input changes" (tried again on a later frame).</summary>
     public int Deferred { get; set; }
 
+    /// <summary>Smart Predictive: how often a target reversal flipped the input at once (instant brake).</summary>
+    public int Brakes { get; set; }
+
     /// <summary>How many times the target went missing long enough for "release and wait".</summary>
     public int LostEpisodes { get; set; }
 
@@ -208,6 +211,7 @@ public sealed class FeedbackStats
                 $"so it reacts about {work:0}-{work + interval:0} ms after the screen changes, plus the game's own delay";
         text += $"; {InputChanges} input change{(InputChanges == 1 ? "" : "s")} ({Presses} press, {Releases} release, {Taps} tap";
         if (Deferred > 0) text += $", {Deferred} delayed by the minimum time between changes";
+        if (Brakes > 0) text += $", {Brakes} instant brake{(Brakes == 1 ? "" : "s")} on a target reversal";
         text += ")";
         text += $"; marker found in {Share(MarkerFound)} of frames, unclear in {Share(MarkerUnclear)}, missing in {Share(MarkerMissing)}";
         if (IgnoredJumps > 0) text += $", {IgnoredJumps} jump{(IgnoredJumps == 1 ? "" : "s")} ignored";

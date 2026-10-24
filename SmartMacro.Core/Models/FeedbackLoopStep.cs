@@ -80,6 +80,25 @@ public enum FeedbackPreset
     ClickWhenInZone,
 }
 
+/// <summary>How a feedback loop turns what it sees into hold / release.</summary>
+public enum FeedbackControlMode
+{
+    /// <summary>
+    /// "Classic Simple Hold": the region rules (before / inside / after the zone → Hold / Release / Keep / Tap / Pulse),
+    /// exactly as before Feedback Loop 2.0. Older files and Click-when-in-zone loops use it.
+    /// </summary>
+    ClassicSimpleHold,
+
+    /// <summary>
+    /// "Smart Predictive (PD + Brake — Best for Fisch)": tracks where the target and the bar are AND how fast they move,
+    /// predicts the gap <see cref="FeedbackLoopStep.LeadPredictionFactor"/> seconds ahead (so a fast bar is released
+    /// before it overshoots), micro-pulses the input near the target so a bar with gravity hovers
+    /// (<see cref="FeedbackLoopStep.UsePwmMicroPulse"/>), and brakes at once when the target reverses direction.
+    /// Uses the Before / After rules only to know which way holding pushes the bar. See PredictiveFeedbackController.
+    /// </summary>
+    SmartPredictive,
+}
+
 /// <summary>Which kind of input the loop controls.</summary>
 public enum FeedbackInputKind
 {
@@ -197,6 +216,35 @@ public sealed class FeedbackLoopStep : MacroStep
     /// </summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public bool FinishWhenInZone { get; set; }
+
+    // ---------------- Smart Predictive (Feedback Loop 2.0) ----------------
+
+    /// <summary>
+    /// Classic (default for older files and code) or Smart Predictive (new toolbox steps and the game presets). Only saved
+    /// when it isn't Classic.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public FeedbackControlMode ControlMode { get; set; } = FeedbackControlMode.ClassicSimpleHold;
+
+    /// <summary>
+    /// Smart Predictive: how far ahead (seconds) the target and the bar are predicted from their speeds. 0.18 = 180 ms:
+    /// predictedError = (target + targetVelocity × 0.18) − (bar + barVelocity × 0.18).
+    /// </summary>
+    public double LeadPredictionFactor { get; set; } = DefaultLeadPredictionFactor;
+
+    public const double DefaultLeadPredictionFactor = 0.18;
+
+    /// <summary>Smart Predictive: a predicted gap of at most this many pixels counts as "on target" (hover / pulse zone).</summary>
+    public int DeadzonePx { get; set; } = DefaultDeadzonePx;
+
+    public const int DefaultDeadzonePx = 6;
+
+    /// <summary>
+    /// Smart Predictive: near the target (inside the dead zone) micro-pulse the input at a proportional duty cycle
+    /// (every <see cref="PulsePeriodMs"/>) so a bar with gravity hovers in place, instead of full hold / full release.
+    /// Off = keep the current state inside the dead zone.
+    /// </summary>
+    public bool UsePwmMicroPulse { get; set; } = true;
 
     // ---------------- Act ----------------
 

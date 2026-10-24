@@ -108,8 +108,14 @@ public class SmallTemplateAndForegroundMatchingTests
         var screen = Textured(400, 300, Water, seed: 2);                         // now it spawned over water
         TestImages.Paste(screen, SeeThroughButton(Textured(60, 50, Water, seed: 3)), 150, 120);
 
+        // Updated on purpose (Find image bug-fix pass, automatic foreground masking): the wood around the ring is the
+        // picture's plain background, so the normal search now scores the white ring + letters only and finds the button
+        // over water too. With that automatic masking off, the whole-picture comparison still fails as before.
+        var plain = TemplateMatcher.Find(screen, template, new TemplateMatchOptions { MinScore = 0.85, AutoMaskBackground = false });
+        Assert.Null(plain.Best); // the brown inside the ring doesn't match blue water
+
         var normal = TemplateMatcher.Find(screen, template, new TemplateMatchOptions { MinScore = 0.85 });
-        Assert.Null(normal.Best); // the brown inside the ring doesn't match blue water
+        Assert.Equal(new ScreenRect(150, 120, 60, 50), Assert.IsType<VisualMatch>(normal.Best).Bounds);
 
         var foreground = TemplateMatcher.Find(screen, template, new TemplateMatchOptions { MinScore = 0.85, MatchForeground = true });
         var best = Assert.IsType<VisualMatch>(foreground.Best);

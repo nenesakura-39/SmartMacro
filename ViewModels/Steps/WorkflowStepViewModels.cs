@@ -54,6 +54,16 @@ public sealed record ScreenTools(IFindTextTools? Text, IVisionTools? Vision, ISc
             case FeedbackLoopStepViewModel feedback:
                 feedback.Tools = this;
                 break;
+            case WaitForChangeStepViewModel waitForChange:
+                waitForChange.Tools = Vision;
+                break;
+            case FocusWindowStepViewModel focus:
+                focus.Layout = Layout;
+                break;
+            case ScreenshotStepViewModel screenshot:
+                screenshot.Tools = Vision;
+                screenshot.Layout = Layout;
+                break;
         }
     }
 }

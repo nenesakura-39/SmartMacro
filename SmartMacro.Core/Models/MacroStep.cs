@@ -25,6 +25,11 @@ public enum StepKind
 
     // Stage 4: continuous visual feedback (see FeedbackLoopStep.cs).
     FeedbackLoop,
+
+    // Wait for screen change (VISION & AI) and the UTILITY & GAME steps (see UtilitySteps.cs).
+    WaitForChange,
+    FocusWindow,
+    Screenshot,
 }
 
 public enum MacroMouseButton
@@ -161,6 +166,9 @@ public static class MouseMotionDefaults
 [JsonDerivedType(typeof(RepeatStep), "repeat")]
 [JsonDerivedType(typeof(EndRepeatStep), "endRepeat")]
 [JsonDerivedType(typeof(FeedbackLoopStep), "feedbackLoop")]
+[JsonDerivedType(typeof(WaitForChangeStep), "waitForChange")]
+[JsonDerivedType(typeof(FocusWindowStep), "focusWindow")]
+[JsonDerivedType(typeof(ScreenshotStep), "screenshot")]
 public abstract class MacroStep
 {
     public Guid Id { get; set; } = Guid.NewGuid();
@@ -594,8 +602,37 @@ public sealed class FindTextStep : ScreenSearchStep
 {
     public string Text { get; set; } = string.Empty;
 
-    public TextMatchMode MatchMode { get; set; } = TextMatchMode.Contains;
-    public bool CaseSensitive { get; set; }
+    /// <summary>
+    /// Whole words (new steps) or "contains" (the text may be part of a longer word). Saved as before; older files keep
+    /// what they stored (they were made with "contains").
+    /// </summary>
+    public TextMatchMode MatchMode { get; set; } = TextMatchMode.WholeWords;
+
+    /// <summary>Upper / lower case must match exactly (new steps: on). Older files keep what they stored.</summary>
+    public bool CaseSensitive { get; set; } = true;
+
+    /// <summary>
+    /// "Match whole word only (e.g. 'art' won't match 'apart')": the text must be a complete word on screen – never a
+    /// piece of a longer word – and leading / trailing punctuation of the screen word is ignored ("art," matches "art").
+    /// The same setting as <see cref="MatchMode"/> = <see cref="TextMatchMode.WholeWords"/> (not saved separately).
+    /// </summary>
+    [JsonIgnore]
+    public bool MatchWholeWord
+    {
+        get => MatchMode == TextMatchMode.WholeWords;
+        set => MatchMode = value ? TextMatchMode.WholeWords : TextMatchMode.Contains;
+    }
+
+    /// <summary>
+    /// "Match exact case (e.g. 'aRt' only matches 'aRt')": compares with exact upper / lower case (ordinal). The same
+    /// setting as <see cref="CaseSensitive"/> (not saved separately).
+    /// </summary>
+    [JsonIgnore]
+    public bool MatchCase
+    {
+        get => CaseSensitive;
+        set => CaseSensitive = value;
+    }
 
     /// <summary>How close the OCR text must be to the search text (50-100). Lower = more forgiving of OCR mistakes.</summary>
     public int MinSimilarityPercent { get; set; } = 85;
@@ -704,6 +741,23 @@ public sealed class FindColorStep : ScreenSearchStep
 
     /// <summary>The patch must have at least this many pixels (ignores stray single pixels).</summary>
     public int MinPixels { get; set; } = 10;
+
+    /// <summary>
+    /// "Shade variation": also match darker / lighter shades of the same colour (the shadowed and highlighted sides of a
+    /// 3D ball, a glowing target), not only the colour ± <see cref="Tolerance"/>. A pixel then counts when, brought to the
+    /// colour's brightness (50 %–200 % of it), it is within the tolerance. Off for older files; only saved when on.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public bool MatchShades { get; set; }
+
+    /// <summary>The one-click tuning presets of the Find colour editor.</summary>
+    public static readonly (string Name, int Tolerance, bool MatchShades) ExactUiPreset = ("Exact UI Color (Strict)", 10, false);
+
+    /// <inheritdoc cref="ExactUiPreset"/>
+    public static readonly (string Name, int Tolerance, bool MatchShades) GameTargetPreset = ("Game Target / Solid Object (Recommended)", 28, true);
+
+    /// <inheritdoc cref="ExactUiPreset"/>
+    public static readonly (string Name, int Tolerance, bool MatchShades) GlowingObjectPreset = ("Lighting / Glowing Object (Broad)", 50, true);
 
     [JsonIgnore]
     public override StepKind Kind => StepKind.FindColor;

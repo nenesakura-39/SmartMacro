@@ -222,12 +222,14 @@ public static class StepCategories
     public const string Logic = "Logic";
     public const string Feedback = "Feedback";
     public const string Recorded = "Recorded";
+    public const string Utility = "Utility";
 
     public static string Of(StepKind kind) => kind switch
     {
         StepKind.Delay => Timing,
         StepKind.MouseMove or StepKind.MouseClick or StepKind.MouseScroll or StepKind.KeyPress or StepKind.TypeText => Input,
-        StepKind.FindText or StepKind.FindImage or StepKind.FindColor => Vision,
+        StepKind.FindText or StepKind.FindImage or StepKind.FindColor or StepKind.WaitForChange => Vision,
+        StepKind.FocusWindow or StepKind.Screenshot => Utility,
         StepKind.If or StepKind.Else or StepKind.EndIf or StepKind.Repeat or StepKind.EndRepeat => Logic,
         StepKind.FeedbackLoop => Feedback,
         _ => Recorded,
@@ -275,6 +277,7 @@ public sealed class StepTypeFilterConverter : IValueConverter
             "Input" => c => c is StepCategories.Input or StepCategories.Timing,
             "Vision" => c => c is StepCategories.Vision or StepCategories.Feedback,
             "Logic" => c => c is StepCategories.Logic,
+            "Utility" => c => c is StepCategories.Utility,
             _ => null,
         };
         return keep is null ? value : types.Where(t => keep(StepCategories.Of(t.Kind))).ToList();

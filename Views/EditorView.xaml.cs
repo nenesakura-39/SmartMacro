@@ -268,6 +268,33 @@ public partial class EditorView : UserControl
     /// under the cursor grabbed the wheel and silently changed its value while the user was only scrolling past it.
     /// An OPEN drop-down list still scrolls its own items.
     /// </summary>
+    /// <summary>
+    /// Responsive 3-column layout: when the window gets narrow, take the missing width from the Add step and Properties
+    /// panels (in proportion to how much each can still give, never below their MinWidth), so the Workflow steps column
+    /// in the middle keeps its MinWidth. Only fixed-pixel widths are touched; a size the user dragged wider is kept
+    /// whenever there's room for it.
+    /// </summary>
+    private void Workspace_SizeChanged(object sender, SizeChangedEventArgs e)
+    {
+        if (sender is not Grid grid || grid.ColumnDefinitions.Count < 5) return;
+        ColumnDefinition left = grid.ColumnDefinitions[0], middle = grid.ColumnDefinitions[2], right = grid.ColumnDefinitions[4];
+        if (!left.Width.IsAbsolute || !right.Width.IsAbsolute) return;
+
+        double gaps = grid.ColumnDefinitions[1].ActualWidth + grid.ColumnDefinitions[3].ActualWidth;
+        double missing = left.Width.Value + right.Width.Value + middle.MinWidth + gaps - e.NewSize.Width;
+        if (missing <= 0) return;
+
+        double leftSpare = Math.Max(0, left.Width.Value - left.MinWidth);
+        double rightSpare = Math.Max(0, right.Width.Value - right.MinWidth);
+        double spare = leftSpare + rightSpare;
+        if (spare <= 0) return;
+
+        double cut = Math.Min(missing, spare);
+        double leftCut = cut * leftSpare / spare;
+        left.Width = new GridLength(left.Width.Value - leftCut);
+        right.Width = new GridLength(right.Width.Value - (cut - leftCut));
+    }
+
     private void Properties_PreviewMouseWheel(object sender, MouseWheelEventArgs e)
     {
         if (e.Handled || sender is not ScrollViewer panel) return;

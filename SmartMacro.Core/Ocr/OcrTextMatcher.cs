@@ -26,6 +26,8 @@ public static class OcrTextMatcher
         var foldedTarget = normalizeLookAlikes ? Normalize(FoldLookAlikes(query), caseSensitive) : null;
 
         var targetWordCount = target.Split(' ').Length;
+        var wholeWords = mode == TextMatchMode.WholeWords;
+        var targetIgnoringCase = Normalize(query, caseSensitive: false);
         var candidates = new List<TextMatch>();
 
         foreach (var line in result.Lines)
@@ -37,8 +39,20 @@ public static class OcrTextMatcher
                 for (var length = Math.Max(1, targetWordCount - 1); length <= targetWordCount + 1 && start + length <= words.Count; length++)
                 {
                     var span = words.GetRange(start, length);
-                    var rawSpan = string.Join(" ", span.Select(w => w.Text));
+                    // Whole words: punctuation stuck to the screen words doesn't count ("art," / "(art)" are the word "art").
+                    var rawSpan = string.Join(" ", span.Select(w => wholeWords ? TrimPunctuation(w.Text) : w.Text));
                     var spanText = Normalize(rawSpan, caseSensitive);
+
+                    // Whole words: the text inside a longer word ("art" in "apart" / "apartment") is never a match,
+                    // however similar the rest is.
+                    if (wholeWords && IsInsideLongerWord(spanText, target, Normalize(rawSpan, caseSensitive: false), targetIgnoringCase))
+                        continue;
+
+                    // Exact case: a difference in upper / lower case alone ("Art" / "art" for "aRt") is never an OCR
+                    // mistake, so it never matches – not even through the "similar enough" tolerance.
+                    if (caseSensitive && spanText != target && string.Equals(Normalize(rawSpan, caseSensitive: false), targetIgnoringCase, StringComparison.Ordinal))
+                        continue;
+
                     var similarity = Score(spanText, target, mode);
                     if (foldedTarget is not null && similarity < 1)
                         similarity = Math.Max(similarity, Score(Normalize(FoldLookAlikes(rawSpan), caseSensitive), foldedTarget, mode));
@@ -69,6 +83,44 @@ public static class OcrTextMatcher
             .ThenBy(a => a.Bounds.Y)
             .ThenBy(a => a.Bounds.X)
             .ToList();
+    }
+
+    /// <summary>
+    /// The word without leading / trailing punctuation or symbols ("art," → "art", "(OK)" → "OK"); unchanged when it is
+    /// nothing but punctuation.
+    /// </summary>
+    public static string TrimPunctuation(string word)
+    {
+        if (string.IsNullOrEmpty(word)) return word ?? string.Empty;
+        int start = 0, end = word.Length;
+        while (start < end && IsTrimmable(word[start])) start++;
+        while (end > start && IsTrimmable(word[end - 1])) end--;
+        return start == end ? word : word[start..end];
+
+        // '|' is kept: OCR reads a capital I as a pipe ("|nfo"), and look-alike folding turns it back into I.
+        static bool IsTrimmable(char c) => c != '|' && !char.IsLetterOrDigit(c) && !char.IsWhiteSpace(c);
+    }
+
+    /// <summary>
+    /// True when the search text appears in the span only as a piece of a longer word (a letter or digit right before or
+    /// after it), e.g. "ART" in "APART" or "APARTMENT". Checked without case so "Art" inside "Apartment" counts too.
+    /// A span that also contains the text as a complete word is fine.
+    /// </summary>
+    internal static bool IsInsideLongerWord(string spanText, string target, string spanIgnoringCase, string targetIgnoringCase)
+    {
+        if (spanText == target || targetIgnoringCase.Length == 0) return false;
+        var embedded = false;
+        for (var at = spanIgnoringCase.IndexOf(targetIgnoringCase, StringComparison.Ordinal); at >= 0;
+             at = spanIgnoringCase.IndexOf(targetIgnoringCase, at + 1, StringComparison.Ordinal))
+        {
+            var end = at + targetIgnoringCase.Length;
+            var letterBefore = at > 0 && char.IsLetterOrDigit(spanIgnoringCase[at - 1]);
+            var letterAfter = end < spanIgnoringCase.Length && char.IsLetterOrDigit(spanIgnoringCase[end]);
+            if (!letterBefore && !letterAfter) return false; // also there as a whole word
+            embedded = true;
+        }
+
+        return embedded;
     }
 
     /// <summary>0..1, where 1 means identical (after normalizing).</summary>

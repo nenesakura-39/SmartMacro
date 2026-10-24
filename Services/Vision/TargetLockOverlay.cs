@@ -53,7 +53,7 @@ public sealed class TargetLockOverlay : Window
     private readonly DispatcherTimer _holdTimer;
     private ScreenRect _bounds;
     private TargetDetection? _target;
-    private bool _excludedFromCapture;
+    private bool _streamSafe; // streamer mode reticle: drawn only around (never over) the target, short hold
 
     public TargetLockOverlay()
     {
@@ -93,8 +93,8 @@ public sealed class TargetLockOverlay : Window
     /// </summary>
     public static void BeforeCapture() => CaptureShield.BeforeCapture();
 
-    /// <summary>True when Windows leaves the reticle out of captures (false until it was shown once).</summary>
-    public bool IsExcludedFromCapture => _excludedFromCapture;
+    /// <summary>True when Windows leaves the reticle out of captures (false until it was shown once, and in streamer mode).</summary>
+    public bool IsExcludedFromCapture => OverlayCaptureService.IsExcluded(this);
 
     /// <summary>Flashes the reticle on a detected target (replaces the previous one right away). UI thread.</summary>
     public void ShowTarget(TargetDetection target) => ShowTarget(target, nearMiss: false, hold: null, badgeText: null);
@@ -110,7 +110,14 @@ public sealed class TargetLockOverlay : Window
         NeonBright = nearMiss ? NearMissAmberBright : NeonCyanBright;
         Lock = nearMiss ? NearMissCenter : LockGreen;
         _badgeOverride = badgeText;
-        _holdTimer.Interval = hold is { } h && h > TimeSpan.Zero ? h : HoldTime;
+
+        // "🎥 Show overlays in OBS / Discord": the playback reticle is in captures, so it must never cover what the next
+        // Find step looks at: drawn only around the target and gone after 180 ms. (Editor "🧪 Test" reticles pass their
+        // own hold time and keep the normal look; they're hidden before SmartMacro's next capture like before.)
+        _streamSafe = hold is null && OverlayCapturePolicy.NeedsNonInterferingReticle(OverlayCaptureService.AllowObsCapture);
+        _holdTimer.Interval = hold is { } h && h > TimeSpan.Zero
+            ? h
+            : OverlayCapturePolicy.ReticleHold(HoldTime, OverlayCaptureService.AllowObsCapture);
 
         var box = target.Bounds;
         var bounds = new ScreenRect(box.X - Pad, box.Y - Pad - BadgeRoom, box.Width + 2 * Pad, box.Height + 2 * Pad + BadgeRoom)
@@ -124,7 +131,7 @@ public sealed class TargetLockOverlay : Window
         if (!IsVisible) Show(); // first time: OnSourceInitialized sets the styles and places it
         ApplyBounds();
         Draw();
-        if (!_excludedFromCapture) CaptureShield.MarkVisible(this, HideNow);
+        if (!_streamSafe && !OverlayCaptureService.IsExcluded(this)) CaptureShield.MarkVisible(this, HideNow);
 
         _holdTimer.Stop();
         _holdTimer.Start();
@@ -146,8 +153,8 @@ public sealed class TargetLockOverlay : Window
         var style = NativeMethods.GetWindowLongValue(hwnd, NativeMethods.GWL_EXSTYLE);
         style |= NativeMethods.WS_EX_TRANSPARENT | NativeMethods.WS_EX_LAYERED | NativeMethods.WS_EX_NOACTIVATE | NativeMethods.WS_EX_TOOLWINDOW;
         NativeMethods.SetWindowLongValue(hwnd, NativeMethods.GWL_EXSTYLE, style);
-        // The next Find step must never "see" the reticle.
-        _excludedFromCapture = CaptureShield.TryExclude(hwnd);
+        // The next Find step must never "see" the reticle (streamer mode: captures see it, see ShowTarget).
+        CaptureShield.TryExclude(this);
         ApplyBounds();
     }
 
@@ -184,37 +191,45 @@ public sealed class TargetLockOverlay : Window
         double x = r.X - _bounds.X, y = r.Y - _bounds.Y, w = Math.Max(2, r.Width), h = Math.Max(2, r.Height);
         var glow = new DropShadowEffect { Color = Neon, BlurRadius = 14, ShadowDepth = 0, Opacity = 1 };
 
-        // Thin neon box with a faint fill.
+        // Streamer mode (captures see the reticle): nothing may land on the target itself – the box sits at least
+        // OverlayCapturePolicy.StreamReticleClearancePx outside it, without the faint fill, the inward glow or the centre mark.
+        var gap = _streamSafe ? OverlayCapturePolicy.StreamReticleClearancePx + 2 : 3;
+
+        // Thin neon box with a faint fill. (A WPF Rectangle draws its stroke inside its own bounds.)
         var box = new Rectangle
         {
-            Width = w + 6,
-            Height = h + 6,
+            Width = w + 2 * gap,
+            Height = h + 2 * gap,
             Stroke = new SolidColorBrush(Color.FromArgb(0xCC, Neon.R, Neon.G, Neon.B)),
             StrokeThickness = 1.5,
-            Fill = new SolidColorBrush(Color.FromArgb(0x16, Neon.R, Neon.G, Neon.B)),
+            Fill = _streamSafe ? Brushes.Transparent : new SolidColorBrush(Color.FromArgb(0x16, Neon.R, Neon.G, Neon.B)),
             RadiusX = 3,
             RadiusY = 3,
-            Effect = glow,
+            Effect = _streamSafe ? null : glow,
         };
-        Canvas.SetLeft(box, x - 3);
-        Canvas.SetTop(box, y - 3);
+        Canvas.SetLeft(box, x - gap);
+        Canvas.SetTop(box, y - gap);
         _canvas.Children.Add(box);
 
         // Corner brackets just outside the box (the "lock").
         var arm = Math.Clamp(Math.Min(w, h) * 0.28, 8, 26);
-        double left = x - 9, top = y - 9, right = x + w + 9, bottom = y + h + 9;
+        var out_ = gap + 6;
+        double left = x - out_, top = y - out_, right = x + w + out_, bottom = y + h + out_;
         AddBracket(left, top, arm, arm);
         AddBracket(right, top, -arm, arm);
         AddBracket(left, bottom, arm, -arm);
         AddBracket(right, bottom, -arm, -arm);
 
-        // Centre mark on the spot a click would use.
-        var cx = target.X - _bounds.X;
-        var cy = target.Y - _bounds.Y;
-        _canvas.Children.Add(MakeLine(cx - 7, cy, cx - 2, cy, Lock, 2));
-        _canvas.Children.Add(MakeLine(cx + 2, cy, cx + 7, cy, Lock, 2));
-        _canvas.Children.Add(MakeLine(cx, cy - 7, cx, cy - 2, Lock, 2));
-        _canvas.Children.Add(MakeLine(cx, cy + 2, cx, cy + 7, Lock, 2));
+        // Centre mark on the spot a click would use (not in streamer mode: it would sit on the target).
+        if (!_streamSafe)
+        {
+            var cx = target.X - _bounds.X;
+            var cy = target.Y - _bounds.Y;
+            _canvas.Children.Add(MakeLine(cx - 7, cy, cx - 2, cy, Lock, 2));
+            _canvas.Children.Add(MakeLine(cx + 2, cy, cx + 7, cy, Lock, 2));
+            _canvas.Children.Add(MakeLine(cx, cy - 7, cx, cy - 2, Lock, 2));
+            _canvas.Children.Add(MakeLine(cx, cy + 2, cx, cy + 7, Lock, 2));
+        }
 
         // "🎯 98% · 0.6ms · Find image" badge above the target (below it when there's no room); ⚡ = found at its last spot.
         var badge = new Border

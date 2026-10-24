@@ -225,6 +225,19 @@
                             <CheckBox Style="{StaticResource SettingSwitch}" IsChecked="{Binding ShowRunOverlay}"
                                       Content="Show mini status overlay while recording or playing" AutomationProperties.Name="Show mini status overlay" />
                             <TextBlock Style="{StaticResource SettingHelp}" Text="A small click-through pill in the top-right corner: the current step and what it's doing." />
+
+                            <!-- Streamer mode: applied (and saved) the moment it's switched, also from the editor's top bar. -->
+                            <Border Margin="0,12,0,2" Padding="12,10" CornerRadius="8" Background="{StaticResource VisionSoftBrush}"
+                                    BorderBrush="{StaticResource VisionAccentBrush}" BorderThickness="1">
+                                <StackPanel>
+                                    <CheckBox Style="{StaticResource SettingSwitch}" IsChecked="{Binding ShowOverlaysInObsAndRecording}" Margin="0"
+                                              Content="🎥 Show overlays in OBS / Discord" FontWeight="SemiBold"
+                                              ToolTip="When ON, the Run HUD, status banner, target-lock reticle, and region highlight boxes are visible in OBS, Discord streams, and screen recordings"
+                                              AutomationProperties.Name="Show overlays in OBS and Discord" />
+                                    <TextBlock Style="{StaticResource SettingHelp}"
+                                               Text="When ON, the Run HUD, status banner, target-lock reticle, and region highlight boxes are visible in OBS, Discord streams, and screen recordings. Off (default): Windows leaves them out of every capture, so viewers don't see them. Applied at once to overlays that are open. While it's on, the target-lock reticle is drawn only around a found target (never over it) and fades after 0.18 s, so SmartMacro's own Find steps don't see it. Pickers (Pick area / color / position) always stay out of captures – they'd end up in the picture you pick." />
+                                </StackPanel>
+                            </Border>
                             <CheckBox Style="{StaticResource SettingSwitch}" IsChecked="{Binding SmoothMouseMoves}"
                                       Content="Smooth mouse movement during playback (glide instead of jumping)"
                                       AutomationProperties.Name="Smooth mouse movement during playback"

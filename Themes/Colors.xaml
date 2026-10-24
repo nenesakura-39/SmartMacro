@@ -46,6 +46,8 @@
     <Color x:Key="FeedbackBadgeColor">#064E3B</Color>
     <Color x:Key="RecordedAccentColor">#94A3B8</Color>  <!-- Recorded input -->
     <Color x:Key="RecordedBadgeColor">#1E293B</Color>
+    <Color x:Key="UtilityAccentColor">#EC4899</Color>   <!-- Focus window / Take screenshot (UTILITY & GAME) -->
+    <Color x:Key="UtilityBadgeColor">#831843</Color>
 
     <!-- ============ Brushes ============ -->
     <SolidColorBrush x:Key="BackgroundBrush" Color="{StaticResource BackgroundColor}" />
@@ -113,8 +115,13 @@
     <SolidColorBrush x:Key="RecordedAccentBrush" Color="{StaticResource RecordedAccentColor}" />
     <SolidColorBrush x:Key="RecordedBadgeBrush" Color="{StaticResource RecordedBadgeColor}" />
     <SolidColorBrush x:Key="RecordedSoftBrush" Color="#2694A3B8" />
+    <SolidColorBrush x:Key="UtilityAccentBrush" Color="{StaticResource UtilityAccentColor}" />
+    <SolidColorBrush x:Key="UtilityBadgeBrush" Color="{StaticResource UtilityBadgeColor}" />
+    <SolidColorBrush x:Key="UtilitySoftBrush" Color="#26EC4899" />
 
-    <FontFamily x:Key="IconFont">Segoe Fluent Icons, Segoe MDL2 Assets</FontFamily>
+    <!-- Fallback chain: any character the icon fonts don't have (▶, ✕, ↑ …) falls back to Segoe UI Symbol / Segoe UI
+         instead of rendering as an empty ▯ box. -->
+    <FontFamily x:Key="IconFont">Segoe Fluent Icons, Segoe MDL2 Assets, Segoe UI Symbol, Segoe UI</FontFamily>
     <FontFamily x:Key="UiFont">Segoe UI Variable Text, Segoe UI</FontFamily>
 
 </ResourceDictionary>

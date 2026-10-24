@@ -1,6 +1,16 @@
 # SmartMacro – Project Status / Handoff
 
-_Last updated: 2026-10-24 (Parts 2–4 of the `25ed016` pass – near-miss vision, 🧪 Test Step (Ctrl+T), 📚 Blueprints, In-App
+_Last updated: 2026-10-24 (Upgrade 3 of 3 – new steps "Wait for screen change" (VISION & AI), "Focus window" and "Take
+screenshot" (new UTILITY & GAME toolbox section + Ctrl+K palette): **built + tested with `tools\verify.cmd` on the owner's PC:
+0 warnings, 0 errors, 1074 / 1074 passed**; not committed, not tried by hand. The "Sound / Voice Alert" step was left out on
+purpose by the owner (a later update: it needs more design work first).
+Before it: Feedback Loop 2.0 – Smart Predictive PD + brake + hover pulse, 3 game presets (Upgrade 2 of 3): built + tested,
+1057 / 1057; not tried in a game by hand.
+Before it: Streamer mode "🎥 Show overlays in OBS / Discord" (Upgrade 1 of 3): built + tested, 1040 / 1040; not checked in OBS by hand.
+Before it: UI + Vision / OCR bug-fix pass – 6 fixes: glyph boxes, responsive layout, Find image
+foreground masking + margin trim, Find colour biggest object + reliable game click + presets, Find text whole word + exact case,
+tests: **built + tested by the AI in Visual Studio on the owner's PC: Rebuild 0 warnings, 0 errors, 1034 / 1034 passed**; not
+committed, UI not checked by hand. Before it: Parts 2–4 of the `25ed016` pass – near-miss vision, 🧪 Test Step (Ctrl+T), 📚 Blueprints, In-App
 Manual page: **built + tested on the owner's PC: 0 warnings, 0 errors, 1001 / 1001 passed**; not committed, runtime not checked by
 hand. Before it: Bug-fix pass on `25ed016` – Part 1 (988 / 988). Before it: AAA Studio UI Upgrades 1–3 – guide rails + live step progress bar, Ctrl+K Command Palette,
 post-run summary pill: **built + tested on the owner's PC: 0 warnings, 0 errors, 979 / 979 passed**; not committed, runtime
@@ -37,6 +47,112 @@ Developer: Riku (リク) · Brand: KuroLogic_
 | Release package | `publish\SmartMacro-1.0.0-win-x64\SmartMacro.exe` is an OLD build (made right after `159d6b3`, before Stage 1) | – | ignored by git |
 
 
+
+## Upgrade 3 – new steps (2026-10-24, Upgrade 3 of 3): **built + tested** (`tools\verify.cmd`: 0 warnings, 0 errors, **1074 / 1074 passed**)
+- Owner decision: **no "Sound / Voice Alert" (AlertStep) for now** – maybe a later update (needs more details first).
+- Model (`SmartMacro.Core/Models/UtilitySteps.cs`, StepKinds `WaitForChange`, `FocusWindow`, `Screenshot`; JSON types
+  `waitForChange`, `focusWindow`, `screenshot`; they need file format 13):
+  - `WaitForChangeStep`: area, `MinChangedPercent` (1 %), `PixelTolerance` (30), `TimeoutMs` (10 s), `CheckIntervalMs`
+    (100), `Action` (none / click / double / right / move / hold at the middle of the change), `WhenNotFound`.
+  - `FocusWindowStep`: `WindowTitle` (contains, ignoring case), `RestoreIfMinimized`, `WaitForWindowMs` (5 s), `SettleMs`
+    (250), `WhenNotFound`.
+  - `ScreenshotStep`: `Area` (main monitor / all monitors / custom area / app window), `FolderPath` (empty = Pictures\SmartMacro
+    Screenshots), `FileNamePrefix` → `Prefix_yyyy-MM-dd_HH-mm-ss-fff.png` (never overwrites: `_2`, `_3`…).
+- Core: `Vision/ScreenChangeDetector.cs` (changed pixels, bounds, centroid = the click spot / last found spot),
+  `Vision/ScreenshotFiles.cs` (area resolution, safe names, PNG save), `IWindowFocuser` (in `ScreenLayout.cs`; the real
+  `ScreenInfoProvider` restores + `SetForegroundWindow` with a temporary `AttachThreadInput`).
+- Engine: `WaitForChangeAsync` (baseline picture; re-baselines after a pause; sets the last found spot + reticle),
+  `FocusWindowAsync`, `TakeScreenshotAsync` (failures only logged, macro carries on; `LastScreenshotPath`).
+- Also: validator rules, describer / activity text, schema 13, target-window coordinate scaling, Vision & Logic filter pill,
+  palette entries "➕ Add: Wait for Screen Change / Focus Window / Take Screenshot".
+- UI: new UTILITY & GAME toolbox section (pink `Utility*` colour tokens), editors in `StepEditorTemplates.xaml`
+  (`ViewModels/Steps/UtilityStepViewModels.cs`: area picker, open-window list, folder chooser / open folder).
+- Tests: `SmartMacro.Tests/UtilityStepsTests.cs` (change + centre, click on change, timeout continue / stop, focus by
+  title, missing window, PNG saved, no-screenshot message, file names, area resolution, validation, round trip / format 13,
+  descriptions, palette, coordinate scaling).
+- To check by hand: Focus window on Roblox while another app is in front; Wait for screen change on a Fisch bite; screenshot
+  folder + file names.
+
+## Feedback Loop 2.0 – Smart Predictive (2026-10-24, Upgrade 2 of 3): **built + tested** (`tools\verify.cmd`: 0 warnings, 0 errors, **1057 / 1057 passed**)
+- Model: `FeedbackControlMode { ClassicSimpleHold, SmartPredictive }` + `ControlMode` (saved only when Smart),
+  `LeadPredictionFactor` (0.18 s), `DeadzonePx` (6), `UsePwmMicroPulse` (true) on `FeedbackLoopStep`. Smart loops need
+  **file format 13** (`MacroDocument.CurrentSchemaVersion` 12 → 13); classic loops keep their old format.
+- `Core/Playback/PredictiveFeedbackController.cs` (new): positions in px, EMA speeds (α 0.5), PD lead prediction
+  `(T + vT·lead) − (P + vP·lead)`, hold / release outside the dead zone, adaptive PWM hover duty inside it, instant brake on a
+  target reversal (> 40 px/s; bypasses the minimum change time, counted as `Brakes`). Hold direction comes from the
+  Before / After rules (`PredictiveFeedbackSettings.HoldDirectionOf`). `IFeedbackController` + `FeedbackControllers.Create`
+  pick Classic or Smart; used by `PlaybackEngine` (progress text shows gap / bar speed / hover) and the Vision Preview
+  (live "🧠 Smart PD" telemetry line).
+- Presets: `FeedbackGamePreset` 🎣 Fisch / Momentum Bar (0.18 s, 6 px, PWM 80 ms, 120 fps, 8 ms), ⚡ Fast Reflex Tracker
+  (0.08 s, 3 px, no PWM), ⚖️ Smooth Balance Bar (0.25 s, 10 px, PWM 120 ms, 60 fps, 16 ms). "Follow target bar" and new toolbox
+  loops are Smart by default; "Click when in zone" stays Classic.
+- Validator: smart-only errors (hold direction unclear, Finish-when-in-zone, lead 0–1 s, dead zone 0–200 px, hover pulse
+  20 ms+); no 60 fps / 16 ms warnings in Smart mode; the classic 50 ms pulse check only applies to Classic.
+- UI: "GAME PRESETS & CONTROL MODE" card in the Feedback loop editor (3 preset buttons, control mode combo, lead / dead zone /
+  PWM / pulse cycle, help text); the rule preview explains Smart mode.
+- Tests: `SmartMacro.Tests/FeedbackLoop2Tests.cs` (PD releases before crossing while Classic still holds, reversal brake
+  within the minimum change time, PWM hover, lost bar, hold direction, factory, presets, validation, file round trip / format 13).
+- To check by hand: Fisch reel with the 🎣 preset; Preview 10 s shows the 🧠 line and the bar shouldn't overshoot.
+
+## Streamer mode – "🎥 Show overlays in OBS / Discord" (2026-10-24, Upgrade 1 of 3): **built + tested** (`tools\verify.cmd`: 0 warnings, 0 errors, **1040 / 1040 passed**)
+Not committed. Upgrades 2 (Feedback loop 2.0) and 3 (new steps) of the same request are still to do.
+- `AppSettings.ShowOverlaysInObsAndRecording` (default off, saved in settings.json; old files load as off).
+- Core `Vision/OverlayCapturePolicy.cs` (pure, tested): affinity WDA_NONE 0x00 (on) / WDA_EXCLUDEFROMCAPTURE 0x11 (off),
+  streamer-mode reticle hold ≤ 180 ms, keep-clear area = target + 6 px.
+- App `Services/Vision/OverlayCaptureService.cs`: `AllowObsCapture` (set from `App.xaml.cs` on every SettingsApplied), `Track(window)`
+  registers overlays, applies the affinity, re-applies live to every open overlay when the switch changes (on each window's
+  dispatcher), forgets closed windows. `CaptureShield.TryExclude(Window)` now goes through it (run HUD / status banner,
+  target-lock reticle, region highlight boxes).
+- Self-capture guard: in streamer mode the playback reticle is drawn only outside the target (box ≥ 8 px out, no fill, no inward
+  glow, no centre mark) and fades after 180 ms; editor "🧪 Test" reticles keep their look and are hidden before SmartMacro's next
+  capture; highlight boxes are closed before SmartMacro's next capture.
+- Not changed on purpose: pickers (Pick area / colour / position + countdown banner) always stay out of captures (they'd end up in
+  the picture being picked); SmartMacro's main window stays excluded during playback (a Find image could match its previews).
+- UI: Settings → Playback & Safety highlighted switch (applies + saves at once, not undone by Revert); editor top bar switch next
+  to "With overlay" (`MainViewModel.ShowOverlaysInObs`). Same label + tooltip in both.
+- Tests: `SmartMacro.Tests/StreamerModeTests.cs` (default, settings.json round trip, old file, affinity, hold, keep-clear).
+- To check by hand: OBS "Display Capture" while a Find image loop plays: switch off → no HUD / reticle in OBS; on → visible;
+  flip it while playing (HUD appears / disappears in OBS at once).
+
+## UI + Vision / OCR bug-fix pass (2026-10-24, on top of the `25ed016` Parts 2–4): **built + tested** (Visual Studio on the owner's PC: Rebuild Solution 0 warnings, 0 errors; Test Explorer **1034 / 1034 passed**)
+Not committed to git. The request's file names didn't all exist (`StepModels.cs` = `Models/MacroStep.cs` + `WorkflowSteps.cs`,
+`ColorMatcher.cs` = `Vision/ColorFinder.cs`, `WindowsOcrEngine.cs` = `Services/Ocr/WindowsOcrService.cs`, which already returned
+per-word boxes). Build / tests were run by clicking Rebuild Solution + Test Explorer "Run All" (computer use, click-only).
+1. **▯ glyph boxes** – cause: plain Unicode (▶ ▼ ✕ ↑ ↓) drawn with the icon font (Segoe Fluent Icons / MDL2 has no such
+   glyphs). `IconFont` now falls back to Segoe UI Symbol / Segoe UI. Fold all / Unfold all = text buttons "▾ Fold all" /
+   "▸ Unfold all" (tooltips "Collapse / Expand all If/Repeat blocks"); step rows ALWAYS show the step number, If / Repeat rows
+   get a vector `Path` chevron next to it (rotates when folded; `CollapseGlyph` text now ▾ / ▸); new `DismissButton` style
+   (vector ✕) for the run-summary and test-result pills; search ↑ ↓ ✕ = vector paths. The MDL2 private-use icons (`&#xE…;`)
+   were kept on purpose: they are Windows' built-in icon font and render; only characters missing from it were the problem.
+2. **Layout** – timing presets (Delay, click hold, key hold, Search timing) = `WrapPanel`, buttons Padding 10,5 / Margin 0,0,6,6,
+   "Reset (0ms)". Workflow steps header: title + count on row 1, toolbar `WrapPanel` on row 2. Macro header: description full
+   width, playback settings / toggles in a `WrapPanel` row 3 (label + box kept together). Properties scroll: no horizontal
+   scroll, 32 px bottom padding. `EditorView.Workspace_SizeChanged` shrinks Add step / Properties (down to MinWidth) so the
+   middle column keeps its MinWidth on narrow windows.
+3. **Find image** – new `Core/Vision/TemplateBackground.cs` (outer-ring background colour within 24, or see-through alpha;
+   `CanMask` = bg ≥ 25 % and fg 15–85 %; `CanTrim` also needs ring ≥ 75 % bg and one main shape ≥ 80 %; `TrimMargins` keeps 1 px,
+   cached per picture, trimmed copy keeps the mask) and `BackgroundMaskMatcher.cs` (score over foreground pixels: per-pixel colour
+   difference after removing the lighting shift, extra cost for a shift > 48, × (0.75 + 0.25 × "distinct from what's behind")).
+   `TemplateMatcher.Find`: when nothing was found → masked search; when found → `Recentre` (±max(4, side/8) px) if the masked
+   score is better. `TemplateMatchOptions.AutoMaskBackground` (default on; off with IgnoreColor). `ScreenProbes.SearchTemplate`
+   = trimmed picture, used by playback + "Test detection now" → the click goes to the target's centre.
+4. **Find colour** – `ColorFinder.FindObjects` (8×8 px cell clustering, biggest cluster, centre of mass; `matchShades` = 50–200 %
+   brightness of the same colour) used by Find colour steps / colour conditions / Test. `FindColorStep.MatchShades` (saved only
+   when on). Editor: 3 preset buttons (🎯 Exact 10 / off, 🔴 Game Target 28 / on, 🌅 Glowing 50 / on; ✓ on the active one),
+   tolerance slider + box, "Shade variation" switch. Engine: every click on a found target (Find text / image / colour, If "when
+   found", Mouse click on the last found spot or a Smart-Aim match) = move → 15 ms rest (`TargetHoverMs`) → down → ≥ 25 ms
+   (`MinTargetClickHoldMs`) → up. Fixed-position Mouse clicks keep their exact timing (Win32InputSimulator already settles 20 ms
+   after a jump).
+5. **Find text** – `FindTextStep.MatchWholeWord` / `MatchCase` (views of `MatchMode` / `CaseSensitive`, not saved twice); new steps
+   default to whole word + exact case (older files keep their stored Contains / ignore case). `IfStep` / `RepeatStep` /
+   `Condition` expose the same two options for text conditions. `OcrTextMatcher`: whole words never match inside a longer word,
+   punctuation around a screen word is ignored ('|' kept for I look-alikes), a case-only difference never matches with exact
+   case. `ScreenProbes.ProbeText(read, step)` returns the matched word box. Editor: two checkboxes with the requested labels.
+6. **Tests** – new `SmartMacro.Tests/VisionOcrBugFixTests.cs`. Updated on purpose: `OcrTests` click test (MatchCase off, +15 ms
+   rest), 2 `QolTests` found-click timing tests (+15 ms rest, 25 ms minimum hold), `LiveTestFixTests` see-through test (normal
+   search now finds it through automatic masking; with masking off it still fails).
+- To check by hand: toolbar / step rows / pills (no ▯, number visible), window at ~1000 px wide, Find colour presets, a red ball
+  next to a wall in an aim trainer, Find text "art" on a page with "apart".
 
 ## `25ed016` pass – Parts 2–4 (2026-10-24): **built + tested** (`tools\verify.cmd` on the owner's PC: 0 warnings, 0 errors, **1001 / 1001 passed**)
 Owner decisions: Test Step = **Ctrl+T** (F8 stays Pause); real hotkeys kept (defaults: Record Ctrl+Shift+F9, Play / Stop

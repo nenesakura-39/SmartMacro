@@ -59,6 +59,25 @@ public sealed class Condition
         _ => null,
     };
 
+    /// <summary>
+    /// Text conditions: the text must be a whole word on screen ("art" doesn't match "apart"). Stored on the condition's
+    /// <see cref="FindTextStep"/> (<see cref="FindTextStep.MatchWholeWord"/>); true for other kinds.
+    /// </summary>
+    [JsonIgnore]
+    public bool MatchWholeWord
+    {
+        get => (Check as FindTextStep)?.MatchWholeWord ?? true;
+        set { if (Check is FindTextStep text) text.MatchWholeWord = value; }
+    }
+
+    /// <summary>Text conditions: upper / lower case must match exactly (<see cref="FindTextStep.MatchCase"/>); true for other kinds.</summary>
+    [JsonIgnore]
+    public bool MatchCase
+    {
+        get => (Check as FindTextStep)?.MatchCase ?? true;
+        set { if (Check is FindTextStep text) text.MatchCase = value; }
+    }
+
     /// <summary>A new condition of the given kind with sensible defaults (look once, no click).</summary>
     public static Condition Create(ConditionKind kind) => new() { Check = CreateCheck(kind) };
 
@@ -87,6 +106,22 @@ public sealed class Condition
 public sealed class IfStep : MacroStep
 {
     public Condition Condition { get; set; } = Condition.Create(ConditionKind.TextVisible);
+
+    /// <summary>Text condition: whole word only ("art" won't match "apart"). Same setting as <see cref="Condition.MatchWholeWord"/>.</summary>
+    [JsonIgnore]
+    public bool MatchWholeWord
+    {
+        get => Condition?.MatchWholeWord ?? true;
+        set { if (Condition is not null) Condition.MatchWholeWord = value; }
+    }
+
+    /// <summary>Text condition: exact upper / lower case ("aRt" only matches "aRt"). Same setting as <see cref="Condition.MatchCase"/>.</summary>
+    [JsonIgnore]
+    public bool MatchCase
+    {
+        get => Condition?.MatchCase ?? true;
+        set { if (Condition is not null) Condition.MatchCase = value; }
+    }
 
     /// <summary>
     /// Optional "when true" action: when the condition is true because it SAW its text / image / colour (not a negated
@@ -228,6 +263,22 @@ public sealed class RepeatStep : MacroStep
     /// <summary>The condition for While / Until (null for Times).</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public Condition? Condition { get; set; }
+
+    /// <summary>Text condition: whole word only ("art" won't match "apart"). Same setting as <see cref="Condition.MatchWholeWord"/>.</summary>
+    [JsonIgnore]
+    public bool MatchWholeWord
+    {
+        get => Condition?.MatchWholeWord ?? true;
+        set { if (Condition is not null) Condition.MatchWholeWord = value; }
+    }
+
+    /// <summary>Text condition: exact upper / lower case ("aRt" only matches "aRt"). Same setting as <see cref="Condition.MatchCase"/>.</summary>
+    [JsonIgnore]
+    public bool MatchCase
+    {
+        get => Condition?.MatchCase ?? true;
+        set { if (Condition is not null) Condition.MatchCase = value; }
+    }
 
     /// <summary>Safety limit for While / Until: at most this many turns. 0 = no turn limit (then a time limit is required).</summary>
     public int MaxIterations { get; set; } = 100;

@@ -136,13 +136,17 @@ public class FindTextPlaybackTests
         var clock = new FakeClock();
 
         var result = await new PlaybackEngine(input, clock, ocr).RunAsync(MacroWith(
-            new FindTextStep { Text = "submit", Action = FoundTextAction.Click, OffsetX = 5, TimeoutMs = 5000, CheckIntervalMs = 500 }));
+            // Updated on purpose (Find text bug-fix pass): new steps match exact case by default, so this case-insensitive
+            // search ("submit" for "Submit") turns exact case off.
+            new FindTextStep { Text = "submit", MatchCase = false, Action = FoundTextAction.Click, OffsetX = 5, TimeoutMs = 5000, CheckIntervalMs = 500 }));
 
         Assert.Equal(PlaybackOutcome.Completed, result.Outcome);
         Assert.Equal(3, ocr.Reads);
         Assert.Equal(new[] { "move 135,210", "mouse Left down", "mouse Left up" }, input.Calls); // center (130,210) + offset 5
-        // 2 waits of 500 ms + the found click's hold (35 ms, live-test fix) + the settle after the click.
-        Assert.Equal(1000 + PlaybackEngine.FoundClickHoldMs + PlaybackEngine.ClickSettleMs, clock.TotalDelayed.TotalMilliseconds, precision: 3);
+        // 2 waits of 500 ms + the 15 ms rest on the target before the press (reliable game click) + the found click's hold
+        // (35 ms, live-test fix) + the settle after the click.
+        Assert.Equal(1000 + PlaybackEngine.TargetHoverMs + PlaybackEngine.FoundClickHoldMs + PlaybackEngine.ClickSettleMs,
+            clock.TotalDelayed.TotalMilliseconds, precision: 3);
     }
 
     [Fact]

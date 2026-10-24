@@ -392,7 +392,7 @@ public sealed class VisionTools : IVisionTools
         // Shared decoded copy (TemplateCache): read-only here, the preview draws on a clone of the screen capture.
         if (!TemplateCache.TryGetOrDecode(step.TemplateData, step.TemplateWidth, step.TemplateHeight, out var decoded, out var error))
             return error ?? "Capture the image first.";
-        var template = decoded!;
+        var template = ScreenProbes.SearchTemplate(decoded!); // same trimmed picture playback searches for
 
         var (region, where, problem) = TestArea(step);
         if (problem is not null) return $"Can't test right now: {problem}";
@@ -478,7 +478,7 @@ public sealed class VisionTools : IVisionTools
         }
 
         var watch = Stopwatch.StartNew();
-        var result = await Task.Run(() => ColorFinder.Find(frame.Image, color, secondaryColor, step.Tolerance, step.MinPixels, maxResults: 10));
+        var result = await Task.Run(() => ColorFinder.FindObjects(frame.Image, color, secondaryColor, step.Tolerance, step.MinPixels, maxResults: 10, matchShades: step.MatchShades));
         var searchTime = watch.Elapsed;
 
         var picture = frame.Image.Clone();
@@ -681,7 +681,9 @@ public sealed class VisionTools : IVisionTools
                 FeedbackAction.Pulse => $"PULSE {input}, holding about {FeedbackController.PulseDuty(frame.Observation.MarkerPercent!.Value, frame.Observation.ZoneStartPercent, frame.Observation.ZoneEndPercent, copy.WhenBeforeZone, copy.WhenAfterZone):P0} of the time",
                 _ => "change nothing",
             };
-            text += $" The marker is {place}, so the loop would {would}{(copy.FinishWhenInZone && region == FeedbackRegion.Inside ? " and then finish" : "")}. No input was sent.";
+            text += copy.ControlMode == FeedbackControlMode.SmartPredictive
+                ? $" The marker is {place}. Smart Predictive decides from where things are AND how fast they move, so one picture can't say what it would do – use \"Preview 10 s\" to watch its live decisions. No input was sent."
+                : $" The marker is {place}, so the loop would {would}{(copy.FinishWhenInZone && region == FeedbackRegion.Inside ? " and then finish" : "")}. No input was sent.";
         }
         else
         {
@@ -727,8 +729,8 @@ public sealed class VisionTools : IVisionTools
     {
         using var timerResolution = new HighResolutionTimerScope(); // 1 ms timer, like during playback
         var sensor = new FeedbackSensor(step, _capture);
-        var rules = FeedbackRules.From(step);
-        var controller = new FeedbackController(rules);
+        // The real controller the loop would use (Classic rules, or Smart Predictive PD + hover pulse + brake).
+        var controller = FeedbackControllers.Create(step);
         var stats = new FeedbackStats();
         var interval = TimeSpan.FromTicks(TimeSpan.TicksPerSecond / Math.Clamp(step.MaxCapturesPerSecond, 1, Core.Validation.MacroValidator.MaxCapturesPerSecond));
         var loopEnds = new List<string>();
@@ -762,7 +764,7 @@ public sealed class VisionTools : IVisionTools
             {
                 // The real loop would end here. Note it, and start over so the rest of the preview still shows something.
                 loopEnds.Add($"{start.TotalSeconds:0.0} s");
-                controller = new FeedbackController(rules, start);
+                controller = FeedbackControllers.Create(step, start);
             }
 
             if (start >= nextRefresh)
@@ -783,7 +785,7 @@ public sealed class VisionTools : IVisionTools
     }
 
     /// <summary>One or two lines for the live window: where the marker and zone are and what the loop would do.</summary>
-    private static string DescribeLiveFrame(FeedbackFrame frame, FeedbackDecision decision, FeedbackController controller, FeedbackStats stats, TimeSpan elapsed)
+    private static string DescribeLiveFrame(FeedbackFrame frame, FeedbackDecision decision, IFeedbackController controller, FeedbackStats stats, TimeSpan elapsed)
     {
         var marker = frame.Marker.Status switch
         {
@@ -808,7 +810,13 @@ public sealed class VisionTools : IVisionTools
             _ => decision.Deferred ? "→ change held back (min time between changes)" : "",
         };
         var state = controller.IsHeld ? "HELD" : "released";
-        return $"{marker} · {zone} · {where} {action}\nInput: {state} · {stats.FramesPerSecond(elapsed):0} fps · capture {stats.AverageCaptureMs:0.0} ms · detect {stats.AverageDetectMs:0.0} ms · NO input is sent";
+        // Smart Predictive telemetry: speeds of the target and your bar, the predicted gap and the hover duty.
+        var smart = controller is PredictiveFeedbackController pd
+            ? string.Format(System.Globalization.CultureInfo.InvariantCulture,
+                "\n🧠 Smart PD: target {0:0} px/s · bar {1:0} px/s · predicted gap {2:0} px{3} · brakes {4}",
+                pd.TargetVelocity, pd.PlayerVelocity, pd.PredictedError, pd.Duty is { } duty ? $" · hover pulse {duty * 100:0}%" : "", pd.Brakes)
+            : "";
+        return $"{marker} · {zone} · {where} {action}{smart}\nInput: {state} · {stats.FramesPerSecond(elapsed):0} fps · capture {stats.AverageCaptureMs:0.0} ms · detect {stats.AverageDetectMs:0.0} ms · NO input is sent";
     }
 
     private static string DescribeLostAction(FeedbackLostAction action) => action switch

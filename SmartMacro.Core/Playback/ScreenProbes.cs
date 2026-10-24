@@ -161,9 +161,7 @@ public sealed class ScreenProbes
             var (region, problem) = ResolveArea(step, ocr.GetVirtualScreen());
             if (problem is not null) return ScreenProbe.Miss(problem);
             var read = await ocr.ReadAsync(region, t).ConfigureAwait(false);
-            var match = OcrTextMatcher.Find(read, step.Text, step.MatchMode, step.CaseSensitive, step.MinSimilarityPercent / 100.0,
-                step.NormalizeLookAlikes)
-                .FirstOrDefault();
+            var match = ProbeText(read, step);
             return match is null
                 ? ScreenProbe.Miss(DescribeLastRead(read.FullText), region)
                 : new ScreenProbe(true, match.Bounds.CenterX, match.Bounds.CenterY,
@@ -177,13 +175,31 @@ public sealed class ScreenProbes
         });
     }
 
+    /// <summary>
+    /// The best match of a Find text step (or text condition) in what OCR read, or null. Uses the step's
+    /// <see cref="FindTextStep.MatchWholeWord"/> ("art" never matches "apart" / "apartment"; punctuation around a screen word
+    /// is ignored) and <see cref="FindTextStep.MatchCase"/> (ordinal: "aRt" only matches "aRt", never "art" / "Art").
+    /// The match's Bounds are the matched word(s) only – the OCR word boxes – never the whole line, so a click on found
+    /// text lands on that exact word.
+    /// </summary>
+    public static TextMatch? ProbeText(OcrReadResult read, FindTextStep step)
+    {
+        ArgumentNullException.ThrowIfNull(read);
+        ArgumentNullException.ThrowIfNull(step);
+        var mode = step.MatchWholeWord ? TextMatchMode.WholeWords : TextMatchMode.Contains;
+        return OcrTextMatcher.Find(read, step.Text, mode, step.MatchCase, step.MinSimilarityPercent / 100.0, step.NormalizeLookAlikes)
+            .FirstOrDefault();
+    }
+
     private PreparedSearch PrepareImage(FindImageStep step)
     {
         var capture = RequireCapture();
         // Vision Engine Turbo: the picture is decoded once and shared (not again for every run / repeat / poll).
         if (!TemplateCache.TryGetOrDecode(step.TemplateData, step.TemplateWidth, step.TemplateHeight, out var decoded, out var error))
             throw new InvalidOperationException($"The image of this step can't be used: {error}");
-        var template = decoded!;
+        // Extra blank margin around a target on a plain background is trimmed (1 px kept), so the match – and the click
+        // at its centre – is centred on the target itself, not on the rectangle that happened to be captured.
+        var template = SearchTemplate(decoded!);
         var options = ImageMatchOptions(step);
         var hotSpots = _hotSpots;
         var hotKey = hotSpots is null ? default : HotSpotMemory.KeyOf(step);
@@ -336,6 +352,13 @@ public sealed class ScreenProbes
     }
 
     /// <summary>
+    /// The picture a Find image step / image condition actually searches for: the decoded template with extra blank
+    /// margin trimmed (<see cref="TemplateBackground.TrimMargins"/>; the same picture when there's nothing to trim). Used by
+    /// playback and by the editor's "Test detection now", so both search for exactly the same thing.
+    /// </summary>
+    public static BgraImage SearchTemplate(BgraImage decoded) => TemplateBackground.TrimMargins(decoded, out _);
+
+    /// <summary>
     /// The matcher settings for a Find image step or an image condition (If / Repeat / feedback loop). The editor's
     /// "Test detection now" uses this too, so a test, a Find image step and an If condition with the same settings
     /// always search in exactly the same way (same accuracy, colour, edge, background and lighting options).
@@ -377,7 +400,9 @@ public sealed class ScreenProbes
             var t0 = _clock.Elapsed;
             var frame = await capture.CaptureAsync(region, t).ConfigureAwait(false);
             var t1 = _clock.Elapsed;
-            var result = ColorFinder.Find(frame.Image, color, secondaryColor, step.Tolerance, step.MinPixels, maxResults: 20, t);
+            // The biggest colour OBJECT: nearby matching pixels are grouped (8×8 px cells), so a shaded ball is one object and
+            // the click goes to its centre of mass, never to a stray pixel or the top edge.
+            var result = ColorFinder.FindObjects(frame.Image, color, secondaryColor, step.Tolerance, step.MinPixels, maxResults: 20, t, step.MatchShades);
             timer?.Add(t1 - t0, _clock.Elapsed - t1);
 
             if (result.Largest is not { } blob)
@@ -388,7 +413,7 @@ public sealed class ScreenProbes
 
                 // Near miss: the biggest patch that was too small ("4 px of the 10 needed" = 40 %).
                 if (result.MatchingPixels > 0 && step.MinPixels > 1
-                    && ColorFinder.Find(frame.Image, color, secondaryColor, step.Tolerance, 1, maxResults: 1, t).Largest is { } small)
+                    && ColorFinder.FindObjects(frame.Image, color, secondaryColor, step.Tolerance, 1, maxResults: 1, t, step.MatchShades).Largest is { } small)
                 {
                     var smallRect = new ScreenRect(frame.Bounds.X + small.Bounds.X, frame.Bounds.Y + small.Bounds.Y, small.Bounds.Width, small.Bounds.Height);
                     missProbe = missProbe with
@@ -403,7 +428,7 @@ public sealed class ScreenProbes
 
             var x = frame.Bounds.X + (int)Math.Round(blob.CenterX);
             var y = frame.Bounds.Y + (int)Math.Round(blob.CenterY);
-            var more = result.Blobs.Count > 1 ? $", {result.Blobs.Count} patches; the biggest is used" : "";
+            var more = result.Blobs.Count > 1 ? $", {result.Blobs.Count} objects; the biggest is used" : "";
             var patch = new ScreenRect(frame.Bounds.X + blob.Bounds.X, frame.Bounds.Y + blob.Bounds.Y, blob.Bounds.Width, blob.Bounds.Height);
             return new ScreenProbe(true, x, y, $"Found {what.ToLowerInvariant()} at ({x}, {y}): {blob.PixelCount:N0} pixels{more}.", string.Empty, region, patch,
                 1.0, MsSince(started))

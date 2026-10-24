@@ -247,7 +247,7 @@ public class SmartClickSnapshotTests
     [Fact]
     public void Snapshot_settings_are_saved_only_when_used_and_need_format_12()
     {
-        Assert.Equal(12, MacroDocument.CurrentSchemaVersion);
+        Assert.True(MacroDocument.CurrentSchemaVersion >= 12); // 13 since Feedback Loop 2.0
 
         var plainJson = MacroJson.Serialize<MacroStep>(new MouseClickStep { X = 1, Y = 2 });
         foreach (var name in new[] { "targetThumbnail", "targetAnchor", "smartAim", "offsetX", "offsetY", "targetMode" })

@@ -20,7 +20,7 @@ public interface IScreenInfoProvider
 /// (see app.manifest) and every call runs in physical-pixel mode, so these are real pixels — the same coordinates mouse
 /// automation and screen capture use. Safe to call from any thread (playback asks on its background thread).
 /// </summary>
-public sealed class ScreenInfoProvider : IScreenInfoProvider, IScreenLayout
+public sealed class ScreenInfoProvider : IScreenInfoProvider, IScreenLayout, IWindowFocuser
 {
     private const int SM_XVIRTUALSCREEN = 76;
     private const int SM_YVIRTUALSCREEN = 77;
@@ -106,6 +106,39 @@ public sealed class ScreenInfoProvider : IScreenInfoProvider, IScreenLayout
     }
 
     /// <summary>
+    /// "Focus window" step: restore (if asked and minimized) and bring the window to the front. Windows only lets the app
+    /// that owns the foreground change it, so for a moment our input queue is attached to the current foreground window's
+    /// thread (the documented way for automation tools); it is always detached again.
+    /// </summary>
+    public bool TryFocus(WindowInfo window, bool restoreIfMinimized)
+    {
+        ArgumentNullException.ThrowIfNull(window);
+        var hwnd = new IntPtr(window.Handle);
+        if (!WindowApi.IsWindow(hwnd)) return false;
+
+        if (restoreIfMinimized && WindowApi.IsIconic(hwnd))
+            WindowApi.ShowWindow(hwnd, WindowApi.SW_RESTORE);
+        if (NativeMethods.GetForegroundWindow() == hwnd) return true;
+
+        var foreground = NativeMethods.GetForegroundWindow();
+        var foregroundThread = foreground == IntPtr.Zero ? 0u : NativeMethods.GetWindowThreadProcessId(foreground, out _);
+        var ownThread = WindowApi.GetCurrentThreadId();
+        var attached = foregroundThread != 0 && foregroundThread != ownThread
+                       && WindowApi.AttachThreadInput(ownThread, foregroundThread, true);
+        try
+        {
+            WindowApi.BringWindowToTop(hwnd);
+            WindowApi.SetForegroundWindow(hwnd);
+        }
+        finally
+        {
+            if (attached) WindowApi.AttachThreadInput(ownThread, foregroundThread, false);
+        }
+
+        return NativeMethods.GetForegroundWindow() == hwnd;
+    }
+
+    /// <summary>
     /// The window's visible rectangle. DWM's "extended frame bounds" leave out the invisible resize borders that
     /// GetWindowRect includes on Windows 10 / 11, so the search area matches what you see.
     /// </summary>
@@ -180,4 +213,30 @@ internal static class WindowApi
 
     [DllImport("user32.dll")]
     public static extern short GetAsyncKeyState(int vKey);
+
+    // "Focus window" step.
+    public const int SW_RESTORE = 9;
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool IsWindow(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool BringWindowToTop(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool SetForegroundWindow(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool AttachThreadInput(uint idAttach, uint idAttachTo, [MarshalAs(UnmanagedType.Bool)] bool fAttach);
+
+    [DllImport("kernel32.dll")]
+    public static extern uint GetCurrentThreadId();
 }

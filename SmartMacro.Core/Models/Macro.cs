@@ -146,8 +146,11 @@ public sealed class MacroDocument
     /// 12 = adds Smart Click Snapshots (a recorded "what you clicked" picture + Smart-Aim on Mouse click steps, and the
     ///     pictures of clicks inside recorded input) and "on the last found spot + offset" / "by an offset from the
     ///     cursor" targets with X / Y offsets on Move mouse and Mouse click steps.
+    /// 13 = adds Feedback Loop 2.0: "Smart Predictive" control (PD lead prediction, dead zone, hover micro-pulse) on
+    ///     Feedback loop steps. Older versions would silently run such a loop with the classic rules, so it needs 13.
+    ///     Also adds the "Wait for screen change", "Focus window" and "Take screenshot" steps.
     /// </summary>
-    public const int CurrentSchemaVersion = 12;
+    public const int CurrentSchemaVersion = 13;
 
     public int SchemaVersion { get; set; }
     public Macro? Macro { get; set; }
@@ -168,6 +171,8 @@ public sealed class MacroDocument
         {
             var needed = step switch
             {
+                FeedbackLoopStep { ControlMode: not FeedbackControlMode.ClassicSimpleHold } => 13,
+                WaitForChangeStep or FocusWindowStep or ScreenshotStep => 13,
                 _ when UsesVersion12Features(step) => 12,
                 _ when UsesVersion10Features(step) => 10,
                 _ when UsesVersion9Features(step) => 9,

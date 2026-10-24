@@ -44,6 +44,15 @@ public sealed record TemplateMatchOptions
     /// colour verification.
     /// </summary>
     public bool AdaptToLighting { get; init; } = true;
+
+    /// <summary>
+    /// True (default): when the picture is a target on a plain background (a red circle inside a white square, or a
+    /// picture with see-through pixels) and the normal search finds nothing good enough, search again comparing only the
+    /// target's own pixels (<see cref="TemplateBackground"/>, <see cref="BackgroundMaskMatcher"/>), so a wall or screen
+    /// corner showing up in the picture's background corners / margins doesn't sink the score. Never used with
+    /// <see cref="IgnoreColor"/> (that comparison is colour based).
+    /// </summary>
+    public bool AutoMaskBackground { get; init; } = true;
 }
 
 /// <summary>
@@ -130,10 +139,34 @@ public static class TemplateMatcher
         var fine = new FineTemplate(template);
         if (fine.Norm < 1e-6) return TemplateMatchResult.None; // flat template
 
-        if (options.MatchForeground)
-            return FindWithForeground(image, template, fine, options, cancellationToken);
+        var result = options.MatchForeground
+            ? FindWithForeground(image, template, fine, options, cancellationToken)
+            : FindStandard(image, template, fine, options, cancellationToken);
+        return WithBackgroundMask(image, template, result, options, cancellationToken);
+    }
 
-        return FindStandard(image, template, fine, options, cancellationToken);
+    /// <summary>
+    /// Automatic foreground masking: when nothing was found and the picture is a target on a plain background (see
+    /// <see cref="TemplateBackground.CanMask"/>), search again scoring only the target's pixels. A match found that way is
+    /// returned; otherwise the better near-miss of both searches is kept. A match of the normal search is never changed.
+    /// </summary>
+    private static TemplateMatchResult WithBackgroundMask(BgraImage image, BgraImage template, TemplateMatchResult result,
+        TemplateMatchOptions options, CancellationToken cancellationToken)
+    {
+        if (options.IgnoreColor || !options.AutoMaskBackground) return result;
+        var background = TemplateBackground.Detect(template);
+        if (background is null || !background.CanMask) return result;
+
+        // Found already: a wall in the picture's background corners can pull the whole-picture peak a few pixels off the
+        // target. Re-centre each match on the target's own pixels when that scores better.
+        if (result.Matches.Count > 0)
+            return BackgroundMaskMatcher.Recentre(image, template, background, result, options, cancellationToken);
+
+        var masked = BackgroundMaskMatcher.Find(image, template, background, options, cancellationToken);
+        if (masked.Matches.Count > 0) return masked;
+        return masked.BestScore > result.BestScore && !masked.BestBounds.IsEmpty
+            ? result with { BestScore = masked.BestScore, BestBounds = masked.BestBounds }
+            : result;
     }
 
     /// <summary>The normal (whole picture, grey NCC) search.</summary>
@@ -321,7 +354,7 @@ public static class TemplateMatcher
     }
 
     /// <summary>Best first; drops matches that overlap a better one (the same thing found twice).</summary>
-    private static List<VisualMatch> KeepBest(IEnumerable<VisualMatch> found, int maxResults)
+    internal static List<VisualMatch> KeepBest(IEnumerable<VisualMatch> found, int maxResults)
     {
         var kept = new List<VisualMatch>();
         foreach (var match in found.OrderByDescending(m => m.Score))

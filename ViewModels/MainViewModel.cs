@@ -178,6 +178,20 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         }
     }
 
+    /// <summary>
+    /// Editor top bar pill "🎥 Show overlays in OBS / Discord" (streamer mode; saved in Settings at once and applied live to
+    /// open overlays).
+    /// </summary>
+    public bool ShowOverlaysInObs
+    {
+        get => _settings.ShowOverlaysInObsAndRecording;
+        set
+        {
+            if (_settings.ShowOverlaysInObsAndRecording == value) return;
+            _ = Settings.QuickSetAsync(s => s.ShowOverlaysInObsAndRecording = value);
+        }
+    }
+
     /// <summary>Toolbar toggle: minimize SmartMacro while playing (saved in Settings).</summary>
     public bool MinimizeWhilePlaying
     {
@@ -386,6 +400,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(ShowLogPanel));
         OnPropertyChanged(nameof(ShowMiniOverlay));
         OnPropertyChanged(nameof(MinimizeWhilePlaying));
+        OnPropertyChanged(nameof(ShowOverlaysInObs));
         OnPropertyChanged(nameof(RecordingMode));
         Automation?.RefreshShortcuts();
         SettingsApplied?.Invoke(this, settings);

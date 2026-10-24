@@ -57,6 +57,7 @@ public sealed class FeedbackLoopStepViewModel : StepViewModel
         MeasureCommand = new AsyncRelayCommand(MeasureAsync, ex => TestResult = ex.Message, CanUseTools);
         PreviewCommand = new AsyncRelayCommand(PreviewAsync, ex => TestResult = ex.Message, CanUseTools);
         TestDetectionCommand = new AsyncRelayCommand(TestDetectionAsync, ex => TestResult = ex.Message, CanUseTools);
+        ApplyGamePresetCommand = new RelayCommand(ApplyGamePreset);
         ShowMatchCommand = new RelayCommand(() =>
         {
             if (_testMatch is { } spot) _tools.Vision?.ShowSpot(spot);
@@ -218,6 +219,102 @@ public sealed class FeedbackLoopStepViewModel : StepViewModel
         get => _step.FinishWhenInZone;
         set { if (_step.FinishWhenInZone == value) return; _step.FinishWhenInZone = value; NotifyChanged(); }
     }
+
+    // ---------------- Feedback Loop 2.0: Smart Predictive control ----------------
+
+    /// <summary>The one-click game preset buttons (Smart Predictive, tuned per kind of bar).</summary>
+    public static IReadOnlyList<Choice<FeedbackGamePreset>> GamePresets { get; } = Enum.GetValues<FeedbackGamePreset>()
+        .Select(p => new Choice<FeedbackGamePreset>(p, FeedbackPresets.Label(p)))
+        .ToArray();
+
+    public static IReadOnlyList<Choice<FeedbackControlMode>> ControlModes { get; } = new[]
+    {
+        new Choice<FeedbackControlMode>(FeedbackControlMode.SmartPredictive, "Smart Predictive (PD + Brake — Best for Fisch)"),
+        new Choice<FeedbackControlMode>(FeedbackControlMode.ClassicSimpleHold, "Classic Simple Hold"),
+    };
+
+    /// <summary>Applies a game preset (parameter: a <see cref="FeedbackGamePreset"/>); area and colours are kept.</summary>
+    public RelayCommand ApplyGamePresetCommand { get; }
+
+    private void ApplyGamePreset(object? parameter)
+    {
+        var preset = parameter switch
+        {
+            FeedbackGamePreset p => p,
+            Choice<FeedbackGamePreset> c => c.Value,
+            string s when Enum.TryParse<FeedbackGamePreset>(s, out var parsed) => parsed,
+            _ => (FeedbackGamePreset?)null,
+        };
+        if (preset is not { } chosen) return;
+
+        FeedbackPresets.ApplyGamePreset(_step, chosen);
+        _showAdvanced = false;
+        TestResult = $"Applied \"{FeedbackPresets.Label(chosen)}\". Area and colours were kept – press Preview 10 s to watch the live 🧠 telemetry.";
+        OnPropertyChanged(string.Empty); // many settings changed: refresh every field
+        NotifyChanged();
+    }
+
+    /// <summary>Smart Predictive (PD lead + reversal brake + hover pulse) or the classic region rules.</summary>
+    public FeedbackControlMode ControlMode
+    {
+        get => _step.ControlMode;
+        set
+        {
+            if (_step.ControlMode == value) return;
+            _step.ControlMode = value;
+            if (value == FeedbackControlMode.SmartPredictive)
+            {
+                // Smart mode tracks for as long as the bar is there; "finish when in zone" would end it on the first frame.
+                _step.FinishWhenInZone = false;
+                if (_step.MaxCapturesPerSecond < 60) _step.MaxCapturesPerSecond = FeedbackPresets.SmartCapturesPerSecond;
+            }
+            OnPropertyChanged(string.Empty);
+            NotifyChanged();
+        }
+    }
+
+    public bool IsSmartMode => _step.ControlMode == FeedbackControlMode.SmartPredictive;
+
+    public bool IsClassicMode => !IsSmartMode;
+
+    /// <summary>How far ahead (seconds) the loop predicts both bars before deciding.</summary>
+    public double LeadPredictionFactor
+    {
+        get => _step.LeadPredictionFactor;
+        set
+        {
+            var clamped = Math.Round(Math.Clamp(value, 0, 1), 3);
+            if (_step.LeadPredictionFactor.Equals(clamped)) return;
+            _step.LeadPredictionFactor = clamped;
+            NotifyChanged();
+            OnPropertyChanged(nameof(SmartModeHelp));
+        }
+    }
+
+    /// <summary>Predicted gaps smaller than this (pixels) count as "on target": hover instead of hold / release.</summary>
+    public int DeadzonePx
+    {
+        get => _step.DeadzonePx;
+        set { if (_step.DeadzonePx == value) return; _step.DeadzonePx = value; NotifyChanged(); }
+    }
+
+    /// <summary>Inside the dead zone: pulse the input to hover (true) or keep its current state (false).</summary>
+    public bool UsePwmMicroPulse
+    {
+        get => _step.UsePwmMicroPulse;
+        set
+        {
+            if (_step.UsePwmMicroPulse == value) return;
+            _step.UsePwmMicroPulse = value;
+            NotifyChanged();
+        }
+    }
+
+    public string SmartModeHelp =>
+        "Smart Predictive reads the speed of the target and of your bar (smoothed) and decides on where both will be " +
+        $"{_step.LeadPredictionFactor:0.##} s from now, so it lets go BEFORE your bar overshoots. If the target turns around " +
+        "it brakes instantly. Inside the dead zone it taps quickly (micro-pulse) to hover. " +
+        "Press Preview 10 s to see the live 🧠 telemetry: target / bar speed, predicted gap, hover pulse and brakes.";
 
     // ---------------- Choices for the drop-downs ----------------
 

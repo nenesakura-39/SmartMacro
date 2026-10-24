@@ -163,6 +163,24 @@
         <Setter Property="Height" Value="32" />
     </Style>
 
+    <!-- Small dismiss (✕) button drawn as a vector cross, so it never turns into a ▯ box whatever fonts are installed. -->
+    <Style x:Key="DismissButton" TargetType="Button" BasedOn="{StaticResource GhostButton}">
+        <Setter Property="Width" Value="18" />
+        <Setter Property="Height" Value="18" />
+        <Setter Property="Padding" Value="0" />
+        <Setter Property="Focusable" Value="False" />
+        <Setter Property="Content" Value="✕" />
+        <Setter Property="ContentTemplate">
+            <Setter.Value>
+                <DataTemplate>
+                    <Path Data="M0,0 L8,8 M8,0 L0,8" Width="8" Height="8" Stretch="None" StrokeThickness="1.6"
+                          StrokeStartLineCap="Round" StrokeEndLineCap="Round" HorizontalAlignment="Center" VerticalAlignment="Center"
+                          Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" />
+                </DataTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
     <!-- Toolbox button for "add step": icon + name, left aligned. -->
     <Style x:Key="ToolboxButton" TargetType="Button" BasedOn="{StaticResource ButtonBaseStyle}">
         <Setter Property="HorizontalContentAlignment" Value="Left" />

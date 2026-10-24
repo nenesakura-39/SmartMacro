@@ -151,13 +151,14 @@
             <TextBlock Text="{Binding SecondsText}" Style="{StaticResource MutedText}" FontSize="12" Margin="0,4,0,0" />
 
             <TextBlock Text="Quick add" Style="{StaticResource FieldLabel}" />
-            <UniformGrid Columns="5">
-                <Button Content="+100ms" Command="{Binding AddDurationCommand}" CommandParameter="+100" Padding="4,6" Margin="0,0,3,0" />
-                <Button Content="+500ms" Command="{Binding AddDurationCommand}" CommandParameter="+500" Padding="4,6" Margin="2,0,2,0" />
-                <Button Content="+1s" Command="{Binding AddDurationCommand}" CommandParameter="+1000" Padding="4,6" Margin="2,0,2,0" />
-                <Button Content="+5s" Command="{Binding AddDurationCommand}" CommandParameter="+5000" Padding="4,6" Margin="2,0,2,0" />
-                <Button Content="Reset (0)" Command="{Binding ResetDurationCommand}" Padding="4,6" Margin="3,0,0,0" />
-            </UniformGrid>
+            <!-- Quick presets wrap onto a second line on narrow panels instead of being squeezed / cut off. -->
+            <WrapPanel Margin="0,6,0,0">
+                <Button Content="+100ms" Command="{Binding AddDurationCommand}" CommandParameter="+100" Padding="10,5" Margin="0,0,6,6" />
+                <Button Content="+500ms" Command="{Binding AddDurationCommand}" CommandParameter="+500" Padding="10,5" Margin="0,0,6,6" />
+                <Button Content="+1s" Command="{Binding AddDurationCommand}" CommandParameter="+1000" Padding="10,5" Margin="0,0,6,6" />
+                <Button Content="+5s" Command="{Binding AddDurationCommand}" CommandParameter="+5000" Padding="10,5" Margin="0,0,6,6" />
+                <Button Content="Reset (0ms)" Command="{Binding ResetDurationCommand}" Padding="10,5" Margin="0,0,6,6" />
+            </WrapPanel>
 
             <ContentControl Content="{Binding}" ContentTemplate="{StaticResource StepFooterTemplate}" Focusable="False" Visibility="{Binding IsStandalone, Converter={StaticResource BoolToVisibility}}" />
         </StackPanel>
@@ -293,13 +294,14 @@
                 <TextBox Text="{Binding HoldMs, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}"
                          AutomationProperties.Name="Hold time in milliseconds"
                          ToolTip="How long the button stays down. Click / double click: 35 ms is reliable in games (0 = instant; recordings fill in how long you held it). Hold for a duration: e.g. 850 for a casting meter." />
-                <UniformGrid Columns="5" Margin="0,6,0,0">
-                    <Button Content="+100ms" Command="{Binding AddDurationCommand}" CommandParameter="+100" Padding="4,6" Margin="0,0,3,0" />
-                    <Button Content="+500ms" Command="{Binding AddDurationCommand}" CommandParameter="+500" Padding="4,6" Margin="2,0,2,0" />
-                    <Button Content="+1s" Command="{Binding AddDurationCommand}" CommandParameter="+1000" Padding="4,6" Margin="2,0,2,0" />
-                    <Button Content="+5s" Command="{Binding AddDurationCommand}" CommandParameter="+5000" Padding="4,6" Margin="2,0,2,0" />
-                    <Button Content="Reset (0)" Command="{Binding ResetDurationCommand}" Padding="4,6" Margin="3,0,0,0" />
-                </UniformGrid>
+                <!-- Quick presets wrap onto a second line on narrow panels instead of being squeezed / cut off. -->
+                <WrapPanel Margin="0,6,0,0">
+                    <Button Content="+100ms" Command="{Binding AddDurationCommand}" CommandParameter="+100" Padding="10,5" Margin="0,0,6,6" />
+                    <Button Content="+500ms" Command="{Binding AddDurationCommand}" CommandParameter="+500" Padding="10,5" Margin="0,0,6,6" />
+                    <Button Content="+1s" Command="{Binding AddDurationCommand}" CommandParameter="+1000" Padding="10,5" Margin="0,0,6,6" />
+                    <Button Content="+5s" Command="{Binding AddDurationCommand}" CommandParameter="+5000" Padding="10,5" Margin="0,0,6,6" />
+                    <Button Content="Reset (0ms)" Command="{Binding ResetDurationCommand}" Padding="10,5" Margin="0,0,6,6" />
+                </WrapPanel>
             </StackPanel>
 
             <TextBlock Text="Where to click" Style="{StaticResource FieldLabel}" Margin="0,18,0,4" />
@@ -415,13 +417,14 @@
             <TextBlock Text="Hold the key for (ms, Press only)" Style="{StaticResource FieldLabel}" />
             <TextBox Text="{Binding HoldMs, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}" IsEnabled="{Binding IsPress}"
                      AutomationProperties.Name="Hold time in milliseconds" />
-            <UniformGrid Columns="5" Margin="0,6,0,0" IsEnabled="{Binding IsPress}">
-                <Button Content="+100ms" Command="{Binding AddDurationCommand}" CommandParameter="+100" Padding="4,6" Margin="0,0,3,0" />
-                <Button Content="+500ms" Command="{Binding AddDurationCommand}" CommandParameter="+500" Padding="4,6" Margin="2,0,2,0" />
-                <Button Content="+1s" Command="{Binding AddDurationCommand}" CommandParameter="+1000" Padding="4,6" Margin="2,0,2,0" />
-                <Button Content="+5s" Command="{Binding AddDurationCommand}" CommandParameter="+5000" Padding="4,6" Margin="2,0,2,0" />
-                <Button Content="Reset (0)" Command="{Binding ResetDurationCommand}" Padding="4,6" Margin="3,0,0,0" />
-            </UniformGrid>
+            <!-- Quick presets wrap onto a second line on narrow panels instead of being squeezed / cut off. -->
+            <WrapPanel Margin="0,6,0,0" IsEnabled="{Binding IsPress}">
+                <Button Content="+100ms" Command="{Binding AddDurationCommand}" CommandParameter="+100" Padding="10,5" Margin="0,0,6,6" />
+                <Button Content="+500ms" Command="{Binding AddDurationCommand}" CommandParameter="+500" Padding="10,5" Margin="0,0,6,6" />
+                <Button Content="+1s" Command="{Binding AddDurationCommand}" CommandParameter="+1000" Padding="10,5" Margin="0,0,6,6" />
+                <Button Content="+5s" Command="{Binding AddDurationCommand}" CommandParameter="+5000" Padding="10,5" Margin="0,0,6,6" />
+                <Button Content="Reset (0ms)" Command="{Binding ResetDurationCommand}" Padding="10,5" Margin="0,0,6,6" />
+            </WrapPanel>
             <TextBlock Style="{StaticResource MutedText}" FontSize="11" Margin="0,4,0,0"
                        Text="0 = instant tap. Recordings fill in how long you actually held the key (e.g. a short W tap in a game)." />
 
@@ -625,13 +628,14 @@
                              ToolTip="Pause between two looks at the screen. 250 ms is quick; lower values use more CPU." AutomationProperties.Name="Check interval in milliseconds" />
                 </StackPanel>
             </Grid>
-            <UniformGrid Columns="5" Margin="0,6,0,0">
-                <Button Content="+100ms" Command="{Binding AddDurationCommand}" CommandParameter="+100" Padding="4,6" Margin="0,0,3,0" />
-                <Button Content="+500ms" Command="{Binding AddDurationCommand}" CommandParameter="+500" Padding="4,6" Margin="2,0,2,0" />
-                <Button Content="+1s" Command="{Binding AddDurationCommand}" CommandParameter="+1000" Padding="4,6" Margin="2,0,2,0" />
-                <Button Content="+5s" Command="{Binding AddDurationCommand}" CommandParameter="+5000" Padding="4,6" Margin="2,0,2,0" />
-                <Button Content="Reset (0)" Command="{Binding ResetDurationCommand}" Padding="4,6" Margin="3,0,0,0" />
-            </UniformGrid>
+            <!-- Quick presets wrap onto a second line on narrow panels instead of being squeezed / cut off. -->
+            <WrapPanel Margin="0,6,0,0">
+                <Button Content="+100ms" Command="{Binding AddDurationCommand}" CommandParameter="+100" Padding="10,5" Margin="0,0,6,6" />
+                <Button Content="+500ms" Command="{Binding AddDurationCommand}" CommandParameter="+500" Padding="10,5" Margin="0,0,6,6" />
+                <Button Content="+1s" Command="{Binding AddDurationCommand}" CommandParameter="+1000" Padding="10,5" Margin="0,0,6,6" />
+                <Button Content="+5s" Command="{Binding AddDurationCommand}" CommandParameter="+5000" Padding="10,5" Margin="0,0,6,6" />
+                <Button Content="Reset (0ms)" Command="{Binding ResetDurationCommand}" Padding="10,5" Margin="0,0,6,6" />
+            </WrapPanel>
         </StackPanel>
     </DataTemplate>
 
@@ -656,7 +660,7 @@
             <ComboBox ItemsSource="{x:Static steps:ScreenSearchStepViewModel.NotFoundOptions}" DisplayMemberPath="Label" SelectedValuePath="Value"
                       SelectedValue="{Binding WhenNotFound}" AutomationProperties.Name="When the time is up"
                       ToolTip="What happens when the time is up: stop the macro, carry on, or skip the step right below." />
-            <TextBlock Text="{Binding NotFoundHelp}" Style="{StaticResource MutedText}" FontSize="11" TextWrapping="Wrap" Margin="0,4,0,0" />
+            <TextBlock Text="{Binding NotFoundHelp}" Style="{StaticResource MutedText}" FontSize="11" TextWrapping="Wrap" Margin="0,4,0,6" />
         </StackPanel>
     </DataTemplate>
 
@@ -793,10 +797,14 @@
                     <TextBlock Text="Text to find" Style="{StaticResource FieldLabel}" ToolTip="The words to look for, e.g. Sign in or OK." />
                     <TextBox Text="{Binding Text, UpdateSourceTrigger=PropertyChanged}" MaxLength="200" Tag="e.g. Sign in"
                              AutomationProperties.Name="Text to find" ToolTip="The words to look for, e.g. Sign in or OK. Short, distinctive words work best." />
-                    <TextBlock Text="How to match" Style="{StaticResource FieldLabel}" ToolTip="Contains: can be part of a longer word. Whole words: must be complete words." />
-                    <ComboBox ItemsSource="{x:Static steps:FindTextStepViewModel.MatchModes}" DisplayMemberPath="Label" SelectedValuePath="Value"
-                              SelectedValue="{Binding MatchMode}" AutomationProperties.Name="Match mode"
-                              ToolTip="Contains: &quot;Save&quot; also matches &quot;Saved&quot;. Whole words: only complete words count." />
+                    <!-- Shown for Find text steps AND text conditions of If / Repeat (this editor is embedded there too). -->
+                    <TextBlock Text="How to match" Style="{StaticResource FieldLabel}" ToolTip="Whole word and exact case are on for new steps, so a short word never matches inside a longer one or in another case." />
+                    <CheckBox Content="Match whole word only (e.g. 'art' won't match 'apart')" IsChecked="{Binding MatchWholeWord}" Margin="0,4,0,0"
+                              ToolTip="On (default): the text must be a complete word on screen – 'art' matches 'art' and 'art,' but never 'apart' or 'apartment'. Off: it may also be part of a longer word ('Save' matches 'Saved')."
+                              AutomationProperties.Name="Match whole word only" />
+                    <CheckBox Content="Match exact case (e.g. 'aRt' only matches 'aRt')" IsChecked="{Binding MatchCase}" Margin="0,8,0,0"
+                              ToolTip="On (default): upper / lower case must be exactly the same – 'aRt' never matches 'art' or 'Art'. Off: case is ignored."
+                              AutomationProperties.Name="Match exact case" />
                 </StackPanel>
             </Border>
             <ContentControl Content="{Binding}" ContentTemplate="{StaticResource SearchCardsTemplate}" Focusable="False" />
@@ -811,9 +819,7 @@
                              AutomationProperties.Name="Match accuracy percent" ToolTip="100 = exact. Lower values tolerate OCR mistakes (like reading I as l). 85 is a good start." />
                     <TextBlock Style="{StaticResource MutedText}" FontSize="11" Margin="0,4,0,0"
                                Text="Windows OCR doesn't report its own confidence, so this compares the text instead." />
-                    <CheckBox Content="Match upper/lower case exactly" IsChecked="{Binding CaseSensitive}" Margin="0,10,0,0"
-                              ToolTip="On: &quot;OK&quot; doesn't match &quot;ok&quot;. Off (default): case is ignored." AutomationProperties.Name="Match case exactly" />
-                    <CheckBox Content="Normalize similar characters (0/O, 1/I/l)" IsChecked="{Binding NormalizeLookAlikes}" Margin="0,8,0,0"
+                    <CheckBox Content="Normalize similar characters (0/O, 1/I/l)" IsChecked="{Binding NormalizeLookAlikes}" Margin="0,10,0,0"
                               ToolTip="Windows OCR often reads a capital O as zero or a capital I as 1 or l on short words like OK. With this on, those count as the same letter."
                               AutomationProperties.Name="Normalize similar characters" />
                     <ContentControl Content="{Binding}" ContentTemplate="{StaticResource SearchMovementTemplate}" Focusable="False"
@@ -978,10 +984,50 @@
                             </Button>
                         </Grid>
                     </StackPanel>
-                    <TextBlock Text="Tolerance (0-255)" Style="{StaticResource FieldLabel}"
-                               ToolTip="How far each of red, green and blue may differ. About 20-40 is typical." />
-                    <TextBox Text="{Binding Tolerance, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}" Width="80" HorizontalAlignment="Left"
-                             AutomationProperties.Name="Color tolerance" ToolTip="How far each of red, green and blue may differ. About 20-40 is typical." />
+                    <!-- One-click tuning presets (set tolerance + shade variation together). A ✓ marks the preset that's active. -->
+                    <TextBlock Text="Quick tuning" Style="{StaticResource FieldLabel}"
+                               ToolTip="Pick what you're looking for; it sets the tolerance and shade variation for you. You can still fine-tune below." />
+                    <WrapPanel Margin="0,2,0,0">
+                        <Button Command="{Binding ApplyColorPresetCommand}" CommandParameter="exact" Padding="10,5" Margin="0,0,6,6" FontSize="11.5"
+                                ToolTip="Exact UI Color (Strict): tolerance 10, shade variation off. For flat app / menu colours that never change."
+                                AutomationProperties.Name="Exact UI Color preset">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="✓ " Foreground="{StaticResource SuccessBrush}" FontWeight="Bold"
+                                           Visibility="{Binding IsExactPreset, Converter={StaticResource BoolToVisibility}}" />
+                                <TextBlock Text="🎯 Exact UI Color (Strict)" />
+                            </StackPanel>
+                        </Button>
+                        <Button Command="{Binding ApplyColorPresetCommand}" CommandParameter="game" Padding="10,5" Margin="0,0,6,6" FontSize="11.5"
+                                ToolTip="Game Target / Solid Object (Recommended): tolerance 28, shade variation on. For a red ball, an enemy marker, a coloured button in a game – also its darker and lighter sides."
+                                AutomationProperties.Name="Game Target preset">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="✓ " Foreground="{StaticResource SuccessBrush}" FontWeight="Bold"
+                                           Visibility="{Binding IsGamePreset, Converter={StaticResource BoolToVisibility}}" />
+                                <TextBlock Text="🔴 Game Target / Solid Object (Recommended)" TextWrapping="Wrap" />
+                            </StackPanel>
+                        </Button>
+                        <Button Command="{Binding ApplyColorPresetCommand}" CommandParameter="glow" Padding="10,5" Margin="0,0,6,6" FontSize="11.5"
+                                ToolTip="Lighting / Glowing Object (Broad): tolerance 50, shade variation on. For targets under changing light, glowing or flashing effects. Keep the search area small – more things match."
+                                AutomationProperties.Name="Lighting or Glowing Object preset">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="✓ " Foreground="{StaticResource SuccessBrush}" FontWeight="Bold"
+                                           Visibility="{Binding IsGlowPreset, Converter={StaticResource BoolToVisibility}}" />
+                                <TextBlock Text="🌅 Lighting / Glowing Object (Broad)" />
+                            </StackPanel>
+                        </Button>
+                    </WrapPanel>
+                    <TextBlock Style="{StaticResource FieldLabel}"
+                               ToolTip="How far each of red, green and blue may differ. About 20-40 is typical.">
+                        <Run Text="Color tolerance: " /><Run Text="{Binding Tolerance, Mode=OneWay}" FontWeight="SemiBold" />
+                        <Run Text=" (0 = exact colour only, higher = more similar colours count)" />
+                    </TextBlock>
+                    <Slider Minimum="0" Maximum="150" TickFrequency="1" IsSnapToTickEnabled="True" Value="{Binding Tolerance}"
+                            AutomationProperties.Name="Color tolerance slider" ToolTip="How far each of red, green and blue may differ. About 20-40 is typical." />
+                    <TextBox Text="{Binding Tolerance, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}" Width="80" HorizontalAlignment="Left" Margin="0,6,0,0"
+                             AutomationProperties.Name="Color tolerance" ToolTip="Exact tolerance (0-255). How far each of red, green and blue may differ." />
+                    <CheckBox Content="Shade variation (also match darker / lighter shades of this colour)" IsChecked="{Binding MatchShades}" Margin="0,10,0,0"
+                              ToolTip="On: the shadowed and highlighted sides of a 3D ball or a glowing target count too (same colour, 50 %–200 % brightness). Off: only the colour ± tolerance."
+                              AutomationProperties.Name="Shade variation" />
                 </StackPanel>
             </Border>
             <ContentControl Content="{Binding}" ContentTemplate="{StaticResource SearchCardsTemplate}" Focusable="False" />
@@ -1273,6 +1319,247 @@
         </StackPanel>
     </DataTemplate>
 
+    <!-- Wait for screen change (VISION & AI) -->
+    <DataTemplate DataType="{x:Type steps:WaitForChangeStepViewModel}">
+        <StackPanel>
+            <ContentControl Content="{Binding}" ContentTemplate="{StaticResource StepHeaderTemplate}" Focusable="False" />
+            <ContentControl Content="{Binding}" ContentTemplate="{StaticResource SummaryBannerTemplate}" Focusable="False" />
+
+            <Border Style="{StaticResource SetupCard}">
+                <StackPanel>
+                    <TextBlock Text="1. THE AREA TO WATCH" Style="{StaticResource SetupCardTitle}"
+                               ToolTip="Only this area is compared. Keep it small and around the spot where something appears (a bite marker, a pop-up)." />
+                    <WrapPanel Margin="0,8,0,0">
+                        <Button Command="{Binding PickAreaCommand}" Margin="0,0,8,6" Style="{StaticResource PrimaryButton}"
+                                ToolTip="SmartMacro hides and the screen freezes; drag a box around the part of the screen to watch."
+                                AutomationProperties.Name="Pick area to watch">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="&#xE8B0;" Style="{StaticResource IconText}" />
+                                <TextBlock Text="Pick area" Margin="8,0,0,0" />
+                            </StackPanel>
+                        </Button>
+                        <Button Command="{Binding ShowAreaCommand}" Margin="0,0,8,6"
+                                ToolTip="Outlines the watched area on screen for a moment." AutomationProperties.Name="Show watched area on screen">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="🎯" />
+                                <TextBlock Text="Show on screen" Margin="6,0,0,0" />
+                            </StackPanel>
+                        </Button>
+                        <ComboBox Style="{StaticResource FreezeComboBox}" Margin="0,0,0,6" />
+                    </WrapPanel>
+                    <Grid Margin="0,4,0,0">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="8" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="8" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="8" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <StackPanel Grid.Column="0">
+                            <TextBlock Text="X" Style="{StaticResource FieldLabel}" />
+                            <TextBox Text="{Binding RegionX, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}" AutomationProperties.Name="Area X" />
+                        </StackPanel>
+                        <StackPanel Grid.Column="2">
+                            <TextBlock Text="Y" Style="{StaticResource FieldLabel}" />
+                            <TextBox Text="{Binding RegionY, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}" AutomationProperties.Name="Area Y" />
+                        </StackPanel>
+                        <StackPanel Grid.Column="4">
+                            <TextBlock Text="Width" Style="{StaticResource FieldLabel}" />
+                            <TextBox Text="{Binding RegionWidth, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}" AutomationProperties.Name="Area width" />
+                        </StackPanel>
+                        <StackPanel Grid.Column="6">
+                            <TextBlock Text="Height" Style="{StaticResource FieldLabel}" />
+                            <TextBox Text="{Binding RegionHeight, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}" AutomationProperties.Name="Area height" />
+                        </StackPanel>
+                    </Grid>
+                </StackPanel>
+            </Border>
+
+            <Border Style="{StaticResource SetupCard}">
+                <StackPanel>
+                    <TextBlock Text="2. WHAT COUNTS AS A CHANGE" Style="{StaticResource SetupCardTitle}" />
+                    <Grid Margin="0,2,0,0">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="12" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <StackPanel>
+                            <TextBlock Text="How much must change (%)" Style="{StaticResource FieldLabel}"
+                                       ToolTip="The share of the area's pixels that must look different from the starting picture. 1 % ignores most noise; use 0.1 % for a tiny marker in a big area." />
+                            <TextBox Text="{Binding MinChangedPercent, UpdateSourceTrigger=LostFocus, ValidatesOnExceptions=True}" AutomationProperties.Name="How much must change in percent" />
+                        </StackPanel>
+                        <StackPanel Grid.Column="2">
+                            <TextBlock Text="Ignore colour shifts up to" Style="{StaticResource FieldLabel}"
+                                       ToolTip="A pixel only counts as changed when its red, green or blue value moved more than this (0–255). 20–40 ignores glow, shading and video noise." />
+                            <TextBox Text="{Binding PixelTolerance, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}" AutomationProperties.Name="Colour tolerance" />
+                        </StackPanel>
+                    </Grid>
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="12" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <StackPanel>
+                            <TextBlock Text="Wait up to (ms)" Style="{StaticResource FieldLabel}" ToolTip="0 = check once. Time spent paused doesn't count." />
+                            <TextBox Text="{Binding TimeoutMs, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}" AutomationProperties.Name="Wait up to in milliseconds" />
+                        </StackPanel>
+                        <StackPanel Grid.Column="2">
+                            <TextBlock Text="Check every (ms)" Style="{StaticResource FieldLabel}" ToolTip="Pause between looks. 100 ms reacts fast; larger values use less CPU." />
+                            <TextBox Text="{Binding CheckIntervalMs, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}" AutomationProperties.Name="Check every in milliseconds" />
+                        </StackPanel>
+                    </Grid>
+                </StackPanel>
+            </Border>
+
+            <Border Style="{StaticResource SetupCard}">
+                <StackPanel>
+                    <TextBlock Text="3. WHEN IT CHANGES" Style="{StaticResource SetupCardTitle}" />
+                    <ComboBox ItemsSource="{x:Static steps:WaitForChangeStepViewModel.Actions}" DisplayMemberPath="Label" SelectedValuePath="Value"
+                              SelectedValue="{Binding Action}" Margin="0,8,0,0" AutomationProperties.Name="When it changes" />
+                    <StackPanel Visibility="{Binding UsesHold, Converter={StaticResource BoolToVisibility}}">
+                        <TextBlock Text="Hold for (ms)" Style="{StaticResource FieldLabel}" />
+                        <TextBox Text="{Binding ActionHoldMs, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}" Width="120" HorizontalAlignment="Left"
+                                 AutomationProperties.Name="Hold time in milliseconds" />
+                    </StackPanel>
+                    <TextBlock Text="If nothing changes in time" Style="{StaticResource FieldLabel}" />
+                    <ComboBox ItemsSource="{x:Static steps:WaitForChangeStepViewModel.NotFoundOptions}" DisplayMemberPath="Label" SelectedValuePath="Value"
+                              SelectedValue="{Binding WhenNotFound}" AutomationProperties.Name="If nothing changes in time" />
+                </StackPanel>
+            </Border>
+
+            <TextBlock Text="{Binding TestResult}" Style="{StaticResource MutedText}" FontSize="11" Margin="0,8,0,0" TextWrapping="Wrap"
+                       Visibility="{Binding TestResult, Converter={StaticResource NullToVisibility}}" />
+            <ContentControl Content="{Binding}" ContentTemplate="{StaticResource StepFooterTemplate}" Focusable="False" />
+        </StackPanel>
+    </DataTemplate>
+
+    <!-- Focus window (UTILITY & GAME) -->
+    <DataTemplate DataType="{x:Type steps:FocusWindowStepViewModel}">
+        <StackPanel>
+            <ContentControl Content="{Binding}" ContentTemplate="{StaticResource StepHeaderTemplate}" Focusable="False" />
+            <ContentControl Content="{Binding}" ContentTemplate="{StaticResource SummaryBannerTemplate}" Focusable="False" />
+
+            <TextBlock Text="Window" Style="{StaticResource FieldLabel}" Margin="0,18,0,4" />
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <ComboBox ItemsSource="{Binding WindowTitles}" SelectedItem="{Binding SelectedWindowTitle}" AutomationProperties.Name="Window to focus"
+                          ToolTip="The app windows open right now. Choosing one fills in the title below. Open your game first, then click Refresh windows." />
+                <Button Grid.Column="1" Command="{Binding RefreshWindowsCommand}" Margin="8,0,0,0" Padding="10,6"
+                        ToolTip="Read the list of open windows again." AutomationProperties.Name="Refresh windows">
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="&#xE72C;" Style="{StaticResource IconText}" FontSize="12" />
+                        <TextBlock Text="Refresh windows" Margin="6,0,0,0" FontSize="12" />
+                    </StackPanel>
+                </Button>
+            </Grid>
+            <TextBlock Text="Window title contains" Style="{StaticResource FieldLabel}"
+                       ToolTip="Part of the window's title, for example Roblox. Case doesn't matter. An exact match wins over a partial one." />
+            <TextBox Text="{Binding WindowTitle, UpdateSourceTrigger=PropertyChanged}" Tag="e.g. Roblox" MaxLength="260" AutomationProperties.Name="Window title contains" />
+
+            <CheckBox Content="Restore it if it's minimized" IsChecked="{Binding RestoreIfMinimized}" Margin="0,12,0,0"
+                      AutomationProperties.Name="Restore it if it's minimized" />
+
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="12" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <StackPanel>
+                    <TextBlock Text="Wait for it to open (ms)" Style="{StaticResource FieldLabel}"
+                               ToolTip="If the window isn't open yet (the game is still starting), keep looking this long. 0 = look once." />
+                    <TextBox Text="{Binding WaitForWindowMs, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}" AutomationProperties.Name="Wait for the window in milliseconds" />
+                </StackPanel>
+                <StackPanel Grid.Column="2">
+                    <TextBlock Text="Pause after (ms)" Style="{StaticResource FieldLabel}"
+                               ToolTip="A short pause after the window comes to the front, so the game is ready for the next key or click." />
+                    <TextBox Text="{Binding SettleMs, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}" AutomationProperties.Name="Pause after focusing in milliseconds" />
+                </StackPanel>
+            </Grid>
+
+            <TextBlock Text="If the window isn't found" Style="{StaticResource FieldLabel}" />
+            <ComboBox ItemsSource="{x:Static steps:FocusWindowStepViewModel.NotFoundOptions}" DisplayMemberPath="Label" SelectedValuePath="Value"
+                      SelectedValue="{Binding WhenNotFound}" AutomationProperties.Name="If the window isn't found" />
+            <TextBlock Style="{StaticResource MutedText}" FontSize="11" Margin="0,6,0,0" TextWrapping="Wrap"
+                       Text="Windows sometimes refuses to switch windows for another app (e.g. a game started as administrator while SmartMacro isn't). The log says so when that happens." />
+
+            <ContentControl Content="{Binding}" ContentTemplate="{StaticResource StepFooterTemplate}" Focusable="False" />
+        </StackPanel>
+    </DataTemplate>
+
+    <!-- Take screenshot (UTILITY & GAME) -->
+    <DataTemplate DataType="{x:Type steps:ScreenshotStepViewModel}">
+        <StackPanel>
+            <ContentControl Content="{Binding}" ContentTemplate="{StaticResource StepHeaderTemplate}" Focusable="False" />
+            <ContentControl Content="{Binding}" ContentTemplate="{StaticResource SummaryBannerTemplate}" Focusable="False" />
+
+            <TextBlock Text="What to capture" Style="{StaticResource FieldLabel}" Margin="0,18,0,4" />
+            <ComboBox ItemsSource="{x:Static steps:ScreenshotStepViewModel.Areas}" DisplayMemberPath="Label" SelectedValuePath="Value"
+                      SelectedValue="{Binding Area}" AutomationProperties.Name="What to capture" />
+
+            <StackPanel Visibility="{Binding UsesWindow, Converter={StaticResource BoolToVisibility}}">
+                <Grid Margin="0,8,0,0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <ComboBox ItemsSource="{Binding WindowTitles}" SelectedItem="{Binding SelectedWindowTitle}" AutomationProperties.Name="Window to capture" />
+                    <Button Grid.Column="1" Command="{Binding RefreshWindowsCommand}" Margin="8,0,0,0" Padding="10,6"
+                            ToolTip="Read the list of open windows again." AutomationProperties.Name="Refresh windows">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="&#xE72C;" Style="{StaticResource IconText}" FontSize="12" />
+                            <TextBlock Text="Refresh windows" Margin="6,0,0,0" FontSize="12" />
+                        </StackPanel>
+                    </Button>
+                </Grid>
+                <TextBlock Text="Window title contains" Style="{StaticResource FieldLabel}" />
+                <TextBox Text="{Binding WindowTitle, UpdateSourceTrigger=PropertyChanged}" Tag="e.g. Roblox" MaxLength="260" AutomationProperties.Name="Window title contains" />
+            </StackPanel>
+
+            <StackPanel Visibility="{Binding UsesRegion, Converter={StaticResource BoolToVisibility}}">
+                <WrapPanel Margin="0,8,0,0">
+                    <Button Command="{Binding PickAreaCommand}" Margin="0,0,8,6" Style="{StaticResource PrimaryButton}"
+                            ToolTip="SmartMacro hides and the screen freezes; drag a box around the part to capture." AutomationProperties.Name="Pick screenshot area">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="&#xE8B0;" Style="{StaticResource IconText}" />
+                            <TextBlock Text="Pick area" Margin="8,0,0,0" />
+                        </StackPanel>
+                    </Button>
+                    <ComboBox Style="{StaticResource FreezeComboBox}" Margin="0,0,0,6" />
+                </WrapPanel>
+                <TextBlock Style="{StaticResource MutedText}" FontSize="11" TextWrapping="Wrap">
+                    <Run Text="Area: (" /><Run Text="{Binding RegionX, Mode=OneWay}" /><Run Text=", " /><Run Text="{Binding RegionY, Mode=OneWay}" /><Run Text="), " /><Run Text="{Binding RegionWidth, Mode=OneWay}" /><Run Text=" × " /><Run Text="{Binding RegionHeight, Mode=OneWay}" /><Run Text=" px" />
+                </TextBlock>
+            </StackPanel>
+
+            <TextBlock Text="Save in folder" Style="{StaticResource FieldLabel}" />
+            <TextBox Text="{Binding FolderPath, UpdateSourceTrigger=LostFocus}" Tag="Pictures\SmartMacro Screenshots" AutomationProperties.Name="Screenshot folder"
+                     ToolTip="Leave empty for Pictures\SmartMacro Screenshots. The folder is created when it doesn't exist." />
+            <WrapPanel Margin="0,6,0,0">
+                <Button Content="Choose folder…" Command="{Binding ChooseFolderCommand}" Padding="10,5" Margin="0,0,6,6" AutomationProperties.Name="Choose folder" />
+                <Button Content="Use default" Command="{Binding UseDefaultFolderCommand}" Padding="10,5" Margin="0,0,6,6" AutomationProperties.Name="Use the default folder" />
+                <Button Content="Open folder" Command="{Binding OpenFolderCommand}" Padding="10,5" Margin="0,0,6,6" AutomationProperties.Name="Open the screenshot folder" />
+            </WrapPanel>
+
+            <TextBlock Text="File name starts with" Style="{StaticResource FieldLabel}" />
+            <TextBox Text="{Binding FileNamePrefix, UpdateSourceTrigger=PropertyChanged}" Tag="SmartMacro" MaxLength="60" AutomationProperties.Name="File name prefix" />
+            <TextBlock Style="{StaticResource MutedText}" FontSize="11" Margin="0,4,0,0" TextWrapping="Wrap">
+                <Run Text="Example: " /><Run Text="{Binding ExampleFileName, Mode=OneWay}" />
+            </TextBlock>
+
+            <TextBlock Text="{Binding TestResult}" Style="{StaticResource MutedText}" FontSize="11" Margin="0,8,0,0" TextWrapping="Wrap"
+                       Visibility="{Binding TestResult, Converter={StaticResource NullToVisibility}}" />
+            <ContentControl Content="{Binding}" ContentTemplate="{StaticResource StepFooterTemplate}" Focusable="False" />
+        </StackPanel>
+    </DataTemplate>
+
     <!--
         Stage 4: Feedback loop. Sections: bar + marker, zone, rules, input, limits, stop conditions, tools.
         The stop conditions reuse the If / Repeat condition editor.
@@ -1312,6 +1599,66 @@
                             </DataTemplate>
                         </ListBox.ItemTemplate>
                     </ListBox>
+                </StackPanel>
+            </Border>
+
+            <!-- Feedback Loop 2.0: one-click game presets + control mode (Smart Predictive / Classic) -->
+            <Border Style="{StaticResource SetupCard}">
+                <StackPanel>
+                    <TextBlock Text="GAME PRESETS &amp; CONTROL MODE" Style="{StaticResource SetupCardTitle}"
+                               ToolTip="One click sets up a follow-the-target loop with Smart Predictive control tuned for that kind of bar. Your area and colors are kept." />
+                    <ItemsControl ItemsSource="{x:Static steps:FeedbackLoopStepViewModel.GamePresets}" Margin="0,8,0,0" Focusable="False">
+                        <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <WrapPanel />
+                            </ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Button Content="{Binding Label}" CommandParameter="{Binding Value}" Margin="0,0,8,6" Padding="10,5"
+                                        Command="{Binding DataContext.ApplyGamePresetCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                                        ToolTip="Apply this game preset: follow-the-target rules + Smart Predictive values for this kind of bar. Area and colors are kept."
+                                        AutomationProperties.Name="{Binding Label}" />
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                    <TextBlock Text="Control mode" Style="{StaticResource FieldLabel}" />
+                    <ComboBox ItemsSource="{x:Static steps:FeedbackLoopStepViewModel.ControlModes}" DisplayMemberPath="Label" SelectedValuePath="Value"
+                              SelectedValue="{Binding ControlMode}" AutomationProperties.Name="Control mode"
+                              ToolTip="Smart Predictive: predicts where the target and your bar will be, brakes before overshooting and hovers with micro-pulses. Classic: the before / inside / after rules, as they are." />
+                    <StackPanel Visibility="{Binding IsSmartMode, Converter={StaticResource BoolToVisibility}}">
+                        <Grid Margin="0,2,0,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="12" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel>
+                                <TextBlock Text="Lead prediction (s)" Style="{StaticResource FieldLabel}"
+                                           ToolTip="How far ahead the loop predicts both bars. Heavier bars (more momentum) need more. 0.08 – 0.25 is typical." />
+                                <TextBox Text="{Binding LeadPredictionFactor, UpdateSourceTrigger=LostFocus, ValidatesOnExceptions=True}"
+                                         AutomationProperties.Name="Lead prediction in seconds"
+                                         ToolTip="How far ahead the loop predicts both bars (seconds). Heavier bars need more; 0.08 – 0.25 is typical." />
+                            </StackPanel>
+                            <StackPanel Grid.Column="2">
+                                <TextBlock Text="Dead zone (px)" Style="{StaticResource FieldLabel}"
+                                           ToolTip="A predicted gap smaller than this counts as on target: the loop hovers instead of holding or releasing." />
+                                <TextBox Text="{Binding DeadzonePx, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}"
+                                         AutomationProperties.Name="Dead zone in pixels"
+                                         ToolTip="A predicted gap smaller than this (pixels) counts as on target: the loop hovers instead of holding or releasing." />
+                            </StackPanel>
+                        </Grid>
+                        <CheckBox Content="Hover with micro-pulses inside the dead zone (PWM)" IsChecked="{Binding UsePwmMicroPulse}" Margin="0,8,0,0"
+                                  AutomationProperties.Name="Hover with micro-pulses"
+                                  ToolTip="Inside the dead zone the input is tapped quickly so your bar hovers in place (the hold share adapts by itself). Off = keep the current state." />
+                        <StackPanel Visibility="{Binding UsePwmMicroPulse, Converter={StaticResource BoolToVisibility}}">
+                            <TextBlock Text="Pulse cycle (ms)" Style="{StaticResource FieldLabel}" />
+                            <TextBox Text="{Binding PulsePeriodMs, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}" Width="100" HorizontalAlignment="Left"
+                                     AutomationProperties.Name="Hover pulse cycle in milliseconds"
+                                     ToolTip="Length of one hover pulse (hold + release). 80 ms suits most bars; longer = gentler." />
+                        </StackPanel>
+                        <TextBlock Text="{Binding SmartModeHelp}" Style="{StaticResource MutedText}" FontSize="11" Margin="0,8,0,0" TextWrapping="Wrap" />
+                    </StackPanel>
                 </StackPanel>
             </Border>
 
@@ -1668,7 +2015,7 @@
             <TextBlock Style="{StaticResource MutedText}" FontSize="11" Margin="0,4,0,0" TextWrapping="Wrap"
                        Text="The marker must be this far past a zone edge before it counts as crossed, so the input doesn't flicker on and off at an edge. 0 = off; 1-5 is typical." />
             <StackPanel Visibility="{Binding UsesPulse, Converter={StaticResource BoolToVisibility}}">
-                <TextBlock Text="Pulse cycle (ms)" Style="{StaticResource FieldLabel}" />
+                <TextBlock Text="Pulse cycle (ms) – Classic mode; Smart mode sets its hover pulse above" Style="{StaticResource FieldLabel}" />
                 <TextBox Text="{Binding PulsePeriodMs, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}" Width="100" HorizontalAlignment="Left"
                          AutomationProperties.Name="Pulse cycle in milliseconds"
                          ToolTip="Inside the zone the input is held for part of every cycle: more the closer the marker is to the side that holds, less toward the side that releases." />

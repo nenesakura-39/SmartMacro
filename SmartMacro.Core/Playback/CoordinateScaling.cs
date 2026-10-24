@@ -122,6 +122,18 @@ public static class CoordinateScaling
                     (f.RegionX, f.RegionY, f.RegionWidth, f.RegionHeight) = (bar.X, bar.Y, bar.Width, bar.Height);
                     break;
                 }
+                case WaitForChangeStep w:
+                {
+                    var watched = mapping.MapRect(w.Region);
+                    (w.RegionX, w.RegionY, w.RegionWidth, w.RegionHeight) = (watched.X, watched.Y, watched.Width, watched.Height);
+                    break;
+                }
+                case ScreenshotStep { Area: ScreenshotArea.CustomArea } s:
+                {
+                    var shot = mapping.MapRect(s.Region);
+                    (s.RegionX, s.RegionY, s.RegionWidth, s.RegionHeight) = (shot.X, shot.Y, shot.Width, shot.Height);
+                    break;
+                }
             }
 
             // Find steps and the searches of If / Repeat / feedback conditions: only a custom area is a stored position

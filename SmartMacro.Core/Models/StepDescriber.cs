@@ -23,6 +23,9 @@ public static class StepDescriber
         StepKind.Repeat => "Repeat",
         StepKind.EndRepeat => "End Repeat",
         StepKind.FeedbackLoop => "Feedback loop",
+        StepKind.WaitForChange => "Wait for screen change",
+        StepKind.FocusWindow => "Focus window",
+        StepKind.Screenshot => "Take screenshot",
         _ => kind.ToString(),
     };
 
@@ -46,8 +49,49 @@ public static class StepDescriber
         RepeatStep r => DescribeRepeat(r),
         EndRepeatStep => "End of the Repeat block (go back for the next turn)",
         FeedbackLoopStep f => DescribeFeedback(f),
+        WaitForChangeStep w => DescribeWaitForChange(w),
+        FocusWindowStep w => DescribeFocusWindow(w),
+        ScreenshotStep s => DescribeScreenshot(s),
         _ => step.GetType().Name,
     };
+
+    /// <summary>"Wait up to 10 s for 1 % of (100, 200) 300×200 to change → click it".</summary>
+    private static string DescribeWaitForChange(WaitForChangeStep w)
+    {
+        var limit = w.TimeoutMs == 0 ? "Check once if" : $"Wait up to {Seconds(w.TimeoutMs)} for";
+        var percent = w.MinChangedPercent.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture);
+        var action = w.Action switch
+        {
+            FoundTextAction.Move => " → move there",
+            FoundTextAction.Click => " → click it",
+            FoundTextAction.DoubleClick => " → double-click it",
+            FoundTextAction.RightClick => " → right-click it",
+            FoundTextAction.Hold => $" → hold it {w.ActionHoldMs} ms",
+            _ => "",
+        };
+        return $"{limit} {percent} % of ({w.RegionX}, {w.RegionY}) {w.RegionWidth}×{w.RegionHeight} to change{action}";
+    }
+
+    /// <summary>"Bring &quot;Roblox&quot; to the front (restore if minimized)".</summary>
+    private static string DescribeFocusWindow(FocusWindowStep w)
+    {
+        var title = string.IsNullOrWhiteSpace(w.WindowTitle) ? "a window (not chosen yet)" : $"\"{Preview(w.WindowTitle)}\"";
+        return $"Bring {title} to the front{(w.RestoreIfMinimized ? " (restore if minimized)" : "")}";
+    }
+
+    /// <summary>"Save a screenshot of the main monitor as SmartMacro_….png".</summary>
+    private static string DescribeScreenshot(ScreenshotStep s)
+    {
+        var what = s.Area switch
+        {
+            ScreenshotArea.AllMonitors => "all monitors",
+            ScreenshotArea.CustomArea => $"({s.RegionX}, {s.RegionY}) {s.RegionWidth}×{s.RegionHeight}",
+            ScreenshotArea.Window => string.IsNullOrWhiteSpace(s.WindowTitle) ? "an app window (not chosen yet)" : $"the \"{Preview(s.WindowTitle)}\" window",
+            _ => "the main monitor",
+        };
+        var folder = string.IsNullOrWhiteSpace(s.FolderPath) ? $"Pictures\\{Vision.ScreenshotFiles.DefaultFolderName}" : s.FolderPath.Trim();
+        return $"Save a screenshot of {what} as {Vision.ScreenshotFiles.CleanPrefix(s.FileNamePrefix)}_….png in {folder}";
+    }
 
     private static string DescribeClick(MouseClickStep c)
     {
@@ -114,6 +158,9 @@ public static class StepDescriber
             RepeatStep r => name is null ? $"Repeat loop ({DescribeRepeatMode(r)})" : $"Repeat {name}",
             FeedbackLoopStep => name is null ? "Running the feedback loop (minigame)" : $"Feedback loop {name}",
             InputSequenceStep => "Playing recorded input",
+            WaitForChangeStep w => $"Waiting for the area at ({w.RegionX}, {w.RegionY}) to change",
+            FocusWindowStep w => $"Focusing the \"{Preview(w.WindowTitle)}\" window",
+            ScreenshotStep => "Taking a screenshot",
             _ => DisplayName(step.Kind),
         };
     }
@@ -213,6 +260,16 @@ public static class StepDescriber
         {
             var pushes = horizontal ? "right" : "up";
             lines.Add($"Holding pushes your bar {pushes}; releasing lets it drift back.");
+        }
+
+        if (f.ControlMode == FeedbackControlMode.SmartPredictive)
+        {
+            var lead = f.LeadPredictionFactor.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture);
+            var hover = f.UsePwmMicroPulse
+                ? $"taps {input} in quick {f.PulsePeriodMs} ms pulses so {zone} hovers"
+                : $"leaves {input} as it is";
+            lines.Add($"Smart Predictive: decides on where both bars will be {lead} s from now, so it lets go before {zone} overshoots, and brakes at once when {marker} turns around.");
+            lines.Add($"Within {f.DeadzonePx} px of {marker}: {hover}.");
         }
 
         if (f.FinishWhenInZone) lines.Add($"Finishes as soon as {marker} reaches {zone}.");

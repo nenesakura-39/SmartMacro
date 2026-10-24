@@ -29,21 +29,16 @@ public static class CaptureShield
     public static bool IsExclusionSupported { get; } = OperatingSystem.IsWindowsVersionAtLeast(10, 0, ExcludeFromCaptureBuild);
 
     /// <summary>
-    /// Asks Windows to leave the window out of screen captures. False when it can't (old Windows, call failed): then the
-    /// window should use <see cref="MarkVisible"/> / <see cref="MarkHidden"/>.
+    /// Asks Windows to leave the overlay window out of screen captures – unless "🎥 Show overlays in OBS / Discord" is on
+    /// (<see cref="OverlayCaptureService.AllowObsCapture"/>), then captures may see it. The window is registered with
+    /// <see cref="OverlayCaptureService"/>, so a later change of that setting updates it at once. False when captures can
+    /// see it (streamer mode, old Windows, call failed): then the window may use <see cref="MarkVisible"/> / <see cref="MarkHidden"/>.
+    /// Call on the window's UI thread once its handle exists.
     /// </summary>
-    public static bool TryExclude(IntPtr hwnd)
-    {
-        if (hwnd == IntPtr.Zero || !IsExclusionSupported) return false;
-        try
-        {
-            return NativeMethods.SetWindowDisplayAffinity(hwnd, NativeMethods.WDA_EXCLUDEFROMCAPTURE);
-        }
-        catch (Exception)
-        {
-            return false; // missing entry point etc.: treat as "not supported"
-        }
-    }
+    public static bool TryExclude(Window window) => OverlayCaptureService.Track(window);
+
+    /// <inheritdoc cref="TryExclude(Window)"/>
+    public static bool TryExclude(IntPtr hwnd) => OverlayCaptureService.Track(hwnd);
 
     /// <summary>An overlay that captures CAN see is showing now; <paramref name="hide"/> runs on its own UI thread.</summary>
     public static void MarkVisible(Window window, Action hide)

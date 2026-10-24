@@ -89,11 +89,20 @@ public static class MacroValidator
     public const int MinFeedbackRuntimeMs = 100;
     public const int MaxFeedbackRuntimeMs = 3_600_000; // 1 hour
     public const int MaxCapturesPerSecond = 120;
+
+    /// <summary>Smart Predictive feedback loops: largest lead prediction (seconds) and dead zone (px).</summary>
+    public const double MaxLeadPredictionSeconds = 1.0;
+    public const int MaxDeadzonePx = 200;
     public const int MaxInputChangeMs = 5_000;
     public const int MaxLostTimeoutMs = 60_000;
     public const int MaxTapMs = 1_000;
     public const int MaxDeadBandPercent = 25;
     public const int MinBarLength = 10;              // pixels along the bar
+
+    // Wait for screen change / Screenshot steps.
+    public const double MinChangedPercent = 0.01;
+    public const long LargeWatchAreaPixels = 4_000_000; // about 2560×1600
+    public const int MaxFolderPathLength = 240;
     public const long LargeFeedbackAreaPixels = 250_000; // bigger areas make each frame slow
 
     public static bool HasErrors(this IEnumerable<ValidationIssue> issues) =>
@@ -490,12 +499,103 @@ public static class MacroValidator
                     issues.Add(Warning("Searching a whole monitor (or every monitor) for a color often finds something else. Pick a small area or an app window if you can.", "Region"));
                 break;
 
+            case WaitForChangeStep w:
+                ValidateWaitForChange(issues, w, screen);
+                break;
+
+            case FocusWindowStep w:
+                if (string.IsNullOrWhiteSpace(w.WindowTitle))
+                    issues.Add(Error("Enter (part of) the window title, e.g. \"Roblox\", or pick it from the list.", nameof(FocusWindowStep.WindowTitle)));
+                else if (w.WindowTitle.Trim().Length > SearchArea.MaxWindowTitleLength)
+                    issues.Add(Error($"The window title can be at most {SearchArea.MaxWindowTitleLength} characters.", nameof(FocusWindowStep.WindowTitle)));
+                if (w.WaitForWindowMs < 0 || w.WaitForWindowMs > MaxDelayMs)
+                    issues.Add(Error($"\"Wait for the window\" must be 0 to {MaxDelayMs:N0} ms.", nameof(FocusWindowStep.WaitForWindowMs)));
+                if (w.SettleMs < 0 || w.SettleMs > MaxHoldMs)
+                    issues.Add(Error($"The pause after focusing must be 0 to {MaxHoldMs:N0} ms.", nameof(FocusWindowStep.SettleMs)));
+                if (!Enum.IsDefined(w.WhenNotFound))
+                    issues.Add(Error("This step has an unknown option value."));
+                break;
+
+            case ScreenshotStep s:
+                ValidateScreenshot(issues, s, screen);
+                break;
+
             default:
                 issues.Add(Error($"Unsupported step type: {step.GetType().Name}."));
                 break;
         }
 
         return issues;
+    }
+
+    /// <summary>Wait for screen change: an area on screen, how much must change, timing, and the "when it changes" action.</summary>
+    private static void ValidateWaitForChange(List<ValidationIssue> issues, WaitForChangeStep w, ScreenBounds? screen)
+    {
+        if (w.RegionWidth < 5 || w.RegionHeight < 5)
+            issues.Add(Error("The watched area must be at least 5×5 pixels. Use \"Pick area\".", "Region"));
+        else if (w.RegionWidth > MaxRegionSize || w.RegionHeight > MaxRegionSize)
+            issues.Add(Error($"The watched area can be at most {MaxRegionSize:N0} pixels wide or tall.", "Region"));
+        else
+        {
+            if (screen is not null && !w.Region.IntersectsWith(new Ocr.ScreenRect(screen.Left, screen.Top, screen.Width, screen.Height)))
+                issues.Add(Warning("The watched area is outside your current screen.", "Region"));
+            if ((long)w.RegionWidth * w.RegionHeight > LargeWatchAreaPixels)
+                issues.Add(Warning("The watched area is very large, so every look takes longer and unrelated changes (chat, animations) can trigger it. Pick only the part that matters.", "Region"));
+        }
+
+        if (!double.IsFinite(w.MinChangedPercent) || w.MinChangedPercent < MinChangedPercent || w.MinChangedPercent > 100)
+            issues.Add(Error($"\"How much must change\" must be {MinChangedPercent} to 100 %.", nameof(WaitForChangeStep.MinChangedPercent)));
+        if (w.PixelTolerance < 0 || w.PixelTolerance > 255)
+            issues.Add(Error("\"Ignore small colour shifts\" must be 0 to 255.", nameof(WaitForChangeStep.PixelTolerance)));
+        else if (w.PixelTolerance < 5)
+            issues.Add(Warning("A colour tolerance below 5 reacts to tiny flicker that you can't see. 20–40 is typical.", nameof(WaitForChangeStep.PixelTolerance)));
+        if (w.TimeoutMs < 0 || w.TimeoutMs > MaxDelayMs)
+            issues.Add(Error($"The wait time must be 0 to {MaxDelayMs:N0} ms.", nameof(WaitForChangeStep.TimeoutMs)));
+        if (w.CheckIntervalMs < MinVisionCheckIntervalMs || w.CheckIntervalMs > MaxCheckIntervalMs)
+            issues.Add(Error($"Check every must be {MinVisionCheckIntervalMs} to {MaxCheckIntervalMs:N0} ms.", nameof(WaitForChangeStep.CheckIntervalMs)));
+        if (!Enum.IsDefined(w.Action) || !Enum.IsDefined(w.WhenNotFound))
+            issues.Add(Error("This step has an unknown option value."));
+        else if (w.Action == FoundTextAction.Hold && (w.ActionHoldMs < 1 || w.ActionHoldMs > MaxHoldMs))
+            issues.Add(Error($"The hold time must be 1 to {MaxHoldMs:N0} ms.", nameof(WaitForChangeStep.ActionHoldMs)));
+    }
+
+    /// <summary>Screenshot: what to capture (an area / window when chosen), a usable folder and file name prefix.</summary>
+    private static void ValidateScreenshot(List<ValidationIssue> issues, ScreenshotStep s, ScreenBounds? screen)
+    {
+        if (!Enum.IsDefined(s.Area))
+        {
+            issues.Add(Error("This step has an unknown option value."));
+            return;
+        }
+
+        if (s.Area == ScreenshotArea.CustomArea)
+        {
+            if (s.RegionWidth < 5 || s.RegionHeight < 5)
+                issues.Add(Error("The screenshot area must be at least 5×5 pixels. Use \"Pick area\".", "Region"));
+            else if (s.RegionWidth > MaxRegionSize || s.RegionHeight > MaxRegionSize)
+                issues.Add(Error($"The screenshot area can be at most {MaxRegionSize:N0} pixels wide or tall.", "Region"));
+            else if (screen is not null && !s.Region.IntersectsWith(new Ocr.ScreenRect(screen.Left, screen.Top, screen.Width, screen.Height)))
+                issues.Add(Warning("The screenshot area is outside your current screen.", "Region"));
+        }
+        else if (s.Area == ScreenshotArea.Window)
+        {
+            if (string.IsNullOrWhiteSpace(s.WindowTitle))
+                issues.Add(Error("Enter (part of) the window title to take a screenshot of.", nameof(ScreenshotStep.WindowTitle)));
+            else if (s.WindowTitle.Trim().Length > SearchArea.MaxWindowTitleLength)
+                issues.Add(Error($"The window title can be at most {SearchArea.MaxWindowTitleLength} characters.", nameof(ScreenshotStep.WindowTitle)));
+        }
+
+        if (!string.IsNullOrWhiteSpace(s.FolderPath))
+        {
+            var folder = s.FolderPath.Trim();
+            if (folder.Length > MaxFolderPathLength || folder.IndexOfAny(Path.GetInvalidPathChars()) >= 0 || !Path.IsPathRooted(folder))
+                issues.Add(Error("Choose a full folder path, e.g. C:\\Users\\you\\Pictures\\Catches (or leave it empty for Pictures\\SmartMacro Screenshots).", nameof(ScreenshotStep.FolderPath)));
+        }
+
+        if ((s.FileNamePrefix?.Trim().Length ?? 0) > ScreenshotFiles.MaxPrefixLength)
+            issues.Add(Error($"The file name prefix can be at most {ScreenshotFiles.MaxPrefixLength} characters.", nameof(ScreenshotStep.FileNamePrefix)));
+        else if (ScreenshotFiles.HasInvalidFileNameChars(s.FileNamePrefix))
+            issues.Add(Warning("The file name prefix has characters a file name can't contain (< > : \" / \\ | ? *); they're replaced by _.", nameof(ScreenshotStep.FileNamePrefix)));
     }
 
     /// <summary>
@@ -631,7 +731,8 @@ public static class MacroValidator
         var actions = new[] { f.WhenBeforeZone, f.WhenInsideZone, f.WhenAfterZone };
         if (f.WhenBeforeZone == FeedbackAction.Pulse || f.WhenAfterZone == FeedbackAction.Pulse)
             issues.Add(Error("\"Pulse\" only works while the marker is INSIDE the zone. Use Hold or Release before / after it.", "Rules"));
-        if (f.WhenInsideZone == FeedbackAction.Pulse && (f.PulsePeriodMs < 50 || f.PulsePeriodMs > MaxInputChangeMs))
+        if (f.ControlMode != FeedbackControlMode.SmartPredictive // smart mode has its own hover pulse check below
+            && f.WhenInsideZone == FeedbackAction.Pulse && (f.PulsePeriodMs < 50 || f.PulsePeriodMs > MaxInputChangeMs))
             issues.Add(Error($"The pulse cycle must be 50 to {MaxInputChangeMs:N0} ms.", nameof(FeedbackLoopStep.PulsePeriodMs)));
         if (f.FinishWhenInZone && f.WhenInsideZone is not (FeedbackAction.Tap or FeedbackAction.Release))
             issues.Add(Error("\"Finish when the marker reaches the zone\" needs the INSIDE rule to be Tap (click) or Release.", nameof(FeedbackLoopStep.FinishWhenInZone)));
@@ -639,6 +740,24 @@ public static class MacroValidator
             issues.Add(Error("None of the rules presses anything. Set at least one place to \"Hold\" or \"Tap\".", "Rules"));
         else if (actions.Contains(FeedbackAction.Hold) && !actions.Contains(FeedbackAction.Release) && !actions.Contains(FeedbackAction.Tap))
             issues.Add(Warning("A rule holds the input but no rule releases it, so it stays held until the loop ends.", "Rules"));
+
+        // Smart Predictive (Feedback Loop 2.0).
+        var smart = f.ControlMode == FeedbackControlMode.SmartPredictive;
+        if (!Enum.IsDefined(f.ControlMode))
+            issues.Add(Error("Unknown control mode.", nameof(FeedbackLoopStep.ControlMode)));
+        if (smart)
+        {
+            if (Playback.PredictiveFeedbackSettings.HoldDirectionOf(f) == 0)
+                issues.Add(Error("Smart Predictive needs to know which way holding moves the bar: set one side (before / after the zone) to Hold and the other to Release.", "Rules"));
+            if (f.FinishWhenInZone)
+                issues.Add(Error("\"Finish when the marker reaches the zone\" is for Classic timing loops. Switch the control mode to Classic Simple Hold.", nameof(FeedbackLoopStep.FinishWhenInZone)));
+            if (!double.IsFinite(f.LeadPredictionFactor) || f.LeadPredictionFactor < 0 || f.LeadPredictionFactor > MaxLeadPredictionSeconds)
+                issues.Add(Error($"The lead prediction must be 0 to {MaxLeadPredictionSeconds} seconds (0.18 = predict 180 ms ahead).", nameof(FeedbackLoopStep.LeadPredictionFactor)));
+            if (f.DeadzonePx < 0 || f.DeadzonePx > MaxDeadzonePx)
+                issues.Add(Error($"The dead zone must be 0 to {MaxDeadzonePx} pixels.", nameof(FeedbackLoopStep.DeadzonePx)));
+            if (f.UsePwmMicroPulse && (f.PulsePeriodMs < 20 || f.PulsePeriodMs > MaxInputChangeMs))
+                issues.Add(Error($"The hover pulse cycle must be 20 to {MaxInputChangeMs:N0} ms.", nameof(FeedbackLoopStep.PulsePeriodMs)));
+        }
 
         // Act.
         if (f.InputKind == FeedbackInputKind.MouseButton)
@@ -661,12 +780,12 @@ public static class MacroValidator
         // Limits.
         if (f.MaxCapturesPerSecond < 1 || f.MaxCapturesPerSecond > MaxCapturesPerSecond)
             issues.Add(Error($"Captures per second must be 1 to {MaxCapturesPerSecond}.", nameof(FeedbackLoopStep.MaxCapturesPerSecond)));
-        else if (f.MaxCapturesPerSecond > 60)
+        else if (f.MaxCapturesPerSecond > 60 && !smart) // Smart Predictive is built for 120 Hz (it measures speeds)
             issues.Add(Warning("More than 60 captures per second is usually faster than the screen updates; it mostly uses more CPU. Check \"Measure loop speed\".", nameof(FeedbackLoopStep.MaxCapturesPerSecond)));
 
         if (f.MinInputChangeMs < 0 || f.MinInputChangeMs > MaxInputChangeMs)
             issues.Add(Error($"The minimum time between input changes must be 0 to {MaxInputChangeMs:N0} ms.", nameof(FeedbackLoopStep.MinInputChangeMs)));
-        else if (f.MinInputChangeMs < 16)
+        else if (f.MinInputChangeMs < 16 && !smart) // Smart Predictive pulses on purpose (games average the duty cycle)
             issues.Add(Warning("Changes less than 16 ms apart can be faster than a game's frame, so the game may miss some.", nameof(FeedbackLoopStep.MinInputChangeMs)));
 
         if (f.MaxRuntimeMs < MinFeedbackRuntimeMs || f.MaxRuntimeMs > MaxFeedbackRuntimeMs)

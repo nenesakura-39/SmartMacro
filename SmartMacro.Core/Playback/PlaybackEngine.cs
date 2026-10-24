@@ -164,6 +164,17 @@ public sealed class PlaybackEngine
     public const int DoubleClickGapMs = MouseMotionDefaults.DoubleClickIntervalMs;
 
     /// <summary>
+    /// Reliable game click on a found target: after the cursor reaches the target, it rests there this long before the
+    /// button goes down, so games that read the cursor once per frame (aim trainers, Roblox / Unity) register the new
+    /// position first. Used by every click a Find image / colour / text step (or an If "when found") makes on what it
+    /// found, and by Mouse click steps that click the last found spot or a Smart-Aim target.
+    /// </summary>
+    public const int TargetHoverMs = 15;
+
+    /// <summary>A click on a found target keeps the button down at least this long (MouseDown → 25 ms → MouseUp).</summary>
+    public const int MinTargetClickHoldMs = 25;
+
+    /// <summary>
     /// Smooth mouse movement: a cursor jump made by a Move mouse step (or a click / scroll at a position) that comes
     /// right after a Delay glides there during the end of that Delay (up to <see cref="MaxGlideMs"/>, one move every
     /// <see cref="GlideStepInterval"/>), instead of teleporting. Total timing doesn't change. The app turns this on
@@ -441,6 +452,7 @@ public sealed class PlaybackEngine
             ScreenSearchStep s => s.TimeoutMs,
             IfStep { Condition.Search: { } check } => check.TimeoutMs,
             FeedbackLoopStep f => f.MaxRuntimeMs,
+            WaitForChangeStep w => w.TimeoutMs,
             _ => 0,
         };
         return ms > 0 && double.IsFinite(ms) ? ms : null;
@@ -1400,7 +1412,8 @@ public sealed class PlaybackEngine
         var number = run.StepNumberOf(index);
         var capture = _capture ?? throw new ScreenCaptureUnavailableException("Screen capture isn't available, so Feedback loop steps can't run.");
         var sensor = new FeedbackSensor(step, capture, _clock);
-        var controller = new FeedbackController(FeedbackRules.From(step));
+        // Classic region rules, or Feedback Loop 2.0 Smart Predictive (PD lead + hover pulse + reversal brake).
+        var controller = FeedbackControllers.Create(step);
         var stats = new FeedbackStats();
         var held = run.Held;
         var key = new HeldKey(step.VirtualKey);
@@ -1497,6 +1510,7 @@ public sealed class PlaybackEngine
                 stats.Add(frame);
                 var decision = controller.Update(frame.Observation, Now());
                 if (decision.Deferred) stats.Deferred++;
+                if (decision.Braked) stats.Brakes++;
 
                 switch (decision.Command)
                 {
@@ -1552,6 +1566,8 @@ public sealed class PlaybackEngine
                 if (frameStart >= nextProgress)
                 {
                     var state = waiting ? "waiting for the target" : controller.IsHeld ? "holding" : "released";
+                    if (controller is PredictiveFeedbackController smart && !waiting)
+                        state += SmartTelemetry(smart);
                     Report(run, index, loops, $"feedback {frameStart.TotalSeconds:0.0} s, {state}");
                     nextProgress = frameStart + FeedbackProgressInterval;
                 }
@@ -1572,6 +1588,15 @@ public sealed class PlaybackEngine
         }
 
         if (failure is not null) throw failure;
+    }
+
+    /// <summary>", gap 12 px, bar 340 px/s, hover 55%" for the progress text of a Smart Predictive loop (invariant culture).</summary>
+    internal static string SmartTelemetry(PredictiveFeedbackController smart)
+    {
+        var culture = System.Globalization.CultureInfo.InvariantCulture;
+        var text = string.Format(culture, ", gap {0:0} px, bar {1:0} px/s", smart.PredictedError, smart.PlayerVelocity);
+        if (smart.Duty is { } duty) text += string.Format(culture, ", hover {0:0}%", duty * 100);
+        return text;
     }
 
     private static bool IsConditionDue(Condition condition, TimeSpan? lastCheck, TimeSpan now) =>
@@ -1660,6 +1685,7 @@ public sealed class PlaybackEngine
 
             case MouseClickStep c:
                 (int X, int Y)? start = null; // where the click happens, if known (needed for a smooth drag)
+                var onFoundTarget = false;     // clicking something vision found (last found spot / Smart-Aim match)
                 // Humanize moves real clicks a few pixels (never a plain Down / Up, which may belong to a recorded drag).
                 var jitters = c.Action is MouseClickAction.Click or MouseClickAction.DoubleClick or MouseClickAction.Hold;
                 if (c.UseLastFoundText)
@@ -1680,6 +1706,7 @@ public sealed class PlaybackEngine
                     if (jitters) found = Jitter(found.X, found.Y, _lastFoundBounds);
                     await MoveCursorAsync(found.X, found.Y, c.MoveStyle, c.MoveDurationMs, speed, onTimeline: true, token).ConfigureAwait(false);
                     start = found;
+                    onFoundTarget = true;
                 }
                 else if (!c.UseCurrentPosition)
                 {
@@ -1695,10 +1722,32 @@ public sealed class PlaybackEngine
                     (int X, int Y) clickAt = jitters ? Jitter(aimSpot.X, aimSpot.Y, aimBounds) : aimSpot;
                     await MoveCursorAsync(clickAt.X, clickAt.Y, c.MoveStyle, c.MoveDurationMs, speed, onTimeline: true, token).ConfigureAwait(false);
                     start = clickAt;
+                    onFoundTarget = !aimBounds.IsEmpty;
                 }
                 else if (_input.TryGetCursorPosition(out var cursorX, out var cursorY))
                 {
                     start = (cursorX, cursorY);
+                }
+
+                // Reliable game click on a found target: rest on it TargetHoverMs, then press for at least MinTargetClickHoldMs.
+                // (Fixed-position clicks keep their exact recorded timing; the Windows input layer already settles the
+                // cursor before a press that follows a jump.)
+                if (onFoundTarget && c.Action is MouseClickAction.Click or MouseClickAction.DoubleClick)
+                {
+                    AdvanceTimeline(TargetHoverMs);
+                    await WaitForTimelineAsync(token).ConfigureAwait(false);
+                    var hold = Math.Max(MinTargetClickHoldMs, c.HoldMs);
+                    await TimelineClickAsync(c.Button, hold, speed, held, token).ConfigureAwait(false);
+                    if (c.Action == MouseClickAction.DoubleClick)
+                    {
+                        AdvanceTimeline(Math.Max(0, c.DoubleClickIntervalMs) / speed);
+                        await WaitForTimelineAsync(token).ConfigureAwait(false);
+                        await TimelineClickAsync(c.Button, hold, speed, held, token).ConfigureAwait(false);
+                    }
+
+                    await WaitAfterClickAsync(c, speed, token).ConfigureAwait(false);
+                    SyncTimelineToNow();
+                    break;
                 }
 
                 switch (c.Action)
@@ -1847,6 +1896,21 @@ public sealed class PlaybackEngine
 
             case InputSequenceStep q:
                 await PlaySequenceAsync(q, speed, held, token).ConfigureAwait(false);
+                break;
+
+            case WaitForChangeStep w:
+                await WaitForChangeAsync(w, held, token).ConfigureAwait(false);
+                SyncTimelineToNow();
+                break;
+
+            case FocusWindowStep w:
+                await FocusWindowAsync(w, token).ConfigureAwait(false);
+                SyncTimelineToNow();
+                break;
+
+            case ScreenshotStep s:
+                await TakeScreenshotAsync(s, token).ConfigureAwait(false);
+                SyncTimelineToNow();
                 break;
 
             default:
@@ -2149,6 +2213,181 @@ public sealed class PlaybackEngine
         }
     }
 
+    // ---------------- Wait for screen change / Focus window / Take screenshot ----------------
+
+    /// <summary>The file the latest Take screenshot step saved (null before the first one).</summary>
+    public string? LastScreenshotPath { get; private set; }
+
+    /// <summary>
+    /// "Wait for screen change": takes a starting picture of the area, then looks again every check interval until enough
+    /// of it differs. The centre of the changed pixels becomes the last found spot (and gets the step's action). Time spent
+    /// paused doesn't count, and after a pause the starting picture is taken again (the screen may have changed while
+    /// you were doing something else).
+    /// </summary>
+    private async Task WaitForChangeAsync(WaitForChangeStep step, HeldInput held, CancellationToken token)
+    {
+        var capture = _capture ?? throw new ScreenCaptureUnavailableException("Screen capture isn't available, so Wait for screen change steps can't run.");
+        var area = step.Region;
+        var started = _clock.Elapsed;
+        var shiftAtStart = _timelineShift;
+        var timeout = TimeSpan.FromMilliseconds(Math.Max(0, step.TimeoutMs));
+        TimeSpan Elapsed() => _clock.Elapsed - started - (_timelineShift - shiftAtStart);
+
+        await WaitIfPausedAsync(token).ConfigureAwait(false);
+        var baseline = await capture.CaptureAsync(area, token).ConfigureAwait(false);
+        var best = default(ScreenChange);
+
+        while (true)
+        {
+            var shiftBeforeWait = _timelineShift;
+            await WaitAsync(Math.Max(1, step.CheckIntervalMs), token).ConfigureAwait(false);
+            await WaitIfPausedAsync(token).ConfigureAwait(false);
+            token.ThrowIfCancellationRequested();
+
+            var lookStarted = _clock.Elapsed;
+            var frame = await capture.CaptureAsync(area, token).ConfigureAwait(false);
+            if (_timelineShift != shiftBeforeWait || frame.Bounds != baseline.Bounds)
+            {
+                baseline = frame; // paused (or the area moved partly off screen): start comparing from what is there now
+            }
+            else
+            {
+                var change = ScreenChangeDetector.Compare(baseline, frame, step.PixelTolerance);
+                RecordProbeTime((_clock.Elapsed - lookStarted).TotalMilliseconds);
+                if (change.ChangedPercent > best.ChangedPercent) best = change;
+                if (change.Any && change.ChangedPercent >= step.MinChangedPercent)
+                {
+                    var (x, y) = (change.CenterX, change.CenterY);
+                    RememberFound(x, y, change.Bounds);
+                    ReportTarget(x, y, change.Bounds, 1.0, StepDescriber.DisplayName(step.Kind));
+                    Message?.Invoke(this, string.Format(System.Globalization.CultureInfo.InvariantCulture,
+                        "The watched area changed: {0:0.##} % of its pixels, around ({1}, {2}).", change.ChangedPercent, x, y));
+                    await PerformFoundActionAsync(step.Action, x, y, step.ActionHoldMs, FoundActionTiming.Default, held, token, change.Bounds)
+                        .ConfigureAwait(false);
+                    return;
+                }
+            }
+
+            if (Elapsed() >= timeout)
+            {
+                var message = string.Format(System.Globalization.CultureInfo.InvariantCulture,
+                    "The watched area didn't change {0} (largest change: {1:0.##} % of its pixels, needed {2:0.##} %).",
+                    step.TimeoutMs == 0 ? "when checked" : string.Format(System.Globalization.CultureInfo.InvariantCulture, "within {0:0.#} s", timeout.TotalSeconds),
+                    best.ChangedPercent, step.MinChangedPercent);
+                if (step.WhenNotFound is TextNotFoundBehavior.Continue or TextNotFoundBehavior.SkipNextStep)
+                {
+                    ForgetFound();
+                    var skip = step.WhenNotFound == TextNotFoundBehavior.SkipNextStep;
+                    _skipNextStep = skip;
+                    Message?.Invoke(this, message + (skip ? " Skipping the next step." : " Continuing."));
+                    return;
+                }
+
+                throw new DetectionTimeoutException(message);
+            }
+        }
+    }
+
+    /// <summary>How often "Focus window" looks for a window that isn't open yet.</summary>
+    private const int FocusWindowPollMs = 250;
+
+    /// <summary>
+    /// "Focus window": finds the window by (part of) its title (waiting for it up to the step's time), restores it when
+    /// minimized and brings it to the front, then pauses briefly so the app is ready for the next input.
+    /// </summary>
+    private async Task FocusWindowAsync(FocusWindowStep step, CancellationToken token)
+    {
+        var title = step.WindowTitle?.Trim() ?? string.Empty;
+        var layout = _layout ?? throw new InvalidOperationException("The window list isn't available, so Focus window steps can't run.");
+        var started = _clock.Elapsed;
+        var shiftAtStart = _timelineShift;
+        var timeout = TimeSpan.FromMilliseconds(Math.Max(0, step.WaitForWindowMs));
+        TimeSpan Elapsed() => _clock.Elapsed - started - (_timelineShift - shiftAtStart);
+
+        while (true)
+        {
+            await WaitIfPausedAsync(token).ConfigureAwait(false);
+            token.ThrowIfCancellationRequested();
+
+            if (SearchArea.FindWindow(layout.GetWindows(), title) is { } window)
+            {
+                if (layout is not IWindowFocuser focuser)
+                {
+                    Message?.Invoke(this, $"Found the window \"{window.Title}\", but this SmartMacro can't bring windows to the front.");
+                    return;
+                }
+
+                var focused = focuser.TryFocus(window, step.RestoreIfMinimized);
+                Message?.Invoke(this, focused
+                    ? $"Brought the window \"{window.Title}\" to the front."
+                    : $"Found the window \"{window.Title}\", but Windows didn't let SmartMacro bring it to the front (click it once by hand, or run SmartMacro as the same user / admin level as the game).");
+                if (step.SettleMs > 0) await WaitAsync(step.SettleMs, token).ConfigureAwait(false);
+                return;
+            }
+
+            if (Elapsed() >= timeout)
+            {
+                var message = step.WaitForWindowMs == 0
+                    ? $"No open window has \"{title}\" in its title."
+                    : string.Format(System.Globalization.CultureInfo.InvariantCulture, "No window with \"{0}\" in its title opened within {1:0.#} s.", title, timeout.TotalSeconds);
+                if (step.WhenNotFound is TextNotFoundBehavior.Continue or TextNotFoundBehavior.SkipNextStep)
+                {
+                    var skip = step.WhenNotFound == TextNotFoundBehavior.SkipNextStep;
+                    _skipNextStep = skip;
+                    Message?.Invoke(this, message + (skip ? " Skipping the next step." : " Continuing."));
+                    return;
+                }
+
+                throw new DetectionTimeoutException(message);
+            }
+
+            await WaitAsync(Math.Min(FocusWindowPollMs, Math.Max(1, (timeout - Elapsed()).TotalMilliseconds)), token).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// "Take screenshot": captures the main monitor / all monitors / an area / an app window and saves it as a PNG. A
+    /// screenshot that can't be taken or saved is only reported: the macro carries on (it's a log, not a goal).
+    /// </summary>
+    private async Task TakeScreenshotAsync(ScreenshotStep step, CancellationToken token)
+    {
+        var capture = _capture ?? throw new ScreenCaptureUnavailableException("Screen capture isn't available, so Take screenshot steps can't run.");
+        ScreenRect area;
+        try
+        {
+            area = ScreenshotFiles.ResolveArea(step, capture.GetVirtualScreen(), _layout);
+        }
+        catch (SearchAreaUnavailableException ex)
+        {
+            Message?.Invoke(this, $"📸 No screenshot taken: {ex.Message}");
+            return;
+        }
+
+        ScreenFrame frame;
+        try
+        {
+            frame = await capture.CaptureAsync(area, token).ConfigureAwait(false);
+        }
+        catch (ArgumentException ex)
+        {
+            Message?.Invoke(this, $"📸 No screenshot taken: {ex.Message}");
+            return;
+        }
+
+        var folder = ScreenshotFiles.FolderOf(step);
+        var now = DateTime.Now;
+        try
+        {
+            var path = await Task.Run(() => ScreenshotFiles.Save(frame.Image, folder, step.FileNamePrefix, now), token).ConfigureAwait(false);
+            LastScreenshotPath = path;
+            Message?.Invoke(this, $"📸 Screenshot saved: {path} ({frame.Bounds.Width}×{frame.Bounds.Height})");
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
+        {
+            Message?.Invoke(this, $"📸 Couldn't save the screenshot in \"{folder}\": {ex.Message}");
+        }
+    }
+
     /// <summary>How far below the clicked spot the cursor goes when the step searches the whole screen.</summary>
     public const int MoveAwayDistance = 150;
 
@@ -2195,18 +2434,23 @@ public sealed class PlaybackEngine
         if (action != FoundTextAction.Move) (x, y) = Jitter(x, y, matchBounds); // Humanize: stays inside what was found
 
         await MoveCursorAsync(x, y, timing.Style, timing.MoveMs, 1.0, onTimeline: false, token).ConfigureAwait(false);
+
+        // Reliable game click: the cursor rests on the target for a moment before the press (games read the cursor once
+        // per frame), and the button stays down at least MinTargetClickHoldMs.
+        if (action != FoundTextAction.Move) await WaitAsync(TargetHoverMs, token).ConfigureAwait(false);
+        var clickHold = Math.Max(MinTargetClickHoldMs, timing.HoldMs);
         switch (action)
         {
             case FoundTextAction.Click:
-                await HeldClickAsync(MacroMouseButton.Left, timing.HoldMs, held, token).ConfigureAwait(false);
+                await HeldClickAsync(MacroMouseButton.Left, clickHold, held, token).ConfigureAwait(false);
                 break;
             case FoundTextAction.DoubleClick:
-                await HeldClickAsync(MacroMouseButton.Left, timing.HoldMs, held, token).ConfigureAwait(false);
+                await HeldClickAsync(MacroMouseButton.Left, clickHold, held, token).ConfigureAwait(false);
                 await WaitAsync(Math.Max(0, timing.DoubleGapMs), token).ConfigureAwait(false);
-                await HeldClickAsync(MacroMouseButton.Left, timing.HoldMs, held, token).ConfigureAwait(false);
+                await HeldClickAsync(MacroMouseButton.Left, clickHold, held, token).ConfigureAwait(false);
                 break;
             case FoundTextAction.RightClick:
-                await HeldClickAsync(MacroMouseButton.Right, timing.HoldMs, held, token).ConfigureAwait(false);
+                await HeldClickAsync(MacroMouseButton.Right, clickHold, held, token).ConfigureAwait(false);
                 break;
             case FoundTextAction.Hold:
                 _input.MouseButton(MacroMouseButton.Left, true);

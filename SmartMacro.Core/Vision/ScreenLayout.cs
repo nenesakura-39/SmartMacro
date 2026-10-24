@@ -57,6 +57,19 @@ public interface IScreenLayout
     IReadOnlyList<WindowInfo> GetWindows();
 }
 
+/// <summary>
+/// Brings an app window to the front (the "Focus window" step). The real screen layout (WPF project) implements it next to
+/// <see cref="IScreenLayout"/>; without it the step can find the window but not focus it.
+/// </summary>
+public interface IWindowFocuser
+{
+    /// <summary>
+    /// Restores the window when it's minimized (if asked) and makes it the foreground window. Returns true when it is the
+    /// foreground window afterwards (Windows can refuse, e.g. while another app is in a full-screen exclusive mode).
+    /// </summary>
+    bool TryFocus(WindowInfo window, bool restoreIfMinimized);
+}
+
 /// <summary>Thrown when a step's "where to look" can't be used right now (the window isn't open, no such monitor…).</summary>
 public sealed class SearchAreaUnavailableException : Exception
 {

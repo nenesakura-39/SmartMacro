@@ -1,5 +1,18 @@
 namespace SmartMacro.Core.Models;
 
+/// <summary>One-click game presets for Smart Predictive feedback loops (Feedback Loop 2.0).</summary>
+public enum FeedbackGamePreset
+{
+    /// <summary>"🎣 Fisch / Momentum Bar (Smart PD + Hover Pulse)": lead 0.18 s, dead zone 6 px, hover pulse every 80 ms, 120 captures/s.</summary>
+    FischMomentumBar,
+
+    /// <summary>"⚡ Fast Reflex Tracker (Instant Snap)": short lead 0.08 s, dead zone 3 px, no pulsing, 120 captures/s.</summary>
+    FastReflexTracker,
+
+    /// <summary>"⚖️ Smooth Balance Bar (Gentle Pulse)": long lead 0.25 s, dead zone 10 px, gentle 120 ms pulse, 60 captures/s.</summary>
+    SmoothBalanceBar,
+}
+
 /// <summary>
 /// Ready-made settings for the two common kinds of minigame, so a Feedback loop can be set up with three picks
 /// (area, marker colour, zone colour) instead of every raw parameter. Applying a preset only changes the settings
@@ -16,6 +29,53 @@ public static class FeedbackPresets
     /// <summary>"Follow the target": the bar counts as gone after this long without a clear reading.</summary>
     public const int FollowLostTimeoutMs = 1_500;
 
+    /// <summary>Smart Predictive loops look this many times per second (the sensor captures only the bar area).</summary>
+    public const int SmartCapturesPerSecond = 120;
+
+    /// <summary>Smart Predictive loops: minimum time between input changes (one 120 Hz frame).</summary>
+    public const int SmartMinInputChangeMs = 8;
+
+    /// <summary>Smart Predictive hover pulse period (Fisch preset).</summary>
+    public const int SmartPulsePeriodMs = 80;
+
+    /// <summary>The label of a game preset, as shown on its button.</summary>
+    public static string Label(FeedbackGamePreset preset) => preset switch
+    {
+        FeedbackGamePreset.FischMomentumBar => "🎣 Fisch / Momentum Bar (Smart PD + Hover Pulse)",
+        FeedbackGamePreset.FastReflexTracker => "⚡ Fast Reflex Tracker (Instant Snap)",
+        _ => "⚖️ Smooth Balance Bar (Gentle Pulse)",
+    };
+
+    /// <summary>
+    /// One-click game preset: the "follow the target" setup (zone = your bar found by its colour, marker = the target)
+    /// with Smart Predictive control tuned for that kind of bar. The area, colours and direction the user picked are kept.
+    /// </summary>
+    public static void ApplyGamePreset(FeedbackLoopStep step, FeedbackGamePreset preset)
+    {
+        ArgumentNullException.ThrowIfNull(step);
+        Apply(step, FeedbackPreset.FollowTargetBar); // Smart Predictive, Fisch values
+        switch (preset)
+        {
+            case FeedbackGamePreset.FastReflexTracker:
+                SetSmart(step, lead: 0.08, deadzonePx: 3, pwm: false, pulseMs: SmartPulsePeriodMs, capturesPerSecond: SmartCapturesPerSecond, minChangeMs: SmartMinInputChangeMs);
+                break;
+            case FeedbackGamePreset.SmoothBalanceBar:
+                SetSmart(step, lead: 0.25, deadzonePx: 10, pwm: true, pulseMs: 120, capturesPerSecond: 60, minChangeMs: 16);
+                break;
+        }
+    }
+
+    private static void SetSmart(FeedbackLoopStep step, double lead, int deadzonePx, bool pwm, int pulseMs, int capturesPerSecond, int minChangeMs)
+    {
+        step.ControlMode = FeedbackControlMode.SmartPredictive;
+        step.LeadPredictionFactor = lead;
+        step.DeadzonePx = deadzonePx;
+        step.UsePwmMicroPulse = pwm;
+        step.PulsePeriodMs = pulseMs;
+        step.MaxCapturesPerSecond = capturesPerSecond;
+        step.MinInputChangeMs = minChangeMs;
+    }
+
     /// <summary>Applies a preset. Custom changes nothing (it just shows every setting).</summary>
     public static void Apply(FeedbackLoopStep step, FeedbackPreset preset)
     {
@@ -27,7 +87,10 @@ public static class FeedbackPresets
                 step.ZoneMode = FeedbackZoneMode.DetectedByColor;
                 ApplyFollowRules(step);
                 step.DeadBandPercent = 2;
-                step.PulsePeriodMs = FeedbackLoopStep.DefaultPulsePeriodMs;
+                // Feedback Loop 2.0: follow-the-target bars have momentum, so they use Smart Predictive (PD + brake + hover
+                // pulse) with the Fisch values. (The rules above still say which way holding pushes the bar.)
+                SetSmart(step, FeedbackLoopStep.DefaultLeadPredictionFactor, FeedbackLoopStep.DefaultDeadzonePx, pwm: true,
+                    pulseMs: SmartPulsePeriodMs, capturesPerSecond: SmartCapturesPerSecond, minChangeMs: SmartMinInputChangeMs);
                 step.FinishWhenInZone = false;
                 step.InputKind = FeedbackInputKind.MouseButton;
                 step.MouseButton = MacroMouseButton.Left;
@@ -42,6 +105,7 @@ public static class FeedbackPresets
                 SetZoneEntryAction(step, releaseHeldInput: step.FinishWhenInZone && step.WhenInsideZone == FeedbackAction.Release);
                 step.DeadBandPercent = 0; // react the moment it touches the zone
                 step.FinishWhenInZone = true;
+                step.ControlMode = FeedbackControlMode.ClassicSimpleHold; // a timing click, not tracking
                 step.MaxRuntimeMs = ZoneClickMaxRuntimeMs;
                 step.WhenTimeUp = LoopLimitBehavior.ExitLoop;
                 step.WhenTargetLost = FeedbackLostAction.ReleaseAndWait;

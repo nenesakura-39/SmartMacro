@@ -184,6 +184,20 @@ public sealed class SettingsViewModel : ObservableObject
         set { if (SetProperty(ref _showRunOverlay, value)) IsDirty = true; }
     }
 
+    /// <summary>
+    /// "🎥 Show overlays in OBS / Discord" (streamer mode). Applied and saved at once (like the editor's top-bar pill), so it
+    /// doesn't wait for Save and isn't undone by Revert.
+    /// </summary>
+    public bool ShowOverlaysInObsAndRecording
+    {
+        get => _saved.ShowOverlaysInObsAndRecording;
+        set
+        {
+            if (_saved.ShowOverlaysInObsAndRecording == value) return;
+            _ = QuickSetAsync(s => s.ShowOverlaysInObsAndRecording = value);
+        }
+    }
+
     public bool RecordMouseMovement
     {
         get => _recordMouseMovement;
@@ -318,6 +332,7 @@ public sealed class SettingsViewModel : ObservableObject
             SimplifyMousePaths = SimplifyMousePaths,
             CaptureClickSnapshots = CaptureClickSnapshots,
             SmoothMouseMoves = SmoothMouseMoves,
+            ShowOverlaysInObsAndRecording = _saved.ShowOverlaysInObsAndRecording, // saved on its own when toggled
             RecordHotkey = RecordHotkey,
             PlayHotkey = PlayHotkey,
             PauseHotkey = PauseHotkey,
@@ -354,6 +369,7 @@ public sealed class SettingsViewModel : ObservableObject
         _recordingMode = updated.RecordingMode;
         OnPropertyChanged(nameof(MinimizeDuringRun));
         OnPropertyChanged(nameof(ShowRunOverlay));
+        OnPropertyChanged(nameof(ShowOverlaysInObsAndRecording));
         OnPropertyChanged(nameof(RecordingMode));
         OnPropertyChanged(nameof(IsDesktopRecording));
         OnPropertyChanged(nameof(MakesEditableSteps));

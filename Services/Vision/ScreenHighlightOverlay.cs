@@ -137,8 +137,9 @@ public sealed class ScreenHighlightOverlay : Window
         var style = NativeMethods.GetWindowLongValue(hwnd, NativeMethods.GWL_EXSTYLE);
         style |= NativeMethods.WS_EX_TRANSPARENT | NativeMethods.WS_EX_LAYERED | NativeMethods.WS_EX_NOACTIVATE | NativeMethods.WS_EX_TOOLWINDOW;
         NativeMethods.SetWindowLongValue(hwnd, NativeMethods.GWL_EXSTYLE, style);
-        // A test (or the next playback capture) must never "find" the highlight; old Windows: hidden before captures.
-        if (!CaptureShield.TryExclude(hwnd)) CaptureShield.MarkVisible(this, CloseNow);
+        // A test (or the next playback capture) must never "find" the highlight. Old Windows, or "🎥 Show overlays in OBS /
+        // Discord" on (streams / recordings see it): it's closed right before SmartMacro's own next capture instead.
+        if (!CaptureShield.TryExclude(this)) CaptureShield.MarkVisible(this, CloseNow);
         ApplyBounds();
         Draw();
         StartTimer();
