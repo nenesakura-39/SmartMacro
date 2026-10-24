@@ -1,6 +1,8 @@
 # SmartMacro – Project Status / Handoff
 
-_Last updated: 2026-10-24 (AFK safety audit, 6 items: no catch-up bursts, hook fast path, absolute moves by default, ref-counted
+_Last updated: 2026-10-24 (Target-lock reticle badge fit: the "🎯 98% · 45ms · Find image" badge is no longer cut off on small targets:
+**written by the AI without a .NET SDK, NOT built / tested yet** – owner runs `tools\verify.cmd`.
+Before it: AFK safety audit, 6 items: no catch-up bursts, hook fast path, absolute moves by default, ref-counted
 1 ms timer: **built + tested with `tools\verify.cmd` on the owner's PC: 0 warnings, 0 errors, 1139 / 1139 passed** (incl. follow-up fixes); not committed.
 Before it: 1:1 Precision Replay: recording fidelity presets + 3D camera relative mouse moves: **built + tested
 with `tools\verify.cmd` on the owner's PC: 0 warnings, 0 errors, 1129 / 1129 passed**; not committed, not tried by hand.
@@ -56,6 +58,20 @@ Developer: Riku (リク) · Brand: KuroLogic_
 | Release package | `publish\SmartMacro-1.0.0-win-x64\SmartMacro.exe` is an OLD build (made right after `159d6b3`, before Stage 1) | – | ignored by git |
 
 
+
+## Target-lock reticle badge fit (2026-10-24): **NOT built / tested yet** (written without a .NET SDK; owner runs `tools\verify.cmd`)
+
+- Bug: on a small target (the 63 px "Click the Target" ball) the badge text "🎯 98% · 45ms · Find image" was cut off. The reticle
+  window was only target + 18 px pad (+30 px above), ~99 px wide, while the badge is ~180 px wide.
+- Fix: new pure `SmartMacro.Core/Vision/ReticleLayout.cs` (`Compute(box, badgeW, badgeH, screen)` → `ReticleFrame`): the window
+  is the bracket area UNION the measured badge (+8 px glow), clipped to the virtual screen. Badge centred over the target,
+  above it, or below when there's no room above; pushed inward at screen edges instead of clipped; works on negative-origin monitors.
+- `Services/Vision/TargetLockOverlay.cs`: badge is measured before the window is sized (`BuildBadge`, NoWrap), at the target
+  monitor's DPI (`GetDpiForMonitor`, fallback to the window DPI). Streamer mode: if the badge would touch the target's keep-clear
+  area it is dropped (brackets only), same rule as before.
+- Not a bug (owner): the "search area moved" report – the website's own layout changes between playing / finishing.
+- Tests: `SmartMacro.Tests/ReticleLayoutTests.cs` (6 tests, 8 cases incl. 100 / 150 / 200 % scaling, every screen edge, corner,
+  left monitor, no-badge window, badge never on the target).
 
 ## AFK safety audit – 6 items (2026-10-24): **built + tested** (`tools\verify.cmd` run by the AI on the owner's PC: 0 warnings, 0 errors, **1137 / 1137 passed**)
 Not committed, not tried by hand. Audit result per item (request names: `Win32InputInjector` / `IInputInjector` =
@@ -1558,6 +1574,8 @@ no .NET SDK in the AI's environment)
   csproj Company/Authors "Riku", Copyright "© 2026 Riku", README "© 2026 Riku") – change awaits owner approval.
 
 ## Next task
+- Owner: `tools\verify.cmd` for the reticle badge fit (never compiled), then a Find image loop on a small target: the whole
+  badge should show (also near the top edge → badge goes below, and at 125 / 150 % scaling).
 - Owner: try the Studio UI Upgrades 1–3 by hand (list in their section), then commit Fixes 1–5 + Upgrades 1–6 + Studio UI 1–3.
 - Owner: `tools\verify.cmd` for Upgrades 1–6 (never fully compiled), then try: Shift+F5, Space on an If, Ctrl+D on an If,
   Ctrl+F search + pills, ▼ / ▶ folding, Compact view, ⚡ Vision in the header pill / mini-HUD during a Find image loop.

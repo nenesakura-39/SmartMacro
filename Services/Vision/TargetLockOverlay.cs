@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Interop;
@@ -31,8 +32,8 @@ public sealed class TargetLockOverlay : Window
     /// <summary>How long it takes to fade out afterwards.</summary>
     public static readonly TimeSpan FadeTime = TimeSpan.FromMilliseconds(160);
 
-    private const int Pad = 18;    // physical px around the target for the brackets and glow
-    private const int BadgeRoom = 30; // physical px above the target for the badge
+    // Window / badge layout (physical px) comes from ReticleLayout: the window always fits the whole badge.
+    private const int BadgeSafetyPx = 4; // extra width so text measured in WPF units never ends up a pixel too narrow
 
     private static readonly Color NeonCyan = Color.FromRgb(0x22, 0xD3, 0xEE);
     private static readonly Color NeonCyanBright = Color.FromRgb(0xA5, 0xF3, 0xFC);
@@ -48,6 +49,11 @@ public sealed class TargetLockOverlay : Window
     private Color NeonBright = NeonCyanBright;
     private Color Lock = LockGreen;
     private string? _badgeOverride;
+    private string _badgeText = string.Empty;
+    private double _badgeScale = 1.0;        // DPI scale of the monitor the target is on (badge text size in physical px)
+    private int _badgeWidth;                 // measured badge size, physical px (0 = no badge)
+    private int _badgeHeight;
+    private ReticleFrame _frame;
 
     private readonly Canvas _canvas = new() { IsHitTestVisible = false };
     private readonly DispatcherTimer _holdTimer;
@@ -121,11 +127,27 @@ public sealed class TargetLockOverlay : Window
 
         // Streamer mode: everything is drawn around the hollow core (the target + a 24×24 px square on the click point).
         var box = _streamSafe ? OverlayCapturePolicy.HollowArea(target.Bounds, target.X, target.Y) : target.Bounds;
-        var bounds = new ScreenRect(box.X - Pad, box.Y - Pad - BadgeRoom, box.Width + 2 * Pad, box.Height + 2 * Pad + BadgeRoom)
-            .Intersect(VirtualScreen());
-        if (bounds.IsEmpty) return;
 
-        _bounds = bounds;
+        // Measure the badge first (at the DPI of the monitor the target is on), then size the window so the WHOLE badge
+        // fits: "🎯 98% · 45ms · Find image" is wider than a small target plus its brackets.
+        _badgeText = _badgeOverride ?? $"{target.Badge} · {(target.FromHotSpot ? "⚡ " : "")}{target.Label}";
+        _badgeScale = MonitorScaleAt(target.X, target.Y);
+        var measured = BuildBadge(_badgeText, _badgeScale);
+        measured.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+        _badgeWidth = (int)Math.Ceiling(measured.DesiredSize.Width) + BadgeSafetyPx;
+        _badgeHeight = (int)Math.Ceiling(measured.DesiredSize.Height) + 1;
+
+        var screen = VirtualScreen();
+        var frame = ReticleLayout.Compute(box, _badgeWidth, _badgeHeight, screen);
+        // Streamer mode: the badge is in captures too, so it must never touch the target; if it can't fit clear of it
+        // (target filling the screen), it's left out.
+        if (_streamSafe && frame.Placement != BadgePlacement.None
+            && !OverlayCapturePolicy.IsClearOf(frame.BadgeOnScreen(_badgeWidth, _badgeHeight), box))
+            frame = ReticleLayout.Compute(box, 0, 0, screen);
+        if (frame.Window.IsEmpty) return;
+
+        _frame = frame;
+        _bounds = frame.Window;
         _target = target;
         BeginAnimation(OpacityProperty, null);
         Opacity = 1;
@@ -236,34 +258,59 @@ public sealed class TargetLockOverlay : Window
             _canvas.Children.Add(MakeLine(cx, cy + 2, cx, cy + 7, Lock, 2));
         }
 
-        // "🎯 98% · 0.6ms · Find image" badge above the target (below it when there's no room); ⚡ = found at its last spot.
-        var badge = new Border
-        {
-            Background = new SolidColorBrush(Color.FromArgb(0xE8, 0x0B, 0x12, 0x20)),
-            BorderBrush = new SolidColorBrush(Neon),
-            BorderThickness = new Thickness(1.2 * dpi.DpiScaleX),
-            CornerRadius = new CornerRadius(6 * dpi.DpiScaleX),
-            Padding = new Thickness(7 * dpi.DpiScaleX, 2 * dpi.DpiScaleY, 8 * dpi.DpiScaleX, 3 * dpi.DpiScaleY),
-            Effect = new DropShadowEffect { Color = Neon, BlurRadius = 10, ShadowDepth = 0, Opacity = 0.8 },
-            Child = new TextBlock
-            {
-                Text = _badgeOverride ?? $"{target.Badge} · {(target.FromHotSpot ? "⚡ " : "")}{target.Label}",
-                Foreground = new SolidColorBrush(NeonBright),
-                FontSize = 12.5 * dpi.DpiScaleY, // the canvas is scaled back down, so this ends up as 12.5 px text
-                FontWeight = FontWeights.SemiBold,
-                FontFamily = new FontFamily("Segoe UI Variable Text, Segoe UI"),
-            },
-        };
-        badge.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
-        var bx = Math.Clamp(left, 0, Math.Max(0, _bounds.Width - badge.DesiredSize.Width));
-        var above = top - badge.DesiredSize.Height - 4;
-        // Streamer mode: no room above → no badge (below, the window is too short and it would be pushed onto the target).
-        if (_streamSafe && above < 0) return;
-        var by = above >= 0 ? above : Math.Min(bottom + 4, Math.Max(0, _bounds.Height - badge.DesiredSize.Height));
-        Canvas.SetLeft(badge, bx);
-        Canvas.SetTop(badge, by);
+        // "🎯 98% · 0.6ms · Find image" badge, centred above the target (below it when there's no room; pushed inward at the
+        // screen edges). ⚡ = found at its last spot. The window was sized to fit it whole (ReticleLayout).
+        if (_frame.Placement == BadgePlacement.None || string.IsNullOrEmpty(_badgeText)) return;
+        var badge = BuildBadge(_badgeText, _badgeScale);
+        Canvas.SetLeft(badge, _frame.BadgeLeft);
+        Canvas.SetTop(badge, _frame.BadgeTop);
         _canvas.Children.Add(badge);
     }
+
+    /// <summary>
+    /// The badge, sized in physical px for a monitor with DPI scale <paramref name="scale"/> (the canvas is scaled back by
+    /// the window's DPI, so 12.5 × scale canvas units end up as 12.5 px text on that monitor).
+    /// </summary>
+    private Border BuildBadge(string text, double scale) => new()
+    {
+        Background = new SolidColorBrush(Color.FromArgb(0xE8, 0x0B, 0x12, 0x20)),
+        BorderBrush = new SolidColorBrush(Neon),
+        BorderThickness = new Thickness(1.2 * scale),
+        CornerRadius = new CornerRadius(6 * scale),
+        Padding = new Thickness(7 * scale, 2 * scale, 8 * scale, 3 * scale),
+        Effect = new DropShadowEffect { Color = Neon, BlurRadius = 10, ShadowDepth = 0, Opacity = 0.8 },
+        Child = new TextBlock
+        {
+            Text = text,
+            Foreground = new SolidColorBrush(NeonBright),
+            FontSize = 12.5 * scale,
+            FontWeight = FontWeights.SemiBold,
+            FontFamily = new FontFamily("Segoe UI Variable Text, Segoe UI"),
+            TextWrapping = TextWrapping.NoWrap,
+        },
+    };
+
+    /// <summary>The DPI scale (1.0 = 100 %) of the monitor at a screen point, or the window's own DPI as a fallback.</summary>
+    private double MonitorScaleAt(int x, int y)
+    {
+        try
+        {
+            var monitor = NativeMethods.MonitorFromPoint(new NativeMethods.POINT { X = x, Y = y }, NativeMethods.MONITOR_DEFAULTTONEAREST);
+            if (monitor != IntPtr.Zero && GetDpiForMonitor(monitor, MdtEffectiveDpi, out var dpiX, out _) == 0 && dpiX > 0)
+                return dpiX / 96.0;
+        }
+        catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException)
+        {
+            // Older Windows: fall back to the window's DPI below.
+        }
+
+        return VisualTreeHelper.GetDpi(this).DpiScaleX;
+    }
+
+    private const int MdtEffectiveDpi = 0;
+
+    [DllImport("shcore.dll")]
+    private static extern int GetDpiForMonitor(IntPtr hmonitor, int dpiType, out uint dpiX, out uint dpiY);
 
     private void AddBracket(double x, double y, double dx, double dy)
     {
