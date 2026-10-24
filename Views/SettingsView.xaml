@@ -188,9 +188,9 @@
                                        Text="Applies to the editable steps of Smart and Desktop recordings. Camera parts, Game mode and Exact 1:1 / Rhythm always keep every event." />
                             <CheckBox Style="{StaticResource SettingSwitch}" IsChecked="{Binding UseRelativeMouseDeltas}" IsEnabled="{Binding MakesEditableSteps}"
                                       Content="🎮 Use relative mouse deltas for 3D camera" AutomationProperties.Name="Use relative mouse deltas for 3D camera"
-                                      ToolTip="Every recorded mouse movement becomes a relative move (dx, dy), and clicks happen where the cursor is: for shift-lock, first-person and other games that lock the cursor in the middle. Off: only movement while you hold the right or middle button (turning the camera) is relative." />
+                                      ToolTip="Every recorded mouse movement plays as a relative move (dx, dy), and clicks happen where the cursor is: for shift-lock, first-person and other games that lock the cursor in the middle." />
                             <TextBlock Style="{StaticResource SettingHelp}"
-                                       Text="Movement while the right or middle button is held (turning the camera) is always recorded as relative deltas. Left-button drags (sliders) keep exact screen positions." />
+                                       Text="Off (recommended): moves and drags play at their exact screen positions, so dragging items, sliders or a map never drifts. Every Move step still remembers its dx / dy, so you can switch one step to relative in the editor." />
                             <CheckBox Style="{StaticResource SettingSwitch}" IsChecked="{Binding CaptureClickSnapshots}" IsEnabled="{Binding MakesEditableSteps}"
                                       Content="✨ Smart Click Snapshots: save a small picture of what I click" AutomationProperties.Name="Smart Click Snapshots"
                                       ToolTip="Every recorded click keeps a 56×56 picture of what was under the cursor. The editor shows it, Smart-Aim can find the button again if it moved a little, and one click turns the step into a 'Find image &amp; click'. The pictures are saved inside the macro file, so turn this off if your screen shows private things while you record." />

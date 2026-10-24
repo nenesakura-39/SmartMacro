@@ -199,8 +199,9 @@ public static class RecordingConverter
         {
             if (accounted is long acc)
             {
+                // Out-of-order or equal times give gap <= 0: never a negative Delay (and never more than the 1 h maximum).
                 var gap = time - acc;
-                var minDelay = keysDown.Count > 0 && options.MinDelayMs <= 15 ? 1 : options.MinDelayMs;
+                var minDelay = Math.Max(1, keysDown.Count > 0 && options.MinDelayMs <= 15 ? 1 : options.MinDelayMs);
                 if (gap >= minDelay)
                 {
                     steps.Add(new DelayStep { DurationMs = (int)Math.Min(gap, MacroValidator.MaxDelayMs) });
@@ -247,7 +248,10 @@ public static class RecordingConverter
             }
             else
             {
-                Emit(new MouseMoveStep { X = move.X, Y = move.Y }, move.TimeMs, move.TimeMs);
+                // Absolute X / Y stays authoritative (UseRelativeDelta off), but the delta from the previous spot is
+                // recorded too, so the step can be switched to "relative (3D camera)" in the editor without re-recording.
+                var (dx, dy) = lastMovePosition is { } previous ? (move.X - previous.X, move.Y - previous.Y) : (0, 0);
+                Emit(new MouseMoveStep { X = move.X, Y = move.Y, DeltaX = dx, DeltaY = dy }, move.TimeMs, move.TimeMs);
             }
 
             lastMoveTime = move.TimeMs;

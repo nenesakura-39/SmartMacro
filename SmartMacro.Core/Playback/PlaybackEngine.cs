@@ -162,10 +162,17 @@ public sealed class PlaybackEngine
     /// a click or key press itself takes to send (Windows' hover nudge + settle before a press can be ~35 ms, a stalled
     /// UI thread a few ms more) stays ON the virtual timeline and is taken out of the next wait, instead of being added
     /// to the macro after every step. Over hundreds of steps / a 5-hour AFK loop that extra time used to add up to
-    /// seconds of drift. Up to this much is caught up this way; anything later than that (a real PC stall) is skipped,
-    /// so playback never fires a burst of late input.
+    /// seconds of drift. Up to this much is caught up this way; anything later than that (a slow step, an OS lag spike,
+    /// a real PC stall) is dropped: the timeline restarts from "now", so playback never fires a burst of late input.
     /// </summary>
-    public static readonly TimeSpan MaxStepOverheadCatchUp = TimeSpan.FromMilliseconds(100);
+    public static readonly TimeSpan MaxStepOverheadCatchUp = TimeSpan.FromMilliseconds(50);
+
+    /// <summary>
+    /// No 0 ms catch-up bursts: when playback is behind, one wait is shortened by at most this share of its own length
+    /// (a 16 ms gap between two recorded moves still lasts ≥ 8 ms). Whatever is still owed is taken out of the next waits,
+    /// a little at a time, so games always see the inputs spaced out and the total time still matches the recording.
+    /// </summary>
+    public const double MaxCatchUpShare = 0.5;
 
     /// <summary>
     /// A Mouse click step with a hold (recorded clicks always have one) keeps the button down at least this long
@@ -326,6 +333,7 @@ public sealed class PlaybackEngine
     private TimeSpan _timelineTarget;   // clock time at which the current step / event is due
     private TimeSpan _timelineShift;    // total time the timeline was pushed back (pauses, stalls)
     private TimeSpan _lagAllowance = MaxTimelineLag; // how far behind the timeline may be and still catch up (see MaxStepOverheadCatchUp)
+    private TimeSpan _carriedDebt;      // time still owed that the next waits take out a little at a time (see MaxCatchUpShare)
     private TimeSpan _pausedTotal;      // total time spent paused in this run (not counted by timeouts / loop limits)
     private bool _skipNextStep;         // set by a Find step that timed out with "skip the next step"
 
@@ -971,6 +979,7 @@ public sealed class PlaybackEngine
     {
         _timelineTarget = _clock.Elapsed;
         _lagAllowance = MaxTimelineLag;
+        _carriedDebt = TimeSpan.Zero;
     }
 
     /// <summary>
@@ -988,10 +997,18 @@ public sealed class PlaybackEngine
     {
         var now = _clock.Elapsed;
         var lag = now - _timelineTarget;
-        if (lag > _lagAllowance)
+        var owed = (lag > TimeSpan.Zero ? lag : TimeSpan.Zero) + _carriedDebt;
+        if (owed > _lagAllowance)
         {
-            _timelineShift += lag;
-            _timelineTarget = now;
+            // Too far behind to catch up without a burst: restart the timeline from now.
+            if (lag > TimeSpan.Zero)
+            {
+                _timelineShift += lag;
+                _timelineTarget = now;
+            }
+
+            _carriedDebt = TimeSpan.Zero;
+            _lagAllowance = MaxTimelineLag;
         }
     }
 
@@ -1002,6 +1019,7 @@ public sealed class PlaybackEngine
     private void SyncTimelineToNow()
     {
         _lagAllowance = MaxTimelineLag;
+        _carriedDebt = TimeSpan.Zero;
         var now = _clock.Elapsed;
         if (now > _timelineTarget)
         {
@@ -1010,10 +1028,57 @@ public sealed class PlaybackEngine
         }
     }
 
-    private void AdvanceTimeline(double milliseconds)
+    private void AdvanceTimeline(double milliseconds) => AdvanceTimeline(ToDuration(milliseconds));
+
+    private static TimeSpan ToDuration(double milliseconds) =>
+        milliseconds > 0 && double.IsFinite(milliseconds)
+            ? TimeSpan.FromTicks((long)Math.Round(milliseconds * TimeSpan.TicksPerMillisecond))
+            : TimeSpan.Zero;
+
+    /// <summary>
+    /// Schedules a hold (a key or button kept down: a click hold, a key hold, typematic repeats): the hold always lasts its
+    /// full length from the moment it really starts, because its length IS the input (a 550 ms rod cast must stay 550 ms).
+    /// Time the timeline is behind at that moment isn't taken out of the hold; it stays owed and comes out of the next
+    /// gaps (Delays, glides) instead, a little at a time like any other catch-up.
+    /// </summary>
+    private void AdvanceHold(double milliseconds)
     {
         ClampTimelineBacklog();
-        if (milliseconds > 0) _timelineTarget += TimeSpan.FromTicks((long)Math.Round(milliseconds * TimeSpan.TicksPerMillisecond));
+        var duration = ToDuration(milliseconds);
+        if (duration <= TimeSpan.Zero) return;
+
+        var now = _clock.Elapsed;
+        if (_timelineTarget < now)
+        {
+            _carriedDebt += now - _timelineTarget; // owed, repaid by the following gaps (never by this hold)
+            _timelineTarget = now;
+        }
+
+        _timelineTarget += duration;
+    }
+
+    private void AdvanceTimeline(TimeSpan duration)
+    {
+        ClampTimelineBacklog();
+        if (duration <= TimeSpan.Zero) return;
+
+        var now = _clock.Elapsed;
+        var lag = now - _timelineTarget;
+        if (lag <= TimeSpan.Zero && _carriedDebt <= TimeSpan.Zero)
+        {
+            _timelineTarget += duration; // on time: the normal case
+            return;
+        }
+
+        // Behind schedule (time spent sending input, a slow step, timer overshoot): this wait is shortened by what is
+        // owed, but never by more than MaxCatchUpShare of its length, so no input ever fires in a 0 ms burst. The rest
+        // stays owed and comes out of the following waits.
+        var owed = (lag > TimeSpan.Zero ? lag : TimeSpan.Zero) + _carriedDebt;
+        var maxRepay = TimeSpan.FromTicks((long)(duration.Ticks * MaxCatchUpShare));
+        var repay = owed < maxRepay ? owed : maxRepay;
+        _carriedDebt = owed - repay;
+        var from = _timelineTarget > now ? _timelineTarget : now;
+        _timelineTarget = from + duration - repay;
     }
 
     /// <summary>
@@ -1032,18 +1097,19 @@ public sealed class PlaybackEngine
             if (remaining <= TimeSpan.Zero)
             {
                 // Far behind (the PC stalled)? Skip ahead rather than firing a burst of late input.
-                if (-remaining > _lagAllowance)
+                if (-remaining + _carriedDebt > _lagAllowance)
                 {
                     _timelineShift += now - _timelineTarget;
                     _timelineTarget = now;
                     _lagAllowance = MaxTimelineLag;
+                    _carriedDebt = TimeSpan.Zero;
                 }
 
                 return;
             }
 
-            // Ahead of the deadline again: any step overhead has been caught up.
-            _lagAllowance = MaxTimelineLag;
+            // Ahead of the deadline again: any step overhead has been caught up (unless some is still owed).
+            if (_carriedDebt <= TimeSpan.Zero) _lagAllowance = MaxTimelineLag;
 
             await _clock.DelayAsync(remaining < MaxDelayChunk ? remaining : MaxDelayChunk, token).ConfigureAwait(false);
         }
@@ -1720,7 +1786,7 @@ public sealed class PlaybackEngine
 
         var skipped = (_timelineShift - shiftAtStart) - (_pausedTotal - pausedAtStart);
         var owed = _clock.Elapsed - _timelineTarget;
-        if (skipped > TimeSpan.Zero && owed + skipped <= MaxStepOverheadCatchUp)
+        if (skipped > TimeSpan.Zero && owed + skipped + _carriedDebt <= MaxStepOverheadCatchUp)
         {
             _timelineTarget -= skipped;
             _timelineShift -= skipped;
@@ -1759,11 +1825,9 @@ public sealed class PlaybackEngine
                     var glide = Math.Min(total, MaxGlideMs);
                     AdvanceTimeline(total - glide);
                     await WaitForTimelineAsync(token).ConfigureAwait(false);
-                    var before = _timelineTarget;
-                    await GlideAsync(target, TimeSpan.FromMilliseconds(glide), token).ConfigureAwait(false);
+                    var used = await GlideAsync(target, TimeSpan.FromMilliseconds(glide), token).ConfigureAwait(false);
                     // Whatever the glide didn't use (it skipped, or rounding) is still waited for.
-                    var used = (_timelineTarget - before).TotalMilliseconds;
-                    AdvanceTimeline(glide - used);
+                    AdvanceTimeline(TimeSpan.FromMilliseconds(glide) - used);
                 }
                 else
                 {
@@ -1879,7 +1943,7 @@ public sealed class PlaybackEngine
                         // tracked, so Stop still releases it): a 550 ms rod cast stays a 550 ms cast.
                         _input.MouseButton(c.Button, true);
                         held.Buttons.Add(c.Button);
-                        AdvanceTimeline(ScaledHoldMs(Math.Max(MinClickHoldMs, c.HoldDurationMs), speed));
+                        AdvanceHold(ScaledHoldMs(Math.Max(MinClickHoldMs, c.HoldDurationMs), speed));
                         await WaitForTimelineAsync(token).ConfigureAwait(false);
                         _input.MouseButton(c.Button, false);
                         held.Buttons.Remove(c.Button);
@@ -1914,7 +1978,7 @@ public sealed class PlaybackEngine
                         // Press, keep it down for HoldMs (on the timeline, so Speed applies), release.
                         _input.MouseButton(c.Button, true);
                         held.Buttons.Add(c.Button);
-                        AdvanceTimeline(ScaledHoldMs(c.HoldMs, speed));
+                        AdvanceHold(ScaledHoldMs(c.HoldMs, speed));
                         await WaitForTimelineAsync(token).ConfigureAwait(false);
                         _input.MouseButton(c.Button, false);
                         held.Buttons.Remove(c.Button);
@@ -1959,21 +2023,21 @@ public sealed class PlaybackEngine
                             const int typematicDelayMs = 250;
                             const int typematicRepeatMs = 33;
                             var elapsedHoldMs = Math.Min(typematicDelayMs, k.HoldMs);
-                            AdvanceTimeline(elapsedHoldMs / speed);
+                            AdvanceHold(elapsedHoldMs / speed);
                             await WaitForTimelineAsync(token).ConfigureAwait(false);
 
                             while (elapsedHoldMs < k.HoldMs)
                             {
                                 _input.Key(k.VirtualKey, true);
                                 var stepMs = Math.Min(typematicRepeatMs, k.HoldMs - elapsedHoldMs);
-                                AdvanceTimeline(stepMs / speed);
+                                AdvanceHold(stepMs / speed);
                                 await WaitForTimelineAsync(token).ConfigureAwait(false);
                                 elapsedHoldMs += stepMs;
                             }
                         }
                         else
                         {
-                            AdvanceTimeline(ScaledHoldMs(k.HoldMs, speed));
+                            AdvanceHold(ScaledHoldMs(k.HoldMs, speed));
                             await WaitForTimelineAsync(token).ConfigureAwait(false);
                         }
 
@@ -2633,7 +2697,6 @@ public sealed class PlaybackEngine
     {
         _input.MouseButton(c.Button, true);
         held.Buttons.Add(c.Button);
-        ClampTimelineBacklog();
 
         var duration = TimeSpan.FromMilliseconds(Vary(Math.Max(0, c.DragDurationMs) / speed));
         var steps = start is null ? 1 : Math.Max(1, (int)Math.Ceiling(duration / DragStepInterval));
@@ -2642,7 +2705,7 @@ public sealed class PlaybackEngine
         {
             if (stepTime > TimeSpan.Zero)
             {
-                _timelineTarget += stepTime;
+                AdvanceTimeline(stepTime); // burst-safe: each drag point keeps at least half its spacing
                 await WaitForTimelineAsync(token).ConfigureAwait(false);
             }
 
@@ -2808,26 +2871,32 @@ public sealed class PlaybackEngine
     /// <paramref name="target"/> over <paramref name="duration"/> (on the timeline, so the time is taken out of the
     /// Delay that comes before the jump). Does nothing when the start is unknown or the jump is tiny.
     /// </summary>
-    private async Task GlideAsync((int X, int Y) target, TimeSpan duration, CancellationToken token)
+    /// <returns>How much of <paramref name="duration"/> the glide scheduled (zero when it didn't glide).</returns>
+    private async Task<TimeSpan> GlideAsync((int X, int Y) target, TimeSpan duration, CancellationToken token)
     {
         (int X, int Y) from;
         if (_cursor is { } known) from = known;
         else if (_input.TryGetCursorPosition(out var cx, out var cy)) from = (cx, cy);
-        else return;
-        if (Math.Abs(target.X - from.X) + Math.Abs(target.Y - from.Y) < 3) return;
+        else return TimeSpan.Zero;
+        if (Math.Abs(target.X - from.X) + Math.Abs(target.Y - from.Y) < 3) return TimeSpan.Zero;
 
-        ClampTimelineBacklog();
         var steps = Math.Max(1, (int)Math.Floor(duration / GlideStepInterval));
         var stepTime = duration / steps;
+        var scheduled = TimeSpan.Zero;
         for (var i = 1; i <= steps; i++)
         {
-            _timelineTarget += stepTime;
+            // Through the scheduler (not "target += step"), so a glide that starts behind schedule never sends its
+            // points in a 0 ms burst: each one keeps at least half of its spacing.
+            AdvanceTimeline(stepTime);
+            scheduled += stepTime;
             await WaitForTimelineAsync(token).ConfigureAwait(false);
             var t = i / (double)steps;
             // Ease in and out, like a hand: slow start, fast middle, slow arrival.
             var e = t * t * (3 - 2 * t);
             MoveTo((int)Math.Round(from.X + (target.X - from.X) * e), (int)Math.Round(from.Y + (target.Y - from.Y) * e));
         }
+
+        return scheduled;
     }
 
     /// <summary>
@@ -2869,7 +2938,7 @@ public sealed class PlaybackEngine
 
         _input.MouseButton(button, true);
         held.Buttons.Add(button);
-        AdvanceTimeline(ScaledHoldMs(holdMs, speed));
+        AdvanceHold(ScaledHoldMs(holdMs, speed));
         await WaitForTimelineAsync(token).ConfigureAwait(false);
         _input.MouseButton(button, false);
         held.Buttons.Remove(button);
@@ -2919,7 +2988,6 @@ public sealed class PlaybackEngine
         }
 
         var plan = MouseMotion.Plan(from, (x, y), glide, duration, GlideStepInterval, arc);
-        if (onTimeline) ClampTimelineBacklog(); // far behind: glide from "now"
 
         var previousAt = TimeSpan.Zero;
         (int X, int Y)? sent = from;
@@ -2932,7 +3000,7 @@ public sealed class PlaybackEngine
             {
                 if (onTimeline)
                 {
-                    _timelineTarget += wait;
+                    AdvanceTimeline(wait); // burst-safe (far behind: the glide starts from "now")
                     await WaitForTimelineAsync(token).ConfigureAwait(false);
                 }
                 else

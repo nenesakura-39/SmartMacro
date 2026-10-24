@@ -60,14 +60,15 @@ public sealed class AppSettings
 
     /// <summary>
     /// "Use relative mouse deltas for 3D camera": every recorded cursor movement becomes a relative mouse move (for
-    /// shift-lock / first-person / cursor-locked games). Off (default): only movement while the right or middle button is
-    /// held (turning the camera) is relative.
+    /// shift-lock / first-person / cursor-locked games). Off (default): every move plays as an absolute X / Y position
+    /// (drags of items, sliders and maps never drift); the deltas are still recorded on every Move step, so one step can
+    /// be switched to relative in the editor.
     /// </summary>
     public bool UseRelativeMouseDeltas { get; set; }
 
     /// <summary>The relative-mouse mode recordings use, from <see cref="UseRelativeMouseDeltas"/>.</summary>
     [System.Text.Json.Serialization.JsonIgnore]
-    public RelativeMouseMode RelativeMouseMode => UseRelativeMouseDeltas ? RelativeMouseMode.Always : RelativeMouseMode.CameraDrags;
+    public RelativeMouseMode RelativeMouseMode => UseRelativeMouseDeltas ? RelativeMouseMode.Always : RelativeMouseMode.Off;
 
     /// <summary>
     /// Desktop recordings: keep how long each key / click was held (a short W tap stays as long as it was).

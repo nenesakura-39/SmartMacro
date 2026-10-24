@@ -503,20 +503,42 @@ public sealed class Win32InputSimulator : IInputSimulator
     }
 }
 
-/// <summary>Raises the Windows timer resolution to 1 ms while playing, so short delays are accurate.</summary>
+/// <summary>
+/// Raises the Windows timer resolution to 1 ms while recording or playing, so short waits are accurate.
+/// timeBeginPeriod / timeEndPeriod are process-wide, so all scopes share ONE reference count: the 1 ms period starts with
+/// the first scope and ends with the last one (recording and playback, or nested scopes, can overlap safely). Disposing a
+/// scope twice (or from another thread) is a no-op.
+/// </summary>
 public sealed class HighResolutionTimerScope : IDisposable
 {
-    private bool _active;
+    private static readonly object Gate = new();
+    private static int _activeCount;
+    private static bool _periodActive;
+    private int _disposed;
 
     public HighResolutionTimerScope()
     {
-        _active = timeBeginPeriod(1) == 0;
+        lock (Gate)
+        {
+            if (++_activeCount == 1) _periodActive = timeBeginPeriod(1) == 0;
+        }
+    }
+
+    /// <summary>How many scopes are open right now.</summary>
+    public static int ActiveCount
+    {
+        get { lock (Gate) return _activeCount; }
     }
 
     public void Dispose()
     {
-        if (!_active) return;
-        timeEndPeriod(1);
-        _active = false;
+        if (Interlocked.Exchange(ref _disposed, 1) != 0) return; // already disposed
+        lock (Gate)
+        {
+            if (--_activeCount > 0) return;
+            _activeCount = 0;
+            if (_periodActive) timeEndPeriod(1);
+            _periodActive = false;
+        }
     }
 }

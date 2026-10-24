@@ -130,8 +130,14 @@ internal sealed class LowLevelInputHook : IDisposable
 
                 if (kind is RawInputKind k)
                 {
-                    // Checking the window under the cursor is cheap enough for clicks, but skip it for moves.
-                    var overOwn = k != RawInputKind.MouseMove && IsOwnWindow(WindowFromPoint(data.pt));
+                    // Clicks on SmartMacro's own windows aren't recorded. The hook must stay fast (Windows drops a hook that
+                    // takes longer than LowLevelHooksTimeout), so the check is an in-memory rectangle test first
+                    // (OwnWindowBounds: no Windows call). Only a click that really lands inside one of SmartMacro's own
+                    // visible windows asks Windows which window is on top there (another app may cover that spot); that
+                    // only ever talks to SmartMacro's own UI thread, never to a busy or hung window of another app.
+                    var overOwn = k != RawInputKind.MouseMove
+                                  && OwnWindowBounds.Contains(data.pt.X, data.pt.Y)
+                                  && IsOwnWindow(WindowFromPoint(data.pt));
                     Raise(new HookEvent(k, data.time, timestamp, data.pt.X, data.pt.Y, button, delta, 0,
                         (data.flags & LLMHF_INJECTED) != 0, data.dwExtraInfo == SmartMacroInputTag, overOwn));
                 }
@@ -221,6 +227,10 @@ public sealed class WindowsInputRecorder : IInputRecorder, IDisposable
     private LowLevelInputHook? _hook;
     private RecordingClock? _clock;
     private HighResolutionTimerScope? _timerResolution;
+    private System.Windows.Threading.DispatcherTimer? _boundsTimer;
+
+    /// <summary>How often the own-window rectangles are re-read while recording (a moved window is known within this).</summary>
+    private static readonly TimeSpan OwnWindowRefreshInterval = TimeSpan.FromMilliseconds(200);
 
     /// <summary>Smart Click Snapshots: keep a small picture of what each click hit (Settings; on by default).</summary>
     public bool CaptureClickSnapshots
@@ -256,6 +266,13 @@ public sealed class WindowsInputRecorder : IInputRecorder, IDisposable
         // recording, so the UI thread that runs the hook wakes up on time.
         _timerResolution = new HighResolutionTimerScope();
         _clock = RecordingClock.StartNew();
+
+        // Where SmartMacro's own windows are, for the hook's fast "click on our own UI?" check; kept fresh while recording.
+        OwnWindowBounds.Refresh();
+        _boundsTimer?.Stop();
+        _boundsTimer = new System.Windows.Threading.DispatcherTimer { Interval = OwnWindowRefreshInterval };
+        _boundsTimer.Tick += (_, _) => OwnWindowBounds.Refresh();
+        _boundsTimer.Start();
         if (GetCursorPos(out var pt))
         {
             StartX = pt.X;
@@ -275,12 +292,21 @@ public sealed class WindowsInputRecorder : IInputRecorder, IDisposable
         }
         catch
         {
-            _timerResolution?.Dispose();
-            _timerResolution = null;
+            StopHelpers();
             throw;
         }
 
         _hook = hook;
+    }
+
+    /// <summary>Stops the timer-resolution scope and the own-window refresh (safe to call more than once).</summary>
+    private void StopHelpers()
+    {
+        _boundsTimer?.Stop();
+        _boundsTimer = null;
+        OwnWindowBounds.Clear();
+        _timerResolution?.Dispose();
+        _timerResolution = null;
     }
 
     /// <summary>
@@ -302,8 +328,7 @@ public sealed class WindowsInputRecorder : IInputRecorder, IDisposable
             _keyDownTimestamps.Clear();
         }
 
-        _timerResolution?.Dispose();
-        _timerResolution = null;
+        StopHelpers();
         return _events.ToList();
     }
 

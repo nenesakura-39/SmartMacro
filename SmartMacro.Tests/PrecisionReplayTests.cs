@@ -122,7 +122,7 @@ public class PrecisionReplayTests
     public void Settings_default_to_exact_1to1_and_old_no_movement_settings_become_clicks_and_keys()
     {
         Assert.Equal(RecordingFidelity.Exact1To1, new AppSettings().RecordingFidelity);
-        Assert.Equal(RelativeMouseMode.CameraDrags, new AppSettings().RelativeMouseMode);
+        Assert.Equal(RelativeMouseMode.Off, new AppSettings().RelativeMouseMode); // absolute X / Y by default (audit fix 4)
         Assert.Equal(RelativeMouseMode.Always, new AppSettings { UseRelativeMouseDeltas = true }.RelativeMouseMode);
 
         var old = new AppSettings { SchemaVersion = 3, RecordMouseMovement = false };

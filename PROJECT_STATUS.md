@@ -1,6 +1,8 @@
 # SmartMacro – Project Status / Handoff
 
-_Last updated: 2026-10-24 (1:1 Precision Replay: recording fidelity presets + 3D camera relative mouse moves: **built + tested
+_Last updated: 2026-10-24 (AFK safety audit, 6 items: no catch-up bursts, hook fast path, absolute moves by default, ref-counted
+1 ms timer: **built + tested with `tools\verify.cmd` on the owner's PC: 0 warnings, 0 errors, 1139 / 1139 passed** (incl. follow-up fixes); not committed.
+Before it: 1:1 Precision Replay: recording fidelity presets + 3D camera relative mouse moves: **built + tested
 with `tools\verify.cmd` on the owner's PC: 0 warnings, 0 errors, 1129 / 1129 passed**; not committed, not tried by hand.
 Before it: Recording / playback timing fixes 1–5 (deadline-synced timeline, auto-repeat + chords, exact click
 hold + drags, hotkey bleed + stop releases, Stopwatch timestamps): **built + tested with `tools\verify.cmd` on the owner's PC:
@@ -54,6 +56,42 @@ Developer: Riku (リク) · Brand: KuroLogic_
 | Release package | `publish\SmartMacro-1.0.0-win-x64\SmartMacro.exe` is an OLD build (made right after `159d6b3`, before Stage 1) | – | ignored by git |
 
 
+
+## AFK safety audit – 6 items (2026-10-24): **built + tested** (`tools\verify.cmd` run by the AI on the owner's PC: 0 warnings, 0 errors, **1137 / 1137 passed**)
+Not committed, not tried by hand. Audit result per item (request names: `Win32InputInjector` / `IInputInjector` =
+`Win32InputSimulator` / `IInputSimulator`, `HighPrecisionTimer` = `HighResolutionTimerScope`, `Win32InputRecorder` =
+`WindowsInputRecorder`, `virtualTimelineTicks` = `_timelineTarget`):
+1. **Stuck keys / buttons** – already safe, no code change: every playback (Run / Run step / Play from here) goes through
+   `RunCoreAsync`, whose `finally` releases the engine's `HeldInput` and calls `ReleaseAllHeldInputs()` (Win32 side tracks
+   every press in `HeldInputTracker` under a lock); `Pause()` releases at once, `WaitIfPausedAsync` releases + re-presses on
+   resume. New regression tests: Stop inside a recorded Shift+W chord, Stop / Pause inside a 550 ms click hold.
+2. **Catch-up bursts** – real (the 100 ms catch-up from the timing fixes could fire several recorded moves at 0 ms).
+   `MaxStepOverheadCatchUp` 100 → **50 ms** (more behind = timeline restarts from now); new `MaxCatchUpShare` = 0.5: a
+   wait is shortened by at most half its length, the rest stays owed (`_carriedDebt`) for the next waits (reset by
+   Reset / Sync). Loop starts, Repeat turns, If, Focus window, Screenshot, Wait for screen change already Sync / Reset;
+   pause keeps shifting the timeline by the paused time (the rest of a Delay still plays in full) on purpose.
+3. **Hook callback** – `OwnWindowBounds` (new, `Services/Input/OwnWindowBounds.cs`): rectangles of SmartMacro's visible,
+   non-minimized, non-click-through windows, refreshed on the UI thread at Start and every 200 ms while recording. The
+   mouse hook checks those in memory first; only a click inside one of them still asks `WindowFromPoint` (another app can
+   cover that spot – a pure rectangle test would drop real game clicks there). Moves never call anything.
+4. **Absolute authoritative** – app default `RelativeMouseMode.Off` (was CameraDrags): moves / drags play at X / Y;
+   every recorded Move step now also stores DeltaX / DeltaY (UseRelativeDelta off) so a step can be switched in the editor.
+   The "🎮 relative" switch still makes everything relative. `Win32InputSimulator.MoveMouse` already sends
+   MOUSEEVENTF_MOVE | ABSOLUTE | VIRTUALDESK + SetCursorPos (real move events during drags), unchanged.
+5. **Timer** – `HighResolutionTimerScope`: one process-wide count under a lock (timeBeginPeriod on the first scope,
+   timeEndPeriod after the last), per-instance Interlocked double-Dispose guard, `ActiveCount`.
+6. **First event / order** – desktop times come from a new `RecordingClock` per Start (no stale remainder); the wait
+   before the first input is not a Delay (unchanged, by design); converter delays need a gap ≥ max(1, MinDelayMs), so
+   out-of-order / equal times never make 0 or negative Delays.
+- Tests: `SmartMacro.Tests/AfkSafetyTests.cs` (8); `PrecisionReplayTests` default-mode assert → Off (on purpose).
+- Follow-up review (same day, **1139 / 1139 passed**, 0 warnings / errors): 2 bugs in the catch-up code fixed in
+  `PlaybackEngine`: (a) holds could repay owed time and get up to 50 % shorter (a 60 ms click hold played as 30 ms) →
+  new `AdvanceHold` for click / Hold / key / typematic / timed-click holds: full length from the real press, lateness stays
+  owed for the next gaps; (b) smooth-mouse glides (on by default in the app), Smooth glide / Human curve moves and drags
+  did `_timelineTarget += step` and bypassed the burst protection → they now go through `AdvanceTimeline`
+  (`GlideAsync` returns what it scheduled). Tests: 2 more in `AfkSafetyTests`.
+  Known limit (not changed): a key released while Windows shows a secure screen (UAC, Ctrl+Alt+Del, lock) isn't seen by
+  the recorder; a later press of that key then counts as auto-repeat until its next release.
 
 ## 1:1 Precision Replay – fidelity presets, 3D camera relative moves (2026-10-24): **built + tested** (`tools\verify.cmd` run by the AI on the owner's PC: 0 warnings, 0 errors, **1129 / 1129 passed**)
 Not committed, not tried by hand. Names in the request that don't exist: `Win32InputRecorder` = `WindowsInputRecorder` /
