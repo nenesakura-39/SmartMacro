@@ -1,0 +1,101 @@
+<Window x:Class="SmartMacro.Views.FeedbackTelemetryOverlay"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="SmartMacro Servo Telemetry HUD"
+        WindowStyle="None"
+        ResizeMode="NoResize"
+        AllowsTransparency="True"
+        Background="Transparent"
+        Topmost="True"
+        ShowInTaskbar="False"
+        ShowActivated="False"
+        Focusable="False"
+        IsHitTestVisible="False"
+        Left="-32000"
+        Top="-32000"
+        Width="1"
+        Height="1">
+    <Canvas x:Name="HudCanvas" IsHitTestVisible="False" Background="Transparent">
+        <!--Compact Telemetry Pill Banner docked above the SearchRegion-->
+        <Border x:Name="TelemetryPill"
+                Background="#F00B1120"
+                BorderBrush="#00D4FF"
+                BorderThickness="1.3"
+                CornerRadius="8"
+                Padding="10,4,10,4"
+                IsHitTestVisible="False">
+            <Border.Effect>
+                <DropShadowEffect x:Name="PillGlow" Color="#00D4FF" BlurRadius="10" ShadowDepth="0" Opacity="0.7" />
+            </Border.Effect>
+            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                <Ellipse x:Name="StateDot"
+                         Width="7"
+                         Height="7"
+                         Fill="#00D4FF"
+                         VerticalAlignment="Center"
+                         Margin="0,0,6,0" />
+                <TextBlock x:Name="StateText"
+                           Text="SERVO [TRACKING]"
+                           Foreground="#00D4FF"
+                           FontFamily="Cascadia Mono, Consolas, Segoe UI"
+                           FontSize="11.5"
+                           FontWeight="Bold"
+                           VerticalAlignment="Center" />
+                <Border CornerRadius="4" Background="#161F30" BorderBrush="#243045" BorderThickness="1" Padding="6,1" Margin="8,0,0,0" VerticalAlignment="Center">
+                    <TextBlock x:Name="ErrorText"
+                               Text="ERR: +0px"
+                               Foreground="#E2E8F0"
+                               FontFamily="Cascadia Mono, Consolas"
+                               FontSize="11"
+                               FontWeight="SemiBold"
+                               VerticalAlignment="Center" />
+                </Border>
+                <Border CornerRadius="4" Background="#161F30" BorderBrush="#243045" BorderThickness="1" Padding="6,1" Margin="6,0,0,0" VerticalAlignment="Center">
+                    <TextBlock x:Name="PwmText"
+                               Text="PWM: 45%"
+                               Foreground="#00D4FF"
+                               FontFamily="Cascadia Mono, Consolas"
+                               FontSize="11"
+                               FontWeight="SemiBold"
+                               VerticalAlignment="Center" />
+                </Border>
+                <Border CornerRadius="4" Background="#161F30" BorderBrush="#243045" BorderThickness="1" Padding="6,1" Margin="6,0,0,0" VerticalAlignment="Center">
+                    <TextBlock x:Name="OnTargetText"
+                               Text="ON-TGT: 100%"
+                               Foreground="#10B981"
+                               FontFamily="Cascadia Mono, Consolas"
+                               FontSize="11"
+                               FontWeight="SemiBold"
+                               VerticalAlignment="Center" />
+                </Border>
+                <!--Live horizontal mini-bar showing current thrust (0% to 100%) with 50% hover tick-->
+                <Border Width="54"
+                        Height="8"
+                        Margin="8,0,0,0"
+                        CornerRadius="4"
+                        Background="#331E293B"
+                        BorderBrush="#55475569"
+                        BorderThickness="1"
+                        VerticalAlignment="Center">
+                    <Grid>
+                        <Border x:Name="ThrustBarFill"
+                                HorizontalAlignment="Left"
+                                Width="24"
+                                CornerRadius="3">
+                            <Border.Background>
+                                <LinearGradientBrush StartPoint="0,0.5" EndPoint="1,0.5">
+                                    <GradientStop Color="#00D4FF" Offset="0" />
+                                    <GradientStop Color="#8B5CF6" Offset="1" />
+                                </LinearGradientBrush>
+                            </Border.Background>
+                        </Border>
+                        <Border Width="1" Background="#8894A3B8" HorizontalAlignment="Center" />
+                    </Grid>
+                </Border>
+            </StackPanel>
+        </Border>
+
+        <!--Dynamic tactical overlay canvas for corner brackets, player bar span, target caret & velocity vector-->
+        <Canvas x:Name="DynamicLayer" IsHitTestVisible="False" />
+    </Canvas>
+</Window>

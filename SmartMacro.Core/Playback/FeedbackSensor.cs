@@ -35,6 +35,7 @@ public sealed class FeedbackSensor
     private readonly IScreenCapture _capture;
     private readonly IPlaybackClock _clock;
     private readonly MarkerTracker _tracker;
+    private readonly FeedbackLoopTracker _loopTracker = new();
     private readonly RgbColor _zoneColor;
     private readonly RgbColor? _secondaryZoneColor;
     private readonly int _markerMinPixels;
@@ -91,6 +92,54 @@ public sealed class FeedbackSensor
         if (frame.Bounds != region)
             throw new InvalidOperationException($"The bar area {region} is partly outside the screen (only {frame.Bounds} is visible). Pick the area again.");
 
+        var horizontal = _step.Orientation == BarOrientation.Horizontal;
+        var crossLength = horizontal ? frame.Image.Height : frame.Image.Width;
+        var length = horizontal ? frame.Image.Width : frame.Image.Height;
+
+        if (_step.ControlMode == FeedbackControlMode.SmartPredictive &&
+            _step.ZoneMode == FeedbackZoneMode.DetectedByColor &&
+            crossLength >= 10 &&
+            length > 1)
+        {
+            var (targetScan, indicatorScan) = _loopTracker.Scan(frame.Image, _step);
+            MarkerReading smartMarker;
+            if (targetScan.Found && targetScan.MatchCount >= _markerMinPixels)
+            {
+                var posPct = ZoneFinder.ToPercent(targetScan.CenterPos, length);
+                var mMin = (int)Math.Clamp(Math.Floor(targetScan.MinEdge), 0, length - 1);
+                var mMax = (int)Math.Clamp(Math.Ceiling(targetScan.MaxEdge), mMin, length - 1);
+                var mBounds = horizontal
+                    ? new Ocr.ScreenRect(mMin, 0, Math.Max(1, mMax - mMin + 1), frame.Image.Height)
+                    : new Ocr.ScreenRect(0, mMin, frame.Image.Width, Math.Max(1, mMax - mMin + 1));
+                smartMarker = new MarkerReading(MarkerStatus.Found, posPct, 1.0, 1, mBounds);
+            }
+            else
+            {
+                smartMarker = new MarkerReading(MarkerStatus.Lost, null, 0, 0, null);
+            }
+
+            ZoneReading smartZone;
+            if (indicatorScan.Found && indicatorScan.MatchCount >= _zoneMinPixels)
+            {
+                var startPct = ZoneFinder.ToPercent(indicatorScan.MinEdge, length);
+                var endPct = ZoneFinder.ToPercent(indicatorScan.MaxEdge, length);
+                var zMin = (int)Math.Clamp(Math.Floor(indicatorScan.MinEdge), 0, length - 1);
+                var zMax = (int)Math.Clamp(Math.Ceiling(indicatorScan.MaxEdge), zMin, length - 1);
+                var zBounds = horizontal
+                    ? new Ocr.ScreenRect(zMin, 0, Math.Max(1, zMax - zMin + 1), frame.Image.Height)
+                    : new Ocr.ScreenRect(0, zMin, frame.Image.Width, Math.Max(1, zMax - zMin + 1));
+                smartZone = new ZoneReading(true, startPct, endPct, zBounds);
+            }
+            else
+            {
+                smartZone = ZoneReading.Missing;
+            }
+
+            var t2Smart = _clock.Elapsed;
+            var smartObs = new FeedbackObservation(smartMarker.Status, smartMarker.PositionPercent, smartZone.Found, smartZone.StartPercent, smartZone.EndPercent, _loopTracker.LastBarWasActiveSecondary);
+            return new FeedbackFrame(frame, smartMarker, smartZone, smartObs, t1 - t0, t2Smart - t1);
+        }
+
         var marker = _tracker.Update(frame.Image, cancellationToken);
         var occluded = false;
         ZoneReading zone;
@@ -118,7 +167,7 @@ public sealed class FeedbackSensor
     }
 
     /// <summary>
-    /// Smart Overlap Handling: when the control bar has an active/overlapping 2nd colour (e.g. White in Roblox Fisch)
+    /// Smart Overlap Handling: when the control bar has an active/overlapping 2nd colour (e.g. White when active)
     /// and that active colour is present on screen while the primary target is occluded or partially occluded by the bar,
     /// use the centroid of the active bar region so the controller knows the bar is aligned with the target instead of
     /// declaring "Target missing".
@@ -126,13 +175,9 @@ public sealed class FeedbackSensor
     public static MarkerReading ApplySmartOverlap(BgraImage barImage, BarOrientation orientation, MarkerReading marker,
         ZoneReading zone, RgbColor secondaryZoneColor, int zoneTolerance, int zoneMinPixels, CancellationToken cancellationToken = default)
     {
-        if (!zone.Found) return marker;
+        if (!zone.Found || marker.Status == MarkerStatus.Found) return marker;
         var activeZone = ZoneFinder.Find(barImage, secondaryZoneColor, null, zoneTolerance, zoneMinPixels, orientation, 2, cancellationToken);
         if (!activeZone.Found) return marker;
-
-        var occluded = marker.Status != MarkerStatus.Found
-                       || (marker.Bounds is { } mb && activeZone.Bounds is { } zb && TouchingOrOverlapping(mb, zb));
-        if (!occluded) return marker;
 
         var centroid = (activeZone.StartPercent + activeZone.EndPercent) * 0.5;
         return new MarkerReading(MarkerStatus.Found, centroid, 1.0, 1, activeZone.Bounds);
@@ -173,6 +218,9 @@ public sealed class FeedbackStats
     /// <summary>Smart Predictive: how often a target reversal flipped the input at once (instant brake).</summary>
     public int Brakes { get; set; }
 
+    /// <summary>Feedback Loop 3.0: share of tracked frames where the target stayed inside the player bar (0–100%).</summary>
+    public double? OnTargetPercent { get; set; }
+
     /// <summary>How many times the target went missing long enough for "release and wait".</summary>
     public int LostEpisodes { get; set; }
 
@@ -182,6 +230,20 @@ public sealed class FeedbackStats
 
     public double AverageCaptureMs => Frames == 0 ? 0 : CaptureTime.TotalMilliseconds / Frames;
     public double AverageDetectMs => Frames == 0 ? 0 : DetectTime.TotalMilliseconds / Frames;
+
+    public void AddServoFrame(BarScanResult target, BarScanResult indicator, TimeSpan captureTime, TimeSpan detectTime)
+    {
+        Frames++;
+        if (captureTime > TimeSpan.Zero) CaptureTime += captureTime;
+        if (detectTime > TimeSpan.Zero) DetectTime += detectTime;
+        var work = captureTime + detectTime;
+        if (work > SlowestFrame) SlowestFrame = work;
+
+        if (target.Found) MarkerFound++;
+        else MarkerMissing++;
+
+        if (!indicator.Found) ZoneMissing++;
+    }
 
     public void Add(FeedbackFrame frame)
     {
@@ -226,6 +288,7 @@ public sealed class FeedbackStats
         text += $"; marker found in {Share(MarkerFound)} of frames, unclear in {Share(MarkerUnclear)}, missing in {Share(MarkerMissing)}";
         if (IgnoredJumps > 0) text += $", {IgnoredJumps} jump{(IgnoredJumps == 1 ? "" : "s")} ignored";
         if (ZoneMissing > 0) text += $", zone missing in {Share(ZoneMissing)}";
+        if (OnTargetPercent is { } onTarget) text += $"; on-target {onTarget:0}%";
         if (LostEpisodes > 0) text += $"; target lost {LostEpisodes} time{(LostEpisodes == 1 ? "" : "s")}";
         if (ConditionChecks > 0) text += $"; {ConditionChecks} condition check{(ConditionChecks == 1 ? "" : "s")}";
         return text + ".";

@@ -81,7 +81,19 @@ if errorlevel 1 (
   exit /b 1
 )
 
+rem Close any running SmartMacro.exe instance first so it cannot lock files in publish\ or leave an old build open.
+tasklist /fi "imagename eq SmartMacro.exe" 2>nul | find /i "SmartMacro.exe" >nul && (
+  echo       Closing running SmartMacro.exe instance before publishing...
+  taskkill /f /im SmartMacro.exe >nul 2>&1
+  powershell -NoProfile -Command "Start-Sleep -Milliseconds 400"
+)
+
 if exist "%OUT%" rmdir /s /q "%OUT%"
+if exist "%OUT%\SmartMacro.exe" (
+  echo Could not remove old %OUT%\SmartMacro.exe ^(file is locked^). Close SmartMacro and try again.
+  pause
+  exit /b 1
+)
 if not exist release mkdir release
 rem A real release replaces any old private test build of the same version, so the two can't be mixed up.
 if "%SUFFIX%"=="" (
@@ -160,7 +172,9 @@ if errorlevel 1 (
 powershell -NoProfile -Command "$h = (Get-FileHash '%ZIP%' -Algorithm SHA256).Hash; ($h + '  ' + (Split-Path '%ZIP%' -Leaf)) | Set-Content -Path '%ZIP%.sha256.txt' -Encoding ASCII"
 
 echo.
-echo Done! Release package: %ZIP%
+echo Done!
+powershell -NoProfile -Command "$exe = Get-Item '%OUT%\SmartMacro.exe'; Write-Host ('  Standalone EXE : ' + $exe.FullName + '  (built ' + $exe.LastWriteTime.ToString('yyyy-MM-dd HH:mm:ss') + ')')"
+echo   Release ZIP    : %ZIP%
 echo It contains:
 powershell -NoProfile -Command "Add-Type -AssemblyName System.IO.Compression.FileSystem; $z = [IO.Compression.ZipFile]::OpenRead((Resolve-Path '%ZIP%')); $z.Entries | ForEach-Object { '  ' + $_.FullName + '  (' + $_.Length + ' bytes)' }; $z.Dispose()"
 if exist "%ZIP%.sha256.txt" (

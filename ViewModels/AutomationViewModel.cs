@@ -145,6 +145,7 @@ public sealed class AutomationViewModel : ObservableObject, IDisposable
         _engine.RunStarted += OnEngineRunStarted;
         _engine.TargetDetected += OnTargetDetected;
         _engine.TargetOverlayClearRequested += OnTargetOverlayClearRequested;
+        _engine.FeedbackTelemetryUpdated += OnFeedbackTelemetryUpdated;
         _emergency.EmergencyStopRequested += OnEmergencyStop;
         _host.PauseRequested += OnHudPauseRequested;
         _host.StopRequested += OnHudStopRequested;
@@ -493,6 +494,7 @@ public sealed class AutomationViewModel : ObservableObject, IDisposable
         _engine.RunStarted -= OnEngineRunStarted;
         _engine.TargetDetected -= OnTargetDetected;
         _engine.TargetOverlayClearRequested -= OnTargetOverlayClearRequested;
+        _engine.FeedbackTelemetryUpdated -= OnFeedbackTelemetryUpdated;
         _emergency.EmergencyStopRequested -= OnEmergencyStop;
         _host.PauseRequested -= OnHudPauseRequested;
         _host.StopRequested -= OnHudStopRequested;
@@ -975,6 +977,27 @@ public sealed class AutomationViewModel : ObservableObject, IDisposable
     // loop can find its target hundreds of times per second: only ONE dispatcher call is queued at a time and it draws
     // the latest target, so the UI thread never gets a backlog of reticles.
     private TargetDetection? _pendingTarget;
+    private FeedbackTelemetryData? _pendingFeedbackTelemetry;
+
+    // Playback thread: live servo telemetry from FeedbackLoopStep (~30–60 FPS) or null when loop ends.
+    private void OnFeedbackTelemetryUpdated(object? sender, FeedbackTelemetryData? telemetry)
+    {
+        if (telemetry is null)
+        {
+            Interlocked.Exchange(ref _pendingFeedbackTelemetry, null);
+            _dispatcher.InvokeAsync(() => _host.UpdateFeedbackTelemetry(null), DispatcherPriority.Render);
+            return;
+        }
+
+        var session = Interlocked.Read(ref _playbackSessionId);
+        if (Interlocked.Exchange(ref _pendingFeedbackTelemetry, telemetry) is not null) return;
+        _dispatcher.InvokeAsync(() =>
+        {
+            var latest = Interlocked.Exchange(ref _pendingFeedbackTelemetry, null);
+            if (latest is not null && IsCurrentSession(session))
+                _host.UpdateFeedbackTelemetry(latest);
+        }, DispatcherPriority.Render);
+    }
 
     // Playback thread: something was found; draw the target-lock reticle there (mini overlay on only).
     private void OnTargetDetected(object? sender, TargetDetection target)
@@ -1016,6 +1039,8 @@ public sealed class AutomationViewModel : ObservableObject, IDisposable
         Interlocked.Increment(ref _playbackSessionId);
         _progressTimer.Stop();
         _pendingTarget = null;
+        _pendingFeedbackTelemetry = null;
+        _host.UpdateFeedbackTelemetry(null);
         HideStepProgress();
         SetRunningStep(null);
 

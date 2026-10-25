@@ -37,7 +37,23 @@ public static class ZoneFinder
         int bridgeGapPixels = 2, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(frame);
-        var result = ColorFinder.Find(frame, color, secondaryColor, tolerance, minPixels, maxResults: 20, cancellationToken);
+
+        // When a 2nd (active/overlapping) bar color is configured, check it separately first so white active bars
+        // never merge with primary-colored track borders.
+        if (secondaryColor is { } activeColor)
+        {
+            var secZone = FindSingleColor(frame, activeColor, tolerance, minPixels, orientation, bridgeGapPixels, cancellationToken);
+            if (secZone.Found && (secZone.EndPercent - secZone.StartPercent) <= 65.0)
+                return secZone;
+        }
+
+        return FindSingleColor(frame, color, tolerance, minPixels, orientation, bridgeGapPixels, cancellationToken);
+    }
+
+    private static ZoneReading FindSingleColor(BgraImage frame, RgbColor color, int tolerance, int minPixels, BarOrientation orientation,
+        int bridgeGapPixels, CancellationToken cancellationToken)
+    {
+        var result = ColorFinder.Find(frame, color, null, tolerance, minPixels, maxResults: 20, cancellationToken);
         if (result.Largest is not { } main) return ZoneReading.Missing;
 
         var horizontal = orientation == BarOrientation.Horizontal;

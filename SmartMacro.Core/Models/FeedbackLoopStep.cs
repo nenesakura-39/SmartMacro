@@ -90,14 +90,24 @@ public enum FeedbackControlMode
     ClassicSimpleHold,
 
     /// <summary>
-    /// "Smart Predictive (PD + Brake — Best for Fisch)": tracks where the target and the bar are AND how fast they move,
-    /// predicts the gap <see cref="FeedbackLoopStep.LeadPredictionFactor"/> seconds ahead (so a fast bar is released
-    /// before it overshoots), micro-pulses the input near the target so a bar with gravity hovers
-    /// (<see cref="FeedbackLoopStep.UsePwmMicroPulse"/>), and brakes at once when the target reverses direction.
-    /// Uses the Before / After rules only to know which way holding pushes the bar. See PredictiveFeedbackController.
+    /// "Smart Predictive (Adaptive PD + Brake)": tracks where the target and the bar are AND how fast they move,
+    /// predicts their positions ahead by the measured loop latency, damps relative velocity, and brakes automatically
+    /// using kinematic stopping distance before the bar can overshoot the target.
     /// </summary>
     SmartPredictive,
 }
+
+/// <summary>
+/// Learned or calibrated physical profile of the player control bar along the active axis.
+/// </summary>
+public sealed record BarProfile(
+    double RiseAccelPxPerSec2 = 750.0,
+    double FallAccelPxPerSec2 = 650.0,
+    double MaxSpeedPxPerSec = 520.0,
+    double GlidePx = 18.0,
+    double LatencyMs = 34.0,
+    double HoverDuty = 0.45,
+    bool IsCalibrated = false);
 
 /// <summary>Which kind of input the loop controls.</summary>
 public enum FeedbackInputKind
@@ -246,6 +256,100 @@ public sealed class FeedbackLoopStep : MacroStep
     /// </summary>
     public bool UsePwmMicroPulse { get; set; } = true;
 
+    // ---------------- Closed-Loop PWM PD+FeedForward Servo (AAA Minigame Upgrade) ----------------
+
+    /// <summary>
+    /// Flips the default axis polarity when a game uses reversed controls.
+    /// By default: Horizontal holding moves +X (Right); Vertical holding moves UP (-Y in screen coordinates).
+    /// </summary>
+    public bool InvertDirection { get; set; } = false;
+
+    /// <summary>
+    /// The baseline PWM hold ratio (0.0 to 1.0) required to counteract gravity and hover stationary when error == 0.
+    /// </summary>
+    public double NeutralHoverDutyCycle { get; set; } = 0.45;
+
+    /// <summary>
+    /// The micro-pulse period in milliseconds (10 to 60) used to convert continuous control output u in [0.0, 1.0]
+    /// into high-frequency hold/release pulses (holdMs = u * PwmCycleMs, releaseMs = (1 - u) * PwmCycleMs).
+    /// </summary>
+    public int PwmCycleMs { get; set; } = 22;
+
+    /// <summary>Proportional position error gain (Kp) for the PWM servo controller.</summary>
+    public double Kp { get; set; } = 1.35;
+
+    /// <summary>Derivative bar-velocity damping gain (Kd) for the PWM servo controller.</summary>
+    public double Kd { get; set; } = 0.65;
+
+    /// <summary>
+    /// Target Velocity Feed-Forward Gain (Kv): tracks the target/fish velocity so the bar immediately moves with a moving fish.
+    /// </summary>
+    public double DerivativeTargetGain { get; set; } = 0.35;
+
+    /// <summary>Convenience alias for <see cref="DerivativeTargetGain"/> (Kv).</summary>
+    [JsonIgnore]
+    public double Kv
+    {
+        get => DerivativeTargetGain;
+        set => DerivativeTargetGain = value;
+    }
+
+    /// <summary>
+    /// Extra counter-braking multiplier applied to Kd when the bar is rushing toward the target at high speed
+    /// or when the target suddenly reverses direction ("ankle-break").
+    /// </summary>
+    public double AnkleBreakBrakingMultiplier { get; set; } = 1.65;
+
+    /// <summary>
+    /// Boundary / Wall Lock threshold (0 to 25 % of SearchRegion). When the target is within the release wall N%,
+    /// clamps output to 0.0 (Full Release Lock). When within the hold wall N%, clamps output to Full Hold Lock.
+    /// </summary>
+    public double BoundaryLockThresholdPercent { get; set; } = 10.0;
+
+    /// <summary>
+    /// Automatically completes the FeedbackLoopStep early as soon as the minigame UI disappears (both Target and Indicator
+    /// absent for <see cref="DisappearExitMs"/> after having been seen at least once).
+    /// </summary>
+    public bool AutoExitWhenBarDisappears { get; set; } = true;
+
+    /// <summary>Duration in milliseconds that both Target and Indicator must be absent (after being seen) to auto-exit.</summary>
+    public int DisappearExitMs { get; set; } = 650;
+
+    /// <summary>Shows the live AAA FeedbackTelemetryOverlay HUD around the SearchRegion during execution.</summary>
+    public bool ShowTelemetryHud { get; set; } = true;
+
+    // ---------------- Feedback Loop 3.0: Auto-Calibrate, Comfort Zone & Frame-Safe Sigma-Delta ----------------
+
+    /// <summary>
+    /// Automatically measures the bar's rise/fall acceleration, neutral hover duty cycle, and response latency during play
+    /// and adapts braking margin online whenever overshoot or lag is observed.
+    /// </summary>
+    public bool AutoCalibrate { get; set; } = true;
+
+    /// <summary>
+    /// Overall tracking responsiveness from 0 (Calm / Smooth) to 100 (Aggressive / Snappy). Default: 50.
+    /// Scales the comfort zone tightness, proportional thrust, and stopping-distance safety margin.
+    /// </summary>
+    public int Responsiveness { get; set; } = 50;
+
+    /// <summary>
+    /// Safety margin inside each edge of the player bar (0 to 45 % of bar width per side; default 20 %).
+    /// The controller keeps the target inside this inner "comfort zone" and brakes before the target crosses the comfort edge.
+    /// </summary>
+    public double ComfortZonePercent { get; set; } = 20.0;
+
+    /// <summary>
+    /// Minimum duration (in milliseconds, 8 to 50 ms; default 17 ms) for any hold or release state change in the
+    /// frame-safe Sigma-Delta modulator so sub-frame pulses are never dropped by 60 FPS game loops.
+    /// </summary>
+    public int MinPulseMs { get; set; } = 17;
+
+    /// <summary>
+    /// Optional learned physical profile of the player bar (populated by Auto-Tune or online auto-calibration).
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public BarProfile? LearnedProfile { get; set; }
+
     // ---------------- Act ----------------
 
     public FeedbackInputKind InputKind { get; set; } = FeedbackInputKind.MouseButton;
@@ -294,6 +398,28 @@ public sealed class FeedbackLoopStep : MacroStep
     /// <summary>The bar area as a rectangle.</summary>
     [JsonIgnore]
     public ScreenRect Region => new(RegionX, RegionY, RegionWidth, RegionHeight);
+
+    /// <summary>Alias for <see cref="Region"/>.</summary>
+    [JsonIgnore]
+    public ScreenRect SearchRegion
+    {
+        get => Region;
+        set
+        {
+            RegionX = value.X;
+            RegionY = value.Y;
+            RegionWidth = value.Width;
+            RegionHeight = value.Height;
+        }
+    }
+
+    /// <summary>Convenience alias for <see cref="MaxRuntimeMs"/> in seconds.</summary>
+    [JsonIgnore]
+    public double TimeoutSeconds
+    {
+        get => MaxRuntimeMs / 1000.0;
+        set => MaxRuntimeMs = (int)Math.Round(value * 1000.0);
+    }
 
     /// <summary>The rule for one region.</summary>
     public FeedbackAction ActionFor(FeedbackRegion region) => region switch

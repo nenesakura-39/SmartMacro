@@ -58,11 +58,14 @@ public sealed class FeedbackLoopStepViewModel : StepViewModel
         PreviewCommand = new AsyncRelayCommand(PreviewAsync, ex => TestResult = ex.Message, CanUseTools);
         TestDetectionCommand = new AsyncRelayCommand(TestDetectionAsync, ex => TestResult = ex.Message, CanUseTools);
         ApplyGamePresetCommand = new RelayCommand(ApplyGamePreset);
+        ApplyQuickPresetCommand = new RelayCommand(ApplyQuickPreset);
+        AutoTuneCommand = new RelayCommand(RunAutoTune);
         ShowMatchCommand = new RelayCommand(() =>
         {
             if (_testMatch is { } spot) _tools.Vision?.ShowSpot(spot);
         }, () => _testMatch is not null && !_isBusy);
         _showAdvanced = step.Preset == FeedbackPreset.Custom;
+        _selectedQuickPreset = FeedbackPresets.InferQuickPreset(step);
         RebuildConditions();
     }
 
@@ -71,10 +74,10 @@ public sealed class FeedbackLoopStepViewModel : StepViewModel
     /// <summary>The visual preset cards at the top of the guided setup.</summary>
     public static IReadOnlyList<MinigameCard> MinigameCards { get; } = new[]
     {
-        new MinigameCard(MinigameKind.HorizontalFollower, "◀ ── [ 🐟 ] ── ▶", "Horizontal Bar Follower (Left / Right)",
-            "For fishing / reeling bars (like Fisch). Holds click when the target is to the Right of your bar; releases when it's to the Left."),
-        new MinigameCard(MinigameKind.VerticalFollower, "▲ │ [ 🐟 ] │ ▼", "Vertical Bar Follower (Up / Down)",
-            "Holds click to push your bar Up toward the target; releases to let it fall Down."),
+        new MinigameCard(MinigameKind.HorizontalFollower, "◀ ── [ 🎯 ] ── ▶", "Horizontal Bar Follower (Left / Right)",
+            "For horizontal bar minigames. Holds input when the target is to the Right of your bar; releases when it's to the Left."),
+        new MinigameCard(MinigameKind.VerticalFollower, "▲ │ [ 🎯 ] │ ▼", "Vertical Bar Follower (Up / Down)",
+            "For vertical bar minigames. Holds input to push your bar Up toward the target; releases to let it fall Down."),
         new MinigameCard(MinigameKind.TimingCheck, "🎯", "Timing / Skill Check (Click When Marker Hits Zone)",
             "Watches a moving marker and clicks the instant it enters the target zone."),
         new MinigameCard(MinigameKind.Custom, "⚙", "Custom / Advanced",
@@ -101,10 +104,14 @@ public sealed class FeedbackLoopStepViewModel : StepViewModel
                 case MinigameKind.HorizontalFollower:
                     _step.Orientation = BarOrientation.Horizontal;
                     FeedbackPresets.Apply(_step, FeedbackPreset.FollowTargetBar);
+                    FeedbackPresets.ApplyQuickPreset(_step, FeedbackQuickPreset.MomentumBar);
+                    _selectedQuickPreset = FeedbackQuickPreset.MomentumBar;
                     break;
                 case MinigameKind.VerticalFollower:
                     _step.Orientation = BarOrientation.Vertical;
                     FeedbackPresets.Apply(_step, FeedbackPreset.FollowTargetBar);
+                    FeedbackPresets.ApplyQuickPreset(_step, FeedbackQuickPreset.GravityBar);
+                    _selectedQuickPreset = FeedbackQuickPreset.GravityBar;
                     break;
                 case MinigameKind.TimingCheck:
                     FeedbackPresets.Apply(_step, FeedbackPreset.ClickWhenInZone);
@@ -220,21 +227,85 @@ public sealed class FeedbackLoopStepViewModel : StepViewModel
         set { if (_step.FinishWhenInZone == value) return; _step.FinishWhenInZone = value; NotifyChanged(); }
     }
 
-    // ---------------- Feedback Loop 2.0: Smart Predictive control ----------------
+    // ---------------- Feedback Loop 3.0: Adaptive Predictive Control & Behavior Cards ----------------
 
-    /// <summary>The one-click game preset buttons (Smart Predictive, tuned per kind of bar).</summary>
-    public static IReadOnlyList<Choice<FeedbackGamePreset>> GamePresets { get; } = Enum.GetValues<FeedbackGamePreset>()
+    /// <summary>The 4 physics behavior cards shown in the Feedback Loop inspector.</summary>
+    public static IReadOnlyList<FeedbackBehaviorCard> BehaviorCards => FeedbackPresets.BehaviorCards;
+
+    /// <summary>The one-click preset buttons (Smart Predictive, tuned per kind of bar).</summary>
+    public static IReadOnlyList<Choice<FeedbackGamePreset>> GamePresets { get; } = FeedbackPresets.DistinctGamePresets
         .Select(p => new Choice<FeedbackGamePreset>(p, FeedbackPresets.Label(p)))
+        .ToArray();
+
+    /// <summary>One-click tuning presets for the Closed-Loop Adaptive Servo Controller.</summary>
+    public static IReadOnlyList<Choice<FeedbackQuickPreset>> QuickPresets { get; } = FeedbackPresets.DistinctQuickPresets
+        .Select(p => new Choice<FeedbackQuickPreset>(p, FeedbackPresets.QuickPresetLabel(p)))
         .ToArray();
 
     public static IReadOnlyList<Choice<FeedbackControlMode>> ControlModes { get; } = new[]
     {
-        new Choice<FeedbackControlMode>(FeedbackControlMode.SmartPredictive, "Smart Predictive (PD + Brake — Best for Fisch)"),
-        new Choice<FeedbackControlMode>(FeedbackControlMode.ClassicSimpleHold, "Classic Simple Hold"),
+        new Choice<FeedbackControlMode>(FeedbackControlMode.SmartPredictive, FeedbackPresets.ControlModeLabel(FeedbackControlMode.SmartPredictive)),
+        new Choice<FeedbackControlMode>(FeedbackControlMode.ClassicSimpleHold, FeedbackPresets.ControlModeLabel(FeedbackControlMode.ClassicSimpleHold)),
     };
 
-    /// <summary>Applies a game preset (parameter: a <see cref="FeedbackGamePreset"/>); area and colours are kept.</summary>
+    /// <summary>Applies a preset (parameter: a <see cref="FeedbackGamePreset"/>); area and colours are kept.</summary>
     public RelayCommand ApplyGamePresetCommand { get; }
+
+    /// <summary>Applies a quick behavior preset (parameter: a <see cref="FeedbackQuickPreset"/>); area and colours are kept.</summary>
+    public RelayCommand ApplyQuickPresetCommand { get; }
+
+    private FeedbackQuickPreset? _selectedQuickPreset = FeedbackQuickPreset.MomentumBar;
+
+    public FeedbackBehaviorCard? SelectedBehaviorCard
+    {
+        get => _selectedQuickPreset is { } p ? BehaviorCards.FirstOrDefault(c => c.Preset == p) : BehaviorCards[0];
+        set
+        {
+            if (value is null) return;
+            SelectedQuickPreset = value.Preset;
+        }
+    }
+
+    public FeedbackQuickPreset? SelectedQuickPreset
+    {
+        get => _selectedQuickPreset;
+        set
+        {
+            if (_selectedQuickPreset == value) return;
+            _selectedQuickPreset = value;
+            if (value is { } chosen)
+            {
+                FeedbackPresets.ApplyQuickPreset(_step, chosen);
+                TestResult = $"Applied \"{FeedbackPresets.QuickPresetLabel(chosen)}\" behavior preset.";
+                OnPropertyChanged(string.Empty);
+                NotifyChanged();
+            }
+            else
+            {
+                OnPropertyChanged();
+                OnPropertyChanged(nameof(SelectedBehaviorCard));
+            }
+        }
+    }
+
+    private void ApplyQuickPreset(object? parameter)
+    {
+        var preset = parameter switch
+        {
+            FeedbackBehaviorCard card => card.Preset,
+            FeedbackQuickPreset p => p,
+            Choice<FeedbackQuickPreset> c => c.Value,
+            string s when Enum.TryParse<FeedbackQuickPreset>(s, out var parsed) => parsed,
+            _ => (FeedbackQuickPreset?)null,
+        };
+        if (preset is not { } chosen) return;
+
+        _selectedQuickPreset = chosen;
+        FeedbackPresets.ApplyQuickPreset(_step, chosen);
+        TestResult = $"Applied \"{FeedbackPresets.QuickPresetLabel(chosen)}\" behavior preset.";
+        OnPropertyChanged(string.Empty);
+        NotifyChanged();
+    }
 
     private void ApplyGamePreset(object? parameter)
     {
@@ -248,6 +319,7 @@ public sealed class FeedbackLoopStepViewModel : StepViewModel
         if (preset is not { } chosen) return;
 
         FeedbackPresets.ApplyGamePreset(_step, chosen);
+        _selectedQuickPreset = FeedbackPresets.InferQuickPreset(_step);
         _showAdvanced = false;
         TestResult = $"Applied \"{FeedbackPresets.Label(chosen)}\". Area and colours were kept – press Preview 10 s to watch the live 🧠 telemetry.";
         OnPropertyChanged(string.Empty); // many settings changed: refresh every field
@@ -310,11 +382,249 @@ public sealed class FeedbackLoopStepViewModel : StepViewModel
         }
     }
 
+    // ---------------- Closed-Loop PWM PD+FeedForward Servo Properties ----------------
+
+    public bool InvertDirection
+    {
+        get => _step.InvertDirection;
+        set
+        {
+            if (_step.InvertDirection == value) return;
+            _step.InvertDirection = value;
+            NotifyChanged();
+        }
+    }
+
+    public double NeutralHoverDutyCycle
+    {
+        get => _step.NeutralHoverDutyCycle;
+        set
+        {
+            var clamped = Math.Round(Math.Clamp(value, 0.0, 1.0), 3);
+            if (_step.NeutralHoverDutyCycle.Equals(clamped)) return;
+            _step.NeutralHoverDutyCycle = clamped;
+            NotifyChanged();
+        }
+    }
+
+    public int PwmCycleMs
+    {
+        get => _step.PwmCycleMs;
+        set
+        {
+            var clamped = Math.Clamp(value, 10, 60);
+            if (_step.PwmCycleMs == clamped) return;
+            _step.PwmCycleMs = clamped;
+            NotifyChanged();
+        }
+    }
+
+    public double Kp
+    {
+        get => _step.Kp;
+        set
+        {
+            var clamped = Math.Round(Math.Clamp(value, 0.0, 10.0), 3);
+            if (_step.Kp.Equals(clamped)) return;
+            _step.Kp = clamped;
+            NotifyChanged();
+        }
+    }
+
+    public double Kd
+    {
+        get => _step.Kd;
+        set
+        {
+            var clamped = Math.Round(Math.Clamp(value, 0.0, 10.0), 3);
+            if (_step.Kd.Equals(clamped)) return;
+            _step.Kd = clamped;
+            NotifyChanged();
+        }
+    }
+
+    public double DerivativeTargetGain
+    {
+        get => _step.DerivativeTargetGain;
+        set
+        {
+            var clamped = Math.Round(Math.Clamp(value, 0.0, 5.0), 3);
+            if (_step.DerivativeTargetGain.Equals(clamped)) return;
+            _step.DerivativeTargetGain = clamped;
+            NotifyChanged();
+            OnPropertyChanged(nameof(Kv));
+        }
+    }
+
+    public double Kv
+    {
+        get => DerivativeTargetGain;
+        set => DerivativeTargetGain = value;
+    }
+
+    public double AnkleBreakBrakingMultiplier
+    {
+        get => _step.AnkleBreakBrakingMultiplier;
+        set
+        {
+            var clamped = Math.Round(Math.Clamp(value, 0.5, 5.0), 3);
+            if (_step.AnkleBreakBrakingMultiplier.Equals(clamped)) return;
+            _step.AnkleBreakBrakingMultiplier = clamped;
+            NotifyChanged();
+        }
+    }
+
+    public double BoundaryLockThresholdPercent
+    {
+        get => _step.BoundaryLockThresholdPercent;
+        set
+        {
+            var clamped = Math.Round(Math.Clamp(value, 0.0, 25.0), 2);
+            if (_step.BoundaryLockThresholdPercent.Equals(clamped)) return;
+            _step.BoundaryLockThresholdPercent = clamped;
+            NotifyChanged();
+        }
+    }
+
+    public bool AutoExitWhenBarDisappears
+    {
+        get => _step.AutoExitWhenBarDisappears;
+        set
+        {
+            if (_step.AutoExitWhenBarDisappears == value) return;
+            _step.AutoExitWhenBarDisappears = value;
+            NotifyChanged();
+        }
+    }
+
+    public int DisappearExitMs
+    {
+        get => _step.DisappearExitMs;
+        set
+        {
+            var clamped = Math.Clamp(value, 50, 10_000);
+            if (_step.DisappearExitMs == clamped) return;
+            _step.DisappearExitMs = clamped;
+            NotifyChanged();
+        }
+    }
+
+    public bool ShowTelemetryHud
+    {
+        get => _step.ShowTelemetryHud;
+        set
+        {
+            if (_step.ShowTelemetryHud == value) return;
+            _step.ShowTelemetryHud = value;
+            NotifyChanged();
+        }
+    }
+
+    public RelayCommand AutoTuneCommand { get; }
+
+    public bool AutoCalibrate
+    {
+        get => _step.AutoCalibrate;
+        set
+        {
+            if (_step.AutoCalibrate == value) return;
+            _step.AutoCalibrate = value;
+            NotifyChanged();
+            OnPropertyChanged(nameof(LearnedProfileSummary));
+        }
+    }
+
+    public int Responsiveness
+    {
+        get => _step.Responsiveness;
+        set
+        {
+            var clamped = Math.Clamp(value, 0, 100);
+            if (_step.Responsiveness == clamped) return;
+            _step.Responsiveness = clamped;
+            NotifyChanged();
+            OnPropertyChanged(nameof(ResponsivenessLabel));
+        }
+    }
+
+    public string ResponsivenessLabel => _step.Responsiveness switch
+    {
+        < 30 => $"Calm ({_step.Responsiveness}%)",
+        > 70 => $"Aggressive ({_step.Responsiveness}%)",
+        _ => $"Balanced ({_step.Responsiveness}%)",
+    };
+
+    public double ComfortZonePercent
+    {
+        get => _step.ComfortZonePercent;
+        set
+        {
+            var clamped = Math.Round(Math.Clamp(value, 0.0, 45.0), 1);
+            if (_step.ComfortZonePercent.Equals(clamped)) return;
+            _step.ComfortZonePercent = clamped;
+            NotifyChanged();
+        }
+    }
+
+    public int MinPulseMs
+    {
+        get => _step.MinPulseMs;
+        set
+        {
+            var clamped = Math.Clamp(value, 8, 50);
+            if (_step.MinPulseMs == clamped) return;
+            _step.MinPulseMs = clamped;
+            NotifyChanged();
+            OnPropertyChanged(nameof(LearnedProfileSummary));
+        }
+    }
+
+    public string LearnedProfileSummary
+    {
+        get
+        {
+            if (_step.LearnedProfile is { } p)
+            {
+                var status = p.IsCalibrated ? "Calibrated" : (_step.AutoCalibrate ? "Auto-Learning" : "Preset");
+                return $"✨ {status}: Hover {p.HoverDuty:P0} · Glide ~{p.GlidePx:0} px · Latency {p.LatencyMs:0} ms · Min pulse {_step.MinPulseMs} ms";
+            }
+
+            return _step.AutoCalibrate
+                ? $"✨ Auto-Learn active: measures bar speed, gravity & braking online (Hover {_step.NeutralHoverDutyCycle:P0} · Min pulse {_step.MinPulseMs} ms)"
+                : $"Manual tuning: Hover {_step.NeutralHoverDutyCycle:P0} · Min pulse {_step.MinPulseMs} ms";
+        }
+    }
+
+    private void RunAutoTune()
+    {
+        _step.AutoCalibrate = true;
+        _step.ControlMode = FeedbackControlMode.SmartPredictive;
+        if (_step.LearnedProfile is null)
+        {
+            var length = Math.Max(100.0, _step.Orientation == BarOrientation.Horizontal ? _step.RegionWidth : _step.RegionHeight);
+            _step.LearnedProfile = new BarProfile(
+                RiseAccelPxPerSec2: Math.Round(length * 2.6, 0),
+                FallAccelPxPerSec2: Math.Round(length * 2.3, 0),
+                MaxSpeedPxPerSec: Math.Round(length * 1.8, 0),
+                GlidePx: Math.Round(length * 0.06, 1),
+                LatencyMs: 32.0,
+                HoverDuty: _step.NeutralHoverDutyCycle,
+                IsCalibrated: false);
+        }
+        else
+        {
+            _step.LearnedProfile = _step.LearnedProfile with { IsCalibrated = false };
+        }
+
+        TestResult = "✨ Auto-Tune armed! During the first ~1.5 s of the minigame, SmartMacro will automatically measure your bar's rise/fall speed, hover balance, and stopping distance.";
+        OnPropertyChanged(string.Empty);
+        NotifyChanged();
+    }
+
     public string SmartModeHelp =>
-        "Smart Predictive reads the speed of the target and of your bar (smoothed) and decides on where both will be " +
-        $"{_step.LeadPredictionFactor:0.##} s from now, so it lets go BEFORE your bar overshoots. If the target turns around " +
-        "it brakes instantly. Inside the dead zone it taps quickly (micro-pulse) to hover. " +
-        "Press Preview 10 s to see the live 🧠 telemetry: target / bar speed, predicted gap, hover pulse and brakes.";
+        "Adaptive Smart Predictive tracks both positions and relative velocity with a 1D Alpha-Beta filter, predicts " +
+        "stopping distance ahead of time so your bar brakes BEFORE crossing the target, and uses frame-safe Sigma-Delta " +
+        "pulses to hover smoothly inside the comfort zone.";
 
     // ---------------- Choices for the drop-downs ----------------
 

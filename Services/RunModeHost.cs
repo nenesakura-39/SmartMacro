@@ -59,6 +59,13 @@ public interface IRunModeHost
     /// </summary>
     bool HideTargetLock() => false;
 
+    /// <summary>
+    /// Updates or hides (when <paramref name="telemetry"/> is null) the live <see cref="Views.FeedbackTelemetryOverlay"/> HUD.
+    /// </summary>
+    void UpdateFeedbackTelemetry(FeedbackTelemetryData? telemetry)
+    {
+    }
+
     /// <summary>The user clicked "⏸ F8" on the mini-HUD.</summary>
     event EventHandler? PauseRequested;
 
@@ -79,6 +86,7 @@ public sealed class RunModeHost : IRunModeHost, IDisposable
     private readonly Func<AppSettings> _settings;
     private RunOverlayWindow? _overlay;
     private TargetLockOverlay? _targetLock;
+    private Views.FeedbackTelemetryOverlay? _feedbackTelemetry;
     private HudClickHook? _clickHook;
     private bool _minimizedByUs;
     private WindowState _previousState = WindowState.Normal;
@@ -146,10 +154,33 @@ public sealed class RunModeHost : IRunModeHost, IDisposable
         return true;
     }
 
+    public void UpdateFeedbackTelemetry(FeedbackTelemetryData? telemetry)
+    {
+        try
+        {
+            if (telemetry is null)
+            {
+                _feedbackTelemetry?.HideNow();
+                return;
+            }
+
+            if (_targetLock is { IsShowing: true } reticle)
+                reticle.HideNow();
+
+            _feedbackTelemetry ??= new Views.FeedbackTelemetryOverlay();
+            _feedbackTelemetry.UpdateTelemetry(telemetry);
+        }
+        catch (Exception)
+        {
+            // Purely visual: telemetry overlay must never disturb playback.
+        }
+    }
+
     public void Exit()
     {
         StopClickHook();
         _targetLock?.HideNow();
+        _feedbackTelemetry?.HideNow();
         _overlay?.Hide();
         NativeMethods.SetExcludedFromCapture(_mainWindow, false);
         if (_minimizedByUs)
@@ -167,6 +198,8 @@ public sealed class RunModeHost : IRunModeHost, IDisposable
         _overlay = null;
         _targetLock?.Close();
         _targetLock = null;
+        _feedbackTelemetry?.Close();
+        _feedbackTelemetry = null;
     }
 
     private void StartClickHook()

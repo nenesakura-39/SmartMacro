@@ -589,13 +589,18 @@ public sealed class VisionTools : IVisionTools
             {
                 using var stop = new CancellationTokenSource();
                 var live = new LiveFeedbackWindow(stop.Cancel);
+                var hud = copy.ShowTelemetryHud && copy.ControlMode == FeedbackControlMode.SmartPredictive
+                    ? new Views.FeedbackTelemetryOverlay()
+                    : null;
                 live.Show();
                 try
                 {
-                    return await Task.Run(() => PreviewLoopAsync(copy, duration, live, stop.Token));
+                    return await Task.Run(() => PreviewLoopAsync(copy, duration, live, hud, stop.Token));
                 }
                 finally
                 {
+                    hud?.HideNow();
+                    hud?.Close();
                     live.Close();
                 }
             });
@@ -725,18 +730,23 @@ public sealed class VisionTools : IVisionTools
     /// The real loop logic (sensor, controller, rate limit) without input: counts what it would do and keeps the live
     /// window updated a few times per second.
     /// </summary>
-    private async Task<PreviewSummary> PreviewLoopAsync(FeedbackLoopStep step, TimeSpan duration, LiveFeedbackWindow live, CancellationToken token)
+    private async Task<PreviewSummary> PreviewLoopAsync(FeedbackLoopStep step, TimeSpan duration, LiveFeedbackWindow live, Views.FeedbackTelemetryOverlay? hud, CancellationToken token)
     {
         using var timerResolution = new HighResolutionTimerScope(); // 1 ms timer, like during playback
         var sensor = new FeedbackSensor(step, _capture);
         // The real controller the loop would use (Classic rules, or Smart Predictive PD + hover pulse + brake).
         var controller = FeedbackControllers.Create(step);
+        var tracker = hud is not null ? new FeedbackLoopTracker() : null;
+        var servo = hud is not null ? new FeedbackServoController(step) : null;
         var stats = new FeedbackStats();
         var interval = TimeSpan.FromTicks(TimeSpan.TicksPerSecond / Math.Clamp(step.MaxCapturesPerSecond, 1, Core.Validation.MacroValidator.MaxCapturesPerSecond));
         var loopEnds = new List<string>();
         var heldFrames = 0;
         var waiting = false;
         var nextRefresh = TimeSpan.Zero;
+        var nextHudUpdate = TimeSpan.Zero;
+        var hudInterval = TimeSpan.FromMilliseconds(33);
+        TimeSpan? lastFrameTime = null;
         FeedbackFrame? last = null;
         var watch = Stopwatch.StartNew();
 
@@ -746,6 +756,25 @@ public sealed class VisionTools : IVisionTools
             var frame = await sensor.ReadAsync(CancellationToken.None).ConfigureAwait(false);
             stats.Add(frame);
             last = frame;
+
+            var dtSeconds = lastFrameTime is { } prev ? Math.Max(0.001, (start - prev).TotalSeconds) : interval.TotalSeconds;
+            lastFrameTime = start;
+
+            if (hud is not null && tracker is not null && servo is not null)
+            {
+                var (targetScan, indicatorScan) = tracker.Scan(frame.Frame.Image, step);
+                var servoResult = servo.Step(targetScan, indicatorScan, dtSeconds, tracker.EstimatedBarWidth);
+                if (start >= nextHudUpdate)
+                {
+                    nextHudUpdate = start + hudInterval;
+                    var telemetry = servoResult.Telemetry;
+                    _ = hud.Dispatcher.InvokeAsync(() =>
+                    {
+                        if (!token.IsCancellationRequested)
+                            hud.UpdateTelemetry(telemetry);
+                    });
+                }
+            }
 
             var decision = controller.Update(frame.Observation, start);
             if (decision.Deferred) stats.Deferred++;

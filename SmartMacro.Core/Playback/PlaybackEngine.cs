@@ -422,6 +422,12 @@ public sealed class PlaybackEngine
     /// </summary>
     public event EventHandler<OverlayClearRequest>? TargetOverlayClearRequested;
 
+    /// <summary>
+    /// Raised on the playback thread during a FeedbackLoopStep (~30–60 FPS) with live servo telemetry,
+    /// and raised with <c>null</c> in <c>finally</c> when the loop ends so the HUD overlay hides immediately.
+    /// </summary>
+    public event EventHandler<FeedbackTelemetryData?>? FeedbackTelemetryUpdated;
+
     /// <summary>True while playback is paused (Pause / F8).</summary>
     public bool IsPaused => State == PlaybackState.Paused;
 
@@ -1547,12 +1553,214 @@ public sealed class PlaybackEngine
         _inFeedbackLoop = true;
         try
         {
-            await RunFeedbackLoopCoreAsync(run, index, loops, step, token).ConfigureAwait(false);
+            await ClearTargetOverlayAsync(token).ConfigureAwait(false);
+            if (step.ControlMode == FeedbackControlMode.SmartPredictive)
+                await ExecuteFeedbackLoopAsync(run, index, loops, step, token).ConfigureAwait(false);
+            else
+                await RunFeedbackLoopCoreAsync(run, index, loops, step, token).ConfigureAwait(false);
         }
         finally
         {
             _inFeedbackLoop = false;
+            try { FeedbackTelemetryUpdated?.Invoke(this, null); } catch { }
         }
+    }
+
+    /// <summary>
+    /// Closed-Loop Adaptive PD+FeedForward Servo Controller execution for horizontal and vertical bar minigames (Feedback Loop 3.0).
+    /// Uses <see cref="FeedbackLoopTracker"/> (single-pass 1D projection with gap bridging and smooth edge-occlusion reconstruction)
+    /// and <see cref="FeedbackServoController"/> (Alpha-Beta kinematic filtering, latency compensation, relative-velocity damping,
+    /// comfort zone, kinematic stopping-distance braking, frame-safe Sigma-Delta modulation, and online auto-calibration).
+    /// </summary>
+    private async Task ExecuteFeedbackLoopAsync(RunContext run, int index, List<LoopFrame> loops, FeedbackLoopStep step, CancellationToken token)
+    {
+        var number = run.StepNumberOf(index);
+        var capture = _capture ?? throw new ScreenCaptureUnavailableException("Screen capture isn't available, so Feedback loop steps can't run.");
+        if (!RgbColor.TryParse(step.MarkerColor, out _))
+            throw new InvalidOperationException($"The marker color \"{step.MarkerColor}\" is not valid. Use #RRGGBB.");
+        if (step.ZoneMode == FeedbackZoneMode.DetectedByColor && !RgbColor.TryParse(step.ZoneColor, out _))
+            throw new InvalidOperationException($"The zone color \"{step.ZoneColor}\" is not valid. Use #RRGGBB.");
+
+        var region = step.Region;
+        var tracker = new FeedbackLoopTracker();
+        var servo = new FeedbackServoController(step);
+        var stats = new FeedbackStats();
+        var held = run.Held;
+        var key = new HeldKey(step.VirtualKey);
+        var maxRuntime = TimeSpan.FromMilliseconds(step.MaxRuntimeMs);
+        var targetFps = Math.Clamp(step.MaxCapturesPerSecond, 30, MacroValidator.MaxCapturesPerSecond);
+        var frameInterval = TimeSpan.FromTicks(TimeSpan.TicksPerSecond / targetFps);
+        var startedAt = ActiveTime;
+        TimeSpan? lastFrameTime = null;
+        TimeSpan? lastCompleteCheck = null;
+        TimeSpan? lastFailCheck = null;
+        TimeSpan nextTelemetryUpdate = TimeSpan.Zero;
+        var telemetryInterval = TimeSpan.FromMilliseconds(16); // ~60 FPS throttled UI updates
+        var nextProgress = TimeSpan.Zero;
+        var waiting = false;
+        string? ending = null;
+        Exception? failure = null;
+
+        TimeSpan Now() => ActiveTime - startedAt;
+
+        bool IsDown() => step.InputKind == FeedbackInputKind.MouseButton
+            ? held.Buttons.Contains(step.MouseButton)
+            : held.Keys.Contains(key);
+
+        void SetInput(bool down)
+        {
+            if (step.InputKind == FeedbackInputKind.MouseButton)
+            {
+                _input.MouseButton(step.MouseButton, down);
+                if (down) held.Buttons.Add(step.MouseButton);
+                else held.Buttons.Remove(step.MouseButton);
+            }
+            else
+            {
+                _input.Key(step.VirtualKey, down);
+                if (down) held.Keys.Add(key);
+                else held.Keys.Remove(key);
+            }
+        }
+
+        void End(string what, LoopLimitBehavior behavior)
+        {
+            if (behavior == LoopLimitBehavior.StopMacro)
+            {
+                ending = what;
+                failure = new FeedbackLoopException($"Feedback loop (step {number}) {what}. The macro was stopped.");
+            }
+            else
+            {
+                ending = what + "; continuing with the next step";
+            }
+        }
+
+        try
+        {
+            if (IsDown()) SetInput(false);
+
+            while (true)
+            {
+                await WaitIfPausedAsync(token).ConfigureAwait(false);
+                token.ThrowIfCancellationRequested();
+                var frameStart = Now();
+
+                if (frameStart >= maxRuntime)
+                {
+                    End($"reached its max runtime of {step.MaxRuntimeMs / 1000.0:0.###} s", step.WhenTimeUp);
+                    break;
+                }
+
+                if (step.FailWhen is { } fail && IsConditionDue(fail, lastFailCheck, frameStart))
+                {
+                    lastFailCheck = frameStart;
+                    var check = await CheckFeedbackConditionAsync(run, fail, stats, token).ConfigureAwait(false);
+                    if (check.IsTrue)
+                    {
+                        End($"failed: its \"failed when\" condition is true ({check.Details.TrimEnd('.')})", step.WhenFailed);
+                        break;
+                    }
+                }
+
+                if (step.CompleteWhen is { } complete && IsConditionDue(complete, lastCompleteCheck, frameStart))
+                {
+                    lastCompleteCheck = frameStart;
+                    var check = await CheckFeedbackConditionAsync(run, complete, stats, token).ConfigureAwait(false);
+                    if (check.IsTrue)
+                    {
+                        ending = $"finished: its \"done when\" condition is true ({check.Details.TrimEnd('.')})";
+                        break;
+                    }
+                }
+
+                var t0 = _clock.Elapsed;
+                var screenFrame = await capture.CaptureAsync(region, token).ConfigureAwait(false);
+                var t1 = _clock.Elapsed;
+                if (screenFrame.Bounds != region)
+                    throw new InvalidOperationException($"The bar area {region} is partly outside the screen (only {screenFrame.Bounds} is visible). Pick the area again.");
+
+                var (targetScan, indicatorScan) = tracker.Scan(screenFrame.Image, step);
+                var t2 = _clock.Elapsed;
+                stats.AddServoFrame(targetScan, indicatorScan, t1 - t0, t2 - t1);
+
+                var now = Now();
+                var dtSeconds = lastFrameTime is { } prev ? Math.Max(0.001, (now - prev).TotalSeconds) : frameInterval.TotalSeconds;
+                lastFrameTime = now;
+
+                var result = servo.Step(targetScan, indicatorScan, dtSeconds, tracker.EstimatedBarWidth);
+                stats.Brakes = servo.AnkleBrakes;
+                stats.OnTargetPercent = servo.TotalTrackedFrames > 0 ? servo.OnTargetPercent : null;
+
+                if (step.ShowTelemetryHud && now >= nextTelemetryUpdate)
+                {
+                    nextTelemetryUpdate = now + telemetryInterval;
+                    try { FeedbackTelemetryUpdated?.Invoke(this, result.Telemetry); } catch { }
+                }
+
+                // Auto-Exit When Minigame Finishes
+                if (result.ShouldAutoExit)
+                {
+                    if (IsDown())
+                    {
+                        SetInput(false);
+                        stats.Releases++;
+                    }
+                    ending = $"finished: minigame bar disappeared for {step.DisappearExitMs} ms after completion";
+                    break;
+                }
+
+                var isSearching = result.State == ServoTelemetryState.Searching;
+                if (isSearching && !waiting) stats.LostEpisodes++;
+                waiting = isSearching;
+
+                if (frameStart >= nextProgress)
+                {
+                    var stateText = string.Format(
+                        CultureInfo.InvariantCulture,
+                        "servo [{0}], err {1:+0;-0;0}px, pwm {2:P0}, on-tgt {3:0}%",
+                        result.Telemetry.StateLabel,
+                        result.RawErrorPx,
+                        result.DutyCycle,
+                        servo.OnTargetPercent);
+                    Report(run, index, loops, $"feedback {frameStart.TotalSeconds:0.0} s, {stateText}");
+                    nextProgress = frameStart + FeedbackProgressInterval;
+                }
+
+                // Frame-safe Sigma-Delta hold/release application (never sleeps blind across multiple frames)
+                if (result.HoldInput)
+                {
+                    if (!IsDown())
+                    {
+                        SetInput(true);
+                        stats.Presses++;
+                    }
+                }
+                else
+                {
+                    if (IsDown())
+                    {
+                        SetInput(false);
+                        stats.Releases++;
+                    }
+                }
+
+                var rest = frameInterval - (Now() - frameStart);
+                if (rest > TimeSpan.Zero)
+                    await WaitAsync(rest, token).ConfigureAwait(false);
+            }
+        }
+        finally
+        {
+            if (IsDown()) TryRelease(() => SetInput(false));
+            try { FeedbackTelemetryUpdated?.Invoke(this, null); } catch { }
+            ResetTimeline();
+
+            var why = ending ?? (token.IsCancellationRequested ? "was stopped" : "ended because of an error");
+            Message?.Invoke(this, $"Feedback loop (step {number}) {why}. {stats.Describe(Now(), frameInterval)}");
+        }
+
+        if (failure is not null) throw failure;
     }
 
     private async Task RunFeedbackLoopCoreAsync(RunContext run, int index, List<LoopFrame> loops, FeedbackLoopStep step, CancellationToken token)
