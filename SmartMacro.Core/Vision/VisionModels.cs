@@ -47,8 +47,12 @@ public sealed class ScreenCaptureUnavailableException : Exception
 /// <summary>
 /// A place where an image was found. Bounds are in whatever coordinates the searched picture used
 /// (picture pixels inside the matcher, screen pixels once converted). Score is 0..1 (1 = identical).
+/// <see cref="MatchedScale"/> is the template size multiplier that matched (1.0 unless multi-scale matched a resized copy).
 /// </summary>
-public sealed record VisualMatch(ScreenRect Bounds, double Score);
+public sealed record VisualMatch(ScreenRect Bounds, double Score)
+{
+    public double MatchedScale { get; init; } = 1.0;
+}
 
 /// <summary>
 /// Adds up how long screen captures and searches take, so the log can say what a detection step costs

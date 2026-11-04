@@ -5,6 +5,7 @@
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
              xmlns:vm="clr-namespace:SmartMacro.ViewModels"
              xmlns:conv="clr-namespace:SmartMacro.Converters"
+             xmlns:ctrl="clr-namespace:SmartMacro.Controls"
              mc:Ignorable="d"
              d:DataContext="{d:DesignInstance Type=vm:LogViewModel}">
     <UserControl.Resources>
@@ -18,8 +19,8 @@
             <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
                 <Button Style="{StaticResource GhostButton}" Command="{Binding OpenFolderCommand}" Margin="0,0,6,0" ToolTip="Open the folder with the daily log files">
                     <StackPanel Orientation="Horizontal">
-                        <TextBlock Text="&#xE838;" Style="{StaticResource IconText}" />
-                        <TextBlock Text="Open log folder" Margin="8,0,0,0" />
+                        <ctrl:StudioIcon Kind="Folder" Size="13" Foreground="{DynamicResource TextBrush}" />
+                        <TextBlock Text="Open log folder" Margin="7,0,0,0" />
                     </StackPanel>
                 </Button>
             </StackPanel>
@@ -31,15 +32,15 @@
         </DockPanel>
 
         <!-- ===== Studio log surface ===== -->
-        <Border Style="{StaticResource Card}" Padding="0" Background="{StaticResource StepsCanvasBrush}" ClipToBounds="True">
+        <Border Style="{StaticResource Card}" Padding="0" Background="{DynamicResource StepsCanvasBrush}" ClipToBounds="True">
             <DockPanel>
                 <!-- Toolbar: search | level filter pills | count | Copy Log / Clear Log -->
-                <Border DockPanel.Dock="Top" Background="{StaticResource SurfaceBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,0,0,1"
+                <Border DockPanel.Dock="Top" Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,0,1"
                         CornerRadius="10,10,0,0" Padding="10,8">
                     <DockPanel>
                         <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
                             <Border Style="{StaticResource Pill}" Margin="0,0,10,0">
-                                <TextBlock Text="{Binding CountText}" FontSize="11" Foreground="{StaticResource MutedTextBrush}" />
+                                <TextBlock Text="{Binding CountText}" FontSize="11" Foreground="{DynamicResource MutedTextBrush}" />
                             </Border>
                             <Button Command="{Binding CopyCommand}" Margin="0,0,6,0" Padding="10,5" FontSize="12"
                                     ToolTip="Copy Log: copies the entries shown (oldest first) for bug reports" AutomationProperties.Name="Copy log">
@@ -61,7 +62,7 @@
                             <Grid Width="300">
                                 <TextBox Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}" Tag="Search the log" Padding="30,6,28,6"
                                          AutomationProperties.Name="Search the log" />
-                                <TextBlock Text="&#xE721;" Style="{StaticResource IconText}" Foreground="{StaticResource MutedTextBrush}"
+                                <TextBlock Text="&#xE721;" Style="{StaticResource IconText}" Foreground="{DynamicResource MutedTextBrush}"
                                            HorizontalAlignment="Left" Margin="10,0,0,0" IsHitTestVisible="False" FontSize="12" />
                                 <Button Style="{StaticResource IconButton}" Content="&#xE711;" HorizontalAlignment="Right" Width="26" Height="24"
                                         Padding="4" FontSize="9" Margin="0,0,3,0" Command="{Binding ClearSearchCommand}" ToolTip="Clear search"
@@ -99,7 +100,7 @@
                                         <ColumnDefinition Width="66" />
                                         <ColumnDefinition Width="*" />
                                     </Grid.ColumnDefinitions>
-                                    <TextBlock Text="{Binding TimeText}" Foreground="{StaticResource SubtleTextBrush}" FontFamily="Consolas" FontSize="12"
+                                    <TextBlock Text="{Binding TimeText}" Foreground="{DynamicResource SubtleTextBrush}" FontFamily="{StaticResource MonoFont}" FontSize="11.5"
                                                VerticalAlignment="Top" Margin="0,2,0,0" />
                                     <Border Grid.Column="1" Style="{StaticResource Pill}" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="0,1,0,0"
                                             Background="{Binding Converter={StaticResource LogPill}, ConverterParameter=Soft}" MinWidth="52">
@@ -109,8 +110,8 @@
                                     </Border>
                                     <StackPanel Grid.Column="2">
                                         <TextBlock Text="{Binding Message}" TextWrapping="Wrap" FontSize="12" />
-                                        <TextBlock Text="{Binding Details}" Foreground="{StaticResource MutedTextBrush}" FontSize="11" TextWrapping="Wrap"
-                                                   FontFamily="Consolas" Margin="0,2,0,0"
+                                        <TextBlock Text="{Binding Details}" Foreground="{DynamicResource MutedTextBrush}" FontSize="11" TextWrapping="Wrap"
+                                                   FontFamily="{StaticResource MonoFont}" Margin="0,2,0,0"
                                                    Visibility="{Binding Details, Converter={StaticResource NullToVisibility}}" />
                                     </StackPanel>
                                 </Grid>
@@ -119,12 +120,12 @@
                     </ListBox>
                     <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center"
                                 Visibility="{Binding IsEmpty, Converter={StaticResource BoolToVisibility}}">
-                        <TextBlock Text="&#xE9D9;" Style="{StaticResource IconText}" FontSize="26" Foreground="{StaticResource MutedTextBrush}" HorizontalAlignment="Center" />
-                        <TextBlock Text="No log entries yet." Foreground="{StaticResource MutedTextBrush}" Margin="0,10,0,0" />
+                        <TextBlock Text="&#xE9D9;" Style="{StaticResource IconText}" FontSize="26" Foreground="{DynamicResource MutedTextBrush}" HorizontalAlignment="Center" />
+                        <TextBlock Text="No log entries yet." Foreground="{DynamicResource MutedTextBrush}" Margin="0,10,0,0" />
                     </StackPanel>
                     <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center"
                                 Visibility="{Binding IsFilteredEmpty, Converter={StaticResource BoolToVisibility}}">
-                        <TextBlock Text="No log lines match the search / filter." Foreground="{StaticResource MutedTextBrush}" Margin="0,0,0,10" />
+                        <TextBlock Text="No log lines match the search / filter." Foreground="{DynamicResource MutedTextBrush}" Margin="0,0,0,10" />
                         <Button Content="Clear search" Command="{Binding ClearSearchCommand}" HorizontalAlignment="Center" />
                     </StackPanel>
                 </Grid>

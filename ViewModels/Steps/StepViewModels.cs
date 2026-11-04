@@ -36,15 +36,22 @@ public static class StepTypeCatalog
         new StepTypeInfo(StepKind.EndIf, StepDescriber.DisplayName(StepKind.EndIf), "\uE70E", "Closes an If block."),
         new StepTypeInfo(StepKind.Repeat, StepDescriber.DisplayName(StepKind.Repeat), "\uE8EE", "Runs the steps inside several times, or while / until a condition is true. Loops always have a safety limit. Adding it from the toolbox adds the Repeat and its End Repeat."),
         new StepTypeInfo(StepKind.EndRepeat, StepDescriber.DisplayName(StepKind.EndRepeat), "\uE70E", "Closes a Repeat block: playback goes back to the Repeat for the next turn."),
+        new StepTypeInfo(StepKind.SetVariable, StepDescriber.DisplayName(StepKind.SetVariable), "\uE945", "Stores or updates a variable in memory: a constant, a number or text read from the screen (OCR), the clipboard, the last found X/Y, or the loop counter."),
+        new StepTypeInfo(StepKind.Checkpoint, StepDescriber.DisplayName(StepKind.Checkpoint), "\uE7C1", "Marks a named top-level restart point that failure policies and Watchers can jump back to."),
+        new StepTypeInfo(StepKind.CallMacro, StepDescriber.DisplayName(StepKind.CallMacro), "\uE71B", "Runs another macro from your library as a reusable sub-routine, with optional Input and Output variable bindings."),
     };
 
     private static readonly HashSet<StepKind> LogicKinds = new() { StepKind.If, StepKind.Else, StepKind.EndIf, StepKind.Repeat, StepKind.EndRepeat };
+    private static readonly HashSet<StepKind> BrainKinds = new() { StepKind.SetVariable, StepKind.Checkpoint, StepKind.CallMacro };
 
     /// <summary>Action step types offered in the editor's "Add step" toolbox (recorded input only comes from recording).</summary>
-    public static IReadOnlyList<StepTypeInfo> Addable { get; } = All.Where(t => t.Kind != StepKind.InputSequence && !LogicKinds.Contains(t.Kind)).ToList();
+    public static IReadOnlyList<StepTypeInfo> Addable { get; } = All.Where(t => t.Kind != StepKind.InputSequence && !LogicKinds.Contains(t.Kind) && !BrainKinds.Contains(t.Kind)).ToList();
 
     /// <summary>Block steps offered in the toolbox's "Logic" section.</summary>
     public static IReadOnlyList<StepTypeInfo> Logic { get; } = All.Where(t => LogicKinds.Contains(t.Kind)).ToList();
+
+    /// <summary>v1.2 Brain steps offered in the toolbox's "Memory &amp; Sub-Macros" section.</summary>
+    public static IReadOnlyList<StepTypeInfo> Brain { get; } = All.Where(t => BrainKinds.Contains(t.Kind)).ToList();
 
     public static StepTypeInfo Get(StepKind kind) => All.First(t => t.Kind == kind);
 }
@@ -423,6 +430,33 @@ public abstract class StepViewModel : ObservableObject
 
     public bool HasComment => !string.IsNullOrEmpty(Model.Comment);
 
+    /// <summary>Compact inline metadata badge for Step Card v2 (Intent, Smart-Aim, Multi-Scale, Retry/Recovery, Brain).</summary>
+    public string? SmartChipText => this switch
+    {
+        MouseClickStepViewModel when Model is MouseClickStep { UseSmartIntent: true, HasTargetIntent: true } => "🧭 Intent",
+        MouseClickStepViewModel when Model is MouseClickStep { SmartAimAtTarget: true, HasTargetThumbnail: true } => "✨ Smart-Aim",
+        FindImageStepViewModel img => FormatPolicyOrChip(img.FailurePolicy, img.AllowMultiScale ? "🔍 Multi-Scale" : null),
+        ScreenSearchStepViewModel search => FormatPolicyOrChip(search.FailurePolicy, null),
+        WaitForChangeStepViewModel wait => FormatPolicyOrChip(wait.FailurePolicy, null),
+        FocusWindowStepViewModel win => FormatPolicyOrChip(win.FailurePolicy, null),
+        DelayStepViewModel { IsAdaptive: true } => "⚡ Adaptive",
+        SetVariableStepViewModel { UsesScreenRegion: true } => "👁 OCR Read",
+        SetVariableStepViewModel v when !string.IsNullOrWhiteSpace(v.VariableName) => $"{{{v.VariableName}}}",
+        CheckpointStepViewModel cp when !string.IsNullOrWhiteSpace(cp.CheckpointName) => $"📍 {cp.CheckpointName}",
+        CallMacroStepViewModel => "↗ Sub-Macro",
+        _ => null,
+    };
+
+    public bool HasSmartChip => !string.IsNullOrEmpty(SmartChipText);
+
+    private static string? FormatPolicyOrChip(FailurePolicyViewModel policy, string? fallback) => policy.Action switch
+    {
+        StepFailureAction.Retry => $"🔁 Retry ×{policy.RetryCount}",
+        StepFailureAction.RunRecoveryMacro => "🛡 Recovery",
+        StepFailureAction.RestartFromCheckpoint => string.IsNullOrWhiteSpace(policy.CheckpointName) ? "📍 Restart" : $"📍 →{policy.CheckpointName}",
+        _ => fallback,
+    };
+
     public string? IssueText
     {
         get => _issueText;
@@ -455,6 +489,8 @@ public abstract class StepViewModel : ObservableObject
         OnPropertyChanged(propertyName);
         OnPropertyChanged(nameof(Summary));
         OnPropertyChanged(nameof(PlainSummary));
+        OnPropertyChanged(nameof(SmartChipText));
+        OnPropertyChanged(nameof(HasSmartChip));
         Modified?.Invoke(this, EventArgs.Empty);
     }
 
@@ -485,6 +521,9 @@ public abstract class StepViewModel : ObservableObject
         WaitForChangeStep w => new WaitForChangeStepViewModel(w),
         FocusWindowStep w => new FocusWindowStepViewModel(w),
         ScreenshotStep s => new ScreenshotStepViewModel(s),
+        SetVariableStep v => new SetVariableStepViewModel(v),
+        CheckpointStep cp => new CheckpointStepViewModel(cp),
+        CallMacroStep call => new CallMacroStepViewModel(call),
         _ => throw new NotSupportedException($"No editor for step type {step.GetType().Name}."),
     };
 }
@@ -505,9 +544,81 @@ public sealed class DelayStepViewModel : StepViewModel
         SetDurationCommand = AddDurationCommand;
     }
 
+    public static IReadOnlyList<Choice<DelayMode>> Modes { get; } = new[]
+    {
+        new Choice<DelayMode>(DelayMode.Fixed, "⏱ Fixed time (exact milliseconds)"),
+        new Choice<DelayMode>(DelayMode.UntilScreenSettles, "✨ Until screen settles (Smart — fast when ready, safe when slow)"),
+        new Choice<DelayMode>(DelayMode.UntilScreenChanges, "⚡ Until screen changes (wake as soon as UI updates)"),
+    };
+
     public RelayCommand SetDurationCommand { get; }
     public RelayCommand AddDurationCommand { get; }
     public RelayCommand ResetDurationCommand { get; }
+
+    public DelayMode Mode
+    {
+        get => _step.Mode;
+        set
+        {
+            if (_step.Mode == value) return;
+            _step.Mode = value;
+            if (value != DelayMode.Fixed && _step.MaxDurationMs <= 0)
+            {
+                var baseMs = Math.Max(200, _step.DurationMs);
+                if (_step.MinDurationMs <= 0)
+                    _step.MinDurationMs = value == DelayMode.UntilScreenChanges ? 20 : Math.Clamp(baseMs / 4, 60, 250);
+                _step.MaxDurationMs = Math.Clamp(baseMs * 3, Math.Max(600, _step.MinDurationMs), 15_000);
+            }
+
+            NotifyChanged();
+            OnPropertyChanged(nameof(IsFixed));
+            OnPropertyChanged(nameof(IsAdaptive));
+            OnPropertyChanged(nameof(MinDurationMs));
+            OnPropertyChanged(nameof(MaxDurationMs));
+            OnPropertyChanged(nameof(DurationFieldLabel));
+            OnPropertyChanged(nameof(AdaptiveModeHelp));
+        }
+    }
+
+    public bool IsFixed => _step.Mode == DelayMode.Fixed;
+
+    public bool IsAdaptive => _step.Mode != DelayMode.Fixed;
+
+    public int MinDurationMs
+    {
+        get => _step.MinDurationMs;
+        set
+        {
+            if (_step.MinDurationMs == value) return;
+            _step.MinDurationMs = value;
+            NotifyChanged();
+        }
+    }
+
+    public int MaxDurationMs
+    {
+        get => _step.MaxDurationMs;
+        set
+        {
+            if (_step.MaxDurationMs == value) return;
+            _step.MaxDurationMs = value;
+            NotifyChanged();
+        }
+    }
+
+    public string DurationFieldLabel => IsAdaptive
+        ? "Recorded / fallback wait time (ms)"
+        : "Wait time (milliseconds)";
+
+    public string AdaptiveModeHelp => _step.Mode switch
+    {
+        DelayMode.UntilScreenSettles =>
+            "Watches the area around the last action after Minimum wait: continues immediately once the screen stays calm (~120 ms), or stops waiting at Max timeout so slow pages never break playback.",
+        DelayMode.UntilScreenChanges =>
+            "Watches the area around the last action after Minimum wait and continues the instant any visible UI change appears (up to Max timeout).",
+        _ =>
+            "Waits for the exact number of milliseconds below.",
+    };
 
     public int DurationMs
     {
@@ -702,13 +813,15 @@ public sealed class MouseClickStepViewModel : StepViewModel
         SetDurationCommand = AddDurationCommand;
         TestSmartAimCommand = new AsyncRelayCommand(TestSmartAimAsync, ex => SmartAimTestResult = $"✗ Test failed: {ex.Message}",
             () => _visionTools is not null && !_testingSmartAim && HasTargetThumbnail);
+        LocateTargetCommand = new AsyncRelayCommand(LocateTargetAsync, ex => SmartAimTestResult = $"✗ Locate Target failed: {ex.Message}",
+            () => _visionTools is not null && !_testingSmartAim && HasSmartCard);
     }
 
     public RelayCommand SetDurationCommand { get; }
     public RelayCommand AddDurationCommand { get; }
     public RelayCommand ResetDurationCommand { get; }
 
-    // ---------------- 🎯 Test Smart-Aim ----------------
+    // ---------------- 🎯 Test Smart-Aim & 🧭 Locate Target ----------------
 
     private IVisionTools? _visionTools;
     private bool _testingSmartAim;
@@ -728,6 +841,9 @@ public sealed class MouseClickStepViewModel : StepViewModel
     /// <summary>"🎯 Test Smart-Aim": looks for the recorded picture right now (nothing is clicked) and shows the result.</summary>
     public AsyncRelayCommand TestSmartAimCommand { get; }
 
+    /// <summary>"🧭 Locate Target": tests all 5 Smart Intent strategies right now and shows ✓/✗ for each tier.</summary>
+    public AsyncRelayCommand LocateTargetCommand { get; }
+
     /// <summary>"✓ Found at (512, 340) — 98% match in 3 ms…" / "✗ Not found within 120 px…", or null before the first test.</summary>
     public string? SmartAimTestResult
     {
@@ -744,6 +860,23 @@ public sealed class MouseClickStepViewModel : StepViewModel
         {
             SmartAimTestResult = "Looking for the picture on screen…";
             SmartAimTestResult = await tools.TestSmartAimAsync(_step);
+        }
+        finally
+        {
+            _testingSmartAim = false;
+            System.Windows.Input.CommandManager.InvalidateRequerySuggested();
+        }
+    }
+
+    private async Task LocateTargetAsync()
+    {
+        if (_visionTools is not { } tools || _testingSmartAim) return;
+        _testingSmartAim = true;
+        System.Windows.Input.CommandManager.InvalidateRequerySuggested();
+        try
+        {
+            SmartAimTestResult = "Testing all 5 target strategies on screen…";
+            SmartAimTestResult = await tools.LocateTargetAsync(_step);
         }
         finally
         {
@@ -808,6 +941,7 @@ public sealed class MouseClickStepViewModel : StepViewModel
         OnPropertyChanged(nameof(UsesFixedPosition));
         OnPropertyChanged(nameof(UsesLastFound));
         OnPropertyChanged(nameof(SmartAimHint));
+        OnPropertyChanged(nameof(SmartIntentHint));
     }
 
     // ---------------- AAA: "On the last found spot" + offset ----------------
@@ -840,10 +974,38 @@ public sealed class MouseClickStepViewModel : StepViewModel
         NotifyChanged(nameof(OffsetY));
     }
 
-    // ---------------- AAA: Smart Click Snapshot + Smart-Aim ----------------
+    // ---------------- AAA + v1.1: Smart Click Snapshot, Smart-Aim & Smart Intent ----------------
 
     /// <summary>True when this click was recorded with a picture of what it hit.</summary>
     public bool HasTargetThumbnail => _step.HasTargetThumbnail;
+
+    /// <summary>True when this click captured UI element, OCR text or window anchor signals.</summary>
+    public bool HasTargetIntent => _step.HasTargetIntent;
+
+    /// <summary>True when the Smart Click &amp; Intent card has either a visual thumbnail or an intent fingerprint.</summary>
+    public bool HasSmartCard => HasTargetThumbnail || HasTargetIntent;
+
+    /// <summary>Human-readable summary of captured intent signals (UI button, OCR text, window anchor).</summary>
+    public string TargetSignalsSummary => _step.Target?.DescribeSignals() ?? string.Empty;
+
+    /// <summary>"[x] 🧭 Smart Intent: relocate target automatically (UI → OCR → Image → Window → X/Y)".</summary>
+    public bool UseSmartIntent
+    {
+        get => _step.UseSmartIntent;
+        set
+        {
+            if (_step.UseSmartIntent == value) return;
+            _step.UseSmartIntent = value;
+            NotifyChanged();
+            OnPropertyChanged(nameof(SmartIntentHint));
+        }
+    }
+
+    public string SmartIntentHint => !_step.UseSmartIntent
+        ? "Off: SmartMacro skips UI / OCR / window relocation (Smart-Aim or fixed X / Y below is used instead)."
+        : _step.UseCurrentPosition || _step.UseLastFoundText
+            ? "Smart Intent only applies when \"Where to click\" is \"At a chosen position\"."
+            : "On: playback walks UI Automation → OCR Text → Image Snapshot (75%–150%) → Window-Relative → Coordinates, so moving, resizing or rescaling the window still clicks the right target.";
 
     /// <summary>The recorded 56×56 picture of what was clicked (null when none / unreadable).</summary>
     public System.Windows.Media.ImageSource? TargetThumbnail
@@ -1449,6 +1611,10 @@ public abstract class ScreenSearchStepViewModel : StepViewModel
     protected ScreenSearchStepViewModel(ScreenSearchStep step) : base(step)
     {
         _search = step;
+        FailurePolicy = new FailurePolicyViewModel(
+            () => _search.WhenNotFound, v => _search.WhenNotFound = v,
+            () => _search.FailurePolicy, v => _search.FailurePolicy = v,
+            () => NotifyChanged(nameof(FailurePolicy)));
         PickRegionCommand = new AsyncRelayCommand(PickRegionAsync, ex => TestResult = ex.Message, () => HasTools && !_isBusy);
         ShowMatchCommand = new RelayCommand(() =>
         {
@@ -1472,6 +1638,7 @@ public abstract class ScreenSearchStepViewModel : StepViewModel
     public RelayCommand SetDurationCommand { get; }
     public RelayCommand AddDurationCommand { get; }
     public RelayCommand ResetDurationCommand { get; }
+    public FailurePolicyViewModel FailurePolicy { get; }
 
     /// <summary>"🎯 Show search area on screen": outlines where this step looks right now, for a moment.</summary>
     public RelayCommand ShowSearchAreaCommand { get; }
@@ -2100,6 +2267,13 @@ public sealed class FindImageStepViewModel : ScreenSearchStepViewModel
     {
         get => _step.AdaptToLighting;
         set { if (_step.AdaptToLighting == value) return; _step.AdaptToLighting = value; NotifyChanged(); }
+    }
+
+    /// <summary>"Match across display scales &amp; sizes (75%–150%)": check resized copies when 1:1 doesn't match.</summary>
+    public bool AllowMultiScale
+    {
+        get => _step.AllowMultiScale;
+        set { if (_step.AllowMultiScale == value) return; _step.AllowMultiScale = value; NotifyChanged(); }
     }
 
     /// <summary>"Ignore background / match bright text and edges" (see-through game UI).</summary>

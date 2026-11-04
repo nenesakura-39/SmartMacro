@@ -225,6 +225,27 @@ public static class ManualCatalog
                     S("Find text (OCR)", "Uses the text recognition built into Windows (an OCR language pack must be installed). \"Normalize similar characters\" treats 0/O and 1/I/l alike. Stylized or very small game fonts may not be read; Find image is often more reliable there."),
                 },
                 "color colour pixel tolerance text ocr read words language"),
+            new("smart-intent", ManualCategory.VisionAndSmartAim, "🧭", "Smart Intent: 5-tier resilient clicks & Locate Target",
+                "Recorded clicks understand what they clicked and relocate automatically when windows move or resize.",
+                new[]
+                {
+                    S("How Intent Recording works", "With 🧭 Intent Recording on (Settings → Recording Defaults), every recorded click captures a multi-anchor Target Fingerprint off-thread (never slowing down mouse hooks):",
+                        "1. UI Automation element (control name, AutomationId, ControlType, and exact normalized spot inside the control).",
+                        "2. Nearby text (OCR label + pixel offset).",
+                        "3. 56×56 Image Snapshot (1:1 fast path + 75%–150% multi-scale pyramid).",
+                        "4. Window-Relative anchor (window title + process name, so document title changes still match).",
+                        "5. Recorded Coordinates fallback."),
+                    S("Diagnosing & Self-Healing", "Select any Mouse click step and press 🧭 Locate Target in Properties to test all 5 tiers live and flash a green reticle on the winner. When playback relocates a drifted click by 25+ px, the Editor offers an opt-in 🩹 Smart Self-Heal Suggestion banner (Ctrl+Z undoes it; macros are never rewritten silently)."),
+                },
+                "smart intent fingerprint relocate ui automation locate target self heal moved window"),
+            new("adaptive-timing", ManualCategory.VisionAndSmartAim, "⏱", "Adaptive Timing & Multi-Scale Image Matching",
+                "Wait only as long as the UI actually needs, and match templates across 75%–150% DPI.",
+                new[]
+                {
+                    S("Smart Timing on Delay steps", "Delay steps offer three wait modes: Fixed duration, ✨ Until screen settles (continues early as soon as loading animations stop, up to Max timeout), and ⚡ Until screen changes (continues the instant new pixels appear). With ⏱ Smart Timing on in Settings, pauses ≥ 150 ms after recorded clicks automatically use Until screen settles."),
+                    S("Multi-scale Find Image (75%–150%)", "Turn on \"Match across display scales & sizes (75%–150%)\" on a Find Image step when sharing macros across 100% / 125% / 150% DPI monitors or resized browser / app windows. SmartMacro checks 1:1 first for speed, then searches a multi-scale pyramid."),
+                },
+                "adaptive timing wait until screen settles changes multi scale dpi zoom resize"),
 
             // ---------------- 🔀 Logic & Loops ----------------
             new("if-else", ManualCategory.LogicAndLoops, "🔀", "If / Else / End If",
@@ -267,6 +288,34 @@ public static class ManualCatalog
                         "Zones with momentum (heavy physics) are hard for any bang-bang controller; expect a lower win rate there."),
                 },
                 "feedback loop minigame bar fishing marker zone hold release tap"),
+            new("variables-memory", ManualCategory.LogicAndLoops, "🧠", "Variables, {placeholders} & Reading Screen Numbers",
+                "Give your macro plain-data memory: counters, HUD numbers, clipboard text, and goal conditions.",
+                new[]
+                {
+                    S("Declaring & inspecting variables", "Click 🧠 Variables in the Editor header to declare Number, Text, or Boolean variables with default values. While a macro plays (and right after it finishes), live runtime values appear next to each variable."),
+                    S("Set Variable & {name} placeholders", "Use the 🧠 Set variable step to Set, Add (+), Subtract (−), or Append text from a Constant, 🔢 Read number on screen (strips commas, currency symbols, and 0/O look-alikes automatically), Read text on screen, Clipboard, Last found X/Y, Loop counter, or Elapsed seconds.",
+                        "Write {varName} inside Type text, Find text, Focus window, or Screenshot prefix fields to insert the current value.",
+                        "Select 🧠 Variable comparison in any If, Repeat (While / Until), Feedback loop stop condition, or Watcher to branch on ==, !=, >, >=, <, <=, Contains, or StartsWith."),
+                },
+                "variables memory counter set variable placeholder screen number clipboard compare math"),
+            new("checkpoints-watchers", ManualCategory.LogicAndLoops, "🛡", "Checkpoints, Failure Policies & Background Watchers",
+                "Recover automatically from lag spikes, missed buttons, surprise pop-ups, and disconnects.",
+                new[]
+                {
+                    S("Per-step recovery & Checkpoints", "Every Find text / image / color, Wait for screen change, and Focus window step lets you choose what happens on timeout: Continue, Skip next step, Stop, 🔁 Retry (N extra attempts), 🛡 Run a recovery sub-macro, or 📍 Jump back to a Checkpoint.",
+                        "Place 📍 Checkpoint steps at the top level of your workflow (outside If / Repeat blocks) so jumping back always leaves loop state clean. Restarts are capped at 25 per run to prevent infinite loops."),
+                    S("Background Watchers", "Click 🛡 Watchers in the Editor header to add interrupt guards checked periodically between steps (with configurable check interval and cooldown). A watcher can click a surprise popup, run a recovery sub-macro, jump to a checkpoint, or stop the macro cleanly."),
+                },
+                "checkpoint watcher interrupt popup disconnect retry recovery failure policy resilience"),
+            new("submacros-bundles", ManualCategory.LogicAndLoops, "📦", "Sub-Macros (Call Macro) & Self-Contained .smacro Bundles",
+                "Build modular workflows from reusable library helpers and share them as a single file.",
+                new[]
+                {
+                    S("Calling reusable sub-macros", "Add a 📦 Call macro step to run another saved macro from your Library (e.g. \"Login\", \"Sell Inventory\", \"Return to Lobby\"). Each call runs in its own isolated variable memory: pass optional Input parameters in and copy optional Output values back when it finishes.",
+                        "SmartMacro validates the call graph in the Editor and at runtime to block A → B → A recursion cycles (max nesting depth: 8)."),
+                    S("Automatic .smacro bundling", "Exporting a macro from the Library automatically bundles every transitive sub-macro (from Call Macro steps, Recovery policies, and Watchers) into one self-contained .smacro file. Importing it unpacks all helpers with collision-safe names and remapped IDs."),
+                },
+                "submacro call macro subroutine composition input output parameter bundle export import"),
 
             // ---------------- ⌨️ Keyboard Shortcuts ----------------
             new("shortcuts", ManualCategory.KeyboardShortcuts, "⌨️", "Studio shortcut cheat-sheet",
@@ -357,6 +406,24 @@ public static class ManualCatalog
                 "Select the Feedback loop and use the wizard: pick the bar area, the target colour and your bar's colour.",
                 "Measure loop speed, then Preview 10 s (no input) to check the decisions.",
                 "Raise the 1 s max runtime per round, or the 10 rounds, to fit your minigame.",
+            },
+            [MacroBlueprint.ScreenCounterGoalLoop] = new[]
+            {
+                "Open 🧠 Variables in the header to see the pre-created {gold} and {runs} variables (or change the 10,000 target on the Repeat step).",
+                "Select the second Set variable step and click Pick area on screen around your counter or currency readout.",
+                "Replace the sample Mouse click inside the loop with your recorded or vision action steps.",
+            },
+            [MacroBlueprint.CheckpointRecoveryFlow] = new[]
+            {
+                "Select the Find image step and capture your destination screen's button or icon.",
+                "Customize the Find text step (\"Play\") or its 🔁 Retry count (2 extra attempts, 500 ms apart).",
+                "If the destination screen doesn't appear in time, playback jumps cleanly back to 📍 Checkpoint \"start\" (up to 25 restarts).",
+            },
+            [MacroBlueprint.ModularSubMacroPipeline] = new[]
+            {
+                "Create or pick a helper macro in your Library on the 📦 Call macro step (e.g. a macro with variables 'count' and 'profit').",
+                "Adjust the Input ({batchSize} → count) and Output (profit → earned) bindings to match your helper macro's variable names.",
+                "Exporting this macro from Library automatically bundles your helper sub-macro into the same .smacro file.",
             },
         };
 

@@ -77,7 +77,7 @@ public static class ScreenshotFiles
     /// The screen rectangle to capture (always inside <paramref name="virtualScreen"/>). Throws
     /// <see cref="SearchAreaUnavailableException"/> when the window isn't open / is minimized or the area is off screen.
     /// </summary>
-    public static ScreenRect ResolveArea(ScreenshotStep step, ScreenRect virtualScreen, IScreenLayout? layout)
+    public static ScreenRect ResolveArea(ScreenshotStep step, ScreenRect virtualScreen, IScreenLayout? layout, string? windowTitleOverride = null)
     {
         ArgumentNullException.ThrowIfNull(step);
         switch (step.Area)
@@ -90,7 +90,7 @@ public static class ScreenshotFiles
 
             case ScreenshotArea.Window:
             {
-                var title = step.WindowTitle?.Trim();
+                var title = (windowTitleOverride ?? step.WindowTitle)?.Trim();
                 if (string.IsNullOrEmpty(title))
                     throw new SearchAreaUnavailableException("No app window is chosen for the screenshot.");
                 if (layout is null)

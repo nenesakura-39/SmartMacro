@@ -5,6 +5,7 @@ using SmartMacro.Core.Ocr;
 using SmartMacro.Core.Playback;
 using SmartMacro.Core.Recording;
 using SmartMacro.Core.Storage;
+using SmartMacro.Core.Validation;
 using SmartMacro.Core.Workflow;
 using SmartMacro.Mvvm;
 using SmartMacro.Services;
@@ -93,6 +94,8 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         Settings = new SettingsViewModel(settingsStore, log, dialogs, paths, ApplySettings, SetStatus,
             automation.Ocr.StatusText, automation.Ocr.IsAvailable, () => BuildDiagnostics(paths, automation.Ocr, log));
         ShowLogsCommand = new RelayCommand(() => CurrentPage = AppPage.Logs);
+        OpenCommandPaletteCommand = new RelayCommand(OpenCommandPalette);
+        OpenMissionControlCommand = new RelayCommand(() => MissionControlRequested?.Invoke(this, EventArgs.Empty));
 
         Automation = new AutomationViewModel(
             automation.Engine, automation.Recorder, automation.GameRecorder, automation.SmartRecorder, automation.Emergency, automation.Host, automation.Ocr, log, dialogs, dispatcher,
@@ -105,13 +108,29 @@ public sealed class MainViewModel : ObservableObject, IDisposable
                 Settings = () => _settings,
                 SetRecordingMode = mode => RecordingMode = mode,
                 SetRecordingFidelity = fidelity => _ = Settings.QuickSetAsync(s => s.RecordingFidelity = fidelity),
+                ValidateCallGraph = root => MacroValidator.ValidateCallGraph(root, Library.Items.Select(i => i.Macro).ToList()),
                 SetStatus = SetStatus,
             });
 
+        // v1.2 Brain: sub-macro lookup, live variable readouts, and opt-in Self-Heal suggestions.
+        Editor.GetLibraryMacros = () => Library.Items.Select(i => i.Macro).ToList();
+        Editor.OpenSubMacroHandler = OpenSubMacroByLinkAsync;
+        automation.Engine.MacroResolver = (id, name) =>
+        {
+            var resolved = MacroFileFormat.ResolveMacro(Library.Items.Select(i => i.Macro).ToList(), id, name);
+            return resolved is null ? null : MacroJson.Clone(resolved);
+        };
+        automation.Engine.VariablesChanged += (_, snap) => dispatcher.InvokeAsync(() => Editor.UpdateLiveVariables(snap));
+        Automation.PlaybackFinished += (_, info) => Editor.ShowPlaybackResult(info.MacroId, info.Result);
+
         Editor.PropertyChanged += (_, e) =>
         {
-            if (e.PropertyName is nameof(EditorViewModel.IsDirty) or nameof(EditorViewModel.Name) or "")
+            if (e.PropertyName is nameof(EditorViewModel.IsDirty) or nameof(EditorViewModel.Name) or nameof(EditorViewModel.HasMacro) or "")
+            {
                 OnPropertyChanged(nameof(WindowTitle));
+                OnPropertyChanged(nameof(ActiveMacroBreadcrumb));
+                OnPropertyChanged(nameof(HasActiveMacroBreadcrumb));
+            }
             if (e.PropertyName is nameof(EditorViewModel.HasMacro) or nameof(EditorViewModel.Name)
                 or nameof(EditorViewModel.RepeatCount) or nameof(EditorViewModel.Speed) or "")
                 Automation.RefreshTarget();
@@ -123,8 +142,11 @@ public sealed class MainViewModel : ObservableObject, IDisposable
 
         Library.PropertyChanged += (_, e) =>
         {
-            if (e.PropertyName is nameof(LibraryViewModel.SelectedItem) or "")
+            if (e.PropertyName is nameof(LibraryViewModel.SelectedItem) or nameof(LibraryViewModel.CountText) or "")
+            {
                 Automation.RefreshTarget();
+                if (Editor.HasMacro) Editor.RefreshSubMacroLinks();
+            }
         };
 
         // Live step highlight: the editor marks (and scrolls to) the step that is running.
@@ -226,6 +248,61 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     public ManualViewModel Manual { get; }
     public AutomationViewModel Automation { get; }
     public RelayCommand ShowLogsCommand { get; }
+    public RelayCommand OpenCommandPaletteCommand { get; }
+    public RelayCommand OpenMissionControlCommand { get; }
+
+    /// <summary>Raised when the user clicks Mission Control or presses Ctrl+M.</summary>
+    public event EventHandler? MissionControlRequested;
+
+    /// <summary>Whether the left Studio navigation rail is pinned open (saved in Settings).</summary>
+    public bool IsSidebarPinned
+    {
+        get => _settings.SidebarPinned;
+        set
+        {
+            if (_settings.SidebarPinned == value) return;
+            _settings.SidebarPinned = value;
+            OnPropertyChanged();
+            _ = Settings.QuickSetAsync(s => s.SidebarPinned = value);
+        }
+    }
+
+    /// <summary>Breadcrumb label for the active Studio page.</summary>
+    public string PageBreadcrumbText => _currentPage switch
+    {
+        AppPage.Editor => "Workflow Editor",
+        AppPage.Manual => "Studio Manual",
+        AppPage.Logs => "Activity Logs",
+        AppPage.Settings => "Settings",
+        _ => "Macro Library",
+    };
+
+    /// <summary>Open macro name shown in the Studio Title Bar breadcrumb when a macro is loaded.</summary>
+    public string ActiveMacroBreadcrumb =>
+        Editor.HasMacro ? (string.IsNullOrWhiteSpace(Editor.Name) ? "Untitled" : Editor.Name.Trim()) : string.Empty;
+
+    public bool HasActiveMacroBreadcrumb => Editor.HasMacro;
+
+    private void OpenCommandPalette()
+    {
+        if (!Editor.HasMacro && Library.SelectedItem is { } selected && Library.GetSaved(selected.Id) is { } saved)
+            Editor.Load(saved);
+        if (CurrentPage != AppPage.Editor)
+            CurrentPage = AppPage.Editor;
+        Editor.IsCommandPaletteOpen = !Editor.IsCommandPaletteOpen;
+    }
+
+    /// <summary>Opens a macro by ID or name in the Workflow Editor (used by Call Macro "Open ↗").</summary>
+    public Task OpenSubMacroByLinkAsync(Guid targetId, string? targetName)
+    {
+        var resolved = MacroFileFormat.ResolveMacro(Library.Items.Select(i => i.Macro).ToList(), targetId, targetName);
+        if (resolved is null)
+        {
+            SetStatus($"Sub-macro \"{(string.IsNullOrWhiteSpace(targetName) ? targetId.ToString() : targetName)}\" wasn't found in your Library.", StatusKind.Warning);
+            return Task.CompletedTask;
+        }
+        return OpenInEditorAsync(resolved.Id);
+    }
 
     /// <summary>The settings currently in effect (last saved).</summary>
     public AppSettings CurrentSettings => _settings;
@@ -237,6 +314,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         {
             if (!SetProperty(ref _currentPage, value)) return;
             OnPropertyChanged(nameof(CurrentPageViewModel));
+            OnPropertyChanged(nameof(PageBreadcrumbText));
             if (value == AppPage.Manual) Manual.Refresh(); // shortcut keys may have changed in Settings
         }
     }
@@ -417,6 +495,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(ShowOverlaysInObs));
         OnPropertyChanged(nameof(RecordingMode));
         OnPropertyChanged(nameof(RecordingFidelity));
+        OnPropertyChanged(nameof(IsSidebarPinned));
         Automation?.RefreshShortcuts();
         SettingsApplied?.Invoke(this, settings);
     }

@@ -2,6 +2,33 @@ using SmartMacro.Core.Recording;
 
 namespace SmartMacro.Core.Models;
 
+/// <summary>Dark studio surface palettes available in SmartMacro Studio X.</summary>
+public enum StudioTheme
+{
+    /// <summary>Deep obsidian (#0B0F17) with slate cards and cyan-violet neon accents.</summary>
+    ObsidianNeon = 0,
+
+    /// <summary>Rich midnight sapphire (#070D1F) with cobalt-indigo glass surfaces.</summary>
+    MidnightBlue = 1,
+}
+
+/// <summary>Primary interactive accent colour choice in SmartMacro Studio X.</summary>
+public enum StudioAccent
+{
+    NeonBrand = 0,
+    ElectricBlue = 1,
+    CyberViolet = 2,
+    EmeraldPulse = 3,
+    RoseQuartz = 4,
+}
+
+/// <summary>Global UI spacing / row density.</summary>
+public enum StudioDensity
+{
+    Comfortable = 0,
+    Compact = 1,
+}
+
 /// <summary>User preferences, stored in settings.json.</summary>
 public sealed class AppSettings
 {
@@ -91,6 +118,20 @@ public sealed class AppSettings
     public bool CaptureClickSnapshots { get; set; } = true;
 
     /// <summary>
+    /// Intent Recording (v1.1): while recording clicks (Smart and Desktop modes), inspect the UI control, nearby text and
+    /// window anchor off the hook thread so Smart Intent can relocate buttons even when windows move, resize or rescale.
+    /// On by default (also for settings files made before it existed).
+    /// </summary>
+    public bool CaptureClickIntent { get; set; } = true;
+
+    /// <summary>
+    /// Smart Timing (v1.1): when converting Smart / Desktop recordings, pauses of 150 ms+ right after a click become
+    /// adaptive "Until screen settles" waits (fast when the UI is ready early, safe up to 3× when a page loads slowly).
+    /// On by default (also for settings files made before it existed).
+    /// </summary>
+    public bool SmartTimingOnRecord { get; set; } = true;
+
+    /// <summary>
     /// Playback: a cursor jump right after a Delay glides there smoothly (~120 updates per second) during the end of
     /// that Delay instead of teleporting, so menus, sliders and games see real movement. Total timing is unchanged.
     /// On by default (also for settings files made before it existed).
@@ -106,6 +147,21 @@ public sealed class AppSettings
     /// <summary>Shortcut to pause / resume playback (F8 by default; only active while a macro plays).</summary>
     public HotkeyBinding PauseHotkey { get; set; } = HotkeyBinding.DefaultPause;
 
+    /// <summary>Studio X surface palette (Obsidian Neon default, or Midnight Blue).</summary>
+    public StudioTheme Theme { get; set; } = StudioTheme.ObsidianNeon;
+
+    /// <summary>Studio X primary accent colour.</summary>
+    public StudioAccent Accent { get; set; } = StudioAccent.NeonBrand;
+
+    /// <summary>Studio X global row/spacing density.</summary>
+    public StudioDensity Density { get; set; } = StudioDensity.Comfortable;
+
+    /// <summary>Turn off UI transitions and decorative glow animations (also respects Windows Reduce Motion).</summary>
+    public bool ReduceMotion { get; set; }
+
+    /// <summary>Keep the left navigation rail pinned expanded (200 px) instead of collapsed to the 56 px icon rail.</summary>
+    public bool SidebarPinned { get; set; }
+
     public AppSettings Clone() => (AppSettings)MemberwiseClone();
 
     /// <summary>Clamps values that came from a hand-edited or old file into safe ranges.</summary>
@@ -115,6 +171,9 @@ public sealed class AppSettings
         if (DefaultDelayMs > MaxDefaultDelayMs) DefaultDelayMs = MaxDefaultDelayMs;
         if (!Enum.IsDefined(RecordingMode)) RecordingMode = RecordingMode.Smart;
         if (!Enum.IsDefined(RecordingFidelity)) RecordingFidelity = RecordingFidelity.Exact1To1;
+        if (!Enum.IsDefined(Theme)) Theme = StudioTheme.ObsidianNeon;
+        if (!Enum.IsDefined(Accent)) Accent = StudioAccent.NeonBrand;
+        if (!Enum.IsDefined(Density)) Density = StudioDensity.Comfortable;
 
         // Settings saved before the fidelity selector: "don't record mouse movement" becomes Clicks & Keys Only once.
         if (SchemaVersion < 4 && !RecordMouseMovement) RecordingFidelity = RecordingFidelity.ClicksAndKeysOnly;

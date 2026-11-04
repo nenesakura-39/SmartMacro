@@ -92,7 +92,7 @@ public static class SearchArea
     /// Without a layout (tests, or the layout isn't available) the main monitor falls back to the whole desktop.
     /// Throws <see cref="SearchAreaUnavailableException"/> when the chosen monitor / window isn't there right now.
     /// </summary>
-    public static ScreenRect Resolve(ScreenSearchStep step, ScreenRect virtualScreen, IScreenLayout? layout)
+    public static ScreenRect Resolve(ScreenSearchStep step, ScreenRect virtualScreen, IScreenLayout? layout, string? windowTitleOverride = null)
     {
         ArgumentNullException.ThrowIfNull(step);
         switch (step.EffectiveScope)
@@ -121,7 +121,7 @@ public static class SearchArea
 
             case SearchScope.Window:
             {
-                var title = step.WindowTitle?.Trim();
+                var title = (windowTitleOverride ?? step.WindowTitle)?.Trim();
                 if (string.IsNullOrEmpty(title))
                     throw new SearchAreaUnavailableException("No app window is chosen. Pick the window to search in.");
                 if (layout is null)

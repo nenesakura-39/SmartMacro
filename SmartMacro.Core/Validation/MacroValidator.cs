@@ -1,5 +1,8 @@
+using System.Globalization;
 using SmartMacro.Core.Input;
 using SmartMacro.Core.Models;
+using SmartMacro.Core.Storage;
+using SmartMacro.Core.Targeting;
 using SmartMacro.Core.Vision;
 using SmartMacro.Core.Workflow;
 
@@ -105,6 +108,12 @@ public static class MacroValidator
     public const int MaxFolderPathLength = 240;
     public const long LargeFeedbackAreaPixels = 250_000; // bigger areas make each frame slow
 
+    // v1.2 "Brain": variables, watchers, failure policies & sub-macros.
+    public const int MaxVariables = 200;
+    public const int MaxWatchers = 32;
+    public const int MaxRetryCount = 20;
+    public const int MaxVariableBindings = 64;
+
     public static bool HasErrors(this IEnumerable<ValidationIssue> issues) =>
         issues.Any(i => i.Severity == IssueSeverity.Error);
 
@@ -152,6 +161,9 @@ public static class MacroValidator
             issues.Add(Warning("This macro has no steps yet."));
 
         var seenIds = new HashSet<Guid>();
+        var topLevelCheckpoints = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var seenCheckpoints = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var blockDepth = 0;
         var hasFindTextBefore = false;
         for (var i = 0; i < macro.Steps.Count; i++)
         {
@@ -162,14 +174,50 @@ public static class MacroValidator
                 continue;
             }
 
+            if (step is EndIfStep or EndRepeatStep && blockDepth > 0)
+                blockDepth--;
+
+            if (step is CheckpointStep cp)
+            {
+                if (blockDepth > 0)
+                {
+                    issues.Add(new ValidationIssue(IssueSeverity.Error,
+                        "Checkpoints must be placed at the top level (outside If and Repeat blocks) so jumping to a checkpoint never leaves a block open.",
+                        i, step.Id, nameof(CheckpointStep.Name)));
+                }
+                else if (CheckpointStep.IsValidName(cp.Name))
+                {
+                    var trimmedCp = cp.Name.Trim();
+                    if (!seenCheckpoints.Add(trimmedCp))
+                    {
+                        issues.Add(new ValidationIssue(IssueSeverity.Error,
+                            $"Duplicate checkpoint name \"{trimmedCp}\". Each checkpoint in a macro needs a unique name.",
+                            i, step.Id, nameof(CheckpointStep.Name)));
+                    }
+                    else
+                    {
+                        topLevelCheckpoints.Add(trimmedCp);
+                    }
+                }
+            }
+
+            if (step is CallMacroStep selfCall && selfCall.TargetMacroId != Guid.Empty && selfCall.TargetMacroId == macro.Id)
+            {
+                issues.Add(new ValidationIssue(IssueSeverity.Error,
+                    "A macro cannot call itself directly.", i, step.Id, nameof(CallMacroStep.TargetMacroId)));
+            }
+
             if (step is MouseClickStep { UseLastFoundText: true } && !hasFindTextBefore)
                 issues.Add(new ValidationIssue(IssueSeverity.Warning,
                     "This click uses the last found spot, but there's no \"Find text\", \"Find image\" or \"Find color\" step (or If / Repeat condition) before it, so when played it's skipped (it never clicks a default spot).", i, step.Id, nameof(MouseClickStep.UseLastFoundText)));
             if (step is MouseMoveStep { TargetMode: ClickTargetMode.LastFoundMatch } && !hasFindTextBefore)
                 issues.Add(new ValidationIssue(IssueSeverity.Warning,
                     "This move goes to the last found spot, but there's no \"Find text\", \"Find image\" or \"Find color\" step (or If / Repeat condition) before it, so when played it's skipped.", i, step.Id, nameof(MouseMoveStep.TargetMode)));
+            if (step is SetVariableStep { Source: VariableSourceKind.LastFoundX or VariableSourceKind.LastFoundY } && !hasFindTextBefore)
+                issues.Add(new ValidationIssue(IssueSeverity.Warning,
+                    "This variable reads the last found X/Y, but no screen search appears before it.", i, step.Id, nameof(SetVariableStep.Source)));
             if (step is ScreenSearchStep { Enabled: true, Goal: WaitGoal.Appear }) hasFindTextBefore = true;
-            if (step.Enabled && WorkflowSteps.ConditionsOf(step).Any()) hasFindTextBefore = true; // conditions remember what they saw
+            if (step.Enabled && WorkflowSteps.ConditionsOf(step).Any(c => c.Search is not null)) hasFindTextBefore = true; // conditions remember what they saw
 
             if (step is ScreenSearchStep search)
             {
@@ -177,7 +225,7 @@ public static class MacroValidator
                 if (!search.Enabled && hasLaterEnabledStep)
                     issues.Add(new ValidationIssue(IssueSeverity.Warning,
                         "This Find step is turned off, so the steps after it run without waiting for anything. Turn it on, or use an If step to guard them.", i, step.Id, nameof(MacroStep.Enabled)));
-                else if (search.Enabled && search.WhenNotFound == TextNotFoundBehavior.SkipNextStep
+                else if (search.Enabled && search.EffectiveFailureAction == StepFailureAction.SkipNextStep
                          && (i + 1 >= macro.Steps.Count || macro.Steps[i + 1] is ElseStep or EndIfStep or EndRepeatStep))
                     issues.Add(new ValidationIssue(IssueSeverity.Warning,
                         "\"Skip the next step\" has nothing to skip here: there's no step right after this one in the same block.", i, step.Id, nameof(ScreenSearchStep.WhenNotFound)));
@@ -188,8 +236,34 @@ public static class MacroValidator
 
             foreach (var issue in ValidateStep(step, screen))
                 issues.Add(issue with { StepIndex = i, StepId = step.Id });
+
+            if (step is IfStep or RepeatStep)
+                blockDepth++;
         }
 
+        // Cross-check RestartFromCheckpoint targets against top-level checkpoints.
+        for (var i = 0; i < macro.Steps.Count; i++)
+        {
+            var step = macro.Steps[i];
+            if (step is null) continue;
+            var policy = step switch
+            {
+                ScreenSearchStep s => s.FailurePolicy,
+                WaitForChangeStep w => w.FailurePolicy,
+                FocusWindowStep f => f.FailurePolicy,
+                _ => null,
+            };
+            if (policy is { Action: StepFailureAction.RestartFromCheckpoint, CheckpointName: { } cpTarget }
+                && CheckpointStep.IsValidName(cpTarget)
+                && !topLevelCheckpoints.Contains(cpTarget.Trim()))
+            {
+                issues.Add(new ValidationIssue(IssueSeverity.Error,
+                    $"Checkpoint \"{cpTarget.Trim()}\" does not exist at the top level of this macro.",
+                    i, step.Id, nameof(StepFailurePolicy.CheckpointName)));
+            }
+        }
+
+        ValidateWatchers(issues, macro, topLevelCheckpoints, screen);
         ValidateBlocks(issues, macro.Steps);
         return issues;
     }
@@ -215,6 +289,219 @@ public static class MacroValidator
             issues.Add(Error($"Humanize click jitter must be 0 to {Macro.MaxClickJitterPx} px.", property: nameof(Macro.ClickJitterPx)));
         if (macro.DelayJitterPercent is < 0 or > Macro.MaxDelayJitterPercent)
             issues.Add(Error($"Humanize timing variation must be 0 to {Macro.MaxDelayJitterPercent} %.", property: nameof(Macro.DelayJitterPercent)));
+
+        if (macro.Variables is { } variables)
+        {
+            if (variables.Count > MaxVariables)
+            {
+                issues.Add(Error($"A macro can declare at most {MaxVariables} variables.", nameof(Macro.Variables)));
+            }
+            else
+            {
+                var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                foreach (var v in variables)
+                {
+                    if (v is null)
+                    {
+                        issues.Add(Error("A variable entry is empty.", nameof(Macro.Variables)));
+                        continue;
+                    }
+
+                    if (!MacroVariableDefinition.IsValidName(v.Name))
+                    {
+                        issues.Add(Error($"Invalid variable name \"{v.Name}\". Start with a letter or underscore and use letters, digits, or underscores (up to {MacroVariableDefinition.MaxNameLength} chars).", nameof(Macro.Variables)));
+                    }
+                    else if (!names.Add(v.Name.Trim()))
+                    {
+                        issues.Add(Error($"Duplicate variable name \"{v.Name.Trim()}\".", nameof(Macro.Variables)));
+                    }
+
+                    if (!Enum.IsDefined(v.Type))
+                    {
+                        issues.Add(Error($"Variable \"{v.Name}\" has an unknown type.", nameof(Macro.Variables)));
+                    }
+                    else if ((v.DefaultValue?.Length ?? 0) > MacroVariableDefinition.MaxValueLength)
+                    {
+                        issues.Add(Error($"Variable \"{v.Name}\" default value is too long.", nameof(Macro.Variables)));
+                    }
+                    else if (!string.IsNullOrWhiteSpace(v.DefaultValue))
+                    {
+                        var def = v.DefaultValue.Trim();
+                        if (v.Type == MacroVariableType.Number && !double.TryParse(def, NumberStyles.Float | NumberStyles.AllowThousands, CultureInfo.InvariantCulture, out _))
+                            issues.Add(Error($"Variable \"{v.Name}\" is a Number, so its default \"{def}\" must be numeric.", nameof(Macro.Variables)));
+                        else if (v.Type == MacroVariableType.Boolean && !bool.TryParse(def, out _) && def is not ("0" or "1"))
+                            issues.Add(Error($"Variable \"{v.Name}\" is a Boolean, so its default must be true or false.", nameof(Macro.Variables)));
+                    }
+                }
+            }
+        }
+    }
+
+    private static void ValidateWatchers(
+        List<ValidationIssue> issues,
+        Macro macro,
+        HashSet<string> topLevelCheckpoints,
+        ScreenBounds? screen)
+    {
+        if (macro.Watchers is not { Count: > 0 } watchers) return;
+        if (watchers.Count > MaxWatchers)
+        {
+            issues.Add(Error($"A macro can have at most {MaxWatchers} watchers.", nameof(Macro.Watchers)));
+            return;
+        }
+
+        var seenWatcherIds = new HashSet<Guid>();
+        for (var i = 0; i < watchers.Count; i++)
+        {
+            var w = watchers[i];
+            var label = $"Watcher #{i + 1}";
+            if (w is null)
+            {
+                issues.Add(Error($"{label} is empty.", nameof(Macro.Watchers)));
+                continue;
+            }
+
+            if (!string.IsNullOrWhiteSpace(w.Name))
+                label = $"Watcher \"{w.Name.Trim()}\"";
+
+            if (w.Id == Guid.Empty || !seenWatcherIds.Add(w.Id))
+                issues.Add(Error($"{label} has a missing or duplicate ID.", nameof(Macro.Watchers)));
+
+            if (string.IsNullOrWhiteSpace(w.Name) || w.Name.Trim().Length > MaxNameLength)
+                issues.Add(Error($"{label}: enter a watcher name up to {MaxNameLength} characters.", nameof(Macro.Watchers)));
+
+            if (w.CheckIntervalMs < MacroWatcher.MinCheckIntervalMs || w.CheckIntervalMs > MaxCheckIntervalMs)
+                issues.Add(Error($"{label}: check interval must be {MacroWatcher.MinCheckIntervalMs} to {MaxCheckIntervalMs:N0} ms.", nameof(Macro.Watchers)));
+
+            if (w.CooldownMs < 0 || w.CooldownMs > MacroWatcher.MaxCooldownMs)
+                issues.Add(Error($"{label}: cooldown must be 0 to {MacroWatcher.MaxCooldownMs:N0} ms.", nameof(Macro.Watchers)));
+
+            ValidateCondition(issues, w.Condition, screen, label, nameof(Macro.Watchers));
+
+            if (!Enum.IsDefined(w.Action))
+            {
+                issues.Add(Error($"{label}: unknown watcher action.", nameof(Macro.Watchers)));
+                continue;
+            }
+
+            switch (w.Action)
+            {
+                case WatcherActionKind.ClickFoundSpot when w.Condition?.Kind == ConditionKind.VariableCompare:
+                    issues.Add(Error($"{label}: \"Click found spot\" requires a screen condition (text, image, or color).", nameof(Macro.Watchers)));
+                    break;
+                case WatcherActionKind.RunSubMacro:
+                    if ((w.HandlerMacroId is null || w.HandlerMacroId == Guid.Empty) && string.IsNullOrWhiteSpace(w.HandlerMacroName))
+                        issues.Add(Error($"{label}: choose a sub-macro to run when triggered.", nameof(Macro.Watchers)));
+                    else if (w.HandlerMacroId is { } hId && hId != Guid.Empty && hId == macro.Id)
+                        issues.Add(Error($"{label}: a watcher cannot run the same macro it belongs to.", nameof(Macro.Watchers)));
+                    break;
+                case WatcherActionKind.RestartFromCheckpoint:
+                    if (w.CheckpointName is not { } wCp || !CheckpointStep.IsValidName(wCp))
+                        issues.Add(Error($"{label}: enter the checkpoint name to restart from.", nameof(Macro.Watchers)));
+                    else if (!topLevelCheckpoints.Contains(wCp.Trim()))
+                        issues.Add(Error($"{label}: checkpoint \"{wCp.Trim()}\" does not exist at the top level of this macro.", nameof(Macro.Watchers)));
+                    break;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Validates cross-macro sub-macro links, detecting missing target macros, call cycles (A → B → A),
+    /// and nesting deeper than <see cref="CallMacroStep.MaxCallDepth"/>.
+    /// </summary>
+    public static IReadOnlyList<ValidationIssue> ValidateCallGraph(Macro root, IReadOnlyList<Macro> library)
+    {
+        ArgumentNullException.ThrowIfNull(root);
+        ArgumentNullException.ThrowIfNull(library);
+        var issues = new List<ValidationIssue>();
+
+        void Traverse(Macro current, List<Guid> chainIds, List<string> chainNames, int depth, int? rootStepIndex, Guid? rootStepId)
+        {
+            if (depth > CallMacroStep.MaxCallDepth)
+            {
+                issues.Add(new ValidationIssue(
+                    IssueSeverity.Error,
+                    $"Sub-macro nesting exceeds the maximum depth of {CallMacroStep.MaxCallDepth}.",
+                    rootStepIndex,
+                    rootStepId,
+                    nameof(CallMacroStep.TargetMacroId)));
+                return;
+            }
+
+            if (current.Steps is { } steps)
+            {
+                for (var i = 0; i < steps.Count; i++)
+                {
+                    var step = steps[i];
+                    if (step is null) continue;
+                    var stepIdx = depth == 0 ? i : rootStepIndex;
+                    var stepId = depth == 0 ? step.Id : rootStepId;
+
+                    switch (step)
+                    {
+                        case CallMacroStep call when call.TargetMacroId != Guid.Empty || !string.IsNullOrWhiteSpace(call.TargetMacroName):
+                            CheckTarget(call.TargetMacroId, call.TargetMacroName, chainIds, chainNames, depth, stepIdx, stepId, nameof(CallMacroStep.TargetMacroId));
+                            break;
+                        case ScreenSearchStep { FailurePolicy: { Action: StepFailureAction.RunRecoveryMacro } p }:
+                            CheckTarget(p.RecoveryMacroId ?? Guid.Empty, p.RecoveryMacroName, chainIds, chainNames, depth, stepIdx, stepId, nameof(StepFailurePolicy.RecoveryMacroId));
+                            break;
+                        case WaitForChangeStep { FailurePolicy: { Action: StepFailureAction.RunRecoveryMacro } p }:
+                            CheckTarget(p.RecoveryMacroId ?? Guid.Empty, p.RecoveryMacroName, chainIds, chainNames, depth, stepIdx, stepId, nameof(StepFailurePolicy.RecoveryMacroId));
+                            break;
+                        case FocusWindowStep { FailurePolicy: { Action: StepFailureAction.RunRecoveryMacro } p }:
+                            CheckTarget(p.RecoveryMacroId ?? Guid.Empty, p.RecoveryMacroName, chainIds, chainNames, depth, stepIdx, stepId, nameof(StepFailurePolicy.RecoveryMacroId));
+                            break;
+                    }
+                }
+            }
+
+            if (current.Watchers is { } watchers)
+            {
+                foreach (var w in watchers)
+                {
+                    if (w is { Action: WatcherActionKind.RunSubMacro }
+                        && ((w.HandlerMacroId is { } hId && hId != Guid.Empty) || !string.IsNullOrWhiteSpace(w.HandlerMacroName)))
+                    {
+                        CheckTarget(w.HandlerMacroId ?? Guid.Empty, w.HandlerMacroName, chainIds, chainNames, depth, rootStepIndex, rootStepId, nameof(Macro.Watchers));
+                    }
+                }
+            }
+        }
+
+        void CheckTarget(Guid targetId, string? targetName, List<Guid> chainIds, List<string> chainNames, int depth, int? stepIdx, Guid? stepId, string prop)
+        {
+            var target = MacroFileFormat.ResolveMacro(library, targetId, targetName);
+            var display = !string.IsNullOrWhiteSpace(targetName) ? targetName.Trim() : targetId.ToString();
+            if (target is null)
+            {
+                issues.Add(new ValidationIssue(
+                    IssueSeverity.Error,
+                    $"Sub-macro \"{display}\" was not found in the library.",
+                    stepIdx,
+                    stepId,
+                    prop));
+                return;
+            }
+
+            if (chainIds.Contains(target.Id))
+            {
+                var cyclePath = string.Join(" → ", chainNames.Append(target.Name));
+                issues.Add(new ValidationIssue(
+                    IssueSeverity.Error,
+                    $"Sub-macro call cycle detected: {cyclePath}.",
+                    stepIdx,
+                    stepId,
+                    prop));
+                return;
+            }
+
+            var nextIds = new List<Guid>(chainIds) { target.Id };
+            var nextNames = new List<string>(chainNames) { target.Name };
+            Traverse(target, nextIds, nextNames, depth + 1, stepIdx, stepId);
+        }
+
+        Traverse(root, [root.Id], [string.IsNullOrWhiteSpace(root.Name) ? "Macro" : root.Name], 0, null, null);
+        return issues;
     }
 
     /// <summary>
@@ -314,6 +601,48 @@ public static class MacroValidator
             else if (c.UseCurrentPosition || c.UseLastFoundText)
                 issues.Add(Warning("Smart-Aim only works with \"At a chosen position\": it looks for the picture around X / Y.", nameof(MouseClickStep.SmartAimAtTarget)));
         }
+
+        if (c.Target is { } target && !IsValidTargetFingerprint(target))
+        {
+            issues.Add(Error("The recorded click Intent metadata is invalid or too long. The macro may be damaged.", nameof(MouseClickStep.Target)));
+        }
+
+        if (c.UseSmartIntent)
+        {
+            if (!c.HasTargetIntent && !c.HasTargetThumbnail)
+                issues.Add(Warning("Smart Intent has no recorded UI element, text, window, or picture for this click, so it will fall back to X / Y.", nameof(MouseClickStep.UseSmartIntent)));
+            else if (c.UseCurrentPosition || c.UseLastFoundText)
+                issues.Add(Warning("Smart Intent only applies when clicking \"At a chosen position\".", nameof(MouseClickStep.UseSmartIntent)));
+        }
+    }
+
+    private static bool IsValidTargetFingerprint(TargetFingerprint fp)
+    {
+        static bool TooLong(string? s) => s is { Length: > TargetFingerprint.MaxFieldLength };
+
+        if (TooLong(fp.ElementName) || TooLong(fp.AutomationId) || TooLong(fp.ControlType)
+            || TooLong(fp.ClassName) || TooLong(fp.NearbyText) || TooLong(fp.WindowTitle)
+            || TooLong(fp.WindowProcessName))
+            return false;
+
+        if (fp.ElementNormalizedX is { } nx && (double.IsNaN(nx) || double.IsInfinity(nx) || nx is < 0 or > 1))
+            return false;
+        if (fp.ElementNormalizedY is { } ny && (double.IsNaN(ny) || double.IsInfinity(ny) || ny is < 0 or > 1))
+            return false;
+
+        if (Math.Abs((long)fp.NearbyTextOffsetX) > MaxOffset || Math.Abs((long)fp.NearbyTextOffsetY) > MaxOffset)
+            return false;
+
+        if (fp.WindowWidth < 0 || fp.WindowHeight < 0
+            || fp.WindowWidth > MaxScreenCoordinate || fp.WindowHeight > MaxScreenCoordinate)
+            return false;
+
+        if (fp.WindowRelativeX is { } rx && Math.Abs((long)rx) > MaxScreenCoordinate)
+            return false;
+        if (fp.WindowRelativeY is { } ry && Math.Abs((long)ry) > MaxScreenCoordinate)
+            return false;
+
+        return true;
     }
 
     /// <summary>
@@ -339,10 +668,20 @@ public static class MacroValidator
         switch (step)
         {
             case DelayStep d:
+                if (!Enum.IsDefined(d.Mode))
+                    issues.Add(Error("Unknown delay mode. The macro may be damaged.", nameof(DelayStep.Mode)));
                 if (d.DurationMs < 0)
                     issues.Add(Error("The delay can't be negative.", nameof(DelayStep.DurationMs)));
                 else if (d.DurationMs > MaxDelayMs)
                     issues.Add(Error($"The delay can be at most {MaxDelayMs:N0} ms (1 hour).", nameof(DelayStep.DurationMs)));
+                if (d.MinDurationMs < 0 || d.MinDurationMs > MaxDelayMs)
+                    issues.Add(Error($"The minimum adaptive wait must be between 0 and {MaxDelayMs:N0} ms.", nameof(DelayStep.MinDurationMs)));
+                if (d.MaxDurationMs < 0 || d.MaxDurationMs > MaxDelayMs)
+                    issues.Add(Error($"The maximum adaptive wait must be between 0 and {MaxDelayMs:N0} ms.", nameof(DelayStep.MaxDurationMs)));
+                else if (d.Mode != DelayMode.Fixed && d.MaxDurationMs > 0 && d.MaxDurationMs < d.MinDurationMs)
+                    issues.Add(Error("The maximum adaptive wait must be at least the minimum wait.", nameof(DelayStep.MaxDurationMs)));
+                if (d.QuietWindowMs < 0 || d.QuietWindowMs > 60_000)
+                    issues.Add(Error("The screen calm window must be between 0 and 60,000 ms.", nameof(DelayStep.QuietWindowMs)));
                 break;
 
             case MouseMoveStep { UseRelativeDelta: true } r:
@@ -477,6 +816,8 @@ public static class MacroValidator
                         issues.Add(Error($"The hold time must be 1 to {MaxHoldMs:N0} ms.", nameof(IfStep.ThenHoldMs)));
                     if (ifStep.Condition is { Negate: true })
                         issues.Add(Warning("With \"is NOT on screen\" the condition is true when nothing is found, so there's nothing to click: the \"when true\" action never runs.", nameof(IfStep.ThenAction)));
+                    else if (ifStep.Condition is { Kind: ConditionKind.VariableCompare })
+                        issues.Add(Warning("A variable comparison has no screen spot to click, so the \"when true\" mouse action is ignored.", nameof(IfStep.ThenAction)));
                 }
                 break;
 
@@ -522,10 +863,24 @@ public static class MacroValidator
                     issues.Add(Error($"The pause after focusing must be 0 to {MaxHoldMs:N0} ms.", nameof(FocusWindowStep.SettleMs)));
                 if (!Enum.IsDefined(w.WhenNotFound))
                     issues.Add(Error("This step has an unknown option value."));
+                ValidateFailurePolicy(issues, w.FailurePolicy);
                 break;
 
             case ScreenshotStep s:
                 ValidateScreenshot(issues, s, screen);
+                break;
+
+            case SetVariableStep v:
+                ValidateSetVariable(issues, v, screen);
+                break;
+
+            case CheckpointStep cp:
+                if (!CheckpointStep.IsValidName(cp.Name))
+                    issues.Add(Error($"Enter a checkpoint name (1 to {CheckpointStep.MaxNameLength} characters, no line breaks).", nameof(CheckpointStep.Name)));
+                break;
+
+            case CallMacroStep call:
+                ValidateCallMacro(issues, call);
                 break;
 
             default:
@@ -565,6 +920,102 @@ public static class MacroValidator
             issues.Add(Error("This step has an unknown option value."));
         else if (w.Action == FoundTextAction.Hold && (w.ActionHoldMs < 1 || w.ActionHoldMs > MaxHoldMs))
             issues.Add(Error($"The hold time must be 1 to {MaxHoldMs:N0} ms.", nameof(WaitForChangeStep.ActionHoldMs)));
+        ValidateFailurePolicy(issues, w.FailurePolicy);
+    }
+
+    private static void ValidateSetVariable(List<ValidationIssue> issues, SetVariableStep v, ScreenBounds? screen)
+    {
+        if (!MacroVariableDefinition.IsValidName(v.VariableName))
+            issues.Add(Error($"Enter a valid variable name (start with a letter or _, then letters, digits, or _, up to {MacroVariableDefinition.MaxNameLength} chars).", nameof(SetVariableStep.VariableName)));
+        if (!Enum.IsDefined(v.VariableType) || !Enum.IsDefined(v.Operation) || !Enum.IsDefined(v.Source))
+            issues.Add(Error("This Set Variable step has an unknown option value."));
+        if ((v.Value?.Length ?? 0) > MacroVariableDefinition.MaxValueLength)
+            issues.Add(Error($"The value can be at most {MacroVariableDefinition.MaxValueLength:N0} characters.", nameof(SetVariableStep.Value)));
+
+        if (v.UsesScreenRegion)
+        {
+            if (v.RegionWidth < 5 || v.RegionHeight < 5)
+                issues.Add(Error("The screen region to read must be at least 5×5 pixels. Use \"Pick area\".", "Region"));
+            else if (v.RegionWidth > MaxRegionSize || v.RegionHeight > MaxRegionSize)
+                issues.Add(Error($"The screen region can be at most {MaxRegionSize:N0} pixels wide or tall.", "Region"));
+            else if (screen is not null && !v.Region.IntersectsWith(new Ocr.ScreenRect(screen.Left, screen.Top, screen.Width, screen.Height)))
+                issues.Add(Warning("The screen region is outside your current screen.", "Region"));
+        }
+    }
+
+    private static void ValidateCallMacro(List<ValidationIssue> issues, CallMacroStep call)
+    {
+        if (call.TargetMacroId == Guid.Empty && string.IsNullOrWhiteSpace(call.TargetMacroName))
+            issues.Add(Error("Choose a library sub-macro to call.", nameof(CallMacroStep.TargetMacroId)));
+        if ((call.TargetMacroName?.Length ?? 0) > MaxNameLength)
+            issues.Add(Error($"Sub-macro name can be at most {MaxNameLength} characters.", nameof(CallMacroStep.TargetMacroName)));
+
+        ValidateBindings(issues, call.Inputs, isOutput: false, nameof(CallMacroStep.Inputs));
+        ValidateBindings(issues, call.Outputs, isOutput: true, nameof(CallMacroStep.Outputs));
+    }
+
+    private static void ValidateBindings(List<ValidationIssue> issues, List<VariableBinding>? bindings, bool isOutput, string property)
+    {
+        if (bindings is null) return;
+        if (bindings.Count > MaxVariableBindings)
+        {
+            issues.Add(Error($"At most {MaxVariableBindings} variable bindings are allowed.", property));
+            return;
+        }
+
+        foreach (var b in bindings)
+        {
+            if (b is null)
+            {
+                issues.Add(Error("A variable binding is empty.", property));
+                continue;
+            }
+
+            if (!MacroVariableDefinition.IsValidName(b.TargetVariable))
+                issues.Add(Error($"Enter a valid target variable name in {(isOutput ? "Outputs" : "Inputs")}.", property));
+
+            if (isOutput)
+            {
+                if (!MacroVariableDefinition.IsValidName(b.SourceExpression))
+                    issues.Add(Error("Enter a valid sub-macro variable name to read in Outputs.", property));
+            }
+            else if ((b.SourceExpression?.Length ?? 0) > MacroVariableDefinition.MaxValueLength)
+            {
+                issues.Add(Error($"Binding value can be at most {MacroVariableDefinition.MaxValueLength:N0} characters.", property));
+            }
+        }
+    }
+
+    private static void ValidateFailurePolicy(List<ValidationIssue> issues, StepFailurePolicy? policy)
+    {
+        if (policy is null) return;
+        if (!Enum.IsDefined(policy.Action))
+        {
+            issues.Add(Error("Unknown failure policy action.", nameof(StepFailurePolicy.Action)));
+            return;
+        }
+
+        switch (policy.Action)
+        {
+            case StepFailureAction.Retry:
+                if (policy.RetryCount < 1 || policy.RetryCount > MaxRetryCount)
+                    issues.Add(Error($"Retry count must be 1 to {MaxRetryCount}.", nameof(StepFailurePolicy.RetryCount)));
+                if (policy.RetryDelayMs < 0 || policy.RetryDelayMs > MaxCheckIntervalMs)
+                    issues.Add(Error($"Retry delay must be 0 to {MaxCheckIntervalMs:N0} ms.", nameof(StepFailurePolicy.RetryDelayMs)));
+                break;
+
+            case StepFailureAction.RunRecoveryMacro:
+                if ((policy.RecoveryMacroId is null || policy.RecoveryMacroId == Guid.Empty) && string.IsNullOrWhiteSpace(policy.RecoveryMacroName))
+                    issues.Add(Error("Choose a recovery macro to run when this step fails.", nameof(StepFailurePolicy.RecoveryMacroId)));
+                else if ((policy.RecoveryMacroName?.Length ?? 0) > MaxNameLength)
+                    issues.Add(Error($"Recovery macro name can be at most {MaxNameLength} characters.", nameof(StepFailurePolicy.RecoveryMacroName)));
+                break;
+
+            case StepFailureAction.RestartFromCheckpoint:
+                if (!CheckpointStep.IsValidName(policy.CheckpointName))
+                    issues.Add(Error($"Enter the checkpoint name to restart from (1 to {CheckpointStep.MaxNameLength} chars).", nameof(StepFailurePolicy.CheckpointName)));
+                break;
+        }
     }
 
     /// <summary>Screenshot: what to capture (an area / window when chosen), a usable folder and file name prefix.</summary>
@@ -648,9 +1099,26 @@ public static class MacroValidator
     private static void ValidateCondition(List<ValidationIssue> issues, Condition? condition, ScreenBounds? screen,
         string label = "Condition", string property = "Condition")
     {
-        if (condition?.Check is null)
+        if (condition is null)
         {
-            issues.Add(Error($"{label}: choose what the condition looks for (text, image or color).", property));
+            issues.Add(Error($"{label}: choose what the condition checks.", property));
+            return;
+        }
+
+        if (condition.Comparison is { } comp && condition.Check is null)
+        {
+            if (!MacroVariableDefinition.IsValidName(comp.VariableName))
+                issues.Add(Error($"{label}: enter a valid variable name to compare.", property + ".VariableName"));
+            if (!Enum.IsDefined(comp.Operator))
+                issues.Add(Error($"{label}: unknown variable comparison operator.", property + ".Operator"));
+            if ((comp.RightValue?.Length ?? 0) > MacroVariableDefinition.MaxValueLength)
+                issues.Add(Error($"{label}: comparison value can be at most {MacroVariableDefinition.MaxValueLength:N0} characters.", property + ".RightValue"));
+            return;
+        }
+
+        if (condition.Check is null)
+        {
+            issues.Add(Error($"{label}: choose what the condition looks for (text, image, color, or variable).", property));
             return;
         }
 
@@ -663,7 +1131,9 @@ public static class MacroValidator
         foreach (var issue in ValidateStep(search, screen))
         {
             // The "when found" action, wait goal and "when not found" choice aren't used by conditions.
-            if (issue.Property is nameof(ScreenSearchStep.Action) or nameof(ScreenSearchStep.WhenNotFound) or nameof(ScreenSearchStep.Goal)) continue;
+            if (issue.Property is nameof(ScreenSearchStep.Action) or nameof(ScreenSearchStep.WhenNotFound) or nameof(ScreenSearchStep.Goal)
+                or nameof(StepFailurePolicy.Action) or nameof(StepFailurePolicy.RetryCount) or nameof(StepFailurePolicy.RetryDelayMs)
+                or nameof(StepFailurePolicy.RecoveryMacroId) or nameof(StepFailurePolicy.CheckpointName)) continue;
             issues.Add(issue with { Message = label + ": " + issue.Message, Property = property + "." + (issue.Property ?? "") });
         }
     }
@@ -939,12 +1409,17 @@ public static class MacroValidator
         var seen = new HashSet<int>();
         foreach (var target in targets)
         {
+            var hasPicture = !string.IsNullOrEmpty(target?.TargetThumbnailBase64);
+            var hasIntent = target?.Target is { HasAnySignal: true };
             var bad = target is null
                       || target.EventIndex < 0 || target.EventIndex >= step.Events.Count
                       || step.Events[target.EventIndex].Kind != InputEventKind.MouseDown
                       || !seen.Add(target.EventIndex)
-                      || string.IsNullOrEmpty(target.TargetThumbnailBase64) || target.TargetThumbnailBase64.Length > MaxThumbnailLength
-                      || target.AnchorX is < 0 or > MaxTemplateSize || target.AnchorY is < 0 or > MaxTemplateSize;
+                      || (!hasPicture && !hasIntent)
+                      || (hasPicture && (target.TargetThumbnailBase64.Length > MaxThumbnailLength
+                                         || target.AnchorX is < 0 or > MaxTemplateSize
+                                         || target.AnchorY is < 0 or > MaxTemplateSize))
+                      || (target.Target is { } fp && !IsValidTargetFingerprint(fp));
             if (!bad) continue;
             issues.Add(Warning("Some \"what you clicked\" pictures inside this recorded input don't match its clicks; they won't be used when you break it into steps.", property));
             return;
@@ -1045,6 +1520,7 @@ public static class MacroValidator
             issues.Add(Warning("The \"when found\" action isn't used while waiting for something to disappear.", nameof(ScreenSearchStep.Action)));
         else if (f.Action == FoundTextAction.Hold && (f.ActionHoldMs < 1 || f.ActionHoldMs > MaxHoldMs))
             issues.Add(Error($"The hold time must be 1 to {MaxHoldMs:N0} ms.", nameof(ScreenSearchStep.ActionHoldMs)));
+        ValidateFailurePolicy(issues, f.FailurePolicy);
     }
 
     /// <summary>Movement style must be known; the glide time 0 to 5 s.</summary>

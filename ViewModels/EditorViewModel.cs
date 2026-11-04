@@ -4,6 +4,7 @@ using SmartMacro.Core.Logging;
 using SmartMacro.Core.Models;
 using SmartMacro.Core.Playback;
 using SmartMacro.Core.Storage;
+using SmartMacro.Core.Targeting;
 using SmartMacro.Core.Validation;
 using SmartMacro.Core.Workflow;
 using SmartMacro.Mvvm;
@@ -82,7 +83,12 @@ public sealed class EditorViewModel : ObservableObject
         IFindTextTools? findTextTools = null,
         IVisionTools? visionTools = null)
     {
-        _screenTools = new ScreenTools(findTextTools, visionTools, screen as Core.Vision.IScreenLayout);
+        _screenTools = new ScreenTools(
+            findTextTools,
+            visionTools,
+            screen as Core.Vision.IScreenLayout,
+            MacroListProvider: () => GetLibraryMacros?.Invoke() ?? Array.Empty<Macro>(),
+            CurrentMacroIdProvider: () => MacroId);
         _repository = repository;
         _log = log;
         _dialogs = dialogs;
@@ -151,7 +157,326 @@ public sealed class EditorViewModel : ObservableObject
         ToggleCommandPaletteCommand = new RelayCommand(() => IsCommandPaletteOpen = !IsCommandPaletteOpen, () => HasMacro || IsCommandPaletteOpen);
         CloseCommandPaletteCommand = new RelayCommand(() => IsCommandPaletteOpen = false);
         ExecutePaletteItemCommand = new RelayCommand(p => ExecutePaletteItem(p as StudioCommand ?? SelectedPaletteItem));
+
+        AddVariableCommand = new RelayCommand(AddVariable, () => HasMacro);
+        RemoveVariableCommand = new RelayCommand(p => { if (p is VariableItemViewModel v && Variables.Remove(v)) OnVariablesOrWatchersModified(); }, _ => HasMacro);
+        AddWatcherCommand = new RelayCommand(AddWatcher, () => HasMacro);
+        RemoveWatcherCommand = new RelayCommand(p => { if (p is WatcherItemViewModel w && Watchers.Remove(w)) OnVariablesOrWatchersModified(); }, _ => HasMacro);
+        ApplySuggestionCommand = new RelayCommand(ApplySuggestion, p => HasMacro && p is SelfHealItemViewModel);
+        ApplyAllSuggestionsCommand = new RelayCommand(ApplyAllSuggestions, () => HasMacro && PendingSuggestions.Count > 0);
+        DismissSuggestionsCommand = new RelayCommand(() => { PendingSuggestions.Clear(); RaiseSelfHealChanged(); }, () => PendingSuggestions.Count > 0);
+
+        ClearToolboxFilterCommand = new RelayCommand(() => ToolboxFilter = string.Empty, () => HasToolboxFilter);
+        OpenSubMacroCommand = new RelayCommand(p =>
+        {
+            if (p is CallMacroStepViewModel call && call.Model is CallMacroStep step)
+                _ = OpenSubMacroHandler?.Invoke(step.TargetMacroId, call.TargetMacroName);
+        }, p => p is CallMacroStepViewModel);
+        RunGivenStepCommand = new RelayCommand(p =>
+        {
+            if (p is StepViewModel s)
+            {
+                SelectedStep = s;
+                if (RunStepCommand.CanExecute(null)) RunStepCommand.Execute(null);
+            }
+        }, _ => HasMacro && (CanRunSteps?.Invoke() ?? false));
+        TestGivenStepCommand = new RelayCommand(p =>
+        {
+            if (p is StepViewModel s)
+            {
+                SelectedStep = s;
+                if (TestSelectedStepCommand.CanExecute(null)) TestSelectedStepCommand.Execute(null);
+            }
+        }, _ => HasMacro && !_isTestingStep && (CanRunSteps?.Invoke() ?? false));
+        DeleteGivenStepCommand = new RelayCommand(p =>
+        {
+            if (p is StepViewModel s)
+            {
+                _selection = new List<StepViewModel> { s };
+                SelectedStep = s;
+                if (DeleteStepCommand.CanExecute(null)) DeleteStepCommand.Execute(null);
+            }
+        }, _ => HasMacro);
+        OpenBottomTabCommand = new RelayCommand(p =>
+        {
+            if (p is string tabStr && int.TryParse(tabStr, out var idx))
+            {
+                if (IsBottomDockExpanded && SelectedBottomTab == idx)
+                    IsBottomDockExpanded = false;
+                else
+                {
+                    SelectedBottomTab = idx;
+                    IsBottomDockExpanded = true;
+                }
+            }
+        });
+
         RefreshPaletteItems();
+    }
+
+    // ---------------- v1.2 Brain: 🧠 Variables, 🛡 Watchers & 🩹 Self-Healing Suggestions ----------------
+
+    /// <summary>Set by MainViewModel: returns the saved macros in the library (for Call Macro, Recovery Macro, and call-graph checks).</summary>
+    public Func<IReadOnlyList<Macro>>? GetLibraryMacros { get; set; }
+
+    /// <summary>Set by MainViewModel: opens a referenced sub-macro in the Workflow Editor ("Open ↗").</summary>
+    public Func<Guid, string?, Task>? OpenSubMacroHandler { get; set; }
+
+    private string _toolboxFilter = string.Empty;
+    private bool _isBottomDockExpanded;
+    private int _selectedBottomTab;
+
+    public RelayCommand ClearToolboxFilterCommand { get; }
+    public RelayCommand OpenSubMacroCommand { get; }
+    public RelayCommand RunGivenStepCommand { get; }
+    public RelayCommand TestGivenStepCommand { get; }
+    public RelayCommand DeleteGivenStepCommand { get; }
+    public RelayCommand OpenBottomTabCommand { get; }
+
+    /// <summary>Search filter typed at the top of the Add Step toolbox.</summary>
+    public string ToolboxFilter
+    {
+        get => _toolboxFilter;
+        set
+        {
+            if (!SetProperty(ref _toolboxFilter, value ?? string.Empty)) return;
+            OnPropertyChanged(nameof(HasToolboxFilter));
+            OnPropertyChanged(nameof(FilteredInputSteps));
+            OnPropertyChanged(nameof(FilteredVisionSteps));
+            OnPropertyChanged(nameof(FilteredUtilitySteps));
+            OnPropertyChanged(nameof(FilteredLogicSteps));
+            OnPropertyChanged(nameof(FilteredBrainSteps));
+            OnPropertyChanged(nameof(FilteredQuickPatterns));
+            OnPropertyChanged(nameof(HasFilteredInputSteps));
+            OnPropertyChanged(nameof(HasFilteredVisionSteps));
+            OnPropertyChanged(nameof(HasFilteredUtilitySteps));
+            OnPropertyChanged(nameof(HasFilteredLogicSteps));
+            OnPropertyChanged(nameof(HasFilteredBrainSteps));
+            OnPropertyChanged(nameof(HasFilteredQuickPatterns));
+        }
+    }
+
+    public bool HasToolboxFilter => !string.IsNullOrWhiteSpace(_toolboxFilter);
+
+    public IReadOnlyList<StepTypeInfo> FilteredInputSteps => FilterStepTypes(
+        StepTypeCatalog.Addable.Where(t => Converters.StepCategories.Of(t.Kind) is Converters.StepCategories.Input or Converters.StepCategories.Timing), _toolboxFilter);
+
+    public IReadOnlyList<StepTypeInfo> FilteredVisionSteps => FilterStepTypes(
+        StepTypeCatalog.Addable.Where(t => Converters.StepCategories.Of(t.Kind) is Converters.StepCategories.Vision or Converters.StepCategories.Feedback), _toolboxFilter);
+
+    public IReadOnlyList<StepTypeInfo> FilteredUtilitySteps => FilterStepTypes(
+        StepTypeCatalog.Addable.Where(t => Converters.StepCategories.Of(t.Kind) == Converters.StepCategories.Utility), _toolboxFilter);
+
+    public IReadOnlyList<StepTypeInfo> FilteredLogicSteps => FilterStepTypes(StepTypeCatalog.Logic, _toolboxFilter);
+
+    public IReadOnlyList<StepTypeInfo> FilteredBrainSteps => FilterStepTypes(StepTypeCatalog.Brain, _toolboxFilter);
+
+    public IReadOnlyList<QuickPatternInfo> FilteredQuickPatterns => string.IsNullOrWhiteSpace(_toolboxFilter)
+        ? QuickPatterns.All
+        : QuickPatterns.All.Where(p =>
+            p.Title.Contains(_toolboxFilter.Trim(), StringComparison.OrdinalIgnoreCase) ||
+            p.Description.Contains(_toolboxFilter.Trim(), StringComparison.OrdinalIgnoreCase)).ToList();
+
+    public bool HasFilteredInputSteps => FilteredInputSteps.Count > 0;
+    public bool HasFilteredVisionSteps => FilteredVisionSteps.Count > 0;
+    public bool HasFilteredUtilitySteps => FilteredUtilitySteps.Count > 0;
+    public bool HasFilteredLogicSteps => FilteredLogicSteps.Count > 0;
+    public bool HasFilteredBrainSteps => FilteredBrainSteps.Count > 0;
+    public bool HasFilteredQuickPatterns => FilteredQuickPatterns.Count > 0;
+
+    /// <summary>Filters toolbox step items by display name or description.</summary>
+    public static IReadOnlyList<StepTypeInfo> FilterStepTypes(IEnumerable<StepTypeInfo> source, string? query)
+    {
+        if (string.IsNullOrWhiteSpace(query)) return source.ToList();
+        var q = query.Trim();
+        return source.Where(s =>
+            s.DisplayName.Contains(q, StringComparison.OrdinalIgnoreCase) ||
+            s.Description.Contains(q, StringComparison.OrdinalIgnoreCase)).ToList();
+    }
+
+    public bool IsBottomDockExpanded
+    {
+        get => _isBottomDockExpanded;
+        set => SetProperty(ref _isBottomDockExpanded, value);
+    }
+
+    public int SelectedBottomTab
+    {
+        get => _selectedBottomTab;
+        set => SetProperty(ref _selectedBottomTab, Math.Clamp(value, 0, 3));
+    }
+
+    public ObservableCollection<VariableItemViewModel> Variables { get; } = new();
+    public ObservableCollection<WatcherItemViewModel> Watchers { get; } = new();
+    public ObservableCollection<SelfHealItemViewModel> PendingSuggestions { get; } = new();
+
+    public RelayCommand AddVariableCommand { get; }
+    public RelayCommand RemoveVariableCommand { get; }
+    public RelayCommand AddWatcherCommand { get; }
+    public RelayCommand RemoveWatcherCommand { get; }
+    public RelayCommand ApplySuggestionCommand { get; }
+    public RelayCommand ApplyAllSuggestionsCommand { get; }
+    public RelayCommand DismissSuggestionsCommand { get; }
+
+    public bool HasVariables => Variables.Count > 0;
+    public bool HasWatchers => Watchers.Count > 0;
+    public bool HasPendingSuggestions => PendingSuggestions.Count > 0;
+
+    public string VariablesSummary => Variables.Count == 0 ? "Variables" : $"Variables ({Variables.Count})";
+    public string WatchersSummary => Watchers.Count == 0 ? "Watchers" : $"Watchers ({Watchers.Count})";
+
+    public string SelfHealBannerText => PendingSuggestions.Count == 0
+        ? string.Empty
+        : PendingSuggestions.Count == 1
+            ? $"🩹 Smart Self-Heal Suggestion — {PendingSuggestions[0].SummaryText}"
+            : $"🩹 {PendingSuggestions.Count} Smart Self-Heal Suggestions — {PendingSuggestions[0].SummaryText} (+{PendingSuggestions.Count - 1} more)";
+
+    private void AddVariable()
+    {
+        if (!HasMacro) return;
+        var index = Variables.Count + 1;
+        var name = "count";
+        while (Variables.Any(v => string.Equals(v.Name, name, StringComparison.OrdinalIgnoreCase)))
+            name = $"var{index++}";
+
+        Variables.Add(new VariableItemViewModel(new MacroVariableDefinition
+        {
+            Name = name,
+            Type = MacroVariableType.Number,
+            DefaultValue = "0",
+        }, OnVariablesOrWatchersModified));
+        OnVariablesOrWatchersModified();
+    }
+
+    private void AddWatcher()
+    {
+        if (!HasMacro) return;
+        var index = Watchers.Count + 1;
+        var model = new MacroWatcher
+        {
+            Name = $"Popup guard {index}",
+            Enabled = true,
+            Action = WatcherActionKind.ClickFoundSpot,
+            CheckIntervalMs = 1000,
+            CooldownMs = 3000,
+            Condition = new Condition
+            {
+                Check = new FindTextStep { Text = "Close", Scope = Core.Vision.SearchScope.PrimaryMonitor, TimeoutMs = 0 },
+            },
+        };
+        Watchers.Add(new WatcherItemViewModel(model, _screenTools, () => GetLibraryMacros?.Invoke() ?? Array.Empty<Macro>(), MacroId, OnVariablesOrWatchersModified));
+        OnVariablesOrWatchersModified();
+    }
+
+    private void OnVariablesOrWatchersModified()
+    {
+        OnPropertyChanged(nameof(HasVariables));
+        OnPropertyChanged(nameof(HasWatchers));
+        OnPropertyChanged(nameof(VariablesSummary));
+        OnPropertyChanged(nameof(WatchersSummary));
+        Touch();
+    }
+
+    /// <summary>Updates live runtime values shown next to variables in the 🧠 Variables popover.</summary>
+    public void UpdateLiveVariables(IReadOnlyList<VariableSnapshot>? snapshots)
+    {
+        if (snapshots is null || snapshots.Count == 0)
+        {
+            foreach (var v in Variables) v.LiveValue = null;
+            return;
+        }
+
+        var map = snapshots.ToDictionary(s => s.Name, s => s.Value, StringComparer.OrdinalIgnoreCase);
+        foreach (var v in Variables)
+            v.LiveValue = map.TryGetValue(v.Name, out var text) ? text : null;
+    }
+
+    /// <summary>Called when playback finishes: updates final variable readouts and offers opt-in Self-Heal coordinate updates.</summary>
+    public void ShowPlaybackResult(Guid? playedMacroId, PlaybackResult? result)
+    {
+        if (!HasMacro || playedMacroId != _id || result is null) return;
+
+        if (result.FinalVariables is { Count: > 0 } finalVars)
+            UpdateLiveVariables(finalVars);
+
+        PendingSuggestions.Clear();
+        if (result.Suggestions is { Count: > 0 } suggestions)
+        {
+            foreach (var s in suggestions)
+            {
+                var stepVm = Steps.FirstOrDefault(vm => vm.Id == s.StepId && vm.Model is MouseClickStep);
+                if (stepVm is null) continue;
+                PendingSuggestions.Add(new SelfHealItemViewModel(s, stepVm.Number));
+            }
+        }
+
+        RaiseSelfHealChanged();
+    }
+
+    private void ApplySuggestion(object? parameter)
+    {
+        if (!HasMacro || parameter is not SelfHealItemViewModel item) return;
+        var stepIndex = Steps.ToList().FindIndex(s => s.Id == item.Suggestion.StepId);
+        if (stepIndex < 0 || Steps[stepIndex].Model is not MouseClickStep click) return;
+
+        RecordUndo();
+        item.Suggestion.ApplyTo(click);
+        var vm = CreateStepViewModel(click);
+        Steps[stepIndex] = vm;
+        SelectedStep = vm;
+        PendingSuggestions.Remove(item);
+        RaiseSelfHealChanged();
+        Touch();
+        _setStatus($"🩹 Updated step #{stepIndex + 1} coordinates to ({click.X}, {click.Y}). Ctrl+Z undoes it.", StatusKind.Success);
+    }
+
+    private void ApplyAllSuggestions()
+    {
+        if (!HasMacro || PendingSuggestions.Count == 0) return;
+        var applied = 0;
+        RecordUndo();
+        foreach (var item in PendingSuggestions.ToList())
+        {
+            var stepIndex = Steps.ToList().FindIndex(s => s.Id == item.Suggestion.StepId);
+            if (stepIndex < 0 || Steps[stepIndex].Model is not MouseClickStep click) continue;
+            item.Suggestion.ApplyTo(click);
+            Steps[stepIndex] = CreateStepViewModel(click);
+            applied++;
+        }
+
+        PendingSuggestions.Clear();
+        RaiseSelfHealChanged();
+        if (applied > 0)
+        {
+            Touch();
+            _setStatus($"🩹 Applied {applied} self-heal coordinate update{(applied == 1 ? "" : "s")}. Click Save to keep them, or Ctrl+Z to undo.", StatusKind.Success);
+        }
+    }
+
+    private void RaiseSelfHealChanged()
+    {
+        OnPropertyChanged(nameof(HasPendingSuggestions));
+        OnPropertyChanged(nameof(SelfHealBannerText));
+        System.Windows.Input.CommandManager.InvalidateRequerySuggested();
+    }
+
+    /// <summary>Refreshes sub-macro dropdown choices and call-graph validation when the library changes.</summary>
+    public void RefreshSubMacroLinks()
+    {
+        if (!HasMacro) return;
+        foreach (var w in Watchers) w.RefreshMacroChoices();
+        foreach (var step in Steps)
+        {
+            switch (step)
+            {
+                case CallMacroStepViewModel call: call.RefreshMacroChoices(); break;
+                case ScreenSearchStepViewModel s: s.FailurePolicy.RefreshMacroChoices(); break;
+                case WaitForChangeStepViewModel wc: wc.FailurePolicy.RefreshMacroChoices(); break;
+                case FocusWindowStepViewModel fw: fw.FailurePolicy.RefreshMacroChoices(); break;
+            }
+        }
+
+        Revalidate();
     }
 
     // ---------------- 🧪 Test Step (Ctrl+T) ----------------
@@ -291,6 +616,9 @@ public sealed class EditorViewModel : ObservableObject
         RecordUndo();
         var selectedIndex = SelectedStep is null ? -1 : Steps.IndexOf(SelectedStep);
         var index = InsertOutsideFolded(StepListEditing.InsertIndex(Steps.Count, selectedIndex, AddAtEnd ? InsertPosition.AtEnd : InsertPosition.AfterSelected));
+        if (info.RequiresTopLevel)
+            index = StepListEditing.InsertIndexAtTopLevel(Steps.Select(s => s.Model).ToList(), index);
+
         var added = new List<StepViewModel>();
         foreach (var model in models)
         {
@@ -299,14 +627,30 @@ public sealed class EditorViewModel : ObservableObject
             added.Add(vm);
         }
 
+        var seededVars = 0;
+        foreach (var def in MacroBlueprints.BuildVariables(blueprint))
+        {
+            if (Variables.Any(v => string.Equals(v.Name, def.Name, StringComparison.OrdinalIgnoreCase)))
+                continue;
+            Variables.Add(new VariableItemViewModel(def.Clone(), OnVariablesOrWatchersModified));
+            seededVars++;
+        }
+
+        if (seededVars > 0)
+        {
+            OnPropertyChanged(nameof(HasVariables));
+            OnPropertyChanged(nameof(VariablesSummary));
+        }
+
         if (info.EnablesHumanize) HumanizePlayback = true;
         _selection = added.Count > 1 ? added : new List<StepViewModel>();
         SelectedStep = added[0];
         if (added.Count > 1) SelectStepsRequested?.Invoke(this, added);
         Touch();
         _setStatus($"📚 Added \"{info.Title}\" as step{(added.Count == 1 ? "" : "s")} {index + 1}{(added.Count == 1 ? "" : $"–{index + added.Count}")}" +
+                   (seededVars > 0 ? $" (+{seededVars} variable{(seededVars == 1 ? "" : "s")})" : "") +
                    (info.EnablesHumanize ? " and turned Humanize on" : "") +
-                   ". The Problems list shows what is left to set up (images / colours). Ctrl+Z undoes it.", StatusKind.Success);
+                   ". The Problems list shows what is left to set up. Ctrl+Z undoes it.", StatusKind.Success);
         return true;
     }
 
@@ -1328,6 +1672,9 @@ public sealed class EditorViewModel : ObservableObject
     /// <summary>If / Else / End If / Repeat / End Repeat, shown in the toolbox's "Logic" section.</summary>
     public IReadOnlyList<StepTypeInfo> LogicStepTypes => StepTypeCatalog.Logic;
 
+    /// <summary>Set variable / Checkpoint / Call macro, shown in the toolbox's "Memory &amp; Sub-Macros" section.</summary>
+    public IReadOnlyList<StepTypeInfo> BrainStepTypes => StepTypeCatalog.Brain;
+
     public RelayCommand AddStepCommand { get; }
     public RelayCommand DeleteStepCommand { get; }
     public RelayCommand DuplicateStepCommand { get; }
@@ -1556,6 +1903,23 @@ public sealed class EditorViewModel : ObservableObject
         RefreshTargetWindows();
         ResetViewState();
 
+        Variables.Clear();
+        if (copy.Variables is not null)
+        {
+            foreach (var v in copy.Variables)
+                Variables.Add(new VariableItemViewModel(v, OnVariablesOrWatchersModified));
+        }
+
+        Watchers.Clear();
+        if (copy.Watchers is not null)
+        {
+            foreach (var w in copy.Watchers)
+                Watchers.Add(new WatcherItemViewModel(w, _screenTools, () => GetLibraryMacros?.Invoke() ?? Array.Empty<Macro>(), _id, OnVariablesOrWatchersModified));
+        }
+
+        PendingSuggestions.Clear();
+        RaiseSelfHealChanged();
+
         ReplaceSteps(copy.Steps);
 
         IsDirty = false;
@@ -1572,6 +1936,10 @@ public sealed class EditorViewModel : ObservableObject
         _history.Clear();
         RaiseHistoryChanged();
         ResetViewState();
+        Variables.Clear();
+        Watchers.Clear();
+        PendingSuggestions.Clear();
+        RaiseSelfHealChanged();
         ReplaceSteps(Array.Empty<MacroStep>());
         Issues.Clear();
         ErrorCount = 0;
@@ -1629,6 +1997,8 @@ public sealed class EditorViewModel : ObservableObject
         HumanizePlayback = _humanize,
         ClickJitterPx = _clickJitterPx,
         DelayJitterPercent = _delayJitterPercent,
+        Variables = Variables.Count == 0 ? null : Variables.Select(v => v.Model).ToList(),
+        Watchers = Watchers.Count == 0 ? null : Watchers.Select(w => w.Model).ToList(),
     };
 
     public async Task<bool> SaveAsync()
@@ -2040,7 +2410,14 @@ public sealed class EditorViewModel : ObservableObject
     {
         if (!HasMacro) return;
 
-        var issues = MacroValidator.Validate(BuildMacro(), _screenBounds);
+        var built = BuildMacro();
+        var issues = MacroValidator.Validate(built, _screenBounds);
+        if (GetLibraryMacros?.Invoke() is { } libraryMacros)
+        {
+            var graphIssues = MacroValidator.ValidateCallGraph(built, libraryMacros);
+            if (graphIssues.Count > 0)
+                issues = issues.Concat(graphIssues).ToList();
+        }
 
         Issues.Clear();
         foreach (var issue in issues.OrderByDescending(i => i.Severity).ThenBy(i => i.StepIndex ?? -1))

@@ -1,4 +1,4 @@
-﻿using System.Windows;
+using System.Windows;
 using System.Windows.Threading;
 using SmartMacro.Core.Logging;
 using SmartMacro.Core.Models;
@@ -76,22 +76,27 @@ public partial class App : Application
             _log.Warning("High-resolution timer isn't available on this Windows version; playback timing falls back to 1 ms steps.");
         var screenCapture = new GdiScreenCapture();
         var screenInfo = new ScreenInfoProvider(); // monitors + app windows for "where to look"
+        var uiAutomation = new Services.Automation.UiAutomationService();
         var automation = new AutomationServices(
             // Playback captures hide the target-lock reticle first where Windows can't leave it out of captures.
-            new PlaybackEngine(new Win32InputSimulator(_log), _playbackClock, ocr, new OverlayAwareScreenCapture(screenCapture), screenInfo),
-            new WindowsInputRecorder(),
+            new PlaybackEngine(new Win32InputSimulator(_log), _playbackClock, ocr, new OverlayAwareScreenCapture(screenCapture), screenInfo, uiAutomation)
+            {
+                Clipboard = new WpfClipboardReader(),
+            },
+            new WindowsInputRecorder { UiLocator = uiAutomation, OcrService = ocr },
             new RawInputRecorder(),
-            new SmartInputRecorder(),
+            new SmartInputRecorder { UiLocator = uiAutomation, OcrService = ocr },
             new EmergencyStopWatcher(),
             _runHost,
             ocr,
             new FindTextTools(window, ocr, Path.Combine(paths.LogsDirectory, "last-ocr-test.png"), screenInfo),
-            new VisionTools(window, screenCapture, paths.LogsDirectory, screenInfo, ocr));
+            new VisionTools(window, screenCapture, paths.LogsDirectory, screenInfo, ocr, uiAutomation));
 
         var mainViewModel = new MainViewModel(repository, settingsStore, _log, dialogs, screenInfo, paths, Dispatcher, automation);
         viewModel = mainViewModel;
         _mainViewModel = mainViewModel;
 
+        ThemeManager.Apply(mainViewModel.CurrentSettings);
         window.DataContext = mainViewModel;
         MainWindow = window;
         window.Show();
@@ -109,6 +114,7 @@ public partial class App : Application
         };
         mainViewModel.SettingsApplied += (_, settings) =>
         {
+            ThemeManager.Apply(settings);
             // "🎥 Show overlays in OBS / Discord": re-applies the capture rule to every open overlay right away.
             Services.Vision.OverlayCaptureService.AllowObsCapture = settings.ShowOverlaysInObsAndRecording;
             var failed = _hotkeys.Apply(settings);

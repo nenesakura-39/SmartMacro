@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Runtime.InteropServices;
 using SmartMacro.Core.Ocr;
+using SmartMacro.Core.Vision;
 using SmartMacro.Services.Input;
 using Windows.Graphics.Imaging;
 using Windows.Media.Ocr;
@@ -101,6 +102,52 @@ public sealed class WindowsOcrService : IOcrService
         }
 
         return new OcrReadResult(requested, lines);
+    }
+
+    /// <summary>
+    /// Runs Windows OCR directly on an already-captured <see cref="ScreenFrame"/> in memory (no second screen capture),
+    /// returning word boxes mapped to <paramref name="frame"/>'s screen coordinates. Used off-thread by Intent Recording
+    /// to read button/menu labels as they looked right before the click landed.
+    /// </summary>
+    public async Task<OcrReadResult> ReadImageAsync(ScreenFrame frame, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(frame);
+        var engine = _engine ?? throw new OcrUnavailableException(StatusText);
+        var area = frame.Bounds;
+        if (area.IsEmpty || frame.Image.Width <= 0 || frame.Image.Height <= 0)
+            return new OcrReadResult(area, Array.Empty<OcrLineBox>());
+
+        var pixels = frame.Image.Pixels;
+        var scale = frame.Image.Width < SmallAreaWidth || frame.Image.Height < SmallAreaHeight ? UpscaleFactor : 1;
+        var width = frame.Image.Width * scale;
+        var height = frame.Image.Height * scale;
+        if (scale > 1) pixels = Upscale(pixels, frame.Image.Width, frame.Image.Height, scale);
+
+        var maxTile = (int)Math.Min(OcrEngine.MaxImageDimension, 4000u);
+        var lines = new List<OcrLineBox>();
+        foreach (var tile in Tiles(width, height, maxTile))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var tileBytes = CopyTile(pixels, width, tile);
+            using var bitmap = SoftwareBitmap.CreateCopyFromBuffer(
+                CryptographicBuffer.CreateFromByteArray(tileBytes),
+                BitmapPixelFormat.Bgra8, tile.Width, tile.Height, BitmapAlphaMode.Ignore);
+
+            var result = await engine.RecognizeAsync(bitmap);
+            foreach (var line in result.Lines)
+            {
+                var words = line.Words
+                    .Select(w => new OcrWordBox(w.Text, new ScreenRect(
+                        area.X + (int)Math.Round((tile.X + w.BoundingRect.X) / scale),
+                        area.Y + (int)Math.Round((tile.Y + w.BoundingRect.Y) / scale),
+                        Math.Max(1, (int)Math.Round(w.BoundingRect.Width / scale)),
+                        Math.Max(1, (int)Math.Round(w.BoundingRect.Height / scale)))))
+                    .ToList();
+                if (words.Count > 0) lines.Add(new OcrLineBox(words));
+            }
+        }
+
+        return new OcrReadResult(area, lines);
     }
 
     /// <summary>

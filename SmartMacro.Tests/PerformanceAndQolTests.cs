@@ -1636,7 +1636,7 @@ public class BlueprintTests
             Assert.NotEqual(MacroBlueprints.Build(info.Blueprint)[0].Id, steps[0].Id); // new objects every time
         }
 
-        Assert.Equal(4, MacroBlueprints.All.Count);
+        Assert.Equal(7, MacroBlueprints.All.Count);
     }
 
     [Fact]
@@ -1668,7 +1668,7 @@ public class BlueprintTests
     public void Blueprints_and_Test_Step_are_in_the_command_palette()
     {
         var blueprints = StudioCommandCatalog.Filter("blueprint");
-        Assert.Equal(4, blueprints.Count);
+        Assert.Equal(MacroBlueprints.All.Count, blueprints.Count);
         Assert.All(blueprints, c => Assert.Equal(StudioCommandKind.AddBlueprint, c.Kind));
         Assert.Equal(MacroBlueprints.All.Select(b => (MacroBlueprint?)b.Blueprint), blueprints.Select(c => c.Blueprint));
 

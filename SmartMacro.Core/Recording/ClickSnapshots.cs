@@ -1,21 +1,24 @@
 using SmartMacro.Core.Models;
 using SmartMacro.Core.Ocr;
+using SmartMacro.Core.Targeting;
 using SmartMacro.Core.Vision;
 
 namespace SmartMacro.Core.Recording;
 
 /// <summary>
 /// Smart Click Snapshot: a small picture of what was under the cursor when a button went down during recording, plus
-/// where in that picture the click was. <see cref="Png"/> is a normal PNG file (see <see cref="PngCodec"/>).
+/// where in that picture the click was, and an optional off-thread <see cref="TargetFingerprint"/> (Intent Recording).
+/// <see cref="Png"/> is a normal PNG file (see <see cref="PngCodec"/>).
 /// A snapshot made from raw pixels (<see cref="FromPixels"/>) encodes its PNG only when it's first needed (or in the
 /// background via <see cref="EncodeInBackground"/>), so the recorder's mouse hook only pays for the tiny screen copy.
-/// Thread-safe: the PNG is encoded exactly once.
+/// Thread-safe: the PNG is encoded exactly once, and <see cref="Fingerprint"/> can be populated asynchronously.
 /// </summary>
 public sealed class ClickTargetSnapshot
 {
     private readonly object _gate = new();
     private byte[]? _png;
     private BgraImage? _pixels;
+    private TargetFingerprint? _fingerprint;
 
     /// <summary>A snapshot from an already encoded PNG.</summary>
     public ClickTargetSnapshot(byte[] png, int anchorX, int anchorY)
@@ -36,10 +39,24 @@ public sealed class ClickTargetSnapshot
     public static ClickTargetSnapshot FromPixels(BgraImage pixels, int anchorX, int anchorY) =>
         new(pixels ?? throw new ArgumentNullException(nameof(pixels)), anchorX, anchorY);
 
+    /// <summary>
+    /// Creates an intent-only placeholder (no PNG thumbnail stored, e.g. when thumbnail capture is disabled for privacy
+    /// while Intent Recording is enabled).
+    /// </summary>
+    public static ClickTargetSnapshot FromIntentOnly(TargetFingerprint? fingerprint = null) =>
+        new(Array.Empty<byte>(), 0, 0) { Fingerprint = fingerprint };
+
     /// <summary>Where in the picture the click was (px from its top-left corner).</summary>
     public int AnchorX { get; }
 
     public int AnchorY { get; }
+
+    /// <summary>Optional multi-signal Intent fingerprint populated off the hook thread.</summary>
+    public TargetFingerprint? Fingerprint
+    {
+        get { lock (_gate) return _fingerprint; }
+        set { lock (_gate) _fingerprint = value; }
+    }
 
     /// <summary>True once the PNG exists (always for a snapshot made from a PNG).</summary>
     public bool IsEncoded
@@ -126,14 +143,27 @@ public static class ClickSnapshots
         return ClickTargetSnapshot.FromPixels(captured, anchorX, anchorY); // PNG encoded later, off the hook thread
     }
 
-    /// <summary>Puts a recorded snapshot on a click step (nothing happens when there is none or it can't be encoded).</summary>
+    /// <summary>Puts a recorded snapshot and/or Intent fingerprint on a click step.</summary>
     public static void Attach(MouseClickStep step, ClickTargetSnapshot? snapshot)
     {
         ArgumentNullException.ThrowIfNull(step);
-        if (TryBase64(snapshot) is not { } base64) return;
-        step.TargetThumbnailBase64 = base64;
-        step.TargetAnchorX = snapshot!.AnchorX;
-        step.TargetAnchorY = snapshot.AnchorY;
+        if (snapshot is null) return;
+
+        if (TryBase64(snapshot) is { } base64)
+        {
+            step.TargetThumbnailBase64 = base64;
+            step.TargetAnchorX = snapshot.AnchorX;
+            step.TargetAnchorY = snapshot.AnchorY;
+        }
+
+        if (snapshot.Fingerprint is { HasAnySignal: true } fp)
+        {
+            step.Target = fp.Clone();
+            if (!step.UseCurrentPosition && !step.UseLastFoundText && step.Action == MouseClickAction.Click)
+            {
+                step.UseSmartIntent = true;
+            }
+        }
     }
 
     /// <summary>The snapshot as Base64 PNG text, or null (none / empty / couldn't be encoded).</summary>
@@ -151,17 +181,24 @@ public static class ClickSnapshots
         }
     }
 
-    /// <summary>A snapshot back from a stored Base64 thumbnail (recorded-input clicks), or null when it's damaged.</summary>
-    public static ClickTargetSnapshot? FromBase64(string? base64, int anchorX, int anchorY)
+    /// <summary>A snapshot back from a stored Base64 thumbnail (recorded-input clicks) and/or Intent fingerprint.</summary>
+    public static ClickTargetSnapshot? FromBase64(string? base64, int anchorX, int anchorY, TargetFingerprint? fingerprint = null)
     {
-        if (string.IsNullOrEmpty(base64)) return null;
+        if (string.IsNullOrEmpty(base64))
+        {
+            return fingerprint is { HasAnySignal: true } ? ClickTargetSnapshot.FromIntentOnly(fingerprint.Clone()) : null;
+        }
+
         try
         {
-            return new ClickTargetSnapshot(Convert.FromBase64String(base64), anchorX, anchorY);
+            return new ClickTargetSnapshot(Convert.FromBase64String(base64), anchorX, anchorY)
+            {
+                Fingerprint = fingerprint?.Clone(),
+            };
         }
         catch (FormatException)
         {
-            return null;
+            return fingerprint is { HasAnySignal: true } ? ClickTargetSnapshot.FromIntentOnly(fingerprint.Clone()) : null;
         }
     }
 }

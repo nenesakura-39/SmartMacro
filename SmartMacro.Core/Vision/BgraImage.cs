@@ -89,6 +89,140 @@ public sealed class BgraImage
 
     public BgraImage Clone() => new(Width, Height, (byte[])Pixels.Clone());
 
+    /// <summary>
+    /// Resizes this image to <paramref name="newWidth"/> × <paramref name="newHeight"/> using separable resampling:
+    /// exact continuous area averaging when shrinking (so thin 1-pixel strokes never vanish between samples) and
+    /// bilinear interpolation when enlarging. Alpha is written as 255.
+    /// </summary>
+    public BgraImage Resize(int newWidth, int newHeight)
+    {
+        if (newWidth <= 0) throw new ArgumentOutOfRangeException(nameof(newWidth), "The resized width must be at least 1.");
+        if (newHeight <= 0) throw new ArgumentOutOfRangeException(nameof(newHeight), "The resized height must be at least 1.");
+        if (newWidth == Width && newHeight == Height) return Clone();
+
+        var xKernel = BuildResampleKernel(Width, newWidth);
+        var yKernel = BuildResampleKernel(Height, newHeight);
+
+        // Pass 1: horizontal resample (Width -> newWidth) for every source row.
+        var tempB = new float[newWidth * Height];
+        var tempG = new float[newWidth * Height];
+        var tempR = new float[newWidth * Height];
+        var src = Pixels;
+        var srcStride = Width * 4;
+
+        for (var y = 0; y < Height; y++)
+        {
+            var srcRow = y * srcStride;
+            var dstRow = y * newWidth;
+            for (var x = 0; x < newWidth; x++)
+            {
+                var (start, weights) = xKernel[x];
+                float b = 0, g = 0, r = 0;
+                var idx = srcRow + start * 4;
+                for (var k = 0; k < weights.Length; k++, idx += 4)
+                {
+                    var w = weights[k];
+                    b += src[idx] * w;
+                    g += src[idx + 1] * w;
+                    r += src[idx + 2] * w;
+                }
+
+                tempB[dstRow + x] = b;
+                tempG[dstRow + x] = g;
+                tempR[dstRow + x] = r;
+            }
+        }
+
+        // Pass 2: vertical resample (Height -> newHeight) into the destination BGRA buffer.
+        var dst = new byte[checked(newWidth * newHeight * 4)];
+        for (var y = 0; y < newHeight; y++)
+        {
+            var (start, weights) = yKernel[y];
+            var dstIdx = y * newWidth * 4;
+            for (var x = 0; x < newWidth; x++, dstIdx += 4)
+            {
+                float b = 0, g = 0, r = 0;
+                for (var k = 0; k < weights.Length; k++)
+                {
+                    var w = weights[k];
+                    var tIdx = (start + k) * newWidth + x;
+                    b += tempB[tIdx] * w;
+                    g += tempG[tIdx] * w;
+                    r += tempR[tIdx] * w;
+                }
+
+                dst[dstIdx] = ClampToByte(b);
+                dst[dstIdx + 1] = ClampToByte(g);
+                dst[dstIdx + 2] = ClampToByte(r);
+                dst[dstIdx + 3] = 255;
+            }
+        }
+
+        return new BgraImage(newWidth, newHeight, dst);
+    }
+
+    private static byte ClampToByte(float v) => (byte)Math.Clamp((int)MathF.Round(v), 0, 255);
+
+    private static (int Start, float[] Weights)[] BuildResampleKernel(int srcLength, int dstLength)
+    {
+        var kernel = new (int Start, float[] Weights)[dstLength];
+        if (dstLength < srcLength)
+        {
+            // Shrinking: integrate continuously over [i * scale, (i + 1) * scale] so every source pixel contributes.
+            var scale = (double)srcLength / dstLength;
+            for (var i = 0; i < dstLength; i++)
+            {
+                var u0 = i * scale;
+                var u1 = (i + 1) * scale;
+                var first = Math.Clamp((int)Math.Floor(u0), 0, srcLength - 1);
+                var last = Math.Clamp((int)Math.Ceiling(u1) - 1, first, srcLength - 1);
+                var count = last - first + 1;
+                var weights = new float[count];
+                double total = 0;
+                for (var k = 0; k < count; k++)
+                {
+                    var srcIdx = first + k;
+                    var overlap = Math.Min(u1, srcIdx + 1.0) - Math.Max(u0, srcIdx);
+                    if (overlap > 0)
+                    {
+                        weights[k] = (float)overlap;
+                        total += overlap;
+                    }
+                }
+
+                if (total > 0)
+                {
+                    var inv = (float)(1.0 / total);
+                    for (var k = 0; k < count; k++) weights[k] *= inv;
+                }
+                else
+                {
+                    weights[0] = 1f;
+                }
+
+                kernel[i] = (first, weights);
+            }
+        }
+        else
+        {
+            // Enlarging (or 1:1): pixel-center aligned linear interpolation.
+            var scale = (double)srcLength / dstLength;
+            for (var i = 0; i < dstLength; i++)
+            {
+                var u = Math.Clamp((i + 0.5) * scale - 0.5, 0.0, srcLength - 1.0);
+                var k0 = (int)Math.Floor(u);
+                var k1 = Math.Min(k0 + 1, srcLength - 1);
+                var frac = (float)(u - k0);
+                if (k0 == k1 || frac <= 1e-6f)
+                    kernel[i] = (k0, new[] { 1f });
+                else
+                    kernel[i] = (k0, new[] { 1f - frac, frac });
+            }
+        }
+
+        return kernel;
+    }
+
     private void SetPixelClipped(int x, int y, RgbColor color)
     {
         if (x >= 0 && y >= 0 && x < Width && y < Height) SetPixel(x, y, color);

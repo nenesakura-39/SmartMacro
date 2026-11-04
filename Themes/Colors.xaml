@@ -48,8 +48,12 @@
     <Color x:Key="RecordedBadgeColor">#1E293B</Color>
     <Color x:Key="UtilityAccentColor">#EC4899</Color>   <!-- Focus window / Take screenshot (UTILITY & GAME) -->
     <Color x:Key="UtilityBadgeColor">#831843</Color>
+    <Color x:Key="MemoryAccentColor">#14B8A6</Color>    <!-- Set variable / Checkpoint / Call macro (MEMORY & BRAIN) -->
+    <Color x:Key="MemoryBadgeColor">#115E59</Color>
 
     <!-- ============ Brushes ============ -->
+    <SolidColorBrush x:Key="WindowBackdropBrush" Color="#E60B0F17" />
+    <SolidColorBrush x:Key="TitleBarBrush" Color="#CC090D14" />
     <SolidColorBrush x:Key="BackgroundBrush" Color="{StaticResource BackgroundColor}" />
     <SolidColorBrush x:Key="SidebarBrush" Color="{StaticResource SidebarColor}" />
     <SolidColorBrush x:Key="SurfaceBrush" Color="{StaticResource SurfaceColor}" />
@@ -118,6 +122,12 @@
     <SolidColorBrush x:Key="UtilityAccentBrush" Color="{StaticResource UtilityAccentColor}" />
     <SolidColorBrush x:Key="UtilityBadgeBrush" Color="{StaticResource UtilityBadgeColor}" />
     <SolidColorBrush x:Key="UtilitySoftBrush" Color="#26EC4899" />
+    <SolidColorBrush x:Key="MemoryAccentBrush" Color="{StaticResource MemoryAccentColor}" />
+    <SolidColorBrush x:Key="MemoryBadgeBrush" Color="{StaticResource MemoryBadgeColor}" />
+    <SolidColorBrush x:Key="MemorySoftBrush" Color="#2614B8A6" />
+
+    <!-- Monospace font for coordinates, telemetry, variables, and logs -->
+    <FontFamily x:Key="MonoFont">Cascadia Code, Cascadia Mono, Consolas</FontFamily>
 
     <!-- Fallback chain: any character the icon fonts don't have (▶, ✕, ↑ …) falls back to Segoe UI Symbol / Segoe UI
          instead of rendering as an empty ▯ box. -->

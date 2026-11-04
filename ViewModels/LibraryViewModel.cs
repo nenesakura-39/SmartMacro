@@ -1,7 +1,9 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Diagnostics;
+using System.Windows;
 using System.Windows.Data;
+using SmartMacro.Converters;
 using SmartMacro.Core.Logging;
 using SmartMacro.Core.Models;
 using SmartMacro.Core.Storage;
@@ -29,6 +31,7 @@ public sealed class MacroListItemViewModel : ObservableObject
     public string Description => string.IsNullOrWhiteSpace(_macro.Description) ? "No description" : _macro.Description!;
     public bool HasDescription => !string.IsNullOrWhiteSpace(_macro.Description);
     public int StepCount => _macro.Steps.Count;
+    public bool HasSteps => StepCount > 0;
     public string StepCountText => StepCount == 1 ? "1 step" : $"{StepCount:N0} steps";
     public string ModifiedText => _macro.ModifiedAt == default ? "-" : _macro.ModifiedAt.ToLocalTime().ToString("MMM d, yyyy  h:mm tt");
     public string CreatedText => _macro.CreatedAt == default ? "-" : _macro.CreatedAt.ToLocalTime().ToString("MMM d, yyyy  h:mm tt");
@@ -41,8 +44,21 @@ public sealed class MacroListItemViewModel : ObservableObject
     public bool UsesOcr { get; private set; }
     public bool UsesFeedback { get; private set; }
     public bool UsesLogic { get; private set; }
+    public bool UsesMemory { get; private set; }
+    public bool UsesIntent { get; private set; }
     public bool UsesHumanize => _macro.HumanizePlayback;
     public bool UsesTargetWindow => _macro.ScaleCoordinatesToWindow || !string.IsNullOrWhiteSpace(_macro.TargetWindowTitle);
+
+    public string? BrainBadgeText { get; private set; }
+    public bool HasBrainBadge => !string.IsNullOrEmpty(BrainBadgeText);
+
+    // Proportional Star weights for the Workflow Fingerprint Strip on the card
+    public GridLength InputWeight { get; private set; } = new(0, GridUnitType.Star);
+    public GridLength VisionWeight { get; private set; } = new(0, GridUnitType.Star);
+    public GridLength LogicWeight { get; private set; } = new(0, GridUnitType.Star);
+    public GridLength MemoryWeight { get; private set; } = new(0, GridUnitType.Star);
+    public GridLength FeedbackWeight { get; private set; } = new(0, GridUnitType.Star);
+    public GridLength UtilityWeight { get; private set; } = new(0, GridUnitType.Star);
 
     /// <summary>E.g. "just now", "5 min ago", "yesterday", or the date.</summary>
     public string ModifiedAgoText
@@ -79,6 +95,41 @@ public sealed class MacroListItemViewModel : ObservableObject
         UsesOcr = searches.Any(s => s is FindTextStep);
         UsesFeedback = steps.Any(s => s is FeedbackLoopStep);
         UsesLogic = steps.Any(WorkflowSteps.IsBlockStep);
+        UsesMemory = steps.Any(s => s is SetVariableStep or CheckpointStep or CallMacroStep)
+                     || (macro.Variables?.Count > 0) || (macro.Watchers?.Count > 0);
+        UsesIntent = steps.OfType<MouseClickStep>().Any(c => c.UseSmartIntent && c.HasTargetIntent);
+
+        var varCount = macro.Variables?.Count ?? 0;
+        var watcherCount = macro.Watchers?.Count ?? 0;
+        BrainBadgeText = (varCount, watcherCount) switch
+        {
+            (> 0, > 0) => $"🧠 {varCount} var{(varCount == 1 ? "" : "s")} · 🛡 {watcherCount} watcher{(watcherCount == 1 ? "" : "s")}",
+            (> 0, 0) => $"🧠 {varCount} var{(varCount == 1 ? "" : "s")}",
+            (0, > 0) => $"🛡 {watcherCount} watcher{(watcherCount == 1 ? "" : "s")}",
+            _ => null,
+        };
+
+        int inputN = 0, visionN = 0, logicN = 0, memoryN = 0, feedbackN = 0, utilityN = 0;
+        foreach (var step in steps)
+        {
+            switch (StepCategories.Of(step.Kind))
+            {
+                case StepCategories.Input or StepCategories.Timing or StepCategories.Recorded: inputN++; break;
+                case StepCategories.Vision: visionN++; break;
+                case StepCategories.Logic: logicN++; break;
+                case StepCategories.Memory: memoryN++; break;
+                case StepCategories.Feedback: feedbackN++; break;
+                case StepCategories.Utility: utilityN++; break;
+            }
+        }
+
+        InputWeight = new GridLength(inputN, GridUnitType.Star);
+        VisionWeight = new GridLength(visionN, GridUnitType.Star);
+        LogicWeight = new GridLength(logicN, GridUnitType.Star);
+        MemoryWeight = new GridLength(memoryN, GridUnitType.Star);
+        FeedbackWeight = new GridLength(feedbackN, GridUnitType.Star);
+        UtilityWeight = new GridLength(utilityN, GridUnitType.Star);
+
         OnPropertyChanged(string.Empty);
     }
 
@@ -95,7 +146,9 @@ public sealed class MacroListItemViewModel : ObservableObject
             "ocr" or "text" => UsesOcr,
             "feedback" or "loop" or "minigame" => UsesFeedback,
             "input" or "click" or "mouse" or "key" => UsesInput,
-            "logic" or "if" or "repeat" => UsesLogic,
+            "logic" or "if" or "repeat" => UsesLogic || UsesMemory,
+            "brain" or "memory" or "variable" or "variables" or "watcher" or "checkpoint" => UsesMemory,
+            "intent" or "smart" => UsesIntent,
             "error" or "errors" or "problem" or "problems" => HasErrors,
             _ => false,
         };
@@ -440,13 +493,13 @@ public sealed class LibraryViewModel : ObservableObject
                 }
 
                 var json = await File.ReadAllTextAsync(file);
-                if (!MacroFileFormat.TryParse(json, out var macro, out var error))
+                if (!MacroFileFormat.TryParseBundle(json, out var macro, out var subMacros, out var error))
                 {
                     skipped.Add($"{name}: {error}");
                     continue;
                 }
 
-                var prepared = MacroFileFormat.PrepareForImport(macro!, Names);
+                var (prepared, preparedSubs) = MacroFileFormat.PrepareBundleForImport(macro!, subMacros, Names);
                 var issues = MacroValidator.Validate(prepared);
                 if (issues.HasErrors())
                 {
@@ -455,11 +508,29 @@ public sealed class LibraryViewModel : ObservableObject
                     continue;
                 }
 
+                var subError = preparedSubs
+                    .Select(s => (Sub: s, Issues: MacroValidator.Validate(s)))
+                    .FirstOrDefault(x => x.Issues.HasErrors());
+                if (subError.Sub is not null)
+                {
+                    var first = subError.Issues.First(i => i.Severity == IssueSeverity.Error).DisplayText;
+                    skipped.Add($"{name}: bundled sub-macro \"{subError.Sub.Name}\" has problems ({first}).");
+                    continue;
+                }
+
+                foreach (var sub in preparedSubs)
+                {
+                    await _repository.SaveAsync(sub);
+                    Upsert(MacroJson.Clone(sub));
+                }
+
                 await _repository.SaveAsync(prepared);
                 SearchText = string.Empty;
                 Upsert(MacroJson.Clone(prepared));
                 last = Items.FirstOrDefault(i => i.Id == prepared.Id);
-                imported.Add(prepared.Name);
+                imported.Add(preparedSubs.Count == 0
+                    ? prepared.Name
+                    : $"{prepared.Name} (+{preparedSubs.Count} sub-macro{(preparedSubs.Count == 1 ? "" : "s")})");
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
@@ -495,8 +566,12 @@ public sealed class LibraryViewModel : ObservableObject
 
         try
         {
-            await AtomicFile.WriteAllTextAsync(path, MacroFileFormat.Serialize(MacroJson.Clone(item.Macro)));
-            _setStatus($"Exported \"{item.Name}\" to {path}. It's one self-contained file (pictures included): send it to a friend and they can import it.", StatusKind.Success);
+            var libraryMacros = Items.Select(i => i.Macro).ToList();
+            var clone = MacroJson.Clone(item.Macro);
+            var bundledCount = MacroFileFormat.CollectReferencedSubMacros(clone, libraryMacros).Count;
+            await AtomicFile.WriteAllTextAsync(path, MacroFileFormat.Serialize(clone, libraryMacros));
+            var bundleNote = bundledCount > 0 ? $" ({bundledCount} referenced sub-macro{(bundledCount == 1 ? "" : "s")} bundled automatically)" : "";
+            _setStatus($"Exported \"{item.Name}\"{bundleNote} to {path}. It's one self-contained file (pictures and sub-macros included).", StatusKind.Success);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {

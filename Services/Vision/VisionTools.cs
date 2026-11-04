@@ -7,6 +7,7 @@ using SmartMacro.Core.Models;
 using SmartMacro.Core.Ocr;
 using SmartMacro.Core.Playback;
 using SmartMacro.Core.Storage;
+using SmartMacro.Core.Targeting;
 using SmartMacro.Core.Vision;
 using SmartMacro.Core.Workflow;
 using SmartMacro.Services.Input;
@@ -61,6 +62,13 @@ public interface IVisionTools
     /// ("✓ Found at (512, 340) — 98% match in 3 ms" / "✗ Not found within 120 px …"). Nothing is clicked.
     /// </summary>
     Task<string> TestSmartAimAsync(MouseClickStep step);
+
+    /// <summary>
+    /// "🧭 Locate Target" (v1.1): tests all 5 Smart Intent strategies (UI Automation → OCR Text → Image Snapshot →
+    /// Window-Relative → Coordinates), flashes the winning spot on screen, and returns a per-strategy diagnostic report.
+    /// Nothing is clicked.
+    /// </summary>
+    Task<string> LocateTargetAsync(MouseClickStep step) => TestSmartAimAsync(step);
 
     /// <summary>Looks for the step's colour once, shows a preview with the patches, and describes the result.</summary>
     Task<string> TestColorAsync(FindColorStep step);
@@ -135,6 +143,7 @@ public sealed class VisionTools : IVisionTools
     private readonly string _logsDirectory;
     private readonly IScreenLayout? _layout;
     private readonly IOcrService? _ocr;
+    private readonly IUiElementLocator? _uiLocator;
     private Window? _preview;
     private ScreenPoint? _lastMatch;
 
@@ -143,14 +152,22 @@ public sealed class VisionTools : IVisionTools
     public void ShowSpot(ScreenPoint point) => NativeMethods.SetCursorPos(point.X, point.Y);
 
     /// <param name="layout">Monitors and windows, so "Test detection now" searches the same place the step will.</param>
-    /// <param name="ocr">Text recognition, so "Pick offset from screen" can also find a text target (optional).</param>
-    public VisionTools(Window mainWindow, GdiScreenCapture capture, string logsDirectory, IScreenLayout? layout = null, IOcrService? ocr = null)
+    /// <param name="ocr">Text recognition, so "Pick offset from screen" and Smart Intent can find text targets (optional).</param>
+    /// <param name="uiLocator">Windows UI Automation locator for Smart Intent "Locate Target" diagnostics (optional).</param>
+    public VisionTools(
+        Window mainWindow,
+        GdiScreenCapture capture,
+        string logsDirectory,
+        IScreenLayout? layout = null,
+        IOcrService? ocr = null,
+        IUiElementLocator? uiLocator = null)
     {
         _mainWindow = mainWindow;
         _capture = capture;
         _logsDirectory = logsDirectory;
         _layout = layout;
         _ocr = ocr;
+        _uiLocator = uiLocator;
     }
 
     public Task<OffsetPick?> PickOffsetAsync(ScreenSearchStep? reference) => WhileHiddenAsync(async () =>
@@ -333,6 +350,60 @@ public sealed class VisionTools : IVisionTools
         }
     }
 
+    public async Task<string> LocateTargetAsync(MouseClickStep step)
+    {
+        ArgumentNullException.ThrowIfNull(step);
+        _lastMatch = null;
+        ClosePreview();
+
+        try
+        {
+            var resolver = new TargetResolver(_uiLocator, _ocr, _capture, _layout);
+            var res = await WhileInvisibleAsync(() => Task.Run(() => resolver.DiagnoseAllAsync(step)));
+
+            if (res.WinningStrategy != LocatorStrategyKind.Coordinates)
+            {
+                _lastMatch = new ScreenPoint(res.X, res.Y);
+                try
+                {
+                    var box = res.Bounds.IsEmpty ? new ScreenRect(res.X - 18, res.Y - 18, 36, 36) : res.Bounds;
+                    FlashTestReticle(box, res.Confidence, res.TotalElapsedMs, nearMiss: false,
+                        $"🧭 {DescribeStrategy(res.WinningStrategy)} · ({res.X}, {res.Y})");
+                }
+                catch (Exception)
+                {
+                    // Purely visual: reticle failure never alters the diagnostic output.
+                }
+            }
+
+            var sb = new System.Text.StringBuilder();
+            sb.AppendLine($"🧭 Winner: {DescribeStrategy(res.WinningStrategy)} → ({res.X}, {res.Y}) in {res.TotalElapsedMs:0.#} ms");
+            for (var i = 0; i < res.Diagnostics.Count; i++)
+            {
+                var d = res.Diagnostics[i];
+                var mark = d.Succeeded ? "✓" : "✗";
+                sb.Append($"{i + 1}. {DescribeStrategy(d.Strategy)}: {mark} {d.Summary}");
+                if (d.ElapsedMs >= 0.5) sb.Append($" ({d.ElapsedMs:0.#} ms)");
+                if (i + 1 < res.Diagnostics.Count) sb.AppendLine();
+            }
+
+            return sb.ToString();
+        }
+        catch (Exception ex)
+        {
+            return $"✗ Locate Target failed: {ex.Message}";
+        }
+    }
+
+    private static string DescribeStrategy(LocatorStrategyKind strategy) => strategy switch
+    {
+        LocatorStrategyKind.UiAutomation => "UI Automation",
+        LocatorStrategyKind.OcrText => "OCR Text",
+        LocatorStrategyKind.ImageSnapshot => "Image Snapshot",
+        LocatorStrategyKind.WindowRelative => "Window-Relative",
+        _ => "Coordinates",
+    };
+
     // "🧪 Test Step": one reusable reticle window for the test flashes (green = found, amber = near miss).
     private TargetLockOverlay? _testReticle;
 
@@ -410,11 +481,17 @@ public sealed class VisionTools : IVisionTools
             return $"Test failed: {ex.Message}";
         }
 
-        if (frame.Image.Width < template.Width || frame.Image.Height < template.Height)
-            return $"The search area on screen ({frame.Bounds.Width}×{frame.Bounds.Height}) is smaller than the image ({template.Width}×{template.Height}). Make the area bigger.";
-
         // Same settings as a playing Find image step / image condition (one shared builder).
         var options = ScreenProbes.ImageMatchOptions(step);
+        var minRequiredWidth = options.AllowMultiScale
+            ? Math.Max(TemplateMatcher.MinInnerSize, (int)Math.Round(template.Width * options.MinScale))
+            : template.Width;
+        var minRequiredHeight = options.AllowMultiScale
+            ? Math.Max(TemplateMatcher.MinInnerSize, (int)Math.Round(template.Height * options.MinScale))
+            : template.Height;
+        if (frame.Image.Width < minRequiredWidth || frame.Image.Height < minRequiredHeight)
+            return $"The search area on screen ({frame.Bounds.Width}×{frame.Bounds.Height}) is smaller than the image ({template.Width}×{template.Height}). Make the area bigger.";
+
         var watch = Stopwatch.StartNew();
         var result = await Task.Run(() => TemplateMatcher.Find(frame.Image, template, options));
         var searchTime = watch.Elapsed;
@@ -429,13 +506,14 @@ public sealed class VisionTools : IVisionTools
         if (result.Best is { } best)
         {
             var bounds = frame.ToScreen(best.Bounds);
+            var scaleNote = Math.Abs(best.MatchedScale - 1.0) >= 0.02 ? $" at {best.MatchedScale * 100:0}% scale" : "";
             var more = result.Matches.Count > 1
                 ? $" {result.Matches.Count} matches (green = the one a macro uses, orange = others): " +
                   string.Join(", ", result.Matches.Skip(1).Select(m => $"{m.Score:P0} at ({frame.ToScreen(m.Bounds).CenterX}, {frame.ToScreen(m.Bounds).CenterY})")) + "."
                 : "";
             _lastMatch = new ScreenPoint(bounds.CenterX, bounds.CenterY);
-            text = $"Matched at ({bounds.CenterX}, {bounds.CenterY}) — {best.Score:P0} confidence (needs {step.MinSimilarityPercent}%). Searched {where}.{more}";
-            ScreenHighlightOverlay.ShowResult(frame.Bounds, bounds, found: true, $"✓ {best.Score * 100:0}% Match");
+            text = $"Matched at ({bounds.CenterX}, {bounds.CenterY}){scaleNote} — {best.Score:P0} confidence (needs {step.MinSimilarityPercent}%). Searched {where}.{more}";
+            ScreenHighlightOverlay.ShowResult(frame.Bounds, bounds, found: true, $"✓ {best.Score * 100:0}% Match{scaleNote}");
         }
         else
         {
@@ -447,6 +525,8 @@ public sealed class VisionTools : IVisionTools
                 text += " If the right thing is on screen, lower the match accuracy a little (or capture the image again).";
             if (!step.MatchForeground && result.BestScore >= 0.5)
                 text += " If you can see the game through the button (a different background shows inside it), turn on \"Ignore background\".";
+            if (!step.AllowMultiScale)
+                text += " If display scaling or resolution changed since you captured it, turn on \"Match across display scales & sizes (75%–150%)\".";
         }
 
         text += " " + timing;

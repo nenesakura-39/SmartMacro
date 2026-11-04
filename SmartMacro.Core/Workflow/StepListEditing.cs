@@ -93,6 +93,12 @@ public static class StepListEditing
         var blocks = BlockStructure.Analyze(steps);
         var selected = steps[selectedIndex];
 
+        if (newKind == StepKind.Checkpoint)
+        {
+            var raw = InsertIndex(steps.Count, selectedIndex, position);
+            return InsertIndexAtTopLevel(steps, raw);
+        }
+
         if (newKind == StepKind.Else && selected is EndIfStep &&
             (position == InsertPosition.AfterSelected || blocks.StartOf(selectedIndex) >= 0))
             return selectedIndex;
@@ -102,6 +108,33 @@ public static class StepListEditing
             return selectedIndex + 1;
 
         return InsertIndex(steps.Count, selectedIndex, position);
+    }
+
+    /// <summary>
+    /// Advances <paramref name="index"/> past any enclosing <c>If</c> or <c>Repeat</c> blocks so a newly inserted
+    /// top-level step (such as <see cref="CheckpointStep"/>) always sits at block depth 0.
+    /// </summary>
+    public static int InsertIndexAtTopLevel(IReadOnlyList<MacroStep> steps, int index)
+    {
+        ArgumentNullException.ThrowIfNull(steps);
+        index = Math.Clamp(index, 0, steps.Count);
+        var depth = 0;
+        for (var i = 0; i <= steps.Count; i++)
+        {
+            if (i >= index && depth == 0) return i;
+            if (i == steps.Count) break;
+            switch (steps[i])
+            {
+                case IfStep or RepeatStep:
+                    depth++;
+                    break;
+                case EndIfStep or EndRepeatStep:
+                    depth = Math.Max(0, depth - 1);
+                    break;
+            }
+        }
+
+        return steps.Count;
     }
 
     /// <summary>

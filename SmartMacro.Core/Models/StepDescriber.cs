@@ -26,14 +26,15 @@ public static class StepDescriber
         StepKind.WaitForChange => "Wait for screen change",
         StepKind.FocusWindow => "Focus window",
         StepKind.Screenshot => "Take screenshot",
+        StepKind.SetVariable => "Set variable",
+        StepKind.Checkpoint => "Checkpoint",
+        StepKind.CallMacro => "Call sub-macro",
         _ => kind.ToString(),
     };
 
     public static string Describe(MacroStep step) => step switch
     {
-        DelayStep d => d.DurationMs >= 1000
-            ? $"Wait {d.DurationMs / 1000.0:0.###} s"
-            : $"Wait {d.DurationMs} ms",
+        DelayStep d => DescribeDelay(d),
         MouseMoveStep { UseRelativeDelta: true } r => $"Turn the mouse by ({r.DeltaX:+0;-0;0}, {r.DeltaY:+0;-0;0}) · relative (3D camera)",
         MouseMoveStep m => $"{DescribeMoveTarget(m)}{MotionSuffix(m.MoveStyle, m.MoveDurationMs)}",
         MouseClickStep c => DescribeClick(c),
@@ -41,7 +42,9 @@ public static class StepDescriber
         KeyPressStep k => $"{KeyVerb(k.Action)} {KeyCombo(k)}{Hold(k.Action == KeyAction.Press, k.HoldMs)}",
         TypeTextStep t => $"Type \"{Preview(t.Text)}\"",
         FindTextStep f => DescribeSearch(f, $"\"{Preview(f.Text)}\""),
-        FindImageStep i => DescribeSearch(i, i.TemplateWidth > 0 ? $"image ({i.TemplateWidth}×{i.TemplateHeight})" : "image (not captured yet)"),
+        FindImageStep i => DescribeSearch(i, i.TemplateWidth > 0
+            ? $"image ({i.TemplateWidth}×{i.TemplateHeight}{(i.AllowMultiScale ? ", multi-scale" : "")})"
+            : "image (not captured yet)"),
         FindColorStep c => DescribeSearch(c, $"color {c.Color} (±{c.Tolerance})"),
         InputSequenceStep q => DescribeSequence(q),
         IfStep i => $"If {DescribeCondition(i.Condition)}{ThenText(i)}",
@@ -53,8 +56,45 @@ public static class StepDescriber
         WaitForChangeStep w => DescribeWaitForChange(w),
         FocusWindowStep w => DescribeFocusWindow(w),
         ScreenshotStep s => DescribeScreenshot(s),
+        SetVariableStep v => DescribeSetVariable(v),
+        CheckpointStep cp => $"🏁 Checkpoint \"{Preview(cp.Name)}\"",
+        CallMacroStep call => DescribeCallMacro(call),
         _ => step.GetType().Name,
     };
+
+    private static string DescribeSetVariable(SetVariableStep v)
+    {
+        var name = string.IsNullOrWhiteSpace(v.VariableName) ? "(unnamed)" : $"{{{v.VariableName}}}";
+        var source = v.Source switch
+        {
+            VariableSourceKind.ScreenOcrNumber => $"screen number at ({v.RegionX}, {v.RegionY}) {v.RegionWidth}×{v.RegionHeight}",
+            VariableSourceKind.ScreenOcrText => $"screen text at ({v.RegionX}, {v.RegionY}) {v.RegionWidth}×{v.RegionHeight}",
+            VariableSourceKind.ClipboardText => "clipboard text",
+            VariableSourceKind.LastFoundX => "last found X",
+            VariableSourceKind.LastFoundY => "last found Y",
+            VariableSourceKind.LoopCounter => "loop counter",
+            VariableSourceKind.ElapsedSeconds => "elapsed seconds",
+            _ => $"\"{Preview(v.Value)}\"",
+        };
+
+        return v.Operation switch
+        {
+            VariableOperation.Add => $"Add {source} to {name}",
+            VariableOperation.Subtract => $"Subtract {source} from {name}",
+            VariableOperation.AppendText => $"Append {source} to {name}",
+            _ => $"Set {name} = {source}",
+        };
+    }
+
+    private static string DescribeCallMacro(CallMacroStep call)
+    {
+        var target = string.IsNullOrWhiteSpace(call.TargetMacroName) ? "(choose sub-macro)" : $"\"{Preview(call.TargetMacroName)}\"";
+        var parts = new List<string>();
+        if (call.Inputs is { Count: > 0 } ins) parts.Add($"{ins.Count} in");
+        if (call.Outputs is { Count: > 0 } outs) parts.Add($"{outs.Count} out");
+        var io = parts.Count > 0 ? $" ({string.Join(", ", parts)})" : "";
+        return $"Call sub-macro {target}{io}";
+    }
 
     /// <summary>"Wait up to 10 s for 1 % of (100, 200) 300×200 to change → click it".</summary>
     private static string DescribeWaitForChange(WaitForChangeStep w)
@@ -94,18 +134,42 @@ public static class StepDescriber
         return $"Save a screenshot of {what} as {Vision.ScreenshotFiles.CleanPrefix(s.FileNamePrefix)}_….png in {folder}";
     }
 
+    private static string DescribeDelay(DelayStep d)
+    {
+        static string FormatMs(int ms) => ms >= 1000 ? $"{ms / 1000.0:0.###} s" : $"{ms} ms";
+        return d.Mode switch
+        {
+            DelayMode.UntilScreenSettles => $"Wait until screen settles ({FormatMs(d.MinDurationMs)} – {FormatMs(d.EffectiveMaxDurationMs)})",
+            DelayMode.UntilScreenChanges => $"Wait until screen changes ({FormatMs(d.MinDurationMs)} – {FormatMs(d.EffectiveMaxDurationMs)})",
+            _ => FormatMs(d.DurationMs) is var s ? $"Wait {s}" : $"Wait {d.DurationMs} ms",
+        };
+    }
+
     private static string DescribeClick(MouseClickStep c)
     {
         var button = $"{c.Button.ToString().ToLowerInvariant()} button";
         var lastFound = $"the last found spot{OffsetText(c.OffsetX, c.OffsetY)}";
         var where = c.UseLastFoundText ? "at " + lastFound : Where(c.UseCurrentPosition, c.X, c.Y);
         var motion = c.UseCurrentPosition ? "" : MotionSuffix(c.MoveStyle, c.MoveDurationMs);
-        var aim = c.SmartAimAtTarget && c.HasTargetThumbnail && !c.UseCurrentPosition && !c.UseLastFoundText ? " · ✨ Smart-Aim" : "";
+        var smartBadge = "";
+        if (!c.UseCurrentPosition && !c.UseLastFoundText)
+        {
+            if (c.UseSmartIntent)
+            {
+                var label = c.Target?.ShortLabel;
+                smartBadge = string.IsNullOrEmpty(label) ? " · 🧭 Intent" : $" · 🧭 Intent ({label})";
+            }
+            else if (c.SmartAimAtTarget && c.HasTargetThumbnail)
+            {
+                smartBadge = " · ✨ Smart-Aim";
+            }
+        }
+
         return c.Action switch
         {
-            MouseClickAction.Hold => $"Hold {button} for {c.HoldMs} ms {where}{motion}{aim}",
+            MouseClickAction.Hold => $"Hold {button} for {c.HoldMs} ms {where}{motion}{smartBadge}",
             MouseClickAction.Drag => $"Drag {button} from {(c.UseLastFoundText ? lastFound : c.UseCurrentPosition ? "the cursor" : $"({c.X}, {c.Y})")} to ({c.EndX}, {c.EndY}) over {c.DragDurationMs / 1000.0:0.##} s",
-            _ => $"{ClickVerb(c.Action)} {button} {where}{Hold(c.Action == MouseClickAction.Click, c.HoldMs)}{motion}{aim}",
+            _ => $"{ClickVerb(c.Action)} {button} {where}{Hold(c.Action == MouseClickAction.Click, c.HoldMs)}{motion}{smartBadge}",
         };
     }
 
@@ -138,6 +202,8 @@ public static class StepDescriber
         var name = string.IsNullOrWhiteSpace(step.Comment) ? null : $"\"{Preview(step.Comment)}\"";
         return step switch
         {
+            DelayStep { Mode: DelayMode.UntilScreenSettles } => "Waiting for screen to settle",
+            DelayStep { Mode: DelayMode.UntilScreenChanges } => "Waiting for screen to change",
             DelayStep d => d.DurationMs >= 1000 ? $"Waiting {d.DurationMs / 1000.0:0.#} s" : $"Waiting {d.DurationMs} ms",
             MouseMoveStep m => m.TargetMode switch
             {
@@ -147,6 +213,7 @@ public static class StepDescriber
             },
             MouseClickStep c => c.UseLastFoundText ? "Clicking the last found spot"
                 : c.UseCurrentPosition ? "Clicking where the cursor is"
+                : c.UseSmartIntent ? $"Intent clicking {c.Target?.ShortLabel ?? $"near ({c.X}, {c.Y})"}"
                 : c.SmartAimAtTarget && c.HasTargetThumbnail ? $"Smart-Aim clicking near ({c.X}, {c.Y})"
                 : $"Clicking at ({c.X}, {c.Y})",
             MouseScrollStep => "Scrolling",
@@ -162,6 +229,11 @@ public static class StepDescriber
             WaitForChangeStep w => $"Waiting for the area at ({w.RegionX}, {w.RegionY}) to change",
             FocusWindowStep w => $"Focusing the \"{Preview(w.WindowTitle)}\" window",
             ScreenshotStep => "Taking a screenshot",
+            SetVariableStep v => $"Updating {{{v.VariableName}}}",
+            CheckpointStep cp => $"Checkpoint \"{Preview(cp.Name)}\"",
+            CallMacroStep call => string.IsNullOrWhiteSpace(call.TargetMacroName)
+                ? "Calling sub-macro"
+                : $"Calling \"{Preview(call.TargetMacroName)}\"",
             _ => DisplayName(step.Kind),
         };
     }
@@ -214,10 +286,13 @@ public static class StepDescriber
             text += $" When found: {action}{park}.";
         }
 
-        text += f.WhenNotFound switch
+        text += f.EffectiveFailureAction switch
         {
-            TextNotFoundBehavior.Continue => f.Goal == WaitGoal.Appear ? " If it's not found in time: continues anyway." : " If it's still there: continues anyway.",
-            TextNotFoundBehavior.SkipNextStep => " If the time runs out: skips the next step.",
+            StepFailureAction.Continue => f.Goal == WaitGoal.Appear ? " If it's not found in time: continues anyway." : " If it's still there: continues anyway.",
+            StepFailureAction.SkipNextStep => " If the time runs out: skips the next step.",
+            StepFailureAction.Retry => $" If it misses: retries up to {f.FailurePolicy?.RetryCount ?? 2}× ({f.FailurePolicy?.RetryDelayMs ?? 500} ms apart).",
+            StepFailureAction.RunRecoveryMacro => $" If it misses: runs recovery macro \"{Preview(f.FailurePolicy?.RecoveryMacroName)}\" and continues.",
+            StepFailureAction.RestartFromCheckpoint => $" If it misses: restarts from checkpoint \"{Preview(f.FailurePolicy?.CheckpointName)}\".",
             _ => f.Goal == WaitGoal.Appear ? " If it's not found in time: the macro stops." : " If it's still there: the macro stops.",
         };
         return text;
@@ -309,7 +384,27 @@ public static class StepDescriber
     /// <summary>E.g. "\"OK\" is on screen", "the image (40×30) is not in area (…)", plus the wait time if any.</summary>
     public static string DescribeCondition(Condition? condition)
     {
-        if (condition?.Search is not { } search) return "(no condition yet)";
+        if (condition is null) return "(no condition yet)";
+        if (condition.Kind == ConditionKind.VariableCompare && condition.Comparison is { } comp)
+        {
+            var op = comp.Operator switch
+            {
+                VariableCompareOperator.Equals => "==",
+                VariableCompareOperator.NotEquals => "!=",
+                VariableCompareOperator.GreaterThan => ">",
+                VariableCompareOperator.GreaterOrEqual => ">=",
+                VariableCompareOperator.LessThan => "<",
+                VariableCompareOperator.LessOrEqual => "<=",
+                VariableCompareOperator.Contains => "contains",
+                VariableCompareOperator.StartsWith => "starts with",
+                _ => "==",
+            };
+            var name = string.IsNullOrWhiteSpace(comp.VariableName) ? "(variable)" : $"{{{comp.VariableName}}}";
+            var expr = $"{name} {op} \"{Preview(comp.RightValue)}\"";
+            return condition.Negate ? $"NOT ({expr})" : expr;
+        }
+
+        if (condition.Search is not { } search) return "(no condition yet)";
 
         var what = search switch
         {
@@ -472,10 +567,13 @@ public static class StepDescriber
 
         // E.g. "Find image (121×134) on screen → Click center when found (wait up to 10 s)".
         var wait = f.TimeoutMs > 0 ? $"wait up to {seconds}" : "look once";
-        var notFound = f.WhenNotFound switch
+        var notFound = f.EffectiveFailureAction switch
         {
-            TextNotFoundBehavior.SkipNextStep => "; if not found: skip next step",
-            TextNotFoundBehavior.Continue => "; if not found: continue",
+            StepFailureAction.SkipNextStep => "; if not found: skip next step",
+            StepFailureAction.Continue => "; if not found: continue",
+            StepFailureAction.Retry => $"; retry {f.FailurePolicy?.RetryCount ?? 2}×",
+            StepFailureAction.RunRecoveryMacro => $"; recovery \"{Preview(f.FailurePolicy?.RecoveryMacroName)}\"",
+            StepFailureAction.RestartFromCheckpoint => $"; → checkpoint \"{Preview(f.FailurePolicy?.CheckpointName)}\"",
             _ => "",
         };
         return $"Find {what} {where} → {FoundActionText(f.Action, f.OffsetX, f.OffsetY, f.ActionHoldMs)} when found ({wait}{notFound})";

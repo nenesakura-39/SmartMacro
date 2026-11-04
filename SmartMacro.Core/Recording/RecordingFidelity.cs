@@ -90,6 +90,7 @@ public static class RecordingFidelityPresets
             MaxClickDistance = options.MaxClickDistance,
             IgnoredHotkeys = options.IgnoredHotkeys,
             RelativeMouse = options.RelativeMouse,
+            SmartTiming = options.SmartTiming,
             StartX = options.StartX,
             StartY = options.StartY,
             TrimTrailingKeys = options.TrimTrailingKeys,

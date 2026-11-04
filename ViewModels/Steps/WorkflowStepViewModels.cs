@@ -12,14 +12,25 @@ namespace SmartMacro.ViewModels.Steps;
 /// The screen tools (Pick area, Capture image, Pick color, Test now) the editor hands to steps that look at the
 /// screen, including the search inside an If / Repeat condition and a Feedback loop (with its conditions).
 /// </summary>
-public sealed record ScreenTools(IFindTextTools? Text, IVisionTools? Vision, IScreenLayout? Layout = null)
+public sealed record ScreenTools(
+    IFindTextTools? Text,
+    IVisionTools? Vision,
+    IScreenLayout? Layout = null,
+    Func<IReadOnlyList<Macro>>? MacroListProvider = null,
+    Func<Guid?>? CurrentMacroIdProvider = null)
 {
     public static ScreenTools None { get; } = new(null, null);
 
     /// <summary>Gives a step editor the tools it needs (does nothing for steps that don't use any).</summary>
     public void ApplyTo(StepViewModel step)
     {
-        if (step is ScreenSearchStepViewModel search) search.Layout = Layout; // monitor / window lists
+        var excludeId = CurrentMacroIdProvider?.Invoke();
+        if (step is ScreenSearchStepViewModel search)
+        {
+            search.Layout = Layout; // monitor / window lists
+            search.FailurePolicy.ExcludeMacroId = excludeId;
+            search.FailurePolicy.MacroListProvider = MacroListProvider;
+        }
         switch (step)
         {
             case MouseMoveStepViewModel move:
@@ -56,22 +67,32 @@ public sealed record ScreenTools(IFindTextTools? Text, IVisionTools? Vision, ISc
                 break;
             case WaitForChangeStepViewModel waitForChange:
                 waitForChange.Tools = Vision;
+                waitForChange.FailurePolicy.ExcludeMacroId = excludeId;
+                waitForChange.FailurePolicy.MacroListProvider = MacroListProvider;
                 break;
             case FocusWindowStepViewModel focus:
                 focus.Layout = Layout;
+                focus.FailurePolicy.ExcludeMacroId = excludeId;
+                focus.FailurePolicy.MacroListProvider = MacroListProvider;
                 break;
             case ScreenshotStepViewModel screenshot:
                 screenshot.Tools = Vision;
                 screenshot.Layout = Layout;
+                break;
+            case SetVariableStepViewModel setVar:
+                setVar.Tools = Vision;
+                break;
+            case CallMacroStepViewModel callMacro:
+                callMacro.ExcludeMacroId = excludeId;
+                callMacro.MacroListProvider = MacroListProvider;
                 break;
         }
     }
 }
 
 /// <summary>
-/// Editor for a condition: what to look for (text / image / color), "is" or "is NOT" on screen, and the search
-/// settings, which are shown with the normal Find text / Find image / Find color editor (so Pick area, Capture
-/// image, Pick color and Test now all work here too). The parts conditions don't use are hidden.
+/// Editor for a condition: what to look for (text / image / color / variable value), "is" or "is NOT", and the search
+/// or variable comparison settings.
 /// </summary>
 public sealed class ConditionViewModel : ObservableObject
 {
@@ -92,6 +113,7 @@ public sealed class ConditionViewModel : ObservableObject
         new Choice<ConditionKind>(ConditionKind.TextVisible, "Text (read with OCR)"),
         new Choice<ConditionKind>(ConditionKind.ImageVisible, "Image (button, icon…)"),
         new Choice<ConditionKind>(ConditionKind.ColorVisible, "Color"),
+        new Choice<ConditionKind>(ConditionKind.VariableCompare, "🧠 Variable value (memory / counter / OCR)"),
     };
 
     public static IReadOnlyList<Choice<bool>> NegateOptions { get; } = new[]
@@ -99,6 +121,26 @@ public sealed class ConditionViewModel : ObservableObject
         new Choice<bool>(false, "is on screen"),
         new Choice<bool>(true, "is NOT on screen"),
     };
+
+    public static IReadOnlyList<Choice<bool>> VariableNegateOptions { get; } = new[]
+    {
+        new Choice<bool>(false, "is TRUE (matches)"),
+        new Choice<bool>(true, "is FALSE (does not match)"),
+    };
+
+    public static IReadOnlyList<Choice<VariableCompareOperator>> CompareOperators { get; } = new[]
+    {
+        new Choice<VariableCompareOperator>(VariableCompareOperator.Equals, "=  Equals"),
+        new Choice<VariableCompareOperator>(VariableCompareOperator.NotEquals, "≠  Does not equal"),
+        new Choice<VariableCompareOperator>(VariableCompareOperator.GreaterThan, ">  Greater than"),
+        new Choice<VariableCompareOperator>(VariableCompareOperator.GreaterOrEqual, "≥  Greater than or equal"),
+        new Choice<VariableCompareOperator>(VariableCompareOperator.LessThan, "<  Less than"),
+        new Choice<VariableCompareOperator>(VariableCompareOperator.LessOrEqual, "≤  Less than or equal"),
+        new Choice<VariableCompareOperator>(VariableCompareOperator.Contains, "Contains text"),
+        new Choice<VariableCompareOperator>(VariableCompareOperator.StartsWith, "Starts with text"),
+    };
+
+    public IReadOnlyList<Choice<bool>> EffectiveNegateOptions => IsVariableCompare ? VariableNegateOptions : NegateOptions;
 
     public ScreenTools Tools
     {
@@ -118,25 +160,86 @@ public sealed class ConditionViewModel : ObservableObject
         {
             if (value is not { } kind || _condition.Kind == kind) return;
 
-            // Keep the area and the wait time when switching between text / image / color.
-            var old = _condition.Search;
-            var check = MacroCondition.CreateCheck(kind);
-            check.Scope = SearchScope.PrimaryMonitor;
-            if (old is not null)
+            if (kind == ConditionKind.VariableCompare)
             {
-                check.SearchFullScreen = old.SearchFullScreen;
-                check.Scope = old.EffectiveScope;
-                check.MonitorNumber = old.MonitorNumber;
-                check.WindowTitle = old.WindowTitle;
-                check.RegionX = old.RegionX;
-                check.RegionY = old.RegionY;
-                check.RegionWidth = old.RegionWidth;
-                check.RegionHeight = old.RegionHeight;
-                check.TimeoutMs = old.TimeoutMs;
+                _condition.Check = null;
+                _condition.Comparison ??= new VariableComparison { VariableName = "count", Operator = VariableCompareOperator.GreaterOrEqual, RightValue = "10" };
+            }
+            else
+            {
+                // Keep the area and the wait time when switching between text / image / color.
+                var old = _condition.Search;
+                var check = MacroCondition.CreateCheck(kind);
+                check.Scope = SearchScope.PrimaryMonitor;
+                if (old is not null)
+                {
+                    check.SearchFullScreen = old.SearchFullScreen;
+                    check.Scope = old.EffectiveScope;
+                    check.MonitorNumber = old.MonitorNumber;
+                    check.WindowTitle = old.WindowTitle;
+                    check.RegionX = old.RegionX;
+                    check.RegionY = old.RegionY;
+                    check.RegionWidth = old.RegionWidth;
+                    check.RegionHeight = old.RegionHeight;
+                    check.TimeoutMs = old.TimeoutMs;
+                }
+
+                _condition.Comparison = null;
+                _condition.Check = check;
             }
 
-            _condition.Check = check;
             RebuildCheckEditor();
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(IsVariableCompare));
+            OnPropertyChanged(nameof(IsScreenCondition));
+            OnPropertyChanged(nameof(EffectiveNegateOptions));
+            OnPropertyChanged(nameof(VariableName));
+            OnPropertyChanged(nameof(CompareOperator));
+            OnPropertyChanged(nameof(RightValue));
+            OnPropertyChanged(nameof(TestHint));
+            _changed();
+        }
+    }
+
+    public bool IsVariableCompare => _condition.Kind == ConditionKind.VariableCompare;
+    public bool IsScreenCondition => !IsVariableCompare;
+
+    public string VariableName
+    {
+        get => _condition.Comparison?.VariableName ?? string.Empty;
+        set
+        {
+            var cmp = _condition.Comparison ??= new VariableComparison();
+            var v = (value ?? string.Empty).Trim();
+            if (cmp.VariableName == v) return;
+            cmp.VariableName = v;
+            OnPropertyChanged();
+            _changed();
+        }
+    }
+
+    public VariableCompareOperator CompareOperator
+    {
+        get => _condition.Comparison?.Operator ?? VariableCompareOperator.Equals;
+        set
+        {
+            var cmp = _condition.Comparison ??= new VariableComparison();
+            if (cmp.Operator == value) return;
+            cmp.Operator = value;
+            OnPropertyChanged();
+            _changed();
+        }
+    }
+
+    public string RightValue
+    {
+        get => _condition.Comparison?.RightValue ?? string.Empty;
+        set
+        {
+            var cmp = _condition.Comparison ??= new VariableComparison();
+            var v = value ?? string.Empty;
+            if (cmp.RightValue == v) return;
+            cmp.RightValue = v;
             OnPropertyChanged();
             _changed();
         }
@@ -163,18 +266,20 @@ public sealed class ConditionViewModel : ObservableObject
             ? $"Right now this condition is TRUE ({(found ? "it was found" : "it was not found")})."
             : $"Right now this condition is FALSE ({(found ? "it was found" : "it was not found")}).";
 
-    /// <summary>The Find text / image / color editor for the search settings (null if the condition is damaged).</summary>
+    /// <summary>The Find text / image / color editor for the search settings (null if variable compare or damaged).</summary>
     public ScreenSearchStepViewModel? CheckEditor
     {
         get => _checkEditor;
         private set => SetProperty(ref _checkEditor, value);
     }
 
-    public bool IsDamaged => _checkEditor is null;
+    public bool IsDamaged => !IsVariableCompare && _checkEditor is null;
 
-    public string TestHint => _condition.Negate
-        ? "\"Test detection now\" shows whether it's found. With \"is NOT on screen\" the condition is true when it is NOT found."
-        : "\"Test detection now\" shows whether it's found. The condition is true when it is found.";
+    public string TestHint => IsVariableCompare
+        ? "Compares the live variable in memory (numbers are compared numerically; right-hand side supports {otherVar} placeholders)."
+        : _condition.Negate
+            ? "\"Test detection now\" shows whether it's found. With \"is NOT on screen\" the condition is true when it is NOT found."
+            : "\"Test detection now\" shows whether it's found. The condition is true when it is found.";
 
     private void RebuildCheckEditor()
     {

@@ -47,6 +47,14 @@ public static class MacroFactory
         copy.ModifiedAt = now;
         foreach (var step in copy.Steps)
             RenewIds(step);
+        if (copy.Watchers is { } watchers)
+        {
+            foreach (var watcher in watchers)
+            {
+                watcher.Id = Guid.NewGuid();
+                if (watcher.Condition?.Check is { } check) check.Id = Guid.NewGuid();
+            }
+        }
         return copy;
     }
 
@@ -105,6 +113,9 @@ public static class MacroFactory
         StepKind.WaitForChange => new WaitForChangeStep(),
         StepKind.FocusWindow => new FocusWindowStep(),
         StepKind.Screenshot => new ScreenshotStep(),
+        StepKind.SetVariable => new SetVariableStep(),
+        StepKind.Checkpoint => new CheckpointStep { Name = "Main" },
+        StepKind.CallMacro => new CallMacroStep(),
         StepKind.InputSequence => throw new ArgumentException("Recorded input steps are created by recording in game mode, not added by hand.", nameof(kind)),
         _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unknown step type."),
     };

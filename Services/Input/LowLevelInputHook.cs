@@ -3,6 +3,8 @@ using System.Diagnostics;
 using System.Runtime.InteropServices;
 using SmartMacro.Core.Models;
 using SmartMacro.Core.Recording;
+using SmartMacro.Core.Targeting;
+using SmartMacro.Services.Ocr;
 using static SmartMacro.Services.Input.NativeMethods;
 
 namespace SmartMacro.Services.Input;
@@ -239,6 +241,25 @@ public sealed class WindowsInputRecorder : IInputRecorder, IDisposable
         set => _snapshots.Enabled = value;
     }
 
+    /// <summary>Intent Recording: inspect UI element, nearby OCR text, and owning window off-thread (Settings; on by default).</summary>
+    public bool CaptureClickIntent
+    {
+        get => _snapshots.CaptureIntent;
+        set => _snapshots.CaptureIntent = value;
+    }
+
+    public IUiElementLocator? UiLocator
+    {
+        get => _snapshots.UiLocator;
+        set => _snapshots.UiLocator = value;
+    }
+
+    public WindowsOcrService? OcrService
+    {
+        get => _snapshots.OcrService;
+        set => _snapshots.OcrService = value;
+    }
+
     /// <summary>How many click pictures the latest recording kept.</summary>
     public int ClickSnapshotCount => _snapshots.Count;
 
@@ -329,6 +350,7 @@ public sealed class WindowsInputRecorder : IInputRecorder, IDisposable
         }
 
         StopHelpers();
+        _snapshots.WaitForPendingEnrichment(TimeSpan.FromMilliseconds(220));
         return _events.ToList();
     }
 

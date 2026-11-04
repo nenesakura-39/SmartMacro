@@ -3,6 +3,8 @@ using System.Diagnostics;
 using System.Runtime.InteropServices;
 using SmartMacro.Core.Models;
 using SmartMacro.Core.Recording;
+using SmartMacro.Core.Targeting;
+using SmartMacro.Services.Ocr;
 using static SmartMacro.Services.Input.NativeMethods;
 
 namespace SmartMacro.Services.Input;
@@ -51,6 +53,7 @@ public sealed class RawInputRecorder : IRelativeInputRecorder, IDisposable
     private Session? _session;
     private Session? _lastSession;
     private bool _captureClickSnapshots = true;
+    private bool _captureClickIntent = true;
     private HighResolutionTimerScope? _timerResolution; // 1 ms Windows timer while recording
 
     /// <summary>
@@ -62,6 +65,19 @@ public sealed class RawInputRecorder : IRelativeInputRecorder, IDisposable
         get => _captureClickSnapshots;
         set => _captureClickSnapshots = value;
     }
+
+    /// <summary>
+    /// Smart recording only: capture off-thread UI element, OCR label, and window anchor for clicks.
+    /// </summary>
+    public bool CaptureClickIntent
+    {
+        get => _captureClickIntent;
+        set => _captureClickIntent = value;
+    }
+
+    public IUiElementLocator? UiLocator { get; set; }
+
+    public WindowsOcrService? OcrService { get; set; }
 
     /// <summary>How many click pictures the latest recording kept.</summary>
     public int ClickSnapshotCount => (_session ?? _lastSession)?.SnapshotCount ?? 0;
@@ -90,9 +106,15 @@ public sealed class RawInputRecorder : IRelativeInputRecorder, IDisposable
         }
 
         ClickSnapshotter? snapshots = null;
-        if (_captureCursor && _captureClickSnapshots)
+        if (_captureCursor && (_captureClickSnapshots || _captureClickIntent))
         {
-            snapshots = new ClickSnapshotter();
+            snapshots = new ClickSnapshotter
+            {
+                Enabled = _captureClickSnapshots,
+                CaptureIntent = _captureClickIntent,
+                UiLocator = UiLocator,
+                OcrService = OcrService,
+            };
             snapshots.Reset(); // reads the screen layout here, on the calling (UI) thread
         }
 
@@ -124,6 +146,7 @@ public sealed class RawInputRecorder : IRelativeInputRecorder, IDisposable
         var stopTimestamp = Stopwatch.GetTimestamp();
         _session = null;
         session.Stop();
+        session.WaitForPendingEnrichment(TimeSpan.FromMilliseconds(220));
         _timerResolution?.Dispose();
         _timerResolution = null;
 
@@ -216,6 +239,8 @@ public sealed class RawInputRecorder : IRelativeInputRecorder, IDisposable
 
         /// <summary>How many click pictures this session kept.</summary>
         public int SnapshotCount => _snapshots?.Count ?? 0;
+
+        public void WaitForPendingEnrichment(TimeSpan timeout) => _snapshots?.WaitForPendingEnrichment(timeout);
 
         public int EventCount
         {
@@ -650,6 +675,25 @@ public sealed class SmartInputRecorder : ISmartInputRecorder, IDisposable
     {
         get => _recorder.CaptureClickSnapshots;
         set => _recorder.CaptureClickSnapshots = value;
+    }
+
+    /// <summary>Intent Recording on / off (Settings). Read when a recording starts.</summary>
+    public bool CaptureClickIntent
+    {
+        get => _recorder.CaptureClickIntent;
+        set => _recorder.CaptureClickIntent = value;
+    }
+
+    public IUiElementLocator? UiLocator
+    {
+        get => _recorder.UiLocator;
+        set => _recorder.UiLocator = value;
+    }
+
+    public WindowsOcrService? OcrService
+    {
+        get => _recorder.OcrService;
+        set => _recorder.OcrService = value;
     }
 
     /// <summary>How many click pictures the latest recording kept.</summary>

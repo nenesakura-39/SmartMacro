@@ -189,9 +189,16 @@ public static class PlaybackRanges
         foreach (var problem in blocks.Problems)
             result.Add(new ValidationIssue(IssueSeverity.Error, problem.Message, problem.StepIndex, macro.Steps[problem.StepIndex]?.Id, "Block"));
 
+        var fullCheckpoints = new HashSet<string>(
+            macro.Steps.OfType<CheckpointStep>()
+                .Where(c => CheckpointStep.IsValidName(c.Name))
+                .Select(c => c.Name.Trim()),
+            StringComparer.OrdinalIgnoreCase);
+
         foreach (var issue in MacroValidator.Validate(sliceMacro, screen))
         {
             if (issue.Property == "Block" && result.Count > 0) continue; // already reported for the whole macro
+            if (issue.Property == nameof(StepFailurePolicy.CheckpointName) && fullCheckpoints.Count > 0) continue;
             result.Add(issue.StepIndex is int k && k >= 0 && k < slice.SourceIndexes.Count
                 ? issue with { StepIndex = slice.SourceIndexes[k] }
                 : issue);

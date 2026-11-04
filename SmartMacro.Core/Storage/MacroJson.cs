@@ -35,4 +35,8 @@ public static class MacroJson
     /// <summary>Deep copy of one step (keeps the same ID).</summary>
     public static MacroStep CloneStep(MacroStep step) =>
         Deserialize<MacroStep>(Serialize<MacroStep>(step)) ?? throw new InvalidOperationException("Failed to copy the step.");
+
+    /// <summary>Deep copy of one watcher (keeps the same ID).</summary>
+    public static MacroWatcher CloneWatcher(MacroWatcher watcher) =>
+        Deserialize<MacroWatcher>(Serialize(watcher)) ?? throw new InvalidOperationException("Failed to copy the watcher.");
 }

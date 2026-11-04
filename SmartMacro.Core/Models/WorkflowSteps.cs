@@ -12,7 +12,7 @@ namespace SmartMacro.Core.Models;
 // Everything here is plain data: no expressions, no scripts, no code in macro files.
 // ---------------------------------------------------------------------------------------------------------------------
 
-/// <summary>What a condition looks for. Derived from the kind of search step inside it.</summary>
+/// <summary>What a condition looks for. Derived from the kind of search step or variable comparison inside it.</summary>
 public enum ConditionKind
 {
     /// <summary>Text read by OCR (the settings of a Find text step).</summary>
@@ -23,16 +23,16 @@ public enum ConditionKind
 
     /// <summary>A patch of colour (the settings of a Find color step).</summary>
     ColorVisible,
+
+    /// <summary>v1.2 "Brain": compares a macro variable against a number, text, yes/no, or another variable.</summary>
+    VariableCompare,
 }
 
 /// <summary>
-/// A yes/no question about the screen: "is this text / image / colour on screen?", optionally turned around
-/// ("is it NOT on screen?").
+/// A yes/no question about the screen ("is this text / image / colour on screen?") or about a variable ("is gold &gt;= 500?"),
+/// optionally turned around ("is NOT").
 /// The "what and where" settings are a normal Find text / Find image / Find color step stored in <see cref="Check"/>,
-/// so a condition is checked by exactly the same detection code, validation and editor tools as those steps.
-/// Of the search step's settings, a condition uses: what to look for, the search area, "keep checking for"
-/// (TimeoutMs: how long to wait for the condition to become true; 0 = look once) and "check every".
-/// The step's own Goal / Action / Offset / "when not found" settings are not used by conditions.
+/// or a structured <see cref="VariableComparison"/> stored in <see cref="Comparison"/>.
 /// </summary>
 public sealed class Condition
 {
@@ -40,24 +40,33 @@ public sealed class Condition
     /// The search settings: a <see cref="FindTextStep"/>, <see cref="FindImageStep"/> or <see cref="FindColorStep"/>.
     /// Typed as MacroStep so it is read and written with the same safe, closed list of step types as everything else.
     /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public MacroStep? Check { get; set; }
 
-    /// <summary>True = the condition is true when the thing is NOT on screen.</summary>
+    /// <summary>
+    /// v1.2 variable comparison settings when <see cref="Kind"/> is <see cref="ConditionKind.VariableCompare"/>.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public VariableComparison? Comparison { get; set; }
+
+    /// <summary>True = the condition's result is inverted ("is NOT").</summary>
     public bool Negate { get; set; }
 
-    /// <summary>The search settings as a search step, or null if missing / the wrong type (the validator reports that).</summary>
+    /// <summary>The search settings as a search step, or null if this is a variable comparison or missing.</summary>
     [JsonIgnore]
     public ScreenSearchStep? Search => Check is FindTextStep or FindImageStep or FindColorStep ? (ScreenSearchStep)Check : null;
 
-    /// <summary>What the condition looks for, or null if <see cref="Check"/> is missing or unsupported.</summary>
+    /// <summary>What the condition checks, or null if both <see cref="Check"/> and <see cref="Comparison"/> are missing.</summary>
     [JsonIgnore]
-    public ConditionKind? Kind => Check switch
-    {
-        FindTextStep => ConditionKind.TextVisible,
-        FindImageStep => ConditionKind.ImageVisible,
-        FindColorStep => ConditionKind.ColorVisible,
-        _ => null,
-    };
+    public ConditionKind? Kind => Comparison is not null
+        ? ConditionKind.VariableCompare
+        : Check switch
+        {
+            FindTextStep => ConditionKind.TextVisible,
+            FindImageStep => ConditionKind.ImageVisible,
+            FindColorStep => ConditionKind.ColorVisible,
+            _ => null,
+        };
 
     /// <summary>
     /// Text conditions: the text must be a whole word on screen ("art" doesn't match "apart"). Stored on the condition's
@@ -79,7 +88,9 @@ public sealed class Condition
     }
 
     /// <summary>A new condition of the given kind with sensible defaults (look once, no click).</summary>
-    public static Condition Create(ConditionKind kind) => new() { Check = CreateCheck(kind) };
+    public static Condition Create(ConditionKind kind) => kind == ConditionKind.VariableCompare
+        ? new Condition { Comparison = new VariableComparison() }
+        : new Condition { Check = CreateCheck(kind) };
 
     /// <summary>A fresh search step for a condition: looks once (timeout 0) and never clicks.</summary>
     public static ScreenSearchStep CreateCheck(ConditionKind kind)
@@ -310,11 +321,11 @@ public sealed class RepeatStep : MacroStep
         ?? (Condition?.Kind is ConditionKind.ImageVisible or ConditionKind.ColorVisible ? DefaultKeepCheckingForMs : 0);
 
     /// <summary>
-    /// True when the loop ends because its target is not seen: While "… is on screen" or Until "… is NOT on screen".
-    /// Only then the grace window applies (a target that IS seen is trusted right away).
+    /// True when the loop ends because its visual target is not seen: While "… is on screen" or Until "… is NOT on screen".
+    /// Only then the grace window applies (a target that IS seen, or a variable comparison, is trusted right away).
     /// </summary>
     [JsonIgnore]
-    public bool EndsWhenTargetMissing => Condition is { } c
+    public bool EndsWhenTargetMissing => Condition is { Kind: not ConditionKind.VariableCompare } c
         && ((Mode == RepeatMode.While && !c.Negate) || (Mode == RepeatMode.Until && c.Negate));
 
     [JsonIgnore]

@@ -46,6 +46,17 @@ public sealed class WaitForChangeStep : MacroStep
     /// <summary>What happens when nothing changes in time.</summary>
     public TextNotFoundBehavior WhenNotFound { get; set; } = TextNotFoundBehavior.StopMacro;
 
+    /// <summary>Extended v1.2 recovery settings (Retry, Recovery Sub-Macro, Restart from Checkpoint).</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public StepFailurePolicy? FailurePolicy { get; set; }
+
+    [JsonIgnore]
+    public StepFailureAction EffectiveFailureAction
+    {
+        get => StepFailurePolicy.ResolveEffective(WhenNotFound, FailurePolicy);
+        set => (WhenNotFound, FailurePolicy) = StepFailurePolicy.Apply(value, FailurePolicy);
+    }
+
     /// <summary>The watched area as a rectangle.</summary>
     [JsonIgnore]
     public ScreenRect Region => new(RegionX, RegionY, RegionWidth, RegionHeight);
@@ -75,6 +86,17 @@ public sealed class FocusWindowStep : MacroStep
 
     /// <summary>What happens when no such window is found in time.</summary>
     public TextNotFoundBehavior WhenNotFound { get; set; } = TextNotFoundBehavior.StopMacro;
+
+    /// <summary>Extended v1.2 recovery settings (Retry, Recovery Sub-Macro, Restart from Checkpoint).</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public StepFailurePolicy? FailurePolicy { get; set; }
+
+    [JsonIgnore]
+    public StepFailureAction EffectiveFailureAction
+    {
+        get => StepFailurePolicy.ResolveEffective(WhenNotFound, FailurePolicy);
+        set => (WhenNotFound, FailurePolicy) = StepFailurePolicy.Apply(value, FailurePolicy);
+    }
 
     [JsonIgnore]
     public override StepKind Kind => StepKind.FocusWindow;

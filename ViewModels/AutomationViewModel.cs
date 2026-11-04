@@ -44,6 +44,9 @@ public sealed class AutomationHooks
     /// <summary>Saves the recording fidelity chosen next to the Record button.</summary>
     public Action<RecordingFidelity>? SetRecordingFidelity { get; init; }
 
+    /// <summary>Optional call-graph validator (checks sub-macro links and cycles against the library before playback).</summary>
+    public Func<Macro, IReadOnlyList<ValidationIssue>>? ValidateCallGraph { get; init; }
+
     public required Action<string, StatusKind> SetStatus { get; init; }
 }
 
@@ -93,6 +96,8 @@ public sealed class AutomationViewModel : ObservableObject, IDisposable
     private string _runCounterText = string.Empty;
     private string _stepCounterText = string.Empty;
     private string _visionTelemetryText = string.Empty;
+    private string _elapsedText = "00:00";
+    private string _activeStepDetailText = "Ready — press Play to run.";
 
     /// <summary>
     /// Playback UI refresh rate: engine events (step started, run started) only store the latest numbers on the playback
@@ -228,6 +233,9 @@ public sealed class AutomationViewModel : ObservableObject, IDisposable
     /// </summary>
     public event EventHandler<StepProgress>? RunningStepProgressChanged;
 
+    /// <summary>Raised on the UI thread when a playback session finishes, with the played macro's ID and result.</summary>
+    public event EventHandler<(Guid? MacroId, PlaybackResult? Result)>? PlaybackFinished;
+
     public AsyncRelayCommand RecordCommand { get; }
     public AsyncRelayCommand StopRecordingCommand { get; }
     public AsyncRelayCommand PlayCommand { get; }
@@ -362,7 +370,11 @@ public sealed class AutomationViewModel : ObservableObject, IDisposable
     public string TargetText
     {
         get => _targetText;
-        private set => SetProperty(ref _targetText, value);
+        private set
+        {
+            if (SetProperty(ref _targetText, value))
+                OnPropertyChanged(nameof(RunningMacroTitle));
+        }
     }
 
     public string ProgressText
@@ -425,6 +437,28 @@ public sealed class AutomationViewModel : ObservableObject, IDisposable
 
     /// <summary>True while <see cref="VisionTelemetryText"/> has something to show.</summary>
     public bool HasVisionTelemetry => _visionTelemetryText.Length > 0;
+
+    /// <summary>Live elapsed runtime formatted as mm:ss or hh:mm:ss ("00:00" when idle).</summary>
+    public string ElapsedText
+    {
+        get => _elapsedText;
+        private set => SetProperty(ref _elapsedText, value);
+    }
+
+    /// <summary>Live step activity line for Mission Control ("Finding image…", "Paused…", or idle prompt).</summary>
+    public string ActiveStepDetailText
+    {
+        get => _activeStepDetailText;
+        private set => SetProperty(ref _activeStepDetailText, value);
+    }
+
+    /// <summary>Name of the currently running macro, or the current play target when idle.</summary>
+    public string RunningMacroTitle => IsPlaying && !string.IsNullOrWhiteSpace(_runningMacroName) ? _runningMacroName : TargetText;
+
+    private static string FormatElapsed(TimeSpan elapsed) =>
+        elapsed.TotalHours >= 1
+            ? $"{(int)elapsed.TotalHours:00}:{elapsed.Minutes:00}:{elapsed.Seconds:00}"
+            : $"{elapsed.Minutes:00}:{elapsed.Seconds:00}";
 
     /// <summary>"⚡ Vision: 0.6ms" for a look time in ms; empty for 0 / unknown.</summary>
     public static string FormatVisionTelemetry(double milliseconds) =>
@@ -531,10 +565,20 @@ public sealed class AutomationViewModel : ObservableObject, IDisposable
 
         try
         {
-            // Smart Click Snapshots (Settings): a small picture of what each recorded click hit.
-            var snapshots = _hooks.Settings().CaptureClickSnapshots;
-            if (_recorder is WindowsInputRecorder desktopRecorder) desktopRecorder.CaptureClickSnapshots = snapshots;
-            if (_smartRecorder is SmartInputRecorder smartRecorder) smartRecorder.CaptureClickSnapshots = snapshots && _recordingMode == RecordingMode.Smart;
+            // Smart Click Snapshots + Intent Recording (Settings): picture + UI/OCR/window anchor of each recorded click.
+            var curSettings = _hooks.Settings();
+            var snapshots = curSettings.CaptureClickSnapshots;
+            var intent = curSettings.CaptureClickIntent;
+            if (_recorder is WindowsInputRecorder desktopRecorder)
+            {
+                desktopRecorder.CaptureClickSnapshots = snapshots;
+                desktopRecorder.CaptureClickIntent = intent;
+            }
+            if (_smartRecorder is SmartInputRecorder smartRecorder)
+            {
+                smartRecorder.CaptureClickSnapshots = snapshots && _recordingMode == RecordingMode.Smart;
+                smartRecorder.CaptureClickIntent = intent && _recordingMode == RecordingMode.Smart;
+            }
 
             switch (_recordingMode)
             {
@@ -598,6 +642,7 @@ public sealed class AutomationViewModel : ObservableObject, IDisposable
             IgnoredHotkeys = RecordingHotkeys(settings),
             // The fidelity selector (Exact 1:1 / Smart Optimized / Clicks & Keys Only) decides sampling, simplification and holds.
             Fidelity = settings.RecordingFidelity,
+            SmartTiming = settings.SmartTimingOnRecord,
             RelativeMouse = settings.RelativeMouseMode,
             SimplifyMousePath = true, // a few meaningful Move steps instead of one every 30 ms
             CollapseMousePaths = false, // Desktop-only mode keeps simplified mouse paths so pure movements & oscillations work
@@ -681,6 +726,7 @@ public sealed class AutomationViewModel : ObservableObject, IDisposable
             TrimTrailingKeys = settings.RecordHotkey.AllKeys(),
             IgnoredHotkeys = RecordingHotkeys(settings),
             Fidelity = isRhythm ? null : settings.RecordingFidelity,
+            SmartTiming = !isRhythm && settings.SmartTimingOnRecord,
             RelativeMouse = isRhythm ? RelativeMouseMode.Off : settings.RelativeMouseMode,
             RecordMouseMoves = isRhythm || settings.RecordMouseMovement,
             KeepHoldTime = isRhythm || settings.KeepTapHoldTime,
@@ -726,16 +772,19 @@ public sealed class AutomationViewModel : ObservableObject, IDisposable
     private static IReadOnlyCollection<HotkeyBinding> RecordingHotkeys(AppSettings settings) =>
         new[] { settings.RecordHotkey, settings.PlayHotkey }.Where(h => h is not null).ToArray();
 
-    /// <summary>One log line about Smart Click Snapshots, when the recording has any.</summary>
+    /// <summary>One log line about Smart Click Snapshots / Intent Recording, when the recording has any.</summary>
     private void LogClickSnapshots(IReadOnlyList<MacroStep> steps)
     {
+        var withIntent = steps.Count(s => s is MouseClickStep { HasTargetIntent: true });
         var withPicture = steps.Count(s => s is MouseClickStep { HasTargetThumbnail: true });
         var inRecordedInput = steps.Sum(s => s is InputSequenceStep { ClickTargets: { } targets } ? targets.Count : 0);
-        if (withPicture == 0 && inRecordedInput == 0) return;
-        if (withPicture > 0)
+        if (withIntent == 0 && withPicture == 0 && inRecordedInput == 0) return;
+        if (withIntent > 0)
+            _log.Info($"🧭 Intent Recording: {withIntent} click(s) captured UI control / text / window anchors. Select one and click \"🧭 Locate Target\" to test all 5 relocation tiers.");
+        else if (withPicture > 0)
             _log.Info($"✨ Smart Click Snapshots: {withPicture} click(s) remember what they clicked. Select one in the editor to see it, turn on Smart-Aim, or convert it to a \"Find image & click\" step.");
         if (inRecordedInput > 0)
-            _log.Info($"✨ Smart Click Snapshots: {inRecordedInput} click(s) inside \"Recorded input\" steps kept their picture too; \"✂ Break into steps\" gives them back to the Mouse click steps.");
+            _log.Info($"✨ Smart Click Snapshots: {inRecordedInput} click(s) inside \"Recorded input\" steps kept their target info too; \"✂ Break into steps\" gives it back to the Mouse click steps.");
     }
 
     // ---------------- Playback ----------------
@@ -794,6 +843,12 @@ public sealed class AutomationViewModel : ObservableObject, IDisposable
         {
             issues = MacroValidator.ValidateForExecution(macro);
         }
+        if (_hooks.ValidateCallGraph is not null)
+        {
+            var graphIssues = _hooks.ValidateCallGraph(checkedMacro);
+            if (graphIssues.Count > 0)
+                issues = issues.Concat(graphIssues).ToList();
+        }
         if (issues.HasErrors())
         {
             var list = string.Join("\n", issues.Where(i => i.Severity == IssueSeverity.Error).Take(8).Select(i => "• " + i.DisplayText));
@@ -823,9 +878,12 @@ public sealed class AutomationViewModel : ObservableObject, IDisposable
         _currentRun = 0;
         _configuredRuns = range is null ? Math.Max(0, macro.RepeatCount) : 1;
         Mode = AutomationMode.Playing;
+        OnPropertyChanged(nameof(RunningMacroTitle));
         IsProgressIndeterminate = range is null && macro.RepeatCount == 0;
         ProgressValue = 0;
         ProgressText = "Starting…";
+        ElapsedText = "00:00";
+        ActiveStepDetailText = $"Starting \"{_runningMacroName}\"…";
         RunCounterText = PlaybackRunInfo.FormatCounter(1, _configuredRuns);
         StepCounterText = string.Empty;
         _host.Enter(OverlayKind.Playing, OverlayText(), RunCounterText);
@@ -892,6 +950,7 @@ public sealed class AutomationViewModel : ObservableObject, IDisposable
             _host.Exit();
             HideStepProgress();
             SetRunningStep(null);
+            var finishedMacroId = _runningMacroId;
             LastRunSummaryText = result?.Stats?.SummaryText ?? string.Empty;
             LastResult = result;
             Mode = AutomationMode.Idle;
@@ -900,13 +959,17 @@ public sealed class AutomationViewModel : ObservableObject, IDisposable
             IsProgressIndeterminate = false;
             _runTask = null;
             ReportResult(result);
+            PlaybackFinished?.Invoke(this, (finishedMacroId, result));
             RunCounterText = string.Empty;
             StepCounterText = string.Empty;
             VisionTelemetryText = string.Empty;
+            ElapsedText = "00:00";
+            ActiveStepDetailText = "Ready — press Play to run.";
             _renderedVersion = -1;
             _renderedProbeMs = -1;
             _currentRun = 0;
             _runningMacroId = null;
+            OnPropertyChanged(nameof(RunningMacroTitle));
             RefreshTarget();
         }
     }
@@ -1150,7 +1213,9 @@ public sealed class AutomationViewModel : ObservableObject, IDisposable
         _renderedSecond = second;
         _renderedMode = Mode;
         _renderedProbeMs = probeMs;
+        ElapsedText = FormatElapsed(PlayingElapsed);
         VisionTelemetryText = FormatVisionTelemetry(probeMs);
+        ActiveStepDetailText = HudActivityText();
 
         if (_latestProgress is { } p && p.StepCount > 0)
         {

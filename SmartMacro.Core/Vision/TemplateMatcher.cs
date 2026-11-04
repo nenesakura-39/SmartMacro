@@ -53,6 +53,25 @@ public sealed record TemplateMatchOptions
     /// <see cref="IgnoreColor"/> (that comparison is colour based).
     /// </summary>
     public bool AutoMaskBackground { get; init; } = true;
+
+    /// <summary>Default smallest scale factor checked when <see cref="AllowMultiScale"/> is on (0.75 = 75 %).</summary>
+    public const double DefaultMinScale = 0.75;
+
+    /// <summary>Default largest scale factor checked when <see cref="AllowMultiScale"/> is on (1.50 = 150 %).</summary>
+    public const double DefaultMaxScale = 1.50;
+
+    /// <summary>
+    /// When true, also checks resized copies of the template across <see cref="MinScale"/>..<see cref="MaxScale"/>
+    /// (covering 100 %, 125 %, 150 % Windows DPI scaling and 75 %–150 % UI/resolution changes) when 1:1 doesn't
+    /// already give a strong match. Off by default so 1:1 searches pay zero extra cost.
+    /// </summary>
+    public bool AllowMultiScale { get; init; }
+
+    /// <summary>Smallest template scale multiplier tried when <see cref="AllowMultiScale"/> is true.</summary>
+    public double MinScale { get; init; } = DefaultMinScale;
+
+    /// <summary>Largest template scale multiplier tried when <see cref="AllowMultiScale"/> is true.</summary>
+    public double MaxScale { get; init; } = DefaultMaxScale;
 }
 
 /// <summary>
@@ -72,6 +91,9 @@ public sealed record TemplateMatchResult(IReadOnlyList<VisualMatch> Matches, dou
     /// know it).
     /// </summary>
     public ScreenRect BestBounds { get; init; }
+
+    /// <summary>The template scale factor (1.0 = original size) that produced <see cref="Best"/> or <see cref="BestScore"/>.</summary>
+    public double BestScale { get; init; } = 1.0;
 }
 
 /// <summary>
@@ -118,6 +140,12 @@ public static class TemplateMatcher
     private const int LargeFinalCandidatesMax = 12;
     private const double LargeFinalScoreMargin = 0.15;
 
+    // Common Windows DPI / resolution scale steps ordered so standard desktop scales (125%, 150%, 80%, 75%) hit first.
+    private static readonly double[] CandidateScales =
+    {
+        1.25, 1.50, 0.80, 0.75, 0.90, 1.10, 1.3333333, 1.20, 0.85, 1.15, 1.40, 0.95, 1.05, 0.6666667, 1.75, 2.00,
+    };
+
     public static TemplateMatchResult Find(BgraImage image, BgraImage template, TemplateMatchOptions? options = null,
         CancellationToken cancellationToken = default)
     {
@@ -125,6 +153,15 @@ public static class TemplateMatcher
         ArgumentNullException.ThrowIfNull(template);
         options ??= new TemplateMatchOptions();
 
+        if (options.AllowMultiScale)
+            return FindMultiScale(image, template, options, cancellationToken);
+
+        return FindSingleScale(image, template, options, cancellationToken);
+    }
+
+    private static TemplateMatchResult FindSingleScale(BgraImage image, BgraImage template, TemplateMatchOptions options,
+        CancellationToken cancellationToken)
+    {
         int width = image.Width, height = image.Height, tw = template.Width, th = template.Height;
 
         if (options.IgnoreEdgeFraction > 0)
@@ -143,6 +180,100 @@ public static class TemplateMatcher
             ? FindWithForeground(image, template, fine, options, cancellationToken)
             : FindStandard(image, template, fine, options, cancellationToken);
         return WithBackgroundMask(image, template, result, options, cancellationToken);
+    }
+
+    private static TemplateMatchResult FindMultiScale(BgraImage image, BgraImage template, TemplateMatchOptions options,
+        CancellationToken cancellationToken)
+    {
+        var minScale = Math.Clamp(Math.Min(options.MinScale, options.MaxScale), 0.4, 2.5);
+        var maxScale = Math.Clamp(Math.Max(options.MinScale, options.MaxScale), minScale, 2.5);
+        var singleOptions = options with { AllowMultiScale = false };
+
+        var seenSizes = new HashSet<(int W, int H)>();
+        var allMatches = new List<VisualMatch>();
+        var bestScore = 0.0;
+        var bestBounds = default(ScreenRect);
+        var bestScale = 1.0;
+        var totalRejectedForColor = 0;
+        var maxCoarseScale = 1;
+
+        // Fast path: try 1.0x first when within [minScale, maxScale]. If it already gives a strong match, return at once
+        // with zero multi-scale overhead.
+        if (1.0 >= minScale - 1e-6 && 1.0 <= maxScale + 1e-6
+            && template.Width <= image.Width && template.Height <= image.Height)
+        {
+            seenSizes.Add((template.Width, template.Height));
+            var exact = FindSingleScale(image, template, singleOptions, cancellationToken);
+            if (exact.Matches.Count > 0 && exact.BestScore >= Math.Max(options.MinScore, 0.93))
+                return exact;
+
+            allMatches.AddRange(exact.Matches);
+            bestScore = exact.BestScore;
+            bestBounds = exact.BestBounds;
+            totalRejectedForColor = exact.RejectedForColor;
+            maxCoarseScale = exact.Scale;
+        }
+
+        var scales = new List<double>(CandidateScales.Length + 2);
+        foreach (var candidate in CandidateScales)
+        {
+            if (candidate >= minScale - 1e-6 && candidate <= maxScale + 1e-6)
+                scales.Add(candidate);
+        }
+
+        AddScaleIfDistinct(scales, minScale);
+        AddScaleIfDistinct(scales, maxScale);
+
+        foreach (var scale in scales)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (Math.Abs(scale - 1.0) < 1e-4) continue;
+
+            var sw = (int)Math.Round(template.Width * scale);
+            var sh = (int)Math.Round(template.Height * scale);
+            if (sw < MinInnerSize || sh < MinInnerSize || sw > image.Width || sh > image.Height) continue;
+            if (!seenSizes.Add((sw, sh))) continue;
+
+            var scaledTemplate = template.Resize(sw, sh);
+            var res = FindSingleScale(image, scaledTemplate, singleOptions, cancellationToken);
+
+            foreach (var match in res.Matches)
+                allMatches.Add(match with { MatchedScale = scale });
+
+            if (res.BestScore > bestScore)
+            {
+                bestScore = res.BestScore;
+                bestBounds = res.BestBounds;
+                bestScale = scale;
+            }
+
+            totalRejectedForColor += res.RejectedForColor;
+            if (res.Scale > maxCoarseScale) maxCoarseScale = res.Scale;
+
+            // Stop scanning distant scales once a near-exact scaled copy is already confirmed.
+            if (res.Matches.Count > 0 && res.BestScore >= Math.Max(options.MinScore, 0.97))
+                break;
+        }
+
+        if (allMatches.Count == 0 && bestScore <= 0 && totalRejectedForColor == 0)
+            return TemplateMatchResult.None;
+
+        var kept = KeepBest(allMatches, options.MaxResults);
+        return new TemplateMatchResult(kept, Math.Min(1.0, bestScore), kept.Count > 0 ? 0 : totalRejectedForColor, maxCoarseScale)
+        {
+            BestBounds = kept.Count > 0 ? kept[0].Bounds : bestBounds,
+            BestScale = kept.Count > 0 ? kept[0].MatchedScale : bestScale,
+        };
+    }
+
+    private static void AddScaleIfDistinct(List<double> scales, double value)
+    {
+        foreach (var existing in scales)
+        {
+            if (Math.Abs(existing - value) < 0.01) return;
+        }
+
+        scales.Add(value);
     }
 
     /// <summary>
@@ -422,7 +553,7 @@ public static class TemplateMatcher
     private static TemplateMatchResult FindInner(BgraImage image, BgraImage inner, int offsetX, int offsetY, int fullWidth, int fullHeight,
         TemplateMatchOptions options, CancellationToken cancellationToken)
     {
-        var result = Find(image, inner, options, cancellationToken);
+        var result = FindSingleScale(image, inner, options, cancellationToken);
         var bestBounds = result.BestBounds.IsEmpty
             ? default
             : new ScreenRect(result.BestBounds.X - offsetX, result.BestBounds.Y - offsetY, fullWidth, fullHeight);

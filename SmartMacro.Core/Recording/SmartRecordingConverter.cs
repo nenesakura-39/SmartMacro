@@ -90,6 +90,12 @@ public sealed class SmartRecordingOptions
     /// with zero simplification.
     /// </summary>
     public bool ExactTimeline { get; init; }
+
+    /// <summary>
+    /// Adaptive Smart Timing (v1.1): converts post-click delays in editable cursor chunks into
+    /// <see cref="DelayMode.UntilScreenSettles"/> steps.
+    /// </summary>
+    public bool SmartTiming { get; init; }
 }
 
 /// <summary>What a smart recording turned into, for the log and the status bar.</summary>
@@ -447,6 +453,7 @@ public static class SmartRecordingConverter
             MaxTapDurationMs = options.KeepHoldTime ? MacroValidator.MaxHoldMs : 500,
             Fidelity = options.Fidelity,
             RelativeMouse = options.RelativeMouse,
+            SmartTiming = options.SmartTiming,
             StartX = hasStart ? options.StartX : null,
             StartY = hasStart ? options.StartY : null,
         });
@@ -507,17 +514,23 @@ public static class SmartRecordingConverter
                 startY = e.Y;
             }
 
-            // Smart Click Snapshot of a click that lands inside recorded input: kept for "✂ Break into steps".
-            if (e.Kind == InputEventKind.MouseDown && ClickSnapshots.TryBase64(events[i].ClickedTarget) is { } picture)
+            // Smart Click Snapshot / Intent of a click that lands inside recorded input: kept for "✂ Break into steps".
+            if (e.Kind == InputEventKind.MouseDown && events[i].ClickedTarget is { } clicked)
             {
-                clickTargets ??= new List<SequenceClickTarget>();
-                clickTargets.Add(new SequenceClickTarget
+                var picture = ClickSnapshots.TryBase64(clicked);
+                var fp = clicked.Fingerprint is { HasAnySignal: true } f ? f.Clone() : null;
+                if (picture is not null || fp is not null)
                 {
-                    EventIndex = list.Count,
-                    TargetThumbnailBase64 = picture,
-                    AnchorX = events[i].ClickedTarget!.AnchorX,
-                    AnchorY = events[i].ClickedTarget!.AnchorY,
-                });
+                    clickTargets ??= new List<SequenceClickTarget>();
+                    clickTargets.Add(new SequenceClickTarget
+                    {
+                        EventIndex = list.Count,
+                        TargetThumbnailBase64 = picture ?? string.Empty,
+                        AnchorX = clicked.AnchorX,
+                        AnchorY = clicked.AnchorY,
+                        Target = fp,
+                    });
+                }
             }
 
             list.Add(e with { TimeUs = e.TimeUs - origin });

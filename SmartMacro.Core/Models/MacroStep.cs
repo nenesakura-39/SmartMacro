@@ -30,6 +30,11 @@ public enum StepKind
     WaitForChange,
     FocusWindow,
     Screenshot,
+
+    // v1.2 "Brain": Variables, Resilience & Sub-Macros (see Variables.cs & ResilienceAndSubMacros.cs).
+    SetVariable,
+    Checkpoint,
+    CallMacro,
 }
 
 public enum MacroMouseButton
@@ -169,6 +174,9 @@ public static class MouseMotionDefaults
 [JsonDerivedType(typeof(WaitForChangeStep), "waitForChange")]
 [JsonDerivedType(typeof(FocusWindowStep), "focusWindow")]
 [JsonDerivedType(typeof(ScreenshotStep), "screenshot")]
+[JsonDerivedType(typeof(SetVariableStep), "setVariable")]
+[JsonDerivedType(typeof(CheckpointStep), "checkpoint")]
+[JsonDerivedType(typeof(CallMacroStep), "callMacro")]
 public abstract class MacroStep
 {
     public Guid Id { get; set; } = Guid.NewGuid();
@@ -183,10 +191,54 @@ public abstract class MacroStep
     public abstract StepKind Kind { get; }
 }
 
-/// <summary>Waits for a fixed amount of time.</summary>
+/// <summary>How a <see cref="DelayStep"/> decides when to move on (v1.1 Adaptive Timing).</summary>
+public enum DelayMode
+{
+    /// <summary>Wait for the exact <see cref="DelayStep.DurationMs"/> (the classic behavior).</summary>
+    Fixed,
+
+    /// <summary>
+    /// Wait at least <see cref="DelayStep.MinDurationMs"/>, then continue as soon as screen motion around the last
+    /// action settles for <see cref="DelayStep.EffectiveQuietWindowMs"/> (or when <see cref="DelayStep.EffectiveMaxDurationMs"/> expires).
+    /// </summary>
+    UntilScreenSettles,
+
+    /// <summary>
+    /// Wait at least <see cref="DelayStep.MinDurationMs"/>, then continue as soon as the screen around the last action
+    /// visibly changes from how it looked when the wait began (or when <see cref="DelayStep.EffectiveMaxDurationMs"/> expires).
+    /// </summary>
+    UntilScreenChanges,
+}
+
+/// <summary>Waits for a fixed amount of time, or adaptively until the screen settles / changes.</summary>
 public sealed class DelayStep : MacroStep
 {
+    /// <summary>Default calm period required for <see cref="DelayMode.UntilScreenSettles"/> (ms).</summary>
+    public const int DefaultQuietWindowMs = 120;
+
     public int DurationMs { get; set; } = 500;
+
+    /// <summary>Wait strategy. Omitted from JSON when <see cref="DelayMode.Fixed"/> so existing files stay unchanged.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public DelayMode Mode { get; set; } = DelayMode.Fixed;
+
+    /// <summary>Adaptive modes: minimum wait before checking the screen (ms).</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public int MinDurationMs { get; set; }
+
+    /// <summary>Adaptive modes: safety ceiling after which playback continues even if the screen hasn't settled/changed (ms).</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public int MaxDurationMs { get; set; }
+
+    /// <summary>Optional custom calm window (ms) for <see cref="DelayMode.UntilScreenSettles"/>. 0 = <see cref="DefaultQuietWindowMs"/>.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public int QuietWindowMs { get; set; }
+
+    [JsonIgnore]
+    public int EffectiveQuietWindowMs => QuietWindowMs > 0 ? QuietWindowMs : DefaultQuietWindowMs;
+
+    [JsonIgnore]
+    public int EffectiveMaxDurationMs => Math.Max(MinDurationMs, MaxDurationMs > 0 ? MaxDurationMs : DurationMs);
 
     [JsonIgnore]
     public override StepKind Kind => StepKind.Delay;
@@ -412,6 +464,26 @@ public sealed class MouseClickStep : MacroStep
         set => _smartAimRadiusPx = value;
     }
 
+    // ---------------- v1.1 Intent Recording (format 15) ----------------
+
+    /// <summary>
+    /// Multi-signal "Intent" fingerprint captured when this click was recorded (UI element, nearby OCR text, and owning
+    /// window). Null for older files and hand-created coordinate clicks.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public Targeting.TargetFingerprint? Target { get; set; }
+
+    /// <summary>
+    /// "🧭 Smart Intent": resolve where to click using the 5-tier fallback chain (UI Automation → OCR text → Multi-scale
+    /// snapshot → Window-relative → X/Y) so moved, resized, or DPI-scaled windows don't break the click.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public bool UseSmartIntent { get; set; }
+
+    /// <summary>True when an Intent fingerprint with at least one non-coordinate signal is stored on this step.</summary>
+    [JsonIgnore]
+    public bool HasTargetIntent => Target is { HasAnySignal: true };
+
     [JsonIgnore]
     public override StepKind Kind => StepKind.MouseClick;
 }
@@ -625,6 +697,17 @@ public abstract class ScreenSearchStep : MacroStep
 
     public TextNotFoundBehavior WhenNotFound { get; set; } = TextNotFoundBehavior.StopMacro;
 
+    /// <summary>Extended v1.2 recovery settings (Retry, Recovery Sub-Macro, Restart from Checkpoint).</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public StepFailurePolicy? FailurePolicy { get; set; }
+
+    [JsonIgnore]
+    public StepFailureAction EffectiveFailureAction
+    {
+        get => StepFailurePolicy.ResolveEffective(WhenNotFound, FailurePolicy);
+        set => (WhenNotFound, FailurePolicy) = StepFailurePolicy.Apply(value, FailurePolicy);
+    }
+
     /// <summary>The custom search area as a rectangle (only used with <see cref="Vision.SearchScope.CustomArea"/>).</summary>
     [JsonIgnore]
     public Ocr.ScreenRect Region => new(RegionX, RegionY, RegionWidth, RegionHeight);
@@ -745,6 +828,14 @@ public sealed class FindImageStep : ScreenSearchStep
         get => !AdaptToLighting;
         set => AdaptToLighting = !value;
     }
+
+    /// <summary>
+    /// "Match across display scales &amp; sizes (75%–150%)": also checks resized copies of the image when 1:1 doesn't
+    /// match, so a macro recorded at 100 % DPI still finds buttons on a 125 % or 150 % monitor (or resized game UI).
+    /// Off by default; written only when enabled (schema 15).
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public bool AllowMultiScale { get; set; }
 
     [JsonIgnore]
     public override StepKind Kind => StepKind.FindImage;
@@ -869,4 +960,8 @@ public sealed class SequenceClickTarget
     public int AnchorX { get; set; }
 
     public int AnchorY { get; set; }
+
+    /// <summary>Optional Intent fingerprint for this click, preserved when breaking a recorded sequence into steps.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public Targeting.TargetFingerprint? Target { get; set; }
 }

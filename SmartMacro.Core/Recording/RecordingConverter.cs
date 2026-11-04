@@ -140,6 +140,13 @@ public sealed class RecordingOptions
     /// Keys to strip from the end of the recording (e.g. the hotkey used to stop recording).
     /// </summary>
     public IReadOnlyCollection<int> TrimTrailingKeys { get; init; } = Array.Empty<int>();
+
+    /// <summary>
+    /// Adaptive Smart Timing (v1.1): converts pauses recorded after mouse clicks (&gt;= 150 ms) into
+    /// <see cref="DelayMode.UntilScreenSettles"/> steps so fast loads finish early and slow loads wait safely.
+    /// Off by default here for programmatic callers; enabled by default in app settings for Smart/Desktop recordings.
+    /// </summary>
+    public bool SmartTiming { get; init; }
 }
 
 /// <summary>
@@ -190,10 +197,14 @@ public static class RecordingConverter
 
         // How far into the recording playback has got so far (recording time, ms). Gaps are measured from here,
         // and gaps too short for their own Delay step stay "owed" until the next one instead of being lost.
+        /// <summary>Minimum post-click pause (ms) converted into an adaptive settle wait when <see cref="RecordingOptions.SmartTiming"/> is on.</summary>
+        const int MinSmartSettleDelayMs = 150;
+
         long? accounted = null;
         long? lastMoveTime = null;
         (int X, int Y)? lastMovePosition = null;
         RawInputEvent? pendingMove = null; // last thinned-out move, kept if the cursor rests there
+        var awaitingPostClickSettle = false;
 
         void Emit(MacroStep step, long time, long endTime)
         {
@@ -204,7 +215,25 @@ public static class RecordingConverter
                 var minDelay = Math.Max(1, keysDown.Count > 0 && options.MinDelayMs <= 15 ? 1 : options.MinDelayMs);
                 if (gap >= minDelay)
                 {
-                    steps.Add(new DelayStep { DurationMs = (int)Math.Min(gap, MacroValidator.MaxDelayMs) });
+                    var durationMs = (int)Math.Min(gap, MacroValidator.MaxDelayMs);
+                    if (options.SmartTiming && awaitingPostClickSettle && durationMs >= MinSmartSettleDelayMs && keysDown.Count == 0 && buttonsDown.Count == 0)
+                    {
+                        var minWait = Math.Clamp(durationMs / 4, 60, 250);
+                        var maxWait = (int)Math.Clamp(Math.Max((long)durationMs, (long)durationMs * 3), 600, Math.Max(durationMs, 15_000));
+                        steps.Add(new DelayStep
+                        {
+                            DurationMs = durationMs,
+                            Mode = DelayMode.UntilScreenSettles,
+                            MinDurationMs = minWait,
+                            MaxDurationMs = Math.Min(maxWait, MacroValidator.MaxDelayMs),
+                        });
+                        awaitingPostClickSettle = false;
+                    }
+                    else
+                    {
+                        steps.Add(new DelayStep { DurationMs = durationMs });
+                    }
+
                     accounted = time;
                 }
             }
@@ -214,6 +243,11 @@ public static class RecordingConverter
             }
 
             steps.Add(step);
+
+            if (step is MouseClickStep { Action: MouseClickAction.Click })
+                awaitingPostClickSettle = true;
+            else if (step is not MouseMoveStep)
+                awaitingPostClickSettle = false;
 
             // A Click / Press covers the time until its release: either it's played (HoldMs) or,
             // with KeepHoldTime off, deliberately skipped like before.

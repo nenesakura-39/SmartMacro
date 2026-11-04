@@ -223,6 +223,7 @@ public static class StepCategories
     public const string Feedback = "Feedback";
     public const string Recorded = "Recorded";
     public const string Utility = "Utility";
+    public const string Memory = "Memory";
 
     public static string Of(StepKind kind) => kind switch
     {
@@ -230,6 +231,7 @@ public static class StepCategories
         StepKind.MouseMove or StepKind.MouseClick or StepKind.MouseScroll or StepKind.KeyPress or StepKind.TypeText => Input,
         StepKind.FindText or StepKind.FindImage or StepKind.FindColor or StepKind.WaitForChange => Vision,
         StepKind.FocusWindow or StepKind.Screenshot => Utility,
+        StepKind.SetVariable or StepKind.Checkpoint or StepKind.CallMacro => Memory,
         StepKind.If or StepKind.Else or StepKind.EndIf or StepKind.Repeat or StepKind.EndRepeat => Logic,
         StepKind.FeedbackLoop => Feedback,
         _ => Recorded,

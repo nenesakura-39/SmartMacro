@@ -5,6 +5,7 @@
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
              xmlns:vm="clr-namespace:SmartMacro.ViewModels"
              xmlns:views="clr-namespace:SmartMacro.Views"
+             xmlns:ctrl="clr-namespace:SmartMacro.Controls"
              mc:Ignorable="d"
              d:DataContext="{d:DesignInstance Type=vm:SettingsViewModel}">
     <UserControl.Resources>
@@ -14,7 +15,7 @@
             <Setter Property="Margin" Value="0,0,0,14" />
         </Style>
         <Style x:Key="SettingsCardHeader" TargetType="Border">
-            <Setter Property="BorderBrush" Value="{StaticResource BorderBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
             <Setter Property="BorderThickness" Value="0,0,0,1" />
             <Setter Property="Padding" Value="16,12" />
         </Style>
@@ -87,7 +88,7 @@
                         </DockPanel>
 
                         <!-- KuroLogic brand band: obsidian studio surface with the KuroLogic logo (Assets/KuroLogic-Logo.png) -->
-                        <Border CornerRadius="0,0,10,10" BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,1,0,0" ClipToBounds="True">
+                        <Border CornerRadius="0,0,10,10" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,1,0,0" ClipToBounds="True">
                             <Border.Background>
                                 <RadialGradientBrush Center="0.3,0.5" GradientOrigin="0.3,0.5" RadiusX="0.75" RadiusY="1.6">
                                     <GradientStop Color="#2A1B5E" Offset="0" />
@@ -109,6 +110,94 @@
                     </StackPanel>
                 </Border>
 
+                <!-- ===== Studio X Appearance & Motion ===== -->
+                <Border Style="{StaticResource SettingsCard}">
+                    <StackPanel>
+                        <Border Style="{StaticResource SettingsCardHeader}">
+                            <DockPanel>
+                                <Border Width="30" Height="30" CornerRadius="8" Background="{DynamicResource AccentSoftBrush}" VerticalAlignment="Center">
+                                    <ctrl:StudioIcon Kind="Sparkles" Size="15" Foreground="{DynamicResource AccentBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                </Border>
+                                <StackPanel Margin="12,0,0,0" VerticalAlignment="Center">
+                                    <TextBlock Text="Studio Appearance &amp; Motion" Style="{StaticResource SectionTitle}" />
+                                    <TextBlock Text="Customize SmartMacro Studio X's color theme, neon accent, layout density and transitions. Changes preview live."
+                                               Style="{StaticResource MutedText}" FontSize="11" Margin="0,1,0,0" />
+                                </StackPanel>
+                            </DockPanel>
+                        </Border>
+
+                        <StackPanel Style="{StaticResource SettingsCardBody}">
+                            <Grid Margin="0,6,0,0">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="12" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Grid.Column="0">
+                                    <TextBlock Text="Studio theme" Style="{StaticResource FieldLabel}" />
+                                    <ComboBox ItemsSource="{Binding Themes}" SelectedValue="{Binding Theme}"
+                                              SelectedValuePath="Value" DisplayMemberPath="Label"
+                                              AutomationProperties.Name="Studio theme" />
+                                </StackPanel>
+                                <StackPanel Grid.Column="2">
+                                    <TextBlock Text="Layout density" Style="{StaticResource FieldLabel}" />
+                                    <ComboBox ItemsSource="{Binding Densities}" SelectedValue="{Binding Density}"
+                                              SelectedValuePath="Value" DisplayMemberPath="Label"
+                                              AutomationProperties.Name="Layout density" />
+                                </StackPanel>
+                            </Grid>
+
+                            <TextBlock Text="Studio accent color" Style="{StaticResource FieldLabel}" Margin="0,12,0,4" />
+                            <DockPanel>
+                                <!-- Quick-click color swatches -->
+                                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center" Margin="12,0,0,0">
+                                    <Button Width="26" Height="26" Padding="0" Margin="0,0,6,0"
+                                            Command="{Binding SetAccentCommand}" CommandParameter="NeonBrand"
+                                            ToolTip="Neon Brand (Sky &amp; Violet)">
+                                        <Border Width="16" Height="16" CornerRadius="8">
+                                            <Border.Background>
+                                                <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+                                                    <GradientStop Color="#38BDF8" Offset="0" />
+                                                    <GradientStop Color="#8B5CF6" Offset="1" />
+                                                </LinearGradientBrush>
+                                            </Border.Background>
+                                        </Border>
+                                    </Button>
+                                    <Button Width="26" Height="26" Padding="0" Margin="0,0,6,0"
+                                            Command="{Binding SetAccentCommand}" CommandParameter="ElectricBlue"
+                                            ToolTip="Electric Blue (#3B82F6)">
+                                        <Border Width="16" Height="16" CornerRadius="8" Background="#3B82F6" />
+                                    </Button>
+                                    <Button Width="26" Height="26" Padding="0" Margin="0,0,6,0"
+                                            Command="{Binding SetAccentCommand}" CommandParameter="CyberViolet"
+                                            ToolTip="Cyber Violet (#8B5CF6)">
+                                        <Border Width="16" Height="16" CornerRadius="8" Background="#8B5CF6" />
+                                    </Button>
+                                    <Button Width="26" Height="26" Padding="0" Margin="0,0,6,0"
+                                            Command="{Binding SetAccentCommand}" CommandParameter="EmeraldPulse"
+                                            ToolTip="Emerald Pulse (#10B981)">
+                                        <Border Width="16" Height="16" CornerRadius="8" Background="#10B981" />
+                                    </Button>
+                                    <Button Width="26" Height="26" Padding="0"
+                                            Command="{Binding SetAccentCommand}" CommandParameter="RoseQuartz"
+                                            ToolTip="Rose Quartz (#F43F5E)">
+                                        <Border Width="16" Height="16" CornerRadius="8" Background="#F43F5E" />
+                                    </Button>
+                                </StackPanel>
+                                <ComboBox ItemsSource="{Binding Accents}" SelectedValue="{Binding Accent}"
+                                          SelectedValuePath="Value" DisplayMemberPath="Label"
+                                          AutomationProperties.Name="Studio accent color" />
+                            </DockPanel>
+
+                            <CheckBox Style="{StaticResource SettingSwitch}"
+                                      Content="Reduce motion (skip page fade/slide transitions)"
+                                      IsChecked="{Binding ReduceMotion}" />
+                            <TextBlock Style="{StaticResource SettingHelp}"
+                                       Text="SmartMacro also automatically honors Windows Accessibility → Animation effects." />
+                        </StackPanel>
+                    </StackPanel>
+                </Border>
+
                 <!-- ===== Global Hotkeys ===== -->
                 <Border Style="{StaticResource SettingsCard}">
                     <StackPanel>
@@ -116,8 +205,8 @@
                             <DockPanel>
                                 <Button DockPanel.Dock="Right" Style="{StaticResource GhostButton}" Content="Reset shortcuts" Command="{Binding ResetShortcutsCommand}"
                                         Padding="10,4" FontSize="12" VerticalAlignment="Center" />
-                                <Border Width="30" Height="30" CornerRadius="8" Background="{StaticResource InputBadgeBrush}" VerticalAlignment="Center">
-                                    <TextBlock Text="&#xE765;" Style="{StaticResource IconText}" Foreground="{StaticResource InputAccentBrush}" HorizontalAlignment="Center" />
+                                <Border Width="30" Height="30" CornerRadius="8" Background="{DynamicResource InputBadgeBrush}" VerticalAlignment="Center">
+                                    <TextBlock Text="&#xE765;" Style="{StaticResource IconText}" Foreground="{DynamicResource InputAccentBrush}" HorizontalAlignment="Center" />
                                 </Border>
                                 <StackPanel Margin="10,0,0,0" VerticalAlignment="Center">
                                     <TextBlock Text="Global Hotkeys" Style="{StaticResource SectionTitle}" FontSize="14" />
@@ -152,7 +241,7 @@
                                          Margin="0,4" PreviewKeyDown="HotkeyBox_PreviewKeyDown" AutomationProperties.Name="Pause shortcut" Cursor="Hand"
                                          FontWeight="SemiBold" />
                             </Grid>
-                            <TextBlock Text="{Binding HotkeyError}" Foreground="{StaticResource ErrorBrush}" FontSize="12" Margin="0,6,0,0" TextWrapping="Wrap"
+                            <TextBlock Text="{Binding HotkeyError}" Foreground="{DynamicResource ErrorBrush}" FontSize="12" Margin="0,6,0,0" TextWrapping="Wrap"
                                        Visibility="{Binding HotkeyError, Converter={StaticResource NullToVisibility}}" />
                         </StackPanel>
                     </StackPanel>
@@ -163,8 +252,8 @@
                     <StackPanel>
                         <Border Style="{StaticResource SettingsCardHeader}">
                             <DockPanel>
-                                <Border Width="30" Height="30" CornerRadius="8" Background="{StaticResource RecordedBadgeBrush}" VerticalAlignment="Center">
-                                    <TextBlock Text="&#xE7C8;" Style="{StaticResource IconText}" Foreground="{StaticResource RecordedAccentBrush}" HorizontalAlignment="Center" />
+                                <Border Width="30" Height="30" CornerRadius="8" Background="{DynamicResource RecordedBadgeBrush}" VerticalAlignment="Center">
+                                    <TextBlock Text="&#xE7C8;" Style="{StaticResource IconText}" Foreground="{DynamicResource RecordedAccentBrush}" HorizontalAlignment="Center" />
                                 </Border>
                                 <StackPanel Margin="10,0,0,0" VerticalAlignment="Center">
                                     <TextBlock Text="Recording Defaults" Style="{StaticResource SectionTitle}" FontSize="14" />
@@ -194,11 +283,17 @@
                             <CheckBox Style="{StaticResource SettingSwitch}" IsChecked="{Binding CaptureClickSnapshots}" IsEnabled="{Binding MakesEditableSteps}"
                                       Content="✨ Smart Click Snapshots: save a small picture of what I click" AutomationProperties.Name="Smart Click Snapshots"
                                       ToolTip="Every recorded click keeps a 56×56 picture of what was under the cursor. The editor shows it, Smart-Aim can find the button again if it moved a little, and one click turns the step into a 'Find image &amp; click'. The pictures are saved inside the macro file, so turn this off if your screen shows private things while you record." />
+                            <CheckBox Style="{StaticResource SettingSwitch}" IsChecked="{Binding CaptureClickIntent}" IsEnabled="{Binding MakesEditableSteps}"
+                                      Content="🧭 Intent Recording: remember UI buttons, text &amp; windows when I click" AutomationProperties.Name="Intent Recording"
+                                      ToolTip="Off the input hook thread, SmartMacro records the clicked UI control (name / AutomationId), nearby screen text and window position so playback can relocate the target even if the window moves, resizes or rescales." />
+                            <CheckBox Style="{StaticResource SettingSwitch}" IsChecked="{Binding SmartTimingOnRecord}" IsEnabled="{Binding MakesEditableSteps}"
+                                      Content="⏱ Smart Timing: turn pauses after clicks into adaptive 'Until screen settles' waits" AutomationProperties.Name="Smart Timing"
+                                      ToolTip="Pauses of 150 ms or longer right after a click become adaptive waits: playback continues early as soon as the UI stops changing, or waits safely up to 3× longer when a page or dialog loads slowly." />
 
                             <TextBlock Text="Default length of new Delay steps (ms)" Style="{StaticResource FieldLabel}" Margin="0,14,0,4" />
                             <TextBox Text="{Binding DefaultDelayMs, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}" Width="140" HorizontalAlignment="Left"
                                      AutomationProperties.Name="Default delay in milliseconds" />
-                            <TextBlock Text="{Binding DelayError}" Foreground="{StaticResource ErrorBrush}" FontSize="12" Margin="0,4,0,0"
+                            <TextBlock Text="{Binding DelayError}" Foreground="{DynamicResource ErrorBrush}" FontSize="12" Margin="0,4,0,0"
                                        Visibility="{Binding DelayError, Converter={StaticResource NullToVisibility}}" />
                         </StackPanel>
                     </StackPanel>
@@ -209,8 +304,8 @@
                     <StackPanel>
                         <Border Style="{StaticResource SettingsCardHeader}">
                             <DockPanel>
-                                <Border Width="30" Height="30" CornerRadius="8" Background="{StaticResource FeedbackBadgeBrush}" VerticalAlignment="Center">
-                                    <TextBlock Text="&#xE83D;" Style="{StaticResource IconText}" Foreground="{StaticResource FeedbackAccentBrush}" HorizontalAlignment="Center" />
+                                <Border Width="30" Height="30" CornerRadius="8" Background="{DynamicResource FeedbackBadgeBrush}" VerticalAlignment="Center">
+                                    <TextBlock Text="&#xE83D;" Style="{StaticResource IconText}" Foreground="{DynamicResource FeedbackAccentBrush}" HorizontalAlignment="Center" />
                                 </Border>
                                 <StackPanel Margin="10,0,0,0" VerticalAlignment="Center">
                                     <TextBlock Text="Playback &amp; Safety" Style="{StaticResource SectionTitle}" FontSize="14" />
@@ -219,8 +314,8 @@
                             </DockPanel>
                         </Border>
                         <StackPanel Style="{StaticResource SettingsCardBody}">
-                            <Border Margin="0,8,0,2" Padding="10,8" CornerRadius="6" Background="{StaticResource SuccessSoftBrush}">
-                                <TextBlock TextWrapping="Wrap" FontSize="12" Foreground="{StaticResource TextBrush}"
+                            <Border Margin="0,8,0,2" Padding="10,8" CornerRadius="6" Background="{DynamicResource SuccessSoftBrush}">
+                                <TextBlock TextWrapping="Wrap" FontSize="12" Foreground="{DynamicResource TextBrush}"
                                            Text="🛡 Failsafe is always on: when playback finishes, is stopped (Esc / hotkey), times out or hits an error, every key and mouse button SmartMacro is still holding is released, so nothing stays stuck down in a game." />
                             </Border>
                             <CheckBox Style="{StaticResource SettingSwitch}" IsChecked="{Binding MinimizeDuringRun}"
@@ -230,8 +325,8 @@
                             <TextBlock Style="{StaticResource SettingHelp}" Text="A small click-through pill in the top-right corner: the current step and what it's doing." />
 
                             <!-- Streamer mode: applied (and saved) the moment it's switched, also from the editor's top bar. -->
-                            <Border Margin="0,12,0,2" Padding="12,10" CornerRadius="8" Background="{StaticResource VisionSoftBrush}"
-                                    BorderBrush="{StaticResource VisionAccentBrush}" BorderThickness="1">
+                            <Border Margin="0,12,0,2" Padding="12,10" CornerRadius="8" Background="{DynamicResource VisionSoftBrush}"
+                                    BorderBrush="{DynamicResource VisionAccentBrush}" BorderThickness="1">
                                 <StackPanel>
                                     <CheckBox Style="{StaticResource SettingSwitch}" IsChecked="{Binding ShowOverlaysInObsAndRecording}" Margin="0"
                                               Content="🎥 Show overlays in OBS / Discord" FontWeight="SemiBold"
@@ -248,9 +343,9 @@
 
                             <TextBlock Text="TEXT RECOGNITION (OCR)" Style="{StaticResource SetupCardTitle}" Margin="0,16,0,6" />
                             <StackPanel Orientation="Horizontal">
-                                <TextBlock Text="&#xE73E;" Style="{StaticResource IconText}" Foreground="{StaticResource SuccessBrush}" VerticalAlignment="Top" Margin="0,2,8,0"
+                                <TextBlock Text="&#xE73E;" Style="{StaticResource IconText}" Foreground="{DynamicResource SuccessBrush}" VerticalAlignment="Top" Margin="0,2,8,0"
                                            Visibility="{Binding IsOcrAvailable, Converter={StaticResource BoolToVisibility}}" />
-                                <TextBlock Text="&#xE7BA;" Style="{StaticResource IconText}" Foreground="{StaticResource WarningBrush}" VerticalAlignment="Top" Margin="0,2,8,0"
+                                <TextBlock Text="&#xE7BA;" Style="{StaticResource IconText}" Foreground="{DynamicResource WarningBrush}" VerticalAlignment="Top" Margin="0,2,8,0"
                                            Visibility="{Binding IsOcrAvailable, Converter={StaticResource BoolToVisibility}, ConverterParameter=Invert}" />
                                 <TextBlock Text="{Binding OcrStatus}" TextWrapping="Wrap" MaxWidth="660" FontSize="12" />
                             </StackPanel>
@@ -265,8 +360,8 @@
                     <StackPanel>
                         <Border Style="{StaticResource SettingsCardHeader}">
                             <DockPanel>
-                                <Border Width="30" Height="30" CornerRadius="8" Background="{StaticResource TimingBadgeBrush}" VerticalAlignment="Center">
-                                    <TextBlock Text="&#xE8B7;" Style="{StaticResource IconText}" Foreground="{StaticResource TimingAccentBrush}" HorizontalAlignment="Center" />
+                                <Border Width="30" Height="30" CornerRadius="8" Background="{DynamicResource TimingBadgeBrush}" VerticalAlignment="Center">
+                                    <TextBlock Text="&#xE8B7;" Style="{StaticResource IconText}" Foreground="{DynamicResource TimingAccentBrush}" HorizontalAlignment="Center" />
                                 </Border>
                                 <StackPanel Margin="10,0,0,0" VerticalAlignment="Center">
                                     <TextBlock Text="Storage &amp; Data" Style="{StaticResource SectionTitle}" FontSize="14" />
@@ -283,7 +378,7 @@
                                         <TextBlock Text="Open" Margin="8,0,0,0" />
                                     </StackPanel>
                                 </Button>
-                                <TextBox Text="{Binding DataFolder, Mode=OneWay}" IsReadOnly="True" Foreground="{StaticResource MutedTextBrush}" />
+                                <TextBox Text="{Binding DataFolder, Mode=OneWay}" IsReadOnly="True" Foreground="{DynamicResource MutedTextBrush}" />
                             </DockPanel>
                             <TextBlock Style="{StaticResource SettingHelp}" Margin="0,6,0,0"
                                        Text="Macros, settings, daily logs and deleted macros (Trash) are stored here." />

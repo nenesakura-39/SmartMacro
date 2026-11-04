@@ -261,6 +261,14 @@ public partial class EditorView : UserControl
     private void OnRunningStepChanged(object? sender, StepViewModel step)
     {
         if (StepList.IsVisible) StepList.ScrollIntoView(step);
+        StepMinimap?.InvalidateVisual();
+    }
+
+    private void StepMinimap_StepClicked(object sender, StepViewModel step)
+    {
+        if (_editor is null) return;
+        _editor.SelectedStep = step;
+        StepList.ScrollIntoView(step);
     }
 
     /// <summary>

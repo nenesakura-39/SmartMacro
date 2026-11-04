@@ -174,7 +174,9 @@ public static class StepCleanup
                 case InputEventKind.MouseDown:
                 {
                     var target = step.ClickTargetFor(i);
-                    var picture = target is null ? null : ClickSnapshots.FromBase64(target.TargetThumbnailBase64, target.AnchorX, target.AnchorY);
+                    var picture = target is null
+                        ? null
+                        : ClickSnapshots.FromBase64(target.TargetThumbnailBase64, target.AnchorX, target.AnchorY, target.Target);
                     raw.Add(new RawInputEvent(ms, RawInputKind.MouseDown, X: x, Y: y, Button: e.Button, ClickedTarget: picture));
                     break;
                 }

@@ -1,38 +1,37 @@
-﻿<Window x:Class="SmartMacro.MainWindow"
+<Window x:Class="SmartMacro.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:vm="clr-namespace:SmartMacro.ViewModels"
         xmlns:views="clr-namespace:SmartMacro.Views"
+        xmlns:ctrl="clr-namespace:SmartMacro.Controls"
         xmlns:conv="clr-namespace:SmartMacro.Converters"
         mc:Ignorable="d"
         d:DataContext="{d:DesignInstance Type=vm:MainViewModel}"
         Title="{Binding WindowTitle}"
         Icon="pack://application:,,,/Assets/SmartMacro.ico"
-        Width="1340" Height="860" MinWidth="1024" MinHeight="680"
+        Width="1380" Height="880" MinWidth="1040" MinHeight="680"
         WindowStartupLocation="CenterScreen"
-        Background="{StaticResource BackgroundBrush}"
-        Foreground="{StaticResource TextBrush}"
+        Background="{DynamicResource BackgroundBrush}"
+        Foreground="{DynamicResource TextBrush}"
         FontFamily="{StaticResource UiFont}"
         FontSize="13"
         UseLayoutRounding="True"
-        TextOptions.TextFormattingMode="Display">
+        TextOptions.TextFormattingMode="Display"
+        StateChanged="MainWindow_StateChanged">
+
+    <WindowChrome.WindowChrome>
+        <WindowChrome CaptionHeight="40"
+                      ResizeBorderThickness="6"
+                      GlassFrameThickness="-1"
+                      UseAeroCaptionButtons="False" />
+    </WindowChrome.WindowChrome>
 
     <Window.Resources>
-        <!-- Sidebar width: 175 px expanded, 60 px icon-only rail. -->
         <conv:BoolToGridLengthConverter x:Key="SidebarWidth" />
 
-        <!-- The shared automation bar / Activity panel are only shown outside the Workflow Editor:
-             the editor has its own unified header (Record / Play) and bottom drawer (Activity + Problems). -->
-        <Style x:Key="HiddenOnEditorPage" TargetType="Border" BasedOn="{StaticResource Card}">
-            <Style.Triggers>
-                <DataTrigger Binding="{Binding CurrentPage}" Value="Editor">
-                    <Setter Property="Visibility" Value="Collapsed" />
-                </DataTrigger>
-            </Style.Triggers>
-        </Style>
-        <Style x:Key="ActivityPanelStyle" TargetType="Border" BasedOn="{StaticResource Card}">
+        <Style x:Key="ActivityPanelStyle" TargetType="Border" BasedOn="{StaticResource GlassCard}">
             <Setter Property="Visibility" Value="{Binding ShowLogPanel, Converter={StaticResource BoolToVisibility}}" />
             <Style.Triggers>
                 <DataTrigger Binding="{Binding CurrentPage}" Value="Editor">
@@ -41,7 +40,7 @@
             </Style.Triggers>
         </Style>
 
-        <!-- Each page view model is shown with its view. -->
+        <!-- Page view templates -->
         <DataTemplate DataType="{x:Type vm:LibraryViewModel}">
             <views:LibraryView />
         </DataTemplate>
@@ -61,289 +60,454 @@
 
     <Window.InputBindings>
         <KeyBinding Key="S" Modifiers="Control" Command="{Binding Editor.SaveCommand}" />
+        <KeyBinding Key="K" Modifiers="Control" Command="{Binding OpenCommandPaletteCommand}" />
+        <KeyBinding Key="M" Modifiers="Control" Command="{Binding OpenMissionControlCommand}" />
     </Window.InputBindings>
 
-    <Grid>
-        <Grid.ColumnDefinitions>
-            <ColumnDefinition Width="{Binding IsChecked, ElementName=SidebarToggle, Converter={StaticResource SidebarWidth}, ConverterParameter=175|60}" />
-            <ColumnDefinition Width="*" />
-        </Grid.ColumnDefinitions>
-
-        <!-- ============ Sidebar (175 px, or a 60 px icon rail) ============ -->
-        <Border Grid.Column="0" Background="{StaticResource SidebarBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,0,1,0"
-                ClipToBounds="True">
-            <DockPanel LastChildFill="False">
-                <!-- Logo: vector brand mark ("Cybernetic Vision Core + Hyper-Velocity Cursor", Views/BrandLogo.xaml) -->
-                <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="12,14,8,16">
-                    <views:BrandLogo Width="34" Height="34" />
-                    <StackPanel Margin="10,0,0,0" VerticalAlignment="Center"
-                                Visibility="{Binding IsChecked, ElementName=SidebarToggle, Converter={StaticResource BoolToVisibility}}">
-                        <TextBlock Text="SmartMacro" FontSize="14" FontWeight="SemiBold" />
-                        <TextBlock Text="Automation studio" FontSize="10" Foreground="{StaticResource MutedTextBrush}" />
-                    </StackPanel>
-                </StackPanel>
-
-                <TextBlock DockPanel.Dock="Top" Text="WORKSPACE" FontSize="10" FontWeight="SemiBold"
-                           Foreground="{StaticResource SubtleTextBrush}" Margin="18,0,0,4"
-                           Visibility="{Binding IsChecked, ElementName=SidebarToggle, Converter={StaticResource BoolToVisibility}}" />
-
-                <RadioButton DockPanel.Dock="Top" Style="{StaticResource NavButton}" Content="Macro Library" Tag="&#xE8F1;"
-                             GroupName="Nav" AutomationProperties.Name="Macro Library" ToolTip="Macro Library"
-                             IsChecked="{Binding CurrentPage, Converter={StaticResource PageToBool}, ConverterParameter=Library}" />
-                <RadioButton DockPanel.Dock="Top" Style="{StaticResource NavButton}" Tag="&#xE70F;"
-                             GroupName="Nav" AutomationProperties.Name="Workflow Editor" ToolTip="Workflow Editor"
-                             IsChecked="{Binding CurrentPage, Converter={StaticResource PageToBool}, ConverterParameter=Editor}">
-                    <StackPanel Orientation="Horizontal">
-                        <TextBlock Text="Workflow Editor" />
-                        <Ellipse Width="7" Height="7" Fill="{StaticResource WarningBrush}" Margin="6,1,0,0" VerticalAlignment="Center"
-                                 ToolTip="Unsaved changes"
-                                 Visibility="{Binding Editor.IsDirty, Converter={StaticResource BoolToVisibility}}" />
-                    </StackPanel>
-                </RadioButton>
-
-                <TextBlock DockPanel.Dock="Top" Text="APP" FontSize="10" FontWeight="SemiBold"
-                           Foreground="{StaticResource SubtleTextBrush}" Margin="18,14,0,4"
-                           Visibility="{Binding IsChecked, ElementName=SidebarToggle, Converter={StaticResource BoolToVisibility}}" />
-                <Border DockPanel.Dock="Top" Height="1" Margin="14,10,14,8" Background="{StaticResource BorderBrush}"
-                        Visibility="{Binding IsChecked, ElementName=SidebarToggle, Converter={StaticResource BoolToVisibility}, ConverterParameter=Invert}" />
-
-                <RadioButton DockPanel.Dock="Top" Style="{StaticResource NavButton}" Content="Manual" Tag="&#xE82D;"
-                             GroupName="Nav" AutomationProperties.Name="Manual" ToolTip="Manual: guides, recipes and shortcuts"
-                             IsChecked="{Binding CurrentPage, Converter={StaticResource PageToBool}, ConverterParameter=Manual}" />
-                <RadioButton DockPanel.Dock="Top" Style="{StaticResource NavButton}" Content="Logs" Tag="&#xE8A5;"
-                             GroupName="Nav" AutomationProperties.Name="Logs" ToolTip="Logs"
-                             IsChecked="{Binding CurrentPage, Converter={StaticResource PageToBool}, ConverterParameter=Logs}" />
-                <RadioButton DockPanel.Dock="Top" Style="{StaticResource NavButton}" Content="Settings" Tag="&#xE713;"
-                             GroupName="Nav" AutomationProperties.Name="Settings" ToolTip="Settings"
-                             IsChecked="{Binding CurrentPage, Converter={StaticResource PageToBool}, ConverterParameter=Settings}" />
-
-                <!-- Collapse / expand the sidebar -->
-                <ToggleButton x:Name="SidebarToggle" DockPanel.Dock="Bottom" IsChecked="True" Style="{StaticResource GhostToggle}"
-                              HorizontalAlignment="Left" Margin="12,0,0,10" Padding="8,5"
-                              ToolTip="Collapse or expand the sidebar" AutomationProperties.Name="Collapse or expand the sidebar">
-                    <TextBlock FontFamily="{StaticResource IconFont}" FontSize="12">
-                        <TextBlock.Style>
-                            <Style TargetType="TextBlock">
-                                <Setter Property="Text" Value="&#xE76B;" />
-                                <Style.Triggers>
-                                    <DataTrigger Binding="{Binding IsChecked, ElementName=SidebarToggle}" Value="False">
-                                        <Setter Property="Text" Value="&#xE76C;" />
-                                    </DataTrigger>
-                                </Style.Triggers>
-                            </Style>
-                        </TextBlock.Style>
-                    </TextBlock>
-                </ToggleButton>
-
-                <!-- Compact footer badge: version + owner + the safety / hotkey hint -->
-                <Border DockPanel.Dock="Bottom" Margin="10,0,10,8" Padding="10,8" CornerRadius="8"
-                        Background="{StaticResource SurfaceBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1"
-                        ToolTip="{Binding Automation.EmergencyHint}"
-                        Visibility="{Binding IsChecked, ElementName=SidebarToggle, Converter={StaticResource BoolToVisibility}}">
-                    <StackPanel>
-                        <StackPanel Orientation="Horizontal">
-                            <Ellipse Width="6" Height="6" Fill="{StaticResource SuccessBrush}" VerticalAlignment="Center" />
-                            <TextBlock Text="{Binding VersionText}" FontSize="11" FontWeight="SemiBold" Margin="6,0,0,0" />
-                        </StackPanel>
-                        <TextBlock Text="{Binding OwnerText}" Style="{StaticResource MutedText}" FontSize="10" Margin="0,2,0,0" />
-                        <TextBlock Foreground="{StaticResource SubtleTextBrush}" FontSize="10" Margin="0,4,0,0" TextWrapping="Wrap">
-                            <Run Text="Esc stop · " /><Run Text="{Binding Automation.RecordShortcut, Mode=OneWay}" /><Run Text=" rec · " /><Run Text="{Binding Automation.PlayShortcut, Mode=OneWay}" /><Run Text=" play" />
-                        </TextBlock>
-                    </StackPanel>
-                </Border>
-            </DockPanel>
-        </Border>
-
-        <!-- ============ Main area ============ -->
-        <Grid Grid.Column="1">
+    <Border x:Name="RootBorder" Background="{DynamicResource WindowBackdropBrush}">
+        <Grid>
             <Grid.RowDefinitions>
+                <!-- 40px Custom Studio Title Bar & Global Unified Transport -->
+                <RowDefinition Height="40" />
+                <!-- Main Studio Workspace -->
                 <RowDefinition Height="*" />
-                <RowDefinition Height="Auto" />
-                <RowDefinition Height="Auto" />
-                <RowDefinition Height="Auto" />
+                <!-- 26px Unified Studio Status Strip -->
+                <RowDefinition Height="26" />
             </Grid.RowDefinitions>
 
-            <ContentControl Grid.Row="0" Content="{Binding CurrentPageViewModel}" Focusable="False" Margin="14,12,14,8" />
-
-            <!-- Automation bar: record / play / pause / stop -->
-            <Border Grid.Row="1" Margin="14,0,14,8" Style="{StaticResource HiddenOnEditorPage}" Padding="12,6">
-                <Grid DataContext="{Binding Automation}">
+            <!-- =========================================================================
+                 ROW 0: 40px STUDIO X TITLE BAR (Breadcrumb · Ctrl+K Pill · Unified Transport · Caption)
+                 ========================================================================= -->
+            <Border Grid.Row="0" Background="{DynamicResource TitleBarBrush}"
+                    BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,0,1">
+                <Grid>
                     <Grid.ColumnDefinitions>
+                        <!-- Brand + Breadcrumb -->
                         <ColumnDefinition Width="Auto" />
+                        <!-- Flexible drag space + Centered Ctrl+K Search Pill -->
                         <ColumnDefinition Width="*" />
+                        <!-- Global Unified Transport Bar -->
+                        <ColumnDefinition Width="Auto" />
+                        <!-- Window Caption Controls -->
                         <ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
 
-                    <Border VerticalAlignment="Center" CornerRadius="12" Padding="10,4" MinWidth="96">
-                        <Border.Style>
-                            <Style TargetType="Border">
-                                <Setter Property="Background" Value="{StaticResource SurfaceAltBrush}" />
-                                <Style.Triggers>
-                                    <DataTrigger Binding="{Binding Mode}" Value="Recording">
-                                        <Setter Property="Background" Value="{StaticResource ErrorSoftBrush}" />
-                                    </DataTrigger>
-                                    <DataTrigger Binding="{Binding Mode}" Value="Playing">
-                                        <Setter Property="Background" Value="{StaticResource SuccessSoftBrush}" />
-                                    </DataTrigger>
-                                    <DataTrigger Binding="{Binding Mode}" Value="Paused">
-                                        <Setter Property="Background" Value="{StaticResource WarningSoftBrush}" />
-                                    </DataTrigger>
-                                    <DataTrigger Binding="{Binding Mode}" Value="Stopping">
-                                        <Setter Property="Background" Value="{StaticResource WarningSoftBrush}" />
-                                    </DataTrigger>
-                                </Style.Triggers>
-                            </Style>
-                        </Border.Style>
-                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
-                            <Ellipse Width="8" Height="8" VerticalAlignment="Center">
-                                <Ellipse.Style>
-                                    <Style TargetType="Ellipse">
-                                        <Setter Property="Fill" Value="{StaticResource MutedTextBrush}" />
+                    <!-- Left: Brand Logo + Studio Breadcrumb + Quick Save -->
+                    <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center" Margin="14,0,8,0">
+                        <views:BrandLogo Width="22" Height="22" VerticalAlignment="Center" />
+                        <TextBlock Text="SmartMacro" FontSize="13" FontWeight="Bold" Margin="9,0,0,0" VerticalAlignment="Center" />
+                        <ctrl:StudioIcon Kind="ChevronRight" Size="12" Foreground="{DynamicResource SubtleTextBrush}" Margin="7,1,7,0" />
+                        <TextBlock Text="{Binding PageBreadcrumbText}" FontSize="12.5" Foreground="{DynamicResource MutedTextBrush}"
+                                   VerticalAlignment="Center" />
+
+                        <!-- Active Macro Breadcrumb -->
+                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center"
+                                    Visibility="{Binding HasActiveMacroBreadcrumb, Converter={StaticResource BoolToVisibility}}">
+                            <ctrl:StudioIcon Kind="ChevronRight" Size="12" Foreground="{DynamicResource SubtleTextBrush}" Margin="7,1,7,0" />
+                            <TextBlock Text="{Binding ActiveMacroBreadcrumb}" FontSize="12.5" FontWeight="SemiBold"
+                                       MaxWidth="190" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+                            <Ellipse Width="7" Height="7" Fill="{DynamicResource WarningBrush}" Margin="6,1,0,0" VerticalAlignment="Center"
+                                     ToolTip="Unsaved changes in editor (Ctrl+S)"
+                                     Visibility="{Binding Editor.IsDirty, Converter={StaticResource BoolToVisibility}}" />
+                            <Button Style="{StaticResource GhostButton}" Padding="6,4" Margin="6,0,0,0"
+                                    WindowChrome.IsHitTestVisibleInChrome="True"
+                                    Command="{Binding Editor.SaveCommand}"
+                                    Visibility="{Binding Editor.IsDirty, Converter={StaticResource BoolToVisibility}}"
+                                    ToolTip="Save macro (Ctrl+S)" AutomationProperties.Name="Quick save macro">
+                                <ctrl:StudioIcon Kind="Save" Size="13" Foreground="{DynamicResource AccentHoverBrush}" />
+                            </Button>
+                        </StackPanel>
+                    </StackPanel>
+
+                    <!-- Center: Global Ctrl+K Command Search Pill (non-client drag surrounds it cleanly) -->
+                    <Button Grid.Column="1" Style="{StaticResource SearchPillButton}"
+                            HorizontalAlignment="Center" VerticalAlignment="Center" MinWidth="240" MaxWidth="340"
+                            Command="{Binding OpenCommandPaletteCommand}"
+                            ToolTip="Open Command Palette — search steps, blueprints, and studio actions (Ctrl+K)"
+                            AutomationProperties.Name="Search commands and steps">
+                        <Grid Width="230">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <ctrl:StudioIcon Grid.Column="0" Kind="Search" Size="13" VerticalAlignment="Center" />
+                            <TextBlock Grid.Column="1" Text="Search steps, blueprints…" FontSize="12" Margin="8,0,8,0"
+                                       VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                            <Border Grid.Column="2" Style="{StaticResource KeycapBorder}" Padding="5,1">
+                                <TextBlock Text="Ctrl+K" FontSize="10" FontFamily="{StaticResource MonoFont}"
+                                           Foreground="{DynamicResource MutedTextBrush}" />
+                            </Border>
+                        </Grid>
+                    </Button>
+
+                    <!-- Right-Center: Global Unified Transport Bar -->
+                    <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center" Margin="8,0,10,0"
+                                DataContext="{Binding Automation}">
+
+                        <!-- Live Playing Telemetry Pill (Run #3 / ∞ · 00:14 · ⚡ 0.6ms) -->
+                        <Border CornerRadius="13" Padding="10,3" Margin="0,0,8,0" VerticalAlignment="Center"
+                                Background="{DynamicResource SuccessSoftBrush}" BorderBrush="{DynamicResource SuccessBrush}" BorderThickness="1"
+                                Visibility="{Binding IsPlaying, Converter={StaticResource BoolToVisibility}}">
+                            <StackPanel Orientation="Horizontal">
+                                <Ellipse Width="7" Height="7" Fill="{DynamicResource SuccessBrush}" VerticalAlignment="Center" />
+                                <TextBlock Text="{Binding RunCounterText}" FontSize="11.5" FontWeight="SemiBold"
+                                           FontFamily="{StaticResource MonoFont}" Margin="6,0,0,0" VerticalAlignment="Center" />
+                                <TextBlock Text="·" Margin="6,0" Foreground="{DynamicResource MutedTextBrush}" VerticalAlignment="Center" />
+                                <TextBlock Text="{Binding ElapsedText}" FontSize="11.5" FontFamily="{StaticResource MonoFont}"
+                                           Foreground="{DynamicResource MutedTextBrush}" VerticalAlignment="Center" />
+                                <TextBlock Text="{Binding VisionTelemetryText}" FontSize="11" FontFamily="{StaticResource MonoFont}"
+                                           Foreground="{DynamicResource VisionAccentBrush}" Margin="8,0,0,0" VerticalAlignment="Center"
+                                           Visibility="{Binding HasVisionTelemetry, Converter={StaticResource BoolToVisibility}}" />
+                            </StackPanel>
+                        </Border>
+
+                        <!-- Post-Run Summary Chip -->
+                        <Border CornerRadius="13" Padding="9,3" Margin="0,0,8,0" VerticalAlignment="Center"
+                                Background="{DynamicResource SurfaceAltBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1"
+                                Visibility="{Binding HasLastRunSummary, Converter={StaticResource BoolToVisibility}}"
+                                WindowChrome.IsHitTestVisibleInChrome="True">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="{Binding LastRunSummaryText}" FontSize="11" Foreground="{DynamicResource MutedTextBrush}"
+                                           MaxWidth="240" TextTrimming="CharacterEllipsis" VerticalAlignment="Center"
+                                           ToolTip="{Binding LastRunSummaryText}" />
+                                <Button Style="{StaticResource DismissButton}" Width="16" Height="16" Margin="6,0,0,0"
+                                        WindowChrome.IsHitTestVisibleInChrome="True"
+                                        Command="{Binding DismissRunSummaryCommand}" ToolTip="Dismiss run summary" />
+                            </StackPanel>
+                        </Border>
+
+                        <!-- Record + Recording Options Popover -->
+                        <Button Style="{StaticResource TransportButton}" Command="{Binding RecordCommand}" Margin="0,0,2,0"
+                                ToolTip="{Binding RecordTooltip}" AutomationProperties.Name="Record macro"
+                                Visibility="{Binding IsRecording, Converter={StaticResource BoolToVisibility}, ConverterParameter=Invert}">
+                            <StackPanel Orientation="Horizontal">
+                                <ctrl:StudioIcon Kind="Record" Size="11" Foreground="{DynamicResource ErrorBrush}" />
+                                <TextBlock Text="Rec" Margin="6,0,0,0" FontWeight="SemiBold" />
+                            </StackPanel>
+                        </Button>
+
+                        <ToggleButton x:Name="RecOptionsToggle" Style="{StaticResource GhostToggle}"
+                                      Width="24" Height="28" Padding="0" Margin="0,0,6,0"
+                                      WindowChrome.IsHitTestVisibleInChrome="True"
+                                      Visibility="{Binding IsRecording, Converter={StaticResource BoolToVisibility}, ConverterParameter=Invert}"
+                                      ToolTip="Recording mode, fidelity, and HUD quick options"
+                                      AutomationProperties.Name="Recording options">
+                            <ctrl:StudioIcon Kind="ChevronDown" Size="12" />
+                        </ToggleButton>
+
+                        <Popup IsOpen="{Binding IsChecked, ElementName=RecOptionsToggle, Mode=TwoWay}"
+                               PlacementTarget="{Binding ElementName=RecOptionsToggle}" Placement="Bottom"
+                               StaysOpen="False" AllowsTransparency="True" PopupAnimation="Fade">
+                            <Border Background="{DynamicResource CharcoalBrush}" BorderBrush="{DynamicResource BorderBrush}"
+                                    BorderThickness="1" CornerRadius="10" Padding="14,12" Width="300" Margin="8"
+                                    Effect="{StaticResource ShadowPopover}">
+                                <StackPanel DataContext="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource AncestorType=Popup}}">
+                                    <TextBlock Text="RECORDING &amp; RUN HUD" Style="{StaticResource OverlineHeaderStyle}" Margin="0,0,0,8" />
+
+                                    <TextBlock Text="Recording mode" Style="{StaticResource FieldLabel}" Margin="0,0,0,4" />
+                                    <ComboBox ItemsSource="{x:Static vm:AutomationViewModel.RecordingModes}"
+                                              DisplayMemberPath="Label" SelectedValuePath="Value"
+                                              SelectedValue="{Binding RecordingMode}" />
+
+                                    <TextBlock Text="Recording fidelity" Style="{StaticResource FieldLabel}" Margin="0,10,0,4" />
+                                    <ComboBox ItemsSource="{x:Static vm:AutomationViewModel.RecordingFidelities}"
+                                              DisplayMemberPath="Label" SelectedValuePath="Value"
+                                              SelectedValue="{Binding RecordingFidelity}"
+                                              ToolTip="{Binding RecordingFidelityTooltip}" />
+
+                                    <Border Height="1" Background="{DynamicResource BorderBrush}" Margin="0,12,0,10" />
+
+                                    <CheckBox Content="Show mini HUD pill while playing" FontSize="12"
+                                              IsChecked="{Binding PlacementTarget.Tag.ShowMiniOverlay, RelativeSource={RelativeSource AncestorType=Popup}}"
+                                              Visibility="Collapsed" />
+                                    <TextBlock Text="{Binding EmergencyHint}" FontSize="11" Foreground="{DynamicResource MutedTextBrush}"
+                                               TextWrapping="Wrap" />
+                                </StackPanel>
+                            </Border>
+                        </Popup>
+
+                        <!-- Stop Recording -->
+                        <Button Style="{StaticResource DangerButton}" Height="28" Padding="10,0" Margin="0,0,6,0"
+                                WindowChrome.IsHitTestVisibleInChrome="True"
+                                Command="{Binding StopRecordingCommand}" ToolTip="{Binding StopRecordingTooltip}"
+                                Visibility="{Binding IsRecording, Converter={StaticResource BoolToVisibility}}">
+                            <StackPanel Orientation="Horizontal">
+                                <ctrl:StudioIcon Kind="Stop" Size="11" />
+                                <TextBlock Text="Stop Rec" Margin="6,0,0,0" FontSize="12" FontWeight="SemiBold" />
+                            </StackPanel>
+                        </Button>
+
+                        <!-- Neon Play Button -->
+                        <Button Style="{StaticResource NeonPlayButton}" Command="{Binding PlayCommand}" Margin="0,0,6,0"
+                                ToolTip="{Binding PlayTooltip}" AutomationProperties.Name="Play macro"
+                                Visibility="{Binding IsPlaying, Converter={StaticResource BoolToVisibility}, ConverterParameter=Invert}">
+                            <StackPanel Orientation="Horizontal">
+                                <ctrl:StudioIcon Kind="Play" Size="12" />
+                                <TextBlock Text="Play" Margin="6,0,0,0" FontSize="12.5" />
+                            </StackPanel>
+                        </Button>
+
+                        <!-- Pause / Resume & Stop while Playing -->
+                        <Button Style="{StaticResource TransportButton}" Command="{Binding PauseResumeCommand}" Margin="0,0,6,0"
+                                ToolTip="{Binding PauseTooltip}"
+                                Visibility="{Binding IsPlaying, Converter={StaticResource BoolToVisibility}}">
+                            <StackPanel Orientation="Horizontal">
+                                <ctrl:StudioIcon Kind="Pause" Size="12" />
+                                <TextBlock Text="{Binding PauseButtonText}" Margin="6,0,0,0" />
+                            </StackPanel>
+                        </Button>
+
+                        <Button Style="{StaticResource DangerButton}" Height="28" Padding="10,0" Margin="0,0,6,0"
+                                WindowChrome.IsHitTestVisibleInChrome="True"
+                                Command="{Binding StopCommand}" ToolTip="{Binding StopTooltip}"
+                                Visibility="{Binding IsPlaying, Converter={StaticResource BoolToVisibility}}">
+                            <StackPanel Orientation="Horizontal">
+                                <ctrl:StudioIcon Kind="Stop" Size="12" />
+                                <TextBlock Text="Stop" Margin="6,0,0,0" FontSize="12" FontWeight="SemiBold" />
+                            </StackPanel>
+                        </Button>
+
+                        <!-- Mission Control Launch Button (Ctrl+M) -->
+                        <Button Style="{StaticResource GhostButton}" Width="30" Height="28" Padding="0"
+                                WindowChrome.IsHitTestVisibleInChrome="True"
+                                Command="{Binding DataContext.OpenMissionControlCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                ToolTip="Open Mission Control floating telemetry dashboard (Ctrl+M)"
+                                AutomationProperties.Name="Open Mission Control">
+                            <ctrl:StudioIcon Kind="MissionControl" Size="15" />
+                        </Button>
+                    </StackPanel>
+
+                    <!-- Far Right: Native-feel Vector Caption Buttons (Minimize, Snap-Layouts Maximize/Restore, Close) -->
+                    <StackPanel Grid.Column="3" Orientation="Horizontal" VerticalAlignment="Stretch">
+                        <Button x:Name="MinimizeButton" Style="{StaticResource CaptionButton}"
+                                Click="MinimizeButton_Click" ToolTip="Minimize" AutomationProperties.Name="Minimize">
+                            <ctrl:StudioIcon Kind="Minimize" Size="12" />
+                        </Button>
+                        <Button x:Name="MaximizeRestoreButton" Style="{StaticResource CaptionButton}"
+                                Click="MaximizeRestoreButton_Click" ToolTip="Maximize or Restore" AutomationProperties.Name="Maximize or Restore">
+                            <ctrl:StudioIcon Size="12">
+                                <ctrl:StudioIcon.Style>
+                                    <Style TargetType="ctrl:StudioIcon">
+                                        <Setter Property="Kind" Value="Maximize" />
                                         <Style.Triggers>
-                                            <DataTrigger Binding="{Binding Mode}" Value="Recording">
-                                                <Setter Property="Fill" Value="{StaticResource ErrorBrush}" />
-                                            </DataTrigger>
-                                            <DataTrigger Binding="{Binding Mode}" Value="Playing">
-                                                <Setter Property="Fill" Value="{StaticResource SuccessBrush}" />
-                                            </DataTrigger>
-                                            <DataTrigger Binding="{Binding Mode}" Value="Paused">
-                                                <Setter Property="Fill" Value="{StaticResource WarningBrush}" />
-                                            </DataTrigger>
-                                            <DataTrigger Binding="{Binding Mode}" Value="Stopping">
-                                                <Setter Property="Fill" Value="{StaticResource WarningBrush}" />
+                                            <DataTrigger Binding="{Binding WindowState, RelativeSource={RelativeSource AncestorType=Window}}" Value="Maximized">
+                                                <Setter Property="Kind" Value="Restore" />
                                             </DataTrigger>
                                         </Style.Triggers>
                                     </Style>
-                                </Ellipse.Style>
-                            </Ellipse>
-                            <TextBlock Text="{Binding StateText}" FontWeight="SemiBold" Margin="7,0,0,0" FontSize="12" />
-                        </StackPanel>
-                    </Border>
-
-                    <StackPanel Grid.Column="1" Margin="14,0,14,0" VerticalAlignment="Center">
-                        <TextBlock Text="{Binding TargetText}" TextTrimming="CharacterEllipsis" Foreground="{StaticResource MutedTextBrush}"
-                                   Visibility="{Binding IsIdle, Converter={StaticResource BoolToVisibility}}" />
-                        <TextBlock Text="{Binding ProgressText}" TextTrimming="CharacterEllipsis"
-                                   Visibility="{Binding IsIdle, Converter={StaticResource BoolToVisibility}, ConverterParameter=Invert}" />
-                        <ProgressBar Margin="0,6,0,0" Minimum="0" Maximum="1" Value="{Binding ProgressValue, Mode=OneWay}"
-                                     IsIndeterminate="{Binding IsProgressIndeterminate}"
-                                     Visibility="{Binding IsPlaying, Converter={StaticResource BoolToVisibility}}" />
-                    </StackPanel>
-
-                    <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
-                        <!-- Quick toggles for single-monitor gamers (saved in Settings straight away). -->
-                        <StackPanel VerticalAlignment="Center" Margin="0,0,14,0">
-                            <CheckBox Content="Show mini status overlay while playing" FontSize="11"
-                                      IsChecked="{Binding DataContext.ShowMiniOverlay, RelativeSource={RelativeSource AncestorType=Window}}"
-                                      ToolTip="Shows a small click-through pill in the top-right corner while a macro plays: which step runs and what it's doing (e.g. &quot;Step 2/5 — Finding image…&quot;). It never takes focus from your game and closes when playback ends."
-                                      AutomationProperties.Name="Show mini status overlay while playing" />
-                            <CheckBox Content="Minimize main window while playing" FontSize="11" Margin="0,2,0,0"
-                                      IsChecked="{Binding DataContext.MinimizeWhilePlaying, RelativeSource={RelativeSource AncestorType=Window}}"
-                                      ToolTip="Minimizes SmartMacro while recording or playing, so it isn't in the way on a single monitor. It comes back when playback ends."
-                                      AutomationProperties.Name="Minimize main window while playing" />
-                        </StackPanel>
-                        <Button Command="{Binding RecordCommand}" Margin="0,0,8,0"
-                                ToolTip="{Binding RecordTooltip}"
-                                Visibility="{Binding IsRecording, Converter={StaticResource BoolToVisibility}, ConverterParameter=Invert}">
-                            <StackPanel Orientation="Horizontal">
-                                <Ellipse Width="10" Height="10" Fill="{StaticResource ErrorBrush}" VerticalAlignment="Center" />
-                                <TextBlock Text="Record" Margin="8,0,0,0" />
-                            </StackPanel>
+                                </ctrl:StudioIcon.Style>
+                            </ctrl:StudioIcon>
                         </Button>
-                        <Button Style="{StaticResource DangerButton}" Command="{Binding StopRecordingCommand}" Margin="0,0,8,0"
-                                ToolTip="{Binding StopRecordingTooltip}"
-                                Visibility="{Binding IsRecording, Converter={StaticResource BoolToVisibility}}">
-                            <StackPanel Orientation="Horizontal">
-                                <TextBlock Text="&#xE71A;" Style="{StaticResource IconText}" />
-                                <TextBlock Text="Stop recording" Margin="8,0,0,0" />
-                            </StackPanel>
-                        </Button>
-                        <Button Style="{StaticResource PrimaryButton}" Command="{Binding PlayCommand}"
-                                ToolTip="{Binding PlayTooltip}"
-                                Visibility="{Binding IsPlaying, Converter={StaticResource BoolToVisibility}, ConverterParameter=Invert}">
-                            <StackPanel Orientation="Horizontal">
-                                <TextBlock Text="&#xE768;" Style="{StaticResource IconText}" />
-                                <TextBlock Text="Play" Margin="8,0,0,0" />
-                            </StackPanel>
-                        </Button>
-                        <Button Command="{Binding PauseResumeCommand}" Margin="0,0,8,0" ToolTip="{Binding PauseTooltip}"
-                                Visibility="{Binding IsPlaying, Converter={StaticResource BoolToVisibility}}">
-                            <StackPanel Orientation="Horizontal">
-                                <TextBlock Text="&#xE769;" Style="{StaticResource IconText}" />
-                                <TextBlock Text="{Binding PauseButtonText}" Margin="8,0,0,0" />
-                            </StackPanel>
-                        </Button>
-                        <Button Style="{StaticResource DangerButton}" Command="{Binding StopCommand}" ToolTip="{Binding StopTooltip}"
-                                Visibility="{Binding IsPlaying, Converter={StaticResource BoolToVisibility}}">
-                            <StackPanel Orientation="Horizontal">
-                                <TextBlock Text="&#xE71A;" Style="{StaticResource IconText}" />
-                                <TextBlock Text="Stop" Margin="8,0,0,0" />
-                            </StackPanel>
+                        <Button x:Name="CloseButton" Style="{StaticResource CaptionCloseButton}"
+                                Click="CloseButton_Click" ToolTip="Close" AutomationProperties.Name="Close">
+                            <ctrl:StudioIcon Kind="Close" Size="12" />
                         </Button>
                     </StackPanel>
                 </Grid>
             </Border>
 
-            <!-- Compact activity log -->
-            <!-- Small by default (~110 px); drag the grip on its top edge to make it taller (up to 420 px). -->
-            <Border Grid.Row="2" Margin="14,0,14,8" Style="{StaticResource ActivityPanelStyle}" Padding="12,0,12,6">
-                <DockPanel>
-                    <Thumb DockPanel.Dock="Top" Height="8" Cursor="SizeNS" DragDelta="ActivityGrip_DragDelta"
-                           ToolTip="Drag to make the Activity panel taller or shorter" AutomationProperties.Name="Resize the Activity panel">
-                        <Thumb.Template>
-                            <ControlTemplate TargetType="Thumb">
-                                <Border Background="Transparent">
-                                    <Border x:Name="Grip" Width="36" Height="3" CornerRadius="2" Background="{StaticResource BorderBrush}"
-                                            HorizontalAlignment="Center" VerticalAlignment="Center" />
-                                </Border>
-                                <ControlTemplate.Triggers>
-                                    <Trigger Property="IsMouseOver" Value="True">
-                                        <Setter TargetName="Grip" Property="Background" Value="{StaticResource AccentBrush}" />
-                                    </Trigger>
-                                </ControlTemplate.Triggers>
-                            </ControlTemplate>
-                        </Thumb.Template>
-                    </Thumb>
-                    <DockPanel DockPanel.Dock="Top" Margin="2,0,0,2">
-                        <TextBlock Text="Activity" Style="{StaticResource SectionTitle}" FontSize="12" VerticalAlignment="Center" />
-                        <Button DockPanel.Dock="Right" HorizontalAlignment="Right" Style="{StaticResource GhostButton}" Padding="8,0"
-                                FontSize="12" Content="Open full log" Command="{Binding ShowLogsCommand}" />
-                    </DockPanel>
-                    <ListBox x:Name="ActivityList" ItemsSource="{Binding Logs.Entries}" Height="72" ItemContainerStyle="{StaticResource PlainListItem}"
-                             ScrollViewer.VerticalScrollBarVisibility="Auto" VirtualizingPanel.IsVirtualizing="True">
-                        <ListBox.ItemTemplate>
-                            <DataTemplate>
-                                <StackPanel Orientation="Horizontal">
-                                    <TextBlock Text="{Binding Level, Converter={StaticResource LevelToGlyph}}" Style="{StaticResource IconText}"
-                                               FontSize="12" Foreground="{Binding Level, Converter={StaticResource LevelToBrush}}" />
-                                    <TextBlock Text="{Binding TimeText}" Foreground="{StaticResource MutedTextBrush}" Margin="8,0,10,0" FontSize="12" />
-                                    <TextBlock Text="{Binding Message}" FontSize="12" TextTrimming="CharacterEllipsis" />
-                                </StackPanel>
-                            </DataTemplate>
-                        </ListBox.ItemTemplate>
-                    </ListBox>
-                </DockPanel>
-            </Border>
+            <!-- =========================================================================
+                 ROW 1: STUDIO WORKSPACE (56px / 192px Animated Nav Rail + Transition Page Host)
+                 ========================================================================= -->
+            <Grid Grid.Row="1">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="{Binding IsSidebarPinned, Converter={StaticResource SidebarWidth}, ConverterParameter=192|56}" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
 
-            <!-- Status bar -->
-            <Border Grid.Row="3" Background="{StaticResource SidebarBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,1,0,0"
-                    Padding="14,4">
+                <!-- Left Navigation Rail (expands as floating glass overlay on hover when unpinned) -->
+                <Border x:Name="SidebarRail" Grid.Column="0" Grid.ColumnSpan="2"
+                        HorizontalAlignment="Left" Panel.ZIndex="20"
+                        Background="{DynamicResource SidebarBrush}"
+                        BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,1,0"
+                        ClipToBounds="True"
+                        MouseEnter="SidebarRail_MouseEnter"
+                        MouseLeave="SidebarRail_MouseLeave">
+                    <Border.Style>
+                        <Style TargetType="Border">
+                            <Setter Property="Width" Value="56" />
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding IsSidebarPinned}" Value="True">
+                                    <Setter Property="Width" Value="192" />
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </Border.Style>
+
+                    <DockPanel LastChildFill="False" Margin="0,8,0,8">
+                        <TextBlock x:Name="WorkspaceHeaderLabel" DockPanel.Dock="Top" Text="WORKSPACE"
+                                   Style="{StaticResource OverlineHeaderStyle}" Margin="16,4,0,6"
+                                   Visibility="{Binding IsSidebarPinned, Converter={StaticResource BoolToVisibility}}" />
+
+                        <RadioButton DockPanel.Dock="Top" Style="{StaticResource StudioNavButton}"
+                                     Tag="{x:Static ctrl:StudioIconKind.Library}"
+                                     Content="Macro Library" GroupName="Nav"
+                                     AutomationProperties.Name="Macro Library" ToolTip="Macro Library"
+                                     IsChecked="{Binding CurrentPage, Converter={StaticResource PageToBool}, ConverterParameter=Library}" />
+
+                        <RadioButton DockPanel.Dock="Top" Style="{StaticResource StudioNavButton}"
+                                     Tag="{x:Static ctrl:StudioIconKind.Editor}"
+                                     GroupName="Nav"
+                                     AutomationProperties.Name="Workflow Editor" ToolTip="Workflow Editor"
+                                     IsChecked="{Binding CurrentPage, Converter={StaticResource PageToBool}, ConverterParameter=Editor}">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="Workflow Editor" />
+                                <Ellipse Width="7" Height="7" Fill="{DynamicResource WarningBrush}" Margin="7,1,0,0" VerticalAlignment="Center"
+                                         ToolTip="Unsaved changes"
+                                         Visibility="{Binding Editor.IsDirty, Converter={StaticResource BoolToVisibility}}" />
+                            </StackPanel>
+                        </RadioButton>
+
+                        <Border DockPanel.Dock="Top" Height="1" Margin="12,10,12,8" Background="{DynamicResource BorderBrush}" />
+
+                        <TextBlock x:Name="StudioHeaderLabel" DockPanel.Dock="Top" Text="STUDIO"
+                                   Style="{StaticResource OverlineHeaderStyle}" Margin="16,0,0,6"
+                                   Visibility="{Binding IsSidebarPinned, Converter={StaticResource BoolToVisibility}}" />
+
+                        <RadioButton DockPanel.Dock="Top" Style="{StaticResource StudioNavButton}"
+                                     Tag="{x:Static ctrl:StudioIconKind.Manual}"
+                                     Content="Manual &amp; Recipes" GroupName="Nav"
+                                     AutomationProperties.Name="Manual" ToolTip="Manual: guides, 1-click recipes and shortcuts"
+                                     IsChecked="{Binding CurrentPage, Converter={StaticResource PageToBool}, ConverterParameter=Manual}" />
+
+                        <RadioButton DockPanel.Dock="Top" Style="{StaticResource StudioNavButton}"
+                                     Tag="{x:Static ctrl:StudioIconKind.Logs}"
+                                     Content="Activity Logs" GroupName="Nav"
+                                     AutomationProperties.Name="Logs" ToolTip="Activity Logs"
+                                     IsChecked="{Binding CurrentPage, Converter={StaticResource PageToBool}, ConverterParameter=Logs}" />
+
+                        <RadioButton DockPanel.Dock="Top" Style="{StaticResource StudioNavButton}"
+                                     Tag="{x:Static ctrl:StudioIconKind.Settings}"
+                                     Content="Settings" GroupName="Nav"
+                                     AutomationProperties.Name="Settings" ToolTip="Studio Settings &amp; Themes"
+                                     IsChecked="{Binding CurrentPage, Converter={StaticResource PageToBool}, ConverterParameter=Settings}" />
+
+                        <!-- Bottom Pin / Unpin Rail Toggle -->
+                        <ToggleButton x:Name="SidebarToggle" DockPanel.Dock="Bottom"
+                                      IsChecked="{Binding IsSidebarPinned, Mode=TwoWay}"
+                                      Style="{StaticResource GhostToggle}"
+                                      HorizontalAlignment="Left" Margin="10,4,0,2" Padding="8,6"
+                                      Click="SidebarToggle_Click"
+                                      ToolTip="Pin or unpin the navigation sidebar"
+                                      AutomationProperties.Name="Pin or unpin sidebar">
+                            <StackPanel Orientation="Horizontal">
+                                <ctrl:StudioIcon Kind="Pin" Size="14" />
+                                <TextBlock x:Name="PinLabelText" Text="Pinned" FontSize="11.5" Margin="10,0,4,0"
+                                           Visibility="{Binding IsSidebarPinned, Converter={StaticResource BoolToVisibility}}" />
+                            </StackPanel>
+                        </ToggleButton>
+
+                        <!-- Version + Safety Footer Card (visible when pinned or hovered) -->
+                        <Border x:Name="SidebarFooterCard" DockPanel.Dock="Bottom" Margin="10,0,10,6" Padding="10,8" CornerRadius="8"
+                                Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1"
+                                ToolTip="{Binding Automation.EmergencyHint}"
+                                Visibility="{Binding IsSidebarPinned, Converter={StaticResource BoolToVisibility}}">
+                            <StackPanel>
+                                <StackPanel Orientation="Horizontal">
+                                    <Ellipse Width="6" Height="6" Fill="{DynamicResource SuccessBrush}" VerticalAlignment="Center" />
+                                    <TextBlock Text="{Binding VersionText}" FontSize="11" FontWeight="SemiBold" Margin="6,0,0,0" />
+                                </StackPanel>
+                                <TextBlock Text="{Binding OwnerText}" Style="{StaticResource MutedText}" FontSize="10" Margin="0,2,0,0" />
+                                <TextBlock Foreground="{DynamicResource SubtleTextBrush}" FontSize="10" Margin="0,4,0,0" TextWrapping="Wrap">
+                                    <Run Text="Esc stop · " /><Run Text="{Binding Automation.RecordShortcut, Mode=OneWay}" /><Run Text=" rec · " /><Run Text="{Binding Automation.PlayShortcut, Mode=OneWay}" /><Run Text=" play" />
+                                </TextBlock>
+                            </StackPanel>
+                        </Border>
+                    </DockPanel>
+                </Border>
+
+                <!-- Main Page Content Area -->
+                <Grid Grid.Column="1">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="*" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+
+                    <!-- Animated Page Host (160ms CubicEase fade + 8px vertical slide) -->
+                    <ctrl:TransitionContentControl Grid.Row="0" Content="{Binding CurrentPageViewModel}"
+                                                   Focusable="False" Margin="14,10,14,8" />
+
+                    <!-- Compact Activity Log Drawer (outside Editor page; Editor has its own tabbed bottom dock) -->
+                    <Border Grid.Row="1" Margin="14,0,14,8" Style="{StaticResource ActivityPanelStyle}" Padding="12,0,12,6">
+                        <DockPanel>
+                            <Thumb DockPanel.Dock="Top" Height="8" Cursor="SizeNS" DragDelta="ActivityGrip_DragDelta"
+                                   ToolTip="Drag to resize the Activity panel" AutomationProperties.Name="Resize Activity panel">
+                                <Thumb.Template>
+                                    <ControlTemplate TargetType="Thumb">
+                                        <Border Background="Transparent">
+                                            <Border x:Name="Grip" Width="36" Height="3" CornerRadius="2" Background="{DynamicResource BorderBrush}"
+                                                    HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                        </Border>
+                                        <ControlTemplate.Triggers>
+                                            <Trigger Property="IsMouseOver" Value="True">
+                                                <Setter TargetName="Grip" Property="Background" Value="{DynamicResource AccentBrush}" />
+                                            </Trigger>
+                                        </ControlTemplate.Triggers>
+                                    </ControlTemplate>
+                                </Thumb.Template>
+                            </Thumb>
+                            <DockPanel DockPanel.Dock="Top" Margin="2,0,0,2">
+                                <TextBlock Text="Activity" Style="{StaticResource SectionTitle}" FontSize="12" VerticalAlignment="Center" />
+                                <Button DockPanel.Dock="Right" HorizontalAlignment="Right" Style="{StaticResource GhostButton}" Padding="8,0"
+                                        FontSize="12" Content="Open full log" Command="{Binding ShowLogsCommand}" />
+                            </DockPanel>
+                            <ListBox x:Name="ActivityList" ItemsSource="{Binding Logs.Entries}" Height="68" ItemContainerStyle="{StaticResource PlainListItem}"
+                                     ScrollViewer.VerticalScrollBarVisibility="Auto" VirtualizingPanel.IsVirtualizing="True">
+                                <ListBox.ItemTemplate>
+                                    <DataTemplate>
+                                        <StackPanel Orientation="Horizontal">
+                                            <TextBlock Text="{Binding Level, Converter={StaticResource LevelToGlyph}}" Style="{StaticResource IconText}"
+                                                       FontSize="12" Foreground="{Binding Level, Converter={StaticResource LevelToBrush}}" />
+                                            <TextBlock Text="{Binding TimeText}" FontFamily="{StaticResource MonoFont}"
+                                                       Foreground="{DynamicResource MutedTextBrush}" Margin="8,0,10,0" FontSize="11.5" />
+                                            <TextBlock Text="{Binding Message}" FontSize="12" TextTrimming="CharacterEllipsis" />
+                                        </StackPanel>
+                                    </DataTemplate>
+                                </ListBox.ItemTemplate>
+                            </ListBox>
+                        </DockPanel>
+                    </Border>
+                </Grid>
+            </Grid>
+
+            <!-- =========================================================================
+                 ROW 2: 26px UNIFIED STUDIO STATUS STRIP
+                 ========================================================================= -->
+            <Border Grid.Row="2" Background="{DynamicResource SidebarBrush}"
+                    BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,1,0,0"
+                    Padding="14,0">
                 <DockPanel>
-                    <TextBlock DockPanel.Dock="Right" Foreground="{StaticResource MutedTextBrush}" FontSize="12"
+                    <!-- Right: Shortcuts + Library count + Unsaved indicator -->
+                    <TextBlock DockPanel.Dock="Right" Foreground="{DynamicResource MutedTextBrush}" FontSize="11.5"
                                Text="{Binding Library.CountText}" VerticalAlignment="Center" />
-                    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Margin="0,0,18,0" VerticalAlignment="Center"
-                                Visibility="{Binding Editor.IsDirty, Converter={StaticResource BoolToVisibility}}">
-                        <Ellipse Width="7" Height="7" Fill="{StaticResource WarningBrush}" VerticalAlignment="Center" />
-                        <TextBlock Text="Unsaved changes" Foreground="{StaticResource WarningBrush}" FontSize="12" Margin="6,0,0,0" />
+
+                    <Border DockPanel.Dock="Right" Width="1" Height="12" Background="{DynamicResource BorderBrush}" Margin="12,0" />
+
+                    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                        <CheckBox Content="Mini HUD" FontSize="11" Margin="0,0,12,0"
+                                  IsChecked="{Binding ShowMiniOverlay}"
+                                  ToolTip="Show click-through status pill in the top-right corner while a macro plays" />
+                        <CheckBox Content="Auto-minimize" FontSize="11"
+                                  IsChecked="{Binding MinimizeWhilePlaying}"
+                                  ToolTip="Minimize SmartMacro while recording or playing so it stays out of the way on a single monitor" />
                     </StackPanel>
+
+                    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Margin="0,0,16,0" VerticalAlignment="Center"
+                                Visibility="{Binding Editor.IsDirty, Converter={StaticResource BoolToVisibility}}">
+                        <Ellipse Width="6" Height="6" Fill="{DynamicResource WarningBrush}" VerticalAlignment="Center" />
+                        <TextBlock Text="Unsaved" Foreground="{DynamicResource WarningBrush}" FontSize="11.5" FontWeight="SemiBold" Margin="5,0,0,0" />
+                    </StackPanel>
+
+                    <!-- Left: Status icon + live message -->
                     <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
                         <TextBlock Text="{Binding StatusKind, Converter={StaticResource LevelToGlyph}}" Style="{StaticResource IconText}"
-                                   FontSize="13" Foreground="{Binding StatusKind, Converter={StaticResource LevelToBrush}}" />
-                        <TextBlock Text="{Binding StatusMessage}" FontSize="12" Margin="8,0,0,0" TextTrimming="CharacterEllipsis"
+                                   FontSize="12" Foreground="{Binding StatusKind, Converter={StaticResource LevelToBrush}}" />
+                        <TextBlock Text="{Binding StatusMessage}" FontSize="11.5" Margin="8,0,12,0" TextTrimming="CharacterEllipsis"
                                    AutomationProperties.LiveSetting="Polite" />
                     </StackPanel>
                 </DockPanel>
             </Border>
         </Grid>
-    </Grid>
+    </Border>
 </Window>

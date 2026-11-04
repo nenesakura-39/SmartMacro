@@ -80,6 +80,7 @@ public sealed class ScreenProbes
     private readonly IPlaybackClock _clock;
     private readonly IScreenLayout? _layout;
     private readonly HotSpotMemory? _hotSpots;
+    private readonly VariableStore? _variables;
 
     /// <summary>
     /// Hot-Spot fast path: how far (px, every side) around the spot where an image was found last time the quick
@@ -102,13 +103,14 @@ public sealed class ScreenProbes
     /// Null = no fast path: every look searches the whole area (the editor's "Test detection now").
     /// </param>
     public ScreenProbes(IOcrService? ocr, IScreenCapture? capture, IPlaybackClock? clock = null, IScreenLayout? layout = null,
-        HotSpotMemory? hotSpots = null)
+        HotSpotMemory? hotSpots = null, VariableStore? variables = null)
     {
         _ocr = ocr;
         _capture = capture;
         _clock = clock ?? new SystemPlaybackClock();
         _layout = layout;
         _hotSpots = hotSpots;
+        _variables = variables;
     }
 
     /// <summary>The Hot-Spot memory these probes use (null when the fast path is off).</summary>
@@ -129,7 +131,10 @@ public sealed class ScreenProbes
     {
         try
         {
-            return (SearchArea.Resolve(step, virtualScreen, _layout), null);
+            var titleOverride = _variables is not null && step.EffectiveScope == SearchScope.Window && !string.IsNullOrEmpty(step.WindowTitle)
+                ? _variables.Interpolate(step.WindowTitle)
+                : null;
+            return (SearchArea.Resolve(step, virtualScreen, _layout, titleOverride), null);
         }
         catch (SearchAreaUnavailableException ex)
         {
@@ -155,13 +160,15 @@ public sealed class ScreenProbes
         if (ocr is null || !ocr.IsAvailable)
             throw new OcrUnavailableException(ocr?.StatusText ?? "Text recognition (OCR) isn't available.");
 
-        return new PreparedSearch($"\"{step.Text}\"", isTimed: false, async (_, t) =>
+        var whatText = _variables is not null ? _variables.Interpolate(step.Text) : step.Text;
+        return new PreparedSearch($"\"{whatText}\"", isTimed: false, async (_, t) =>
         {
             var started = Stopwatch.GetTimestamp();
             var (region, problem) = ResolveArea(step, ocr.GetVirtualScreen());
             if (problem is not null) return ScreenProbe.Miss(problem);
             var read = await ocr.ReadAsync(region, t).ConfigureAwait(false);
-            var match = ProbeText(read, step);
+            var query = _variables is not null ? _variables.Interpolate(step.Text) : step.Text;
+            var match = ProbeText(read, step, query);
             return match is null
                 ? ScreenProbe.Miss(DescribeLastRead(read.FullText), region)
                 : new ScreenProbe(true, match.Bounds.CenterX, match.Bounds.CenterY,
@@ -182,12 +189,12 @@ public sealed class ScreenProbes
     /// The match's Bounds are the matched word(s) only – the OCR word boxes – never the whole line, so a click on found
     /// text lands on that exact word.
     /// </summary>
-    public static TextMatch? ProbeText(OcrReadResult read, FindTextStep step)
+    public static TextMatch? ProbeText(OcrReadResult read, FindTextStep step, string? queryOverride = null)
     {
         ArgumentNullException.ThrowIfNull(read);
         ArgumentNullException.ThrowIfNull(step);
         var mode = step.MatchWholeWord ? TextMatchMode.WholeWords : TextMatchMode.Contains;
-        return OcrTextMatcher.Find(read, step.Text, mode, step.MatchCase, step.MinSimilarityPercent / 100.0, step.NormalizeLookAlikes)
+        return OcrTextMatcher.Find(read, queryOverride ?? step.Text, mode, step.MatchCase, step.MinSimilarityPercent / 100.0, step.NormalizeLookAlikes)
             .FirstOrDefault();
     }
 
@@ -218,8 +225,15 @@ public sealed class ScreenProbes
             // 1. Hot-Spot fast path: the picture was found before; is it still there (or a few px away)?
             if (hotSpots is not null && hotSpots.TryGet(hotKey, out var last))
             {
+                var hotTemplate = options.AllowMultiScale
+                    && (last.Width != template.Width || last.Height != template.Height)
+                    && last.Width >= TemplateMatcher.MinInnerSize
+                    && last.Height >= TemplateMatcher.MinInnerSize
+                    ? template.Resize(last.Width, last.Height)
+                    : template;
+                var hotSpotOptions = hotOptions with { AllowMultiScale = false };
                 var spotArea = HotSpotArea(last, region);
-                if (spotArea.Width >= template.Width && spotArea.Height >= template.Height)
+                if (spotArea.Width >= hotTemplate.Width && spotArea.Height >= hotTemplate.Height)
                 {
                     ScreenFrame? spot;
                     var c0 = _clock.Elapsed;
@@ -237,7 +251,7 @@ public sealed class ScreenProbes
 
                     var s0 = _clock.Elapsed;
                     captureTime += s0 - c0;
-                    var hit = spot is null ? null : FindNearLastSpot(spot, last, template, hotOptions, t);
+                    var hit = spot is null ? null : FindNearLastSpot(spot, last, hotTemplate, hotSpotOptions, t);
                     searchTime += _clock.Elapsed - s0;
 
                     // Coordinate guard: FindNearLastSpot already returns GLOBAL virtual-screen pixels (the spot frame's
@@ -276,7 +290,13 @@ public sealed class ScreenProbes
             searchTime += _clock.Elapsed - s1;
             timer?.Add(captureTime, searchTime);
 
-            if (frame.Image.Width < template.Width || frame.Image.Height < template.Height)
+            var minRequiredWidth = options.AllowMultiScale
+                ? Math.Max(TemplateMatcher.MinInnerSize, (int)Math.Round(template.Width * options.MinScale))
+                : template.Width;
+            var minRequiredHeight = options.AllowMultiScale
+                ? Math.Max(TemplateMatcher.MinInnerSize, (int)Math.Round(template.Height * options.MinScale))
+                : template.Height;
+            if (frame.Image.Width < minRequiredWidth || frame.Image.Height < minRequiredHeight)
                 return ScreenProbe.Miss(" The search area (on screen) is smaller than the image.", region);
 
             if (result.Best is not { } best)
@@ -299,9 +319,10 @@ public sealed class ScreenProbes
 
             var bounds = frame.ToScreen(best.Bounds);
             hotSpots?.Remember(hotKey, bounds);
+            var scaleNote = Math.Abs(best.MatchedScale - 1.0) >= 0.02 ? $" at {best.MatchedScale * 100:0}% scale" : "";
             var more = result.Matches.Count > 1 ? $" ({result.Matches.Count} matches; the best one is used)" : "";
             return new ScreenProbe(true, bounds.CenterX, bounds.CenterY,
-                $"Found the image at ({bounds.CenterX}, {bounds.CenterY}), {best.Score:P0} match{more}.", string.Empty, region, bounds, best.Score,
+                $"Found the image at ({bounds.CenterX}, {bounds.CenterY}), {best.Score:P0} match{scaleNote}{more}.", string.Empty, region, bounds, best.Score,
                 MsSince(started))
             {
                 BestConfidence = best.Score,
@@ -373,6 +394,7 @@ public sealed class ScreenProbes
             IgnoreEdgeFraction = step.IgnoreEdgesPercent / 100.0,
             MatchForeground = step.MatchForeground,
             AdaptToLighting = step.AdaptToLighting,
+            AllowMultiScale = step.AllowMultiScale,
             MaxResults = 10,
         };
     }

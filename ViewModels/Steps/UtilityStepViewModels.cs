@@ -37,11 +37,17 @@ public sealed class WaitForChangeStepViewModel : StepViewModel
     public WaitForChangeStepViewModel(WaitForChangeStep step) : base(step)
     {
         _step = step;
+        FailurePolicy = new FailurePolicyViewModel(
+            () => _step.WhenNotFound, v => _step.WhenNotFound = v,
+            () => _step.FailurePolicy, v => _step.FailurePolicy = v,
+            () => NotifyChanged(nameof(FailurePolicy)));
         PickAreaCommand = new AsyncRelayCommand(PickAreaAsync, ex => TestResult = ex.Message, () => _tools is not null && !_isBusy);
         ShowAreaCommand = new RelayCommand(() =>
             ScreenHighlightOverlay.ShowResult(_step.Region, null, found: true, $"Watched area · {_step.RegionWidth}×{_step.RegionHeight}",
                 TimeSpan.FromMilliseconds(1600)));
     }
+
+    public FailurePolicyViewModel FailurePolicy { get; }
 
     /// <summary>The editor's screen tools (set right after creation): the area picker.</summary>
     public IVisionTools? Tools
@@ -200,8 +206,14 @@ public sealed class FocusWindowStepViewModel : StepViewModel
     public FocusWindowStepViewModel(FocusWindowStep step) : base(step)
     {
         _step = step;
+        FailurePolicy = new FailurePolicyViewModel(
+            () => _step.WhenNotFound, v => _step.WhenNotFound = v,
+            () => _step.FailurePolicy, v => _step.FailurePolicy = v,
+            () => NotifyChanged(nameof(FailurePolicy)));
         RefreshWindowsCommand = new RelayCommand(RefreshWindows);
     }
+
+    public FailurePolicyViewModel FailurePolicy { get; }
 
     /// <summary>Monitors and windows from the editor (set right after creation), for the window list.</summary>
     public IScreenLayout? Layout

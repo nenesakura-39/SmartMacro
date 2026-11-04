@@ -1,7 +1,12 @@
 # SmartMacro – Project Status / Handoff
 
-_Last updated: 2026-10-24 (Target-lock reticle badge fit: the "🎯 98% · 45ms · Find image" badge is no longer cut off on small targets:
-**written by the AI without a .NET SDK, NOT built / tested yet** – owner runs `tools\verify.cmd`.
+_Last updated: 2026-11-04 (SmartMacro "Studio X" — Obsidian Neon AAA UI Upgrade: custom 40px `WindowChrome` Studio title bar with Windows 11 Mica-Alt backdrop & native Snap Layouts, Global Unified Transport Bar + `Ctrl+K` Search Pill, 56px/192px animated Nav Rail with hover-overlay flyout, Fluent vector icon engine `StudioIcon`, Workflow Editor v2 with `WorkflowMinimap` + collapsible Bottom Dock + Step Card v2 `SmartChipText` & hover action pills, floating `MissionControlWindow` (`Ctrl+M`), Library Workflow Fingerprint strips, and live `ThemeManager` (`Obsidian Neon` / `Midnight Blue` + 5 Studio Accents + `Comfortable`/`Compact` density):
+**built + tested with `tools\verify.cmd` on the owner's PC: 0 warnings, 0 errors, 1219 / 1219 passed**; manual checklist in `docs/UI_STUDIO_X_MANUAL_TESTS.md`.
+Before it: v1.2 "Brain" + Blueprints & Manual Center — Pillars 3, 4 & 5: plain-data Variables & OCR Screen Numbers, Checkpoints + Failure Policies + Watchers + Opt-In Self-Healing, Sub-Macros with Bundled `.smacro` Export, 3 new 1-click Brain Blueprints, and 8 new In-App Manual guides/recipes:
+**built + tested with `tools\verify.cmd` on the owner's PC: 0 warnings, 0 errors, 1215 / 1215 passed**; manual checklist in `docs/V1_2_BRAIN_MANUAL_TESTS.md`.
+Before it: v1.1 "Intent" + Phase 0 `PlaybackEngine` split: 5-tier Smart Intent relocation, off-thread UI Automation + OCR + Window anchors, multi-scale 75%–150% image matching, and Adaptive Timing `UntilScreenSettles` / `UntilScreenChanges`:
+**built + tested with `tools\verify.cmd` on the owner's PC: 0 warnings, 0 errors, 1188 / 1188 passed**; manual checklist in `docs/V1_1_INTENT_MANUAL_TESTS.md`.
+Before it: Target-lock reticle badge fit: **built + tested with `tools\verify.cmd`: 0 warnings, 0 errors, 1165 / 1165 passed**.)
 Before it: AFK safety audit, 6 items: no catch-up bursts, hook fast path, absolute moves by default, ref-counted
 1 ms timer: **built + tested with `tools\verify.cmd` on the owner's PC: 0 warnings, 0 errors, 1139 / 1139 passed** (incl. follow-up fixes); not committed.
 Before it: 1:1 Precision Replay: recording fidelity presets + 3D camera relative mouse moves: **built + tested
@@ -59,7 +64,44 @@ Developer: Riku (リク) · Brand: KuroLogic_
 
 
 
-## Target-lock reticle badge fit (2026-10-24): **NOT built / tested yet** (written without a .NET SDK; owner runs `tools\verify.cmd`)
+## v1.2 "Brain" — Memory, Recovery & Sub-Macros (2026-11-02): **built + tested** (`tools\verify.cmd`: 0 warnings, 0 errors, **1215 / 1215 passed**)
+Not committed yet; manual verification scenarios in `docs/V1_2_BRAIN_MANUAL_TESTS.md`.
+1. **Pillar 3 (Memory — Variables & Reading the Screen)**:
+   - Plain-data macro variables (`SmartMacro.Core/Models/Variables.cs`, `Macro.Variables`): `Number`, `Text`, `Boolean` with defaults — never scripts or eval.
+   - `SetVariableStep` (`StepKind.SetVariable`): operations `Set`, `Add`, `Subtract`, `AppendText` across sources `Constant`, `ScreenOcrNumber` (resilient HUD/currency/look-alike parser in `VariableStore.TryParseScreenNumber`), `ScreenOcrText`, `ClipboardText` (`WpfClipboardReader`), `LastFoundX`, `LastFoundY`, `LoopCounter`, and `ElapsedSeconds`.
+   - `ConditionKind.VariableCompare` (`VariableComparison` with 8 operators `==`, `!=`, `>`, `>=`, `<`, `<=`, `Contains`, `StartsWith`) inside `If`, `Repeat` (`While`/`Until`), `FeedbackLoop` stop conditions, and `Macro.Watchers`.
+   - `{name}` variable interpolation in `TypeTextStep`, `FindTextStep`, `ScreenSearchStep.WindowTitle`, `FocusWindowStep.WindowTitle`, and `ScreenshotStep`.
+2. **Pillar 4 (Resilience — Failure Policies, Checkpoints, Watchers & Self-Healing)**:
+   - Unified per-step `StepFailurePolicy` (`SmartMacro.Core/Models/ResilienceAndSubMacros.cs`) on `ScreenSearchStep`, `WaitForChangeStep`, and `FocusWindowStep`: lossless storage for `Continue` / `SkipNextStep` / `StopMacro` (`FailurePolicy = null`) plus `Retry` (`RetryCount`, `RetryDelayMs`), `RunRecoveryMacro`, and `RestartFromCheckpoint`.
+   - `CheckpointStep` (`StepKind.Checkpoint`): top-level restart marker strictly validated outside `If` / `Repeat` blocks and capped at `PlaybackEngine.MaxCheckpointRestarts = 25`.
+   - `Macro.Watchers` (`MacroWatcher`): background interrupt handlers checked between steps (`CheckIntervalMs`, `CooldownMs`, non-reentrant inside sub-macros) supporting `ClickFoundSpot`, `RunSubMacro`, `RestartFromCheckpoint`, and `StopMacro`.
+   - Opt-in `SelfHealSuggestion` (`SmartMacro.Core/Targeting/SelfHealingAdvisor.cs`): emitted on `PlaybackResult.Suggestions` when a Smart Intent click relocates by `>= 25 px` (never rewriting steps silently), surfaced as a 1-click undoable **🩹 Smart Self-Heal Suggestion** banner in the Editor.
+3. **Pillar 5 (Composition — Sub-Macros & Self-Contained `.smacro` Bundles)**:
+   - `CallMacroStep` (`StepKind.CallMacro`): runs reusable library macros with isolated `VariableStore`, `Inputs` & `Outputs` (`VariableBinding`), static (`MacroValidator.ValidateCallGraph`) + runtime cycle detection, and `MaxCallDepth = 8`.
+   - Automatic transitive sub-macro bundling (`MacroDocument.SubMacros`, `MacroFileFormat.Serialize(macro, library)`, `TryParseBundle`, `PrepareBundleForImport`) wired into `LibraryViewModel` Export/Import with collision-safe ID & name remapping.
+4. **Studio UI, Schema v16 & Tests**:
+   - `EditorView.xaml` + `StepEditorTemplates.xaml` + `BrainStepViewModels.cs`: header **🧠 Variables** (with live runtime values) and **🛡 Watchers** popovers, **MEMORY & SUB-MACROS** toolbox section, `FailurePolicyEditorTemplate`, and **🩹 Smart Self-Heal** banner.
+   - `MacroDocument.CurrentSchemaVersion = 16` (macros without v1.2 features still save as `1..15`). Added 27 unit test cases in `SmartMacro.Tests/BrainUpgradeTests.cs`.
+5. **1-Click Brain Blueprints & In-App Manual Center**:
+   - Added 3 new 1-click blueprints in `MacroBlueprints.cs` (`ScreenCounterGoalLoop` `🧠 Farm Until Goal Counter`, `CheckpointRecoveryFlow` `📍 Checkpoint + Auto-Retry Recovery` with automatic top-level placement via `StepListEditing.InsertIndexAtTopLevel`, and `ModularSubMacroPipeline` `📦 Modular Sub-Macro Pipeline`), automatically seeding default macro variables on insert.
+   - Added 5 new guides + 3 recipe cards in `ManualCatalog.cs` covering Smart Intent, Adaptive Timing & Multi-Scale Matching, Variables & Screen Numbers, Checkpoints & Watchers, and Sub-Macros & `.smacro` Bundles.
+
+## v1.1 "Intent" + Phase 0 `PlaybackEngine` split (2026-11-02): **built + tested** (`tools\verify.cmd`: 0 warnings, 0 errors, **1188 / 1188 passed**)
+Not committed yet; manual verification scenarios in `docs/V1_1_INTENT_MANUAL_TESTS.md`.
+1. **Phase 0 (`PlaybackEngine` split)**: split 3,327-line `SmartMacro.Core/Playback/PlaybackEngine.cs` into 8 focused files (`PlaybackModels.cs`, `PlaybackEngine.cs`, `.Timeline.cs`, `.Blocks.cs`, `.Feedback.cs`, `.Steps.cs`, `.Sequence.cs`, `.Vision.cs`).
+2. **Pillar 1A (Multi-scale image matching)**: `BgraImage.Resize`, `VisualMatch.MatchedScale`, `TemplateMatchOptions.AllowMultiScale` (`MinScale = 0.75`, `MaxScale = 1.50`), and `FindImageStep.AllowMultiScale` (1:1 fast path first, then multi-scale pyramid across 75%–150% DPI / resized UI).
+3. **Pillar 1B (Intent Recording & 5-Tier `TargetResolver`)**:
+   - `SmartMacro.Core/Targeting/` (`TargetFingerprint`, `IUiElementLocator`, `TargetResolver`): resolves clicks through `1. UI Automation → 2. OCR Text → 3. Image Snapshot (1:1 + multi-scale) → 4. Window-Relative (title + process name) → 5. Coordinates`.
+   - `Services/Automation/UiAutomationService.cs`: built-in Windows `System.Windows.Automation` (`UIAutomationClient`, zero NuGet packages), bounded 150 ms / 300 ms timeouts, leaf-to-parent promotion, and full-window game-canvas skip (>60% non-interactive root) so 3D games fall through cleanly.
+   - Off-thread enrichment in `ClickSnapshotter` (`WindowsInputRecorder` + `SmartInputRecorder`): single `160×64` GDI `BitBlt` on `MouseDown` (cropping `56×56` in RAM), background `ConcurrentQueue` worker running PNG encode + `InspectPoint` + in-memory `WindowsOcrService.ReadImageAsync` with zero work on the input hook thread.
+   - Inspector **🧭 Locate Target** button (`VisionTools.LocateTargetAsync`, `MouseClickStepViewModel`, `StepEditorTemplates.xaml`) evaluates all 5 tiers via `DiagnoseAllAsync`, flashes the target-lock reticle on the winner, and prints `✓` / `✗` per strategy.
+4. **Pillar 2 (Adaptive Timing)**:
+   - `DelayStep.Mode` (`Fixed`, `UntilScreenSettles`, `UntilScreenChanges`), `MinDurationMs`, `MaxDurationMs`, `QuietWindowMs`.
+   - `AppSettings.SmartTimingOnRecord` (on by default): `RecordingConverter` and `SmartRecordingConverter` convert post-click pauses `>= 150 ms` into `UntilScreenSettles` (`Min = clamp(d/4, 60, 250)`, `Max = clamp(d*3, 600, max(d, 15000))`).
+   - `PlaybackEngine.ExecuteAdaptiveDelayAsync`: clears overlays first, watches a `320×240` region around `_lastActionSpot`, continues early when calm (or immediately on change), and respects pause/stop.
+5. **Schema v15 & Tests**: `MacroDocument.CurrentSchemaVersion = 15` (macros without v1.1 features still save as `1..14`). Added 23 unit test cases in `SmartMacro.Tests/IntentUpgradeTests.cs`.
+
+## Target-lock reticle badge fit (2026-10-24): **built + tested** (`tools\verify.cmd`: 0 warnings, 0 errors, **1165 / 1165 passed**)
 
 - Bug: on a small target (the 63 px "Click the Target" ball) the badge text "🎯 98% · 45ms · Find image" was cut off. The reticle
   window was only target + 18 px pad (+30 px above), ~99 px wide, while the badge is ~180 px wide.

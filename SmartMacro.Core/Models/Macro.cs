@@ -105,6 +105,22 @@ public sealed class Macro
     [JsonIgnore]
     public int EffectiveDelayJitterPercent => DelayJitterPercent ?? DefaultDelayJitterPercent;
 
+    // ---------------- v1.2 "Brain": Variables & Watchers (format 16) ----------------
+
+    /// <summary>
+    /// Named plain-data variables declared on this macro (Number / Text / Boolean with defaults).
+    /// Null or omitted when unused so older macros stay byte-for-byte unchanged.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public List<MacroVariableDefinition>? Variables { get; set; }
+
+    /// <summary>
+    /// Macro-level interrupt handlers ("Watchers") checked periodically between steps (e.g. close pop-up, reconnect).
+    /// Null or omitted when unused so older macros stay byte-for-byte unchanged.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public List<MacroWatcher>? Watchers { get; set; }
+
     /// <summary>
     /// A shallow copy of this macro (same ID, name, speed, target window, Humanize, …) that plays
     /// <paramref name="steps"/> instead of its own list. The steps themselves aren't copied. Used by "Play from here",
@@ -151,11 +167,24 @@ public sealed class MacroDocument
     ///     Also adds the "Wait for screen change", "Focus window" and "Take screenshot" steps.
     /// 14 = adds relative mouse deltas (3D game camera) on Move mouse steps. Older versions would put the cursor on the
     ///     recorded X / Y instead of turning the camera, so such a macro needs 14.
+    /// 15 = adds v1.1 "Intent": multi-signal TargetFingerprint + UseSmartIntent on Mouse click steps (and recorded-input
+    ///     click targets), multi-scale image matching (AllowMultiScale) on Find image steps/conditions, and adaptive
+    ///     Delay modes (UntilScreenSettles / UntilScreenChanges).
+    /// 16 = adds v1.2 "Brain": Variables (Macro.Variables, SetVariableStep, ConditionKind.VariableCompare), Resilience
+    ///     (StepFailurePolicy Retry / RunRecoveryMacro / RestartFromCheckpoint, CheckpointStep, Macro.Watchers), and
+    ///     Composition (CallMacroStep + bundled SubMacros).
     /// </summary>
-    public const int CurrentSchemaVersion = 14;
+    public const int CurrentSchemaVersion = 16;
 
     public int SchemaVersion { get; set; }
     public Macro? Macro { get; set; }
+
+    /// <summary>
+    /// Optional bundled sub-macros exported alongside <see cref="Macro"/> so a shared <c>.smacro</c> file carries its
+    /// called / recovery / watcher building blocks automatically. Null in normal library files without sub-macros.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public List<Macro>? SubMacros { get; set; }
 
     /// <summary>
     /// The oldest format that can hold this macro without losing anything. Macros that don't use the
@@ -166,6 +195,7 @@ public sealed class MacroDocument
     public static int RequiredSchemaVersion(Macro macro)
     {
         ArgumentNullException.ThrowIfNull(macro);
+        if (UsesVersion16MacroFeatures(macro)) return 16;
         if (macro.Steps is null) return UsesVersion11Features(macro) ? 11 : 1;
 
         var required = UsesVersion11Features(macro) ? 11 : 1;
@@ -173,6 +203,8 @@ public sealed class MacroDocument
         {
             var needed = step switch
             {
+                _ when UsesVersion16StepFeatures(step) => 16,
+                _ when UsesVersion15Features(step) => 15,
                 MouseMoveStep { UseRelativeDelta: true } => 14,
                 FeedbackLoopStep { ControlMode: not FeedbackControlMode.ClassicSimpleHold } => 13,
                 WaitForChangeStep or FocusWindowStep or ScreenshotStep => 13,
@@ -203,6 +235,45 @@ public sealed class MacroDocument
         macro.HumanizePlayback || macro.ScaleCoordinatesToWindow || macro.TargetWindowTitle is not null
         || macro.ClickJitterPx is not null || macro.DelayJitterPercent is not null
         || macro.ReferenceWidth != 0 || macro.ReferenceHeight != 0;
+
+    /// <summary>True if the macro declares Variables or Watchers added in format 16.</summary>
+    private static bool UsesVersion16MacroFeatures(Macro macro) =>
+        macro.Variables is { Count: > 0 } || macro.Watchers is { Count: > 0 };
+
+    /// <summary>True if the step uses a v1.2 "Brain" option added in format 16.</summary>
+    private static bool UsesVersion16StepFeatures(MacroStep step)
+    {
+        switch (step)
+        {
+            case SetVariableStep or CheckpointStep or CallMacroStep:
+            case ScreenSearchStep { FailurePolicy.IsAdvanced: true }:
+            case WaitForChangeStep { FailurePolicy.IsAdvanced: true }:
+            case FocusWindowStep { FailurePolicy.IsAdvanced: true }:
+                return true;
+        }
+
+        foreach (var condition in WorkflowSteps.ConditionsOf(step))
+            if (condition.Kind == ConditionKind.VariableCompare || condition.Comparison is not null) return true;
+        return false;
+    }
+
+    /// <summary>True if the step uses a v1.1 "Intent" or Adaptive Timing option added in format 15.</summary>
+    private static bool UsesVersion15Features(MacroStep step)
+    {
+        switch (step)
+        {
+            case DelayStep d when d.Mode != DelayMode.Fixed || d.MinDurationMs != 0 || d.MaxDurationMs != 0 || d.QuietWindowMs != 0:
+            case MouseClickStep { UseSmartIntent: true } or MouseClickStep { Target: not null }:
+            case FindImageStep { AllowMultiScale: true }:
+                return true;
+            case InputSequenceStep { ClickTargets: { } targets } when targets.Any(t => t?.Target is not null):
+                return true;
+        }
+
+        foreach (var condition in WorkflowSteps.ConditionsOf(step))
+            if (condition.Check is FindImageStep { AllowMultiScale: true }) return true;
+        return false;
+    }
 
     /// <summary>True if the step uses an option added in format 12 (see <see cref="CurrentSchemaVersion"/>).</summary>
     private static bool UsesVersion12Features(MacroStep step) => step switch

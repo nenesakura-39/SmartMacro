@@ -31,7 +31,13 @@ public sealed class SettingsViewModel : ObservableObject
     private bool _keepTapHoldTime;
     private bool _simplifyMousePaths;
     private bool _captureClickSnapshots = true;
+    private bool _captureClickIntent = true;
+    private bool _smartTimingOnRecord = true;
     private bool _smoothMouseMoves;
+    private StudioTheme _theme = StudioTheme.ObsidianNeon;
+    private StudioAccent _accent = StudioAccent.NeonBrand;
+    private StudioDensity _density = StudioDensity.Comfortable;
+    private bool _reduceMotion;
     private HotkeyBinding _recordHotkey = HotkeyBinding.DefaultRecord;
     private HotkeyBinding _playHotkey = HotkeyBinding.DefaultPlay;
     private HotkeyBinding _pauseHotkey = HotkeyBinding.DefaultPause;
@@ -63,6 +69,94 @@ public sealed class SettingsViewModel : ObservableObject
             PauseHotkey = HotkeyBinding.DefaultPause;
         });
         CopyDiagnosticsCommand = new RelayCommand(CopyDiagnostics);
+        SetAccentCommand = new RelayCommand(p =>
+        {
+            if (p is StudioAccent accent) Accent = accent;
+            else if (p is string text && Enum.TryParse<StudioAccent>(text, out var parsed)) Accent = parsed;
+        });
+    }
+
+    public RelayCommand SetAccentCommand { get; }
+
+    // ---- Studio X Appearance & Motion ----
+    public static IReadOnlyList<Choice<StudioTheme>> ThemeChoices { get; } = new[]
+    {
+        new Choice<StudioTheme>(StudioTheme.ObsidianNeon, "🌌 Obsidian Neon (Deep Space #060913 — Default)"),
+        new Choice<StudioTheme>(StudioTheme.MidnightBlue, "🌠 Midnight Blue (High-Contrast Slate #0A1020)"),
+    };
+
+    public static IReadOnlyList<Choice<StudioAccent>> AccentChoices { get; } = new[]
+    {
+        new Choice<StudioAccent>(StudioAccent.NeonBrand, "⚡ Neon Brand (Sky & Violet)"),
+        new Choice<StudioAccent>(StudioAccent.ElectricBlue, "💙 Electric Blue (#3B82F6)"),
+        new Choice<StudioAccent>(StudioAccent.CyberViolet, "💜 Cyber Violet (#8B5CF6)"),
+        new Choice<StudioAccent>(StudioAccent.EmeraldPulse, "💚 Emerald Pulse (#10B981)"),
+        new Choice<StudioAccent>(StudioAccent.RoseQuartz, "💗 Rose Quartz (#F43F5E)"),
+    };
+
+    public static IReadOnlyList<Choice<StudioDensity>> DensityChoices { get; } = new[]
+    {
+        new Choice<StudioDensity>(StudioDensity.Comfortable, "Comfortable (Studio Default)"),
+        new Choice<StudioDensity>(StudioDensity.Compact, "Compact (High-Density Pro)"),
+    };
+
+    public IReadOnlyList<Choice<StudioTheme>> Themes => ThemeChoices;
+    public IReadOnlyList<Choice<StudioAccent>> Accents => AccentChoices;
+    public IReadOnlyList<Choice<StudioDensity>> Densities => DensityChoices;
+
+    public StudioTheme Theme
+    {
+        get => _theme;
+        set
+        {
+            if (!SetProperty(ref _theme, value)) return;
+            IsDirty = true;
+            PreviewAppearance();
+        }
+    }
+
+    public StudioAccent Accent
+    {
+        get => _accent;
+        set
+        {
+            if (!SetProperty(ref _accent, value)) return;
+            IsDirty = true;
+            PreviewAppearance();
+        }
+    }
+
+    public StudioDensity Density
+    {
+        get => _density;
+        set
+        {
+            if (!SetProperty(ref _density, value)) return;
+            IsDirty = true;
+            PreviewAppearance();
+        }
+    }
+
+    public bool ReduceMotion
+    {
+        get => _reduceMotion;
+        set
+        {
+            if (!SetProperty(ref _reduceMotion, value)) return;
+            IsDirty = true;
+            PreviewAppearance();
+        }
+    }
+
+    private void PreviewAppearance()
+    {
+        ThemeManager.Apply(new AppSettings
+        {
+            Theme = _theme,
+            Accent = _accent,
+            Density = _density,
+            ReduceMotion = _reduceMotion,
+        });
     }
 
     // ---- About ----
@@ -292,6 +386,20 @@ public sealed class SettingsViewModel : ObservableObject
         set { if (SetProperty(ref _captureClickSnapshots, value)) IsDirty = true; }
     }
 
+    /// <summary>"Intent Recording: remember UI buttons, text &amp; windows when I click".</summary>
+    public bool CaptureClickIntent
+    {
+        get => _captureClickIntent;
+        set { if (SetProperty(ref _captureClickIntent, value)) IsDirty = true; }
+    }
+
+    /// <summary>"Smart Timing: turn pauses after clicks into adaptive 'Until screen settles' waits".</summary>
+    public bool SmartTimingOnRecord
+    {
+        get => _smartTimingOnRecord;
+        set { if (SetProperty(ref _smartTimingOnRecord, value)) IsDirty = true; }
+    }
+
     /// <summary>"Smooth mouse movement during playback" (glide instead of jumping).</summary>
     public bool SmoothMouseMoves
     {
@@ -337,11 +445,18 @@ public sealed class SettingsViewModel : ObservableObject
         _keepTapHoldTime = settings.KeepTapHoldTime;
         _simplifyMousePaths = settings.SimplifyMousePaths;
         _captureClickSnapshots = settings.CaptureClickSnapshots;
+        _captureClickIntent = settings.CaptureClickIntent;
+        _smartTimingOnRecord = settings.SmartTimingOnRecord;
         _smoothMouseMoves = settings.SmoothMouseMoves;
+        _theme = settings.Theme;
+        _accent = settings.Accent;
+        _density = settings.Density;
+        _reduceMotion = settings.ReduceMotion;
         _recordHotkey = settings.RecordHotkey;
         _playHotkey = settings.PlayHotkey;
         _pauseHotkey = settings.PauseHotkey;
         IsDirty = false;
+        PreviewAppearance();
         OnPropertyChanged(string.Empty);
     }
 
@@ -363,8 +478,15 @@ public sealed class SettingsViewModel : ObservableObject
             KeepTapHoldTime = KeepTapHoldTime,
             SimplifyMousePaths = SimplifyMousePaths,
             CaptureClickSnapshots = CaptureClickSnapshots,
+            CaptureClickIntent = CaptureClickIntent,
+            SmartTimingOnRecord = SmartTimingOnRecord,
             SmoothMouseMoves = SmoothMouseMoves,
             ShowOverlaysInObsAndRecording = _saved.ShowOverlaysInObsAndRecording, // saved on its own when toggled
+            Theme = Theme,
+            Accent = Accent,
+            Density = Density,
+            ReduceMotion = ReduceMotion,
+            SidebarPinned = _saved.SidebarPinned,
             RecordHotkey = RecordHotkey,
             PlayHotkey = PlayHotkey,
             PauseHotkey = PauseHotkey,

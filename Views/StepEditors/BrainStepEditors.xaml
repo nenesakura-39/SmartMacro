@@ -1,0 +1,230 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                    xmlns:models="clr-namespace:SmartMacro.Core.Models;assembly=SmartMacro.Core"
+                    xmlns:steps="clr-namespace:SmartMacro.ViewModels.Steps"
+                    xmlns:vision="clr-namespace:SmartMacro.Services.Vision"
+                    xmlns:conv="clr-namespace:SmartMacro.Converters">
+
+    <ResourceDictionary.MergedDictionaries>
+        <ResourceDictionary Source="/SmartMacro;component/Views/StepEditors/StepEditorsShared.xaml" />
+    </ResourceDictionary.MergedDictionaries>
+
+    <!-- v1.2 Brain: Set variable (Pillar 3 — Memory & Reading the Screen) -->
+    <DataTemplate DataType="{x:Type steps:SetVariableStepViewModel}">
+        <StackPanel>
+            <ContentControl Content="{Binding}" ContentTemplate="{StaticResource StepHeaderTemplate}" Focusable="False" />
+            <ContentControl Content="{Binding}" ContentTemplate="{StaticResource SummaryBannerTemplate}" Focusable="False" />
+
+            <Border Style="{StaticResource SetupCard}">
+                <StackPanel>
+                    <TextBlock Text="1. TARGET VARIABLE" Style="{StaticResource SetupCardTitle}" />
+                    <TextBlock Text="Variable name (letters, digits, _)" Style="{StaticResource FieldLabel}" Margin="0,8,0,4" />
+                    <TextBox Text="{Binding VariableName, UpdateSourceTrigger=PropertyChanged}" Tag="e.g. gold or count" MaxLength="40"
+                             AutomationProperties.Name="Variable name" />
+                    <TextBlock Text="Operation" Style="{StaticResource FieldLabel}" />
+                    <ComboBox ItemsSource="{x:Static steps:SetVariableStepViewModel.Operations}" DisplayMemberPath="Label" SelectedValuePath="Value"
+                              SelectedValue="{Binding Operation}" AutomationProperties.Name="Variable operation" />
+                </StackPanel>
+            </Border>
+
+            <Border Style="{StaticResource SetupCard}">
+                <StackPanel>
+                    <TextBlock Text="2. VALUE SOURCE" Style="{StaticResource SetupCardTitle}" />
+                    <ComboBox ItemsSource="{x:Static steps:SetVariableStepViewModel.Sources}" DisplayMemberPath="Label" SelectedValuePath="Value"
+                              SelectedValue="{Binding Source}" Margin="0,8,0,0" AutomationProperties.Name="Variable value source" />
+
+                    <StackPanel Visibility="{Binding UsesConstantValue, Converter={StaticResource BoolToVisibility}}">
+                        <TextBlock Text="Value (or {otherVar})" Style="{StaticResource FieldLabel}" />
+                        <TextBox Text="{Binding ValueText, UpdateSourceTrigger=PropertyChanged}" Tag="e.g. 1 or Ready or {count}" MaxLength="2000"
+                                 AutomationProperties.Name="Constant value" />
+                    </StackPanel>
+
+                    <StackPanel Visibility="{Binding UsesScreenRegion, Converter={StaticResource BoolToVisibility}}" Margin="0,8,0,0">
+                        <WrapPanel>
+                            <Button Command="{Binding PickRegionCommand}" Style="{StaticResource PrimaryButton}" Margin="0,0,8,6"
+                                    ToolTip="Freeze the screen and drag a box tightly around the number or text to read with Windows OCR."
+                                    AutomationProperties.Name="Pick OCR area on screen">
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock Text="&#xE8B0;" Style="{StaticResource IconText}" />
+                                    <TextBlock Text="Pick area on screen" Margin="8,0,0,0" />
+                                </StackPanel>
+                            </Button>
+                            <Button Command="{Binding ShowRegionCommand}" Margin="0,0,8,6"
+                                    ToolTip="Outline this OCR read area on screen." AutomationProperties.Name="Show OCR area on screen">
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock Text="🎯" />
+                                    <TextBlock Text="Show on screen" Margin="6,0,0,0" />
+                                </StackPanel>
+                            </Button>
+                            <ComboBox Style="{StaticResource FreezeComboBox}" Margin="0,0,0,6" />
+                        </WrapPanel>
+                        <Grid Margin="0,4,0,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="6" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="6" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="6" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Grid.Column="0">
+                                <TextBlock Text="X" Style="{StaticResource FieldLabel}" Margin="0,4,0,2" />
+                                <TextBox Text="{Binding RegionX, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}" Padding="6,5" AutomationProperties.Name="OCR area X" />
+                            </StackPanel>
+                            <StackPanel Grid.Column="2">
+                                <TextBlock Text="Y" Style="{StaticResource FieldLabel}" Margin="0,4,0,2" />
+                                <TextBox Text="{Binding RegionY, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}" Padding="6,5" AutomationProperties.Name="OCR area Y" />
+                            </StackPanel>
+                            <StackPanel Grid.Column="4">
+                                <TextBlock Text="Width" Style="{StaticResource FieldLabel}" Margin="0,4,0,2" />
+                                <TextBox Text="{Binding RegionWidth, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}" Padding="6,5" AutomationProperties.Name="OCR area width" />
+                            </StackPanel>
+                            <StackPanel Grid.Column="6">
+                                <TextBlock Text="Height" Style="{StaticResource FieldLabel}" Margin="0,4,0,2" />
+                                <TextBox Text="{Binding RegionHeight, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}" Padding="6,5" AutomationProperties.Name="OCR area height" />
+                            </StackPanel>
+                        </Grid>
+                        <TextBlock Text="{Binding StatusText}" Style="{StaticResource MutedText}" FontSize="11" Margin="0,6,0,0"
+                                   Visibility="{Binding StatusText, Converter={StaticResource NullToVisibility}}" />
+                    </StackPanel>
+
+                    <TextBlock Text="{Binding SourceHelp}" Style="{StaticResource MutedText}" FontSize="11" Margin="0,8,0,0" TextWrapping="Wrap" />
+                </StackPanel>
+            </Border>
+
+            <ContentControl Content="{Binding}" ContentTemplate="{StaticResource StepFooterTemplate}" Focusable="False" />
+        </StackPanel>
+    </DataTemplate>
+
+    <!-- v1.2 Brain: Checkpoint (Pillar 4 — Named top-level restart marker) -->
+    <DataTemplate DataType="{x:Type steps:CheckpointStepViewModel}">
+        <StackPanel>
+            <ContentControl Content="{Binding}" ContentTemplate="{StaticResource StepHeaderTemplate}" Focusable="False" />
+            <ContentControl Content="{Binding}" ContentTemplate="{StaticResource SummaryBannerTemplate}" Focusable="False" />
+
+            <Border Style="{StaticResource SetupCard}">
+                <StackPanel>
+                    <TextBlock Text="CHECKPOINT NAME" Style="{StaticResource SetupCardTitle}" />
+                    <TextBlock Text="Name (letters, digits, _, -)" Style="{StaticResource FieldLabel}" Margin="0,8,0,4" />
+                    <TextBox Text="{Binding CheckpointName, UpdateSourceTrigger=PropertyChanged}" Tag="e.g. start or lobby" MaxLength="60"
+                             AutomationProperties.Name="Checkpoint name" />
+                    <TextBlock Style="{StaticResource MutedText}" FontSize="11" Margin="0,8,0,0" TextWrapping="Wrap"
+                               Text="Checkpoints must sit at the top level of the workflow (outside If and Repeat blocks) so jumping back to one never corrupts loop or branch state. Any Find step, Wait step, Focus window step, or background Watcher can jump back here (capped at 25 restarts per run)." />
+                </StackPanel>
+            </Border>
+
+            <ContentControl Content="{Binding}" ContentTemplate="{StaticResource StepFooterTemplate}" Focusable="False" />
+        </StackPanel>
+    </DataTemplate>
+
+    <!-- v1.2 Brain: Call macro (Pillar 5 — Sub-Macros with Input / Output bindings) -->
+    <DataTemplate DataType="{x:Type steps:CallMacroStepViewModel}">
+        <StackPanel>
+            <ContentControl Content="{Binding}" ContentTemplate="{StaticResource StepHeaderTemplate}" Focusable="False" />
+            <ContentControl Content="{Binding}" ContentTemplate="{StaticResource SummaryBannerTemplate}" Focusable="False" />
+
+            <Border Style="{StaticResource SetupCard}">
+                <StackPanel>
+                    <DockPanel>
+                        <Button DockPanel.Dock="Right" Padding="8,3" FontSize="11"
+                                Command="{Binding DataContext.OpenSubMacroCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                CommandParameter="{Binding}"
+                                ToolTip="Open this sub-macro in the Workflow Editor"
+                                AutomationProperties.Name="Open sub-macro in editor">
+                            <TextBlock Text="Open ↗" FontWeight="SemiBold" />
+                        </Button>
+                        <TextBlock Text="1. SUB-MACRO TO RUN" Style="{StaticResource SetupCardTitle}" VerticalAlignment="Center" />
+                    </DockPanel>
+                    <TextBlock Text="Pick from library" Style="{StaticResource FieldLabel}" Margin="0,8,0,4" />
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <ComboBox ItemsSource="{Binding MacroChoices}" DisplayMemberPath="Label"
+                                  SelectedItem="{Binding SelectedMacroChoice}" AutomationProperties.Name="Sub-macro to call" />
+                        <Button Grid.Column="1" Command="{Binding RefreshMacrosCommand}" Margin="8,0,0,0" Padding="10,6"
+                                ToolTip="Refresh macro list from library" AutomationProperties.Name="Refresh sub-macros">
+                            <TextBlock Text="&#xE72C;" Style="{StaticResource IconText}" FontSize="12" />
+                        </Button>
+                    </Grid>
+                    <TextBlock Text="Or macro name" Style="{StaticResource FieldLabel}" />
+                    <TextBox Text="{Binding TargetMacroName, UpdateSourceTrigger=PropertyChanged}" Tag="e.g. Sell Inventory" MaxLength="100"
+                             AutomationProperties.Name="Target sub-macro name" />
+                </StackPanel>
+            </Border>
+
+            <Border Style="{StaticResource SetupCard}">
+                <StackPanel>
+                    <DockPanel>
+                        <Button DockPanel.Dock="Right" Content="+ Add input" Command="{Binding AddInputCommand}" Padding="8,3" FontSize="11"
+                                AutomationProperties.Name="Add input binding" />
+                        <TextBlock Text="2. INPUT PARAMETERS (OPTIONAL)" Style="{StaticResource SetupCardTitle}" VerticalAlignment="Center" />
+                    </DockPanel>
+                    <TextBlock Text="Pass values (or {callerVar}) into the sub-macro's own variables:"
+                               Style="{StaticResource MutedText}" FontSize="11" Margin="0,4,0,6" TextWrapping="Wrap" />
+                    <ItemsControl ItemsSource="{Binding Inputs}" Focusable="False">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate DataType="{x:Type steps:VariableBindingItemViewModel}">
+                                <Grid Margin="0,0,0,6">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBox Grid.Column="0" Text="{Binding Name, UpdateSourceTrigger=PropertyChanged}" Tag="subVar" MaxLength="40"
+                                             AutomationProperties.Name="Sub-macro variable name" />
+                                    <TextBlock Grid.Column="1" Text="←" VerticalAlignment="Center" Margin="6,0" Foreground="{DynamicResource MutedTextBrush}" />
+                                    <TextBox Grid.Column="2" Text="{Binding Value, UpdateSourceTrigger=PropertyChanged}" Tag="value or {myVar}" MaxLength="500"
+                                             AutomationProperties.Name="Input value" />
+                                    <Button Grid.Column="3" Style="{StaticResource DismissButton}" Margin="6,0,0,0"
+                                            Command="{Binding DataContext.RemoveInputCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                                            CommandParameter="{Binding}" ToolTip="Remove input" AutomationProperties.Name="Remove input" />
+                                </Grid>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </StackPanel>
+            </Border>
+
+            <Border Style="{StaticResource SetupCard}">
+                <StackPanel>
+                    <DockPanel>
+                        <Button DockPanel.Dock="Right" Content="+ Add output" Command="{Binding AddOutputCommand}" Padding="8,3" FontSize="11"
+                                AutomationProperties.Name="Add output binding" />
+                        <TextBlock Text="3. OUTPUT VALUES (OPTIONAL)" Style="{StaticResource SetupCardTitle}" VerticalAlignment="Center" />
+                    </DockPanel>
+                    <TextBlock Text="Copy a sub-macro variable back into one of this macro's variables when the sub-macro finishes:"
+                               Style="{StaticResource MutedText}" FontSize="11" Margin="0,4,0,6" TextWrapping="Wrap" />
+                    <ItemsControl ItemsSource="{Binding Outputs}" Focusable="False">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate DataType="{x:Type steps:VariableBindingItemViewModel}">
+                                <Grid Margin="0,0,0,6">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBox Grid.Column="0" Text="{Binding Name, UpdateSourceTrigger=PropertyChanged}" Tag="subVar" MaxLength="40"
+                                             AutomationProperties.Name="Sub-macro output variable" />
+                                    <TextBlock Grid.Column="1" Text="→" VerticalAlignment="Center" Margin="6,0" Foreground="{DynamicResource MutedTextBrush}" />
+                                    <TextBox Grid.Column="2" Text="{Binding Value, UpdateSourceTrigger=PropertyChanged}" Tag="callerVar" MaxLength="40"
+                                             AutomationProperties.Name="Caller target variable" />
+                                    <Button Grid.Column="3" Style="{StaticResource DismissButton}" Margin="6,0,0,0"
+                                            Command="{Binding DataContext.RemoveOutputCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                                            CommandParameter="{Binding}" ToolTip="Remove output" AutomationProperties.Name="Remove output" />
+                                </Grid>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </StackPanel>
+            </Border>
+
+            <ContentControl Content="{Binding}" ContentTemplate="{StaticResource StepFooterTemplate}" Focusable="False" />
+        </StackPanel>
+    </DataTemplate>
+
+</ResourceDictionary>

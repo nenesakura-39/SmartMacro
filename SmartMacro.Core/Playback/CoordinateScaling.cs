@@ -134,6 +134,12 @@ public static class CoordinateScaling
                     (s.RegionX, s.RegionY, s.RegionWidth, s.RegionHeight) = (shot.X, shot.Y, shot.Width, shot.Height);
                     break;
                 }
+                case SetVariableStep { UsesScreenRegion: true } v:
+                {
+                    var area = mapping.MapRect(v.Region);
+                    (v.RegionX, v.RegionY, v.RegionWidth, v.RegionHeight) = (area.X, area.Y, area.Width, area.Height);
+                    break;
+                }
             }
 
             // Find steps and the searches of If / Repeat / feedback conditions: only a custom area is a stored position
@@ -145,5 +151,24 @@ public static class CoordinateScaling
                 (search.RegionX, search.RegionY, search.RegionWidth, search.RegionHeight) = (area.X, area.Y, area.Width, area.Height);
             }
         }
+    }
+
+    /// <summary>Clones and scales custom areas of macro-level watchers when coordinate scaling is active.</summary>
+    public static List<MacroWatcher>? ApplyToWatchersCopy(IReadOnlyList<MacroWatcher>? watchers, CoordinateMapping mapping)
+    {
+        if (watchers is null || watchers.Count == 0) return null;
+        var copy = watchers.Select(MacroJson.CloneWatcher).ToList();
+        if (mapping.IsIdentity) return copy;
+
+        foreach (var watcher in copy)
+        {
+            if (watcher.Condition?.Search is { EffectiveScope: SearchScope.CustomArea } search)
+            {
+                var area = mapping.MapRect(search.Region);
+                (search.RegionX, search.RegionY, search.RegionWidth, search.RegionHeight) = (area.X, area.Y, area.Width, area.Height);
+            }
+        }
+
+        return copy;
     }
 }
