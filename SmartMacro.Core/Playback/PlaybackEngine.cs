@@ -231,6 +231,17 @@ public sealed partial class PlaybackEngine
     private TaskCompletionSource? _resumeSignal;
     private TimeSpan? _pauseRequestedAt; // clock time of the latest Pause() call (under _gate)
 
+    // v1.8 Studio X Interactive Debugger: breakpoints (F9) and single-step execution (F10).
+    private volatile bool _pauseBeforeNextStep;
+    private volatile bool _stepOverRequested;
+    private Guid? _lastBreakpointPausedStepId;
+
+    /// <summary>
+    /// v1.8 Studio X Debugger: optional predicate returning true when a step ID has an active breakpoint.
+    /// When hit on a top-level macro step, playback pauses before running that step and reports its position.
+    /// </summary>
+    public Func<Guid, bool>? HasBreakpoint { get; set; }
+
     /// <param name="layout">
     /// Monitors and app windows, for Find steps / conditions that look at one monitor or inside one window. Without it the
     /// main monitor means the whole desktop, and a specific monitor / window can't be found.
@@ -577,6 +588,9 @@ public sealed partial class PlaybackEngine
             _statPausedTotal = TimeSpan.Zero;
             _statPausedSince = null;
             _skipNextStep = false;
+            _pauseBeforeNextStep = false;
+            _stepOverRequested = false;
+            _lastBreakpointPausedStepId = null;
             _cursor = null;
             _glideTarget = null;
             _glideDuringDelay = null;
@@ -808,6 +822,21 @@ public sealed partial class PlaybackEngine
 
     /// <summary>Pause when playing, resume when paused (the F8 / ⏸ button). Returns true if it changed something.</summary>
     public bool TogglePause() => State == PlaybackState.Paused ? Resume() : Pause();
+
+    /// <summary>
+    /// v1.8 Studio X Debugger: when paused, resumes for one step and automatically pauses before the next step.
+    /// Returns true if playback was paused and stepped forward.
+    /// </summary>
+    public bool StepOver()
+    {
+        lock (_gate)
+        {
+            if (_state != PlaybackState.Paused) return false;
+            _stepOverRequested = true;
+        }
+
+        return Resume();
+    }
 
     /// <summary>Stops as soon as possible. Safe to call any time, from any thread.</summary>
     public bool Stop()

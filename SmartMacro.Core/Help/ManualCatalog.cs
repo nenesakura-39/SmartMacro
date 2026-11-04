@@ -83,6 +83,8 @@ public static class ManualCatalog
         new ManualShortcut("Esc", "Emergency stop (your real Esc key; the macro's own Esc presses are ignored)", "While playing"),
         new ManualShortcut("Shift+F5", "Play from the selected step to the end", "Editor"),
         new ManualShortcut("Ctrl+F5", "▶ Run step: play only the selected step (an If / Repeat runs its whole block)", "Editor"),
+        new ManualShortcut("F9", "🔴 Toggle breakpoint on the selected step (pauses before running it)", "Editor"),
+        new ManualShortcut("F10", "⏭ Step over: execute one step while paused and pause before the next step", "Editor / While paused"),
         new ManualShortcut("Ctrl+T", "🧪 Test Step: look for the selected step's target once (near-miss score), or run an action step once", "Editor"),
         new ManualShortcut("Ctrl+K", "Command Palette: add steps, blueprints, play, auto-fix, speed…", "Editor"),
         new ManualShortcut("Ctrl+F", "Search steps (Enter / F3 next, Shift+Enter / Shift+F3 previous, Esc clears)", "Editor"),
@@ -316,6 +318,45 @@ public static class ManualCatalog
                     S("Automatic .smacro bundling", "Exporting a macro from the Library automatically bundles every transitive sub-macro (from Call Macro steps, Recovery policies, and Watchers) into one self-contained .smacro file. Importing it unpacks all helpers with collision-safe names and remapped IDs."),
                 },
                 "submacro call macro subroutine composition input output parameter bundle export import"),
+            new("triggers-reflex", ManualCategory.LogicAndLoops, "⚡", "Triggers & Run Governor: Hotkeys, Hold-to-Run, Schedules & Window Events",
+                "Fire macros automatically from per-macro hotkeys, timers, or window focus changes.",
+                new[]
+                {
+                    S("Four trigger kinds", "Open ⚡ Triggers in the Editor header or bottom dock to attach triggers directly to a macro:",
+                        "Per-macro Hotkey: Press once to run, Hold to run (stops on release), Repeat while held (loops until released), or Toggle start / stop.",
+                        "Interval Timer & Daily Clock Time: Run every N seconds or at a daily HH:mm schedule.",
+                        "Window Appears / Gains Focus: Fire when a matching window title opens or comes to the front."),
+                    S("Run Governor & Armed toggle", "Each trigger chooses what happens if another macro is already playing: Ignore if busy, Queue next (up to 8), or Preempt & stop current. Use the ⚡ Triggers Armed pill in the top bar as a master switch."),
+                },
+                "trigger reflex hotkey hold repeat toggle schedule interval window focus governor queue preempt"),
+            new("profiles-tray", ManualCategory.QuickStart, "🗂", "App & Game Profiles, Auto-Switch & System Tray Mode",
+                "Organize macros by app or game, scope hotkeys to the active window, and run quietly in the system tray.",
+                new[]
+                {
+                    S("Profiles & Auto-Switching", "Assign a Profile tag (e.g. \"Work\", \"Excel\", \"Elden Ring\") in the Editor's Run & Target Window popover, and filter by profile pill in the Library.",
+                        "Turn on \"Auto-switch active profile from foreground window\" in Settings so per-macro triggers tagged with a profile only fire when a matching window is in front (global macros without a profile stay active everywhere)."),
+                    S("System Tray Resident Mode & Window Snap", "Enable \"Minimize to system tray when closing the main window\" in Settings to keep triggers armed in the background with a tray icon and quick menu (Stop All, Pause/Resume, Armed toggle).",
+                        "Focus Window steps can also snap the target window to Left 50%, Right 50%, Maximize, or Center on primary monitor before running."),
+                },
+                "profile context tag auto switch window tray resident minimize background snap left right maximize"),
+            new("gauge-workbench", ManualCategory.VisionAndSmartAim, "📊", "HUD Bar / Gauge Fill % Reader & Workbench Text / Row Loops",
+                "Measure health, mana, stamina, or progress bars (0–100%) and process multi-line lists.",
+                new[]
+                {
+                    S("Reading HUD bars & gauges (0–100%)", "Add a 🧠 Set variable step and choose \"📊 Read bar / gauge fill % on screen\". Pick the bar's bounding box and sample its fill colour (and direction: Left→Right, Right→Left, Bottom→Top, or Top→Bottom).",
+                        "SmartMacro scans the bar and stores a clean 0–100 number in your variable — ready for an If check like {hpPercent} < 35 to tap a potion key."),
+                    S("Workbench text operations & list loops", "Set Variable also includes Trim whitespace, Extract digits only, UPPERCASE, lowercase, and \"📋 Item from list variable (at loop turn)\" to iterate through comma-separated or multi-line rows without external scripts."),
+                },
+                "gauge bar fill percent hp mana progress health trim extract digits uppercase lowercase list row csv"),
+            new("debugger-breakpoints", ManualCategory.QuickStart, "🔴", "Interactive Debugger: Breakpoints (F9), Step Over (F10) & Telemetry",
+                "Pause before any step, inspect live variables, and single-step through complex workflows.",
+                new[]
+                {
+                    S("Setting Breakpoints (F9) & Stepping Over (F10)", "Select any step in the Workflow Editor and press F9 (or click 🔴 Break) to toggle a breakpoint badge on its card.",
+                        "When playback reaches an enabled step with a breakpoint, it pauses right before executing that step and releases held keys safely.",
+                        "While paused, inspect live values in the 🧠 Variables dock, press F10 (⏭ Step) to execute just that step and pause before the next one, or press F8 to resume normal speed."),
+                },
+                "debugger breakpoint f9 step over f10 pause inspect live variables telemetry history"),
 
             // ---------------- ⌨️ Keyboard Shortcuts ----------------
             new("shortcuts", ManualCategory.KeyboardShortcuts, "⌨️", "Studio shortcut cheat-sheet",

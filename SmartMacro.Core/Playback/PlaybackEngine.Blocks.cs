@@ -124,6 +124,26 @@ public sealed partial class PlaybackEngine
                 }
 
                 var step = steps[pc];
+                if (step.Enabled && !run.IsSubRoutine)
+                {
+                    var hitBreakpoint = HasBreakpoint?.Invoke(step.Id) == true && _lastBreakpointPausedStepId != step.Id;
+                    if (_pauseBeforeNextStep || hitBreakpoint)
+                    {
+                        _pauseBeforeNextStep = false;
+                        _lastBreakpointPausedStepId = step.Id;
+                        Report(run, pc, loops, hitBreakpoint ? "breakpoint" : "step over");
+                        Message?.Invoke(this, hitBreakpoint
+                            ? $"🔴 Breakpoint hit at step #{run.StepNumberOf(pc)} (F8 to resume, F10 to step over)."
+                            : $"⏭ Paused at step #{run.StepNumberOf(pc)} (F8 to resume, F10 to step over).");
+                        Pause();
+                        await WaitIfPausedAsync(token).ConfigureAwait(false);
+                        token.ThrowIfCancellationRequested();
+                    }
+                }
+
+                var stepOverThisStep = _stepOverRequested;
+                _stepOverRequested = false;
+
                 switch (step)
                 {
                     case IfStep ifStep:
@@ -280,6 +300,13 @@ public sealed partial class PlaybackEngine
                         }
 
                         break;
+                }
+
+                _lastBreakpointPausedStepId = null;
+                if (stepOverThisStep || _stepOverRequested)
+                {
+                    _stepOverRequested = false;
+                    _pauseBeforeNextStep = true;
                 }
             }
             catch (CheckpointJumpSignal jump)

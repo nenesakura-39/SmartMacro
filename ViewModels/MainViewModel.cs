@@ -208,6 +208,10 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         // 🧪 Test Step on an action step reports how its one-step run went.
         Editor.LastPlaybackResult = () => Automation.LastResult;
 
+        // v1.8 Studio X Interactive Debugger: breakpoints (F9) and single-step execution (F10).
+        automation.Engine.HasBreakpoint = id => Editor.HasStepBreakpoint(id);
+        Editor.StepOverHandler = () => automation.Engine.StepOver();
+
         // 📚 In-App Manual: recipes load into the editor; the cheat-sheet shows the shortcuts set in Settings.
         Manual = new ManualViewModel(LoadRecipeAsync, () => (Automation.RecordShortcut, Automation.PlayShortcut, Automation.PauseShortcut),
             ex =>

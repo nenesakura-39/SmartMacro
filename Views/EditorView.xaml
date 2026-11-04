@@ -229,6 +229,8 @@
         <KeyBinding Key="Y" Modifiers="Control" Command="{Binding RedoCommand}" />
         <KeyBinding Key="Z" Modifiers="Control+Shift" Command="{Binding RedoCommand}" />
         <KeyBinding Key="F5" Modifiers="Shift" Command="{Binding PlayFromSelectedCommand}" />
+        <KeyBinding Key="F9" Command="{Binding ToggleBreakpointCommand}" />
+        <KeyBinding Key="F10" Command="{Binding StepOverCommand}" />
         <KeyBinding Key="F3" Command="{Binding NextMatchCommand}" />
         <KeyBinding Key="F3" Modifiers="Shift" Command="{Binding PreviousMatchCommand}" />
         <KeyBinding Key="K" Modifiers="Control" Command="{Binding ToggleCommandPaletteCommand}" />
@@ -585,6 +587,11 @@
                                         <Border Style="{StaticResource Pill}" Margin="8,0,0,0">
                                             <TextBlock Text="{Binding StepCountText}" Foreground="{DynamicResource MutedTextBrush}" FontSize="11" />
                                         </Border>
+                                        <Border Style="{StaticResource Pill}" Margin="6,0,0,0"
+                                                Visibility="{Binding HasRunHistory, Converter={StaticResource BoolToVisibility}}"
+                                                ToolTip="Session run telemetry for this workflow">
+                                            <TextBlock Text="{Binding RunHistorySummaryText}" Foreground="{DynamicResource MutedTextBrush}" FontSize="10.5" />
+                                        </Border>
                                     </StackPanel>
                                 </DockPanel>
 
@@ -612,6 +619,14 @@
                                             <ctrl:StudioIcon Kind="Flask" Size="12" Foreground="{DynamicResource VisionAccentBrush}" />
                                             <TextBlock Text="Test" Margin="5,0,0,0" />
                                         </StackPanel>
+                                    </Button>
+                                    <Button Style="{StaticResource GhostButton}" Command="{Binding ToggleBreakpointCommand}" Padding="7,4" FontSize="11"
+                                            ToolTip="Toggle debugger breakpoint on selected step (F9)" AutomationProperties.Name="Toggle breakpoint">
+                                        <TextBlock Text="🔴 Break" />
+                                    </Button>
+                                    <Button Style="{StaticResource GhostButton}" Command="{Binding StepOverCommand}" Padding="7,4" FontSize="11"
+                                            ToolTip="Step over one step while paused (F10)" AutomationProperties.Name="Step over">
+                                        <TextBlock Text="⏭ Step (F10)" />
                                     </Button>
 
                                     <!-- Blueprints Popover -->
@@ -811,6 +826,8 @@
                                         <MenuItem Header="▶ Run step" InputGestureText="Ctrl+F5" Command="{Binding RunStepCommand}" />
                                         <MenuItem Header="🧪 Test step" InputGestureText="Ctrl+T" Command="{Binding TestSelectedStepCommand}" />
                                         <MenuItem Header="▶ Play from here" InputGestureText="Shift+F5" Command="{Binding PlayFromSelectedCommand}" />
+                                        <MenuItem Header="🔴 Toggle breakpoint" InputGestureText="F9" Command="{Binding ToggleBreakpointCommand}" />
+                                        <MenuItem Header="⏭ Step over (while paused)" InputGestureText="F10" Command="{Binding StepOverCommand}" />
                                         <MenuItem Header="Turn on / off" InputGestureText="Space" Command="{Binding ToggleEnabledCommand}" />
                                         <MenuItem Header="Fold / unfold block" Command="{Binding ToggleCollapseCommand}" />
                                         <Separator />
@@ -835,6 +852,8 @@
                                 <ListBox.InputBindings>
                                     <KeyBinding Key="F5" Modifiers="Control" Command="{Binding RunStepCommand}" />
                                     <KeyBinding Key="F5" Modifiers="Shift" Command="{Binding PlayFromSelectedCommand}" />
+                                    <KeyBinding Key="F9" Command="{Binding ToggleBreakpointCommand}" />
+                                    <KeyBinding Key="F10" Command="{Binding StepOverCommand}" />
                                 </ListBox.InputBindings>
                                 <ListBox.ItemTemplate>
                                     <DataTemplate DataType="{x:Type steps:StepViewModel}">
@@ -948,6 +967,12 @@
                                                                     <Border x:Name="RunningTag" Style="{StaticResource Pill}" Margin="8,0,0,0" Background="{DynamicResource SuccessSoftBrush}"
                                                                             Visibility="Collapsed">
                                                                         <TextBlock Text="▶ RUNNING" FontSize="9" FontWeight="Bold" Foreground="{DynamicResource SuccessBrush}" />
+                                                                    </Border>
+
+                                                                    <Border Style="{StaticResource Pill}" Margin="8,0,0,0" Background="{DynamicResource ErrorSoftBrush}"
+                                                                            Visibility="{Binding HasBreakpoint, Converter={StaticResource BoolToVisibility}}"
+                                                                            ToolTip="Breakpoint active (F9 toggles, F10 steps over while paused)">
+                                                                        <TextBlock Text="🔴 BREAK" FontSize="9" FontWeight="Bold" Foreground="{DynamicResource ErrorBrush}" />
                                                                     </Border>
 
                                                                     <Border x:Name="HiddenTag" Style="{StaticResource Pill}" Margin="8,0,0,0" Visibility="Collapsed">

@@ -29,6 +29,13 @@ public sealed partial class EditorViewModel : ObservableObject
     private string _toolboxFilter = string.Empty;
     private bool _isBottomDockExpanded;
     private int _selectedBottomTab;
+    private readonly HashSet<Guid> _breakpoints = new();
+    private int _runHistoryTotal;
+    private int _runHistorySucceeded;
+    private string _lastRunSummaryText = string.Empty;
+
+    /// <summary>v1.8 Studio X Debugger: set by MainViewModel to execute one step while paused (F10).</summary>
+    public Func<bool>? StepOverHandler { get; set; }
 
     public RelayCommand ClearToolboxFilterCommand { get; }
     public RelayCommand OpenSubMacroCommand { get; }
@@ -36,6 +43,46 @@ public sealed partial class EditorViewModel : ObservableObject
     public RelayCommand TestGivenStepCommand { get; }
     public RelayCommand DeleteGivenStepCommand { get; }
     public RelayCommand OpenBottomTabCommand { get; }
+    public RelayCommand ToggleBreakpointCommand { get; }
+    public RelayCommand StepOverCommand { get; }
+
+    /// <summary>True when a step ID has an active debugger breakpoint (F9).</summary>
+    public bool HasStepBreakpoint(Guid stepId) => _breakpoints.Contains(stepId);
+
+    /// <summary>Number of active breakpoints in the open workflow.</summary>
+    public int BreakpointCount => _breakpoints.Count;
+
+    /// <summary>Total runs recorded for this macro during the current editor session.</summary>
+    public int RunHistoryTotal => _runHistoryTotal;
+
+    /// <summary>Completed runs recorded for this macro during the current editor session.</summary>
+    public int RunHistorySucceeded => _runHistorySucceeded;
+
+    public bool HasRunHistory => _runHistoryTotal > 0;
+
+    public string RunHistorySummaryText => _runHistoryTotal == 0
+        ? string.Empty
+        : $"📊 {_runHistorySucceeded}/{_runHistoryTotal} runs OK · {_lastRunSummaryText}";
+
+    private void ToggleBreakpoint(StepViewModel? step)
+    {
+        if (!HasMacro || step is null) return;
+        var added = _breakpoints.Add(step.Id);
+        if (!added) _breakpoints.Remove(step.Id);
+        step.HasBreakpoint = added;
+        OnPropertyChanged(nameof(BreakpointCount));
+        _setStatus(added
+            ? $"🔴 Breakpoint set on step #{step.Number} ({step.Title}). Playback will pause before this step (F10 steps over, F8 resumes)."
+            : $"⚪ Breakpoint removed from step #{step.Number}.", StatusKind.Info);
+    }
+
+    private void ExecuteStepOver()
+    {
+        if (StepOverHandler?.Invoke() == true)
+            _setStatus("⏭ Stepping over current step (F10)…", StatusKind.Info);
+        else
+            _setStatus("Pause playback first (F8 or hit a 🔴 breakpoint), then press F10 to step over one step at a time.", StatusKind.Info);
+    }
 
     /// <summary>Search filter typed at the top of the Add Step toolbox.</summary>
     public string ToolboxFilter
@@ -229,10 +276,23 @@ public sealed partial class EditorViewModel : ObservableObject
             v.LiveValue = map.TryGetValue(v.Name, out var text) ? text : null;
     }
 
-    /// <summary>Called when playback finishes: updates final variable readouts and offers opt-in Self-Heal coordinate updates.</summary>
+    /// <summary>Called when playback finishes: updates final variable readouts, run history telemetry, and opt-in Self-Heal coordinate updates.</summary>
     public void ShowPlaybackResult(Guid? playedMacroId, PlaybackResult? result)
     {
         if (!HasMacro || playedMacroId != _id || result is null) return;
+
+        _runHistoryTotal++;
+        if (result.Outcome == PlaybackOutcome.Completed) _runHistorySucceeded++;
+        _lastRunSummaryText = result.Stats?.SummaryText ?? result.Outcome switch
+        {
+            PlaybackOutcome.Completed => $"last run: {result.StepsExecuted} steps",
+            PlaybackOutcome.Stopped => $"last run: stopped at {result.StepsExecuted} steps",
+            _ => $"last run: failed ({result.Error ?? "error"})",
+        };
+        OnPropertyChanged(nameof(RunHistoryTotal));
+        OnPropertyChanged(nameof(RunHistorySucceeded));
+        OnPropertyChanged(nameof(HasRunHistory));
+        OnPropertyChanged(nameof(RunHistorySummaryText));
 
         if (result.FinalVariables is { Count: > 0 } finalVars)
             UpdateLiveVariables(finalVars);
@@ -921,6 +981,10 @@ public sealed partial class EditorViewModel : ObservableObject
     private void ResetViewState()
     {
         _collapsed.Clear();
+        _breakpoints.Clear();
+        _runHistoryTotal = 0;
+        _runHistorySucceeded = 0;
+        _lastRunSummaryText = string.Empty;
         _searchText = string.Empty;
         _filter = StepFilter.All;
         foreach (var pill in FilterPills) pill.IsActive = pill.Value == StepFilter.All;
@@ -936,6 +1000,7 @@ public sealed partial class EditorViewModel : ObservableObject
     {
         var models = Steps.Select(s => s.Model).ToList();
         _collapsed.RemoveWhere(id => !models.Any(m => m.Id == id && StepListView.CanCollapse(m)));
+        _breakpoints.RemoveWhere(id => !models.Any(m => m.Id == id));
         var fold = StepListView.Collapse(models, _collapsed);
         var searching = !string.IsNullOrWhiteSpace(_searchText);
         _matches = StepListView.FindMatches(models, _searchText, _filter);
@@ -945,6 +1010,7 @@ public sealed partial class EditorViewModel : ObservableObject
         {
             var vm = Steps[i];
             vm.IsCollapsed = _collapsed.Contains(vm.Id);
+            vm.HasBreakpoint = _breakpoints.Contains(vm.Id);
             vm.HiddenStepCount = vm.IsCollapsed ? fold.HiddenCount[i] : 0;
             vm.IsHiddenByCollapse = fold.Hidden[i];
             vm.IsFilteredOut = _filter != StepFilter.All && !StepListView.MatchesFilter(vm.Model, _filter);

@@ -213,6 +213,8 @@ public sealed partial class EditorViewModel : ObservableObject
                 }
             }
         });
+        ToggleBreakpointCommand = new RelayCommand(p => ToggleBreakpoint(p as StepViewModel ?? SelectedStep), p => HasMacro && (p as StepViewModel ?? SelectedStep) is not null);
+        StepOverCommand = new RelayCommand(ExecuteStepOver, () => HasMacro);
 
         RefreshPaletteItems();
     }

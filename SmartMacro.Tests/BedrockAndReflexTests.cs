@@ -1,3 +1,4 @@
+using SmartMacro.Core.Help;
 using SmartMacro.Core.Logging;
 using SmartMacro.Core.Models;
 using SmartMacro.Core.Ocr;
@@ -469,5 +470,78 @@ public sealed class BedrockAndReflexTests
         var workbenchVars = MacroBlueprints.BuildVariables(MacroBlueprint.WorkbenchListRowLoop);
         Assert.Contains(workbenchVars, v => v.Name == "rowList");
         Assert.Contains(workbenchVars, v => v.Name == "currentItem");
+    }
+
+    // ---------------- v1.8 Studio X: Interactive Debugger (Breakpoints F9 & Step Over F10) + Manual Guides ----------------
+
+    [Fact]
+    public async Task PlaybackEngine_Breakpoint_And_StepOver_SingleStepsCleanly()
+    {
+        var input = new FakeInput();
+        var engine = new PlaybackEngine(input);
+
+        var step1 = new TypeTextStep { Text = "A", CharacterDelayMs = 0 };
+        var step2 = new TypeTextStep { Text = "B", CharacterDelayMs = 0 };
+        var step3 = new TypeTextStep { Text = "C", CharacterDelayMs = 0 };
+        var macro = new Macro
+        {
+            Name = "Debug Test",
+            Steps = new List<MacroStep> { step1, step2, step3 },
+        };
+
+        var pauseCount = 0;
+        var pausedTcs1 = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var pausedTcs2 = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        engine.HasBreakpoint = id => id == step2.Id;
+        engine.PausedChanged += (_, isPaused) =>
+        {
+            if (!isPaused) return;
+            var n = Interlocked.Increment(ref pauseCount);
+            if (n == 1) pausedTcs1.TrySetResult();
+            else if (n == 2) pausedTcs2.TrySetResult();
+        };
+
+        var runTask = engine.RunAsync(macro);
+
+        // 1. Wait for breakpoint on step 2 to pause playback:
+        await pausedTcs1.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.Equal(PlaybackState.Paused, engine.State);
+        lock (input.Calls)
+        {
+            Assert.Equal(new[] { "type A" }, input.Calls);
+        }
+
+        // 2. Step Over (F10): executes step 2 ("B") and pauses before step 3 ("C"):
+        Assert.True(engine.StepOver());
+        await pausedTcs2.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.Equal(PlaybackState.Paused, engine.State);
+        lock (input.Calls)
+        {
+            Assert.Equal(new[] { "type A", "type B" }, input.Calls);
+        }
+
+        // 3. Resume (F8): finishes step 3 ("C") and completes:
+        Assert.True(engine.Resume());
+        var result = await runTask.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.Equal(PlaybackOutcome.Completed, result.Outcome);
+        Assert.Equal(3, result.StepsExecuted);
+        lock (input.Calls)
+        {
+            Assert.Equal(new[] { "type A", "type B", "type C" }, input.Calls);
+        }
+    }
+
+    [Fact]
+    public void ManualCatalog_IncludesAllV14ToV18GuidesAndDebuggerShortcuts()
+    {
+        Assert.Contains(ManualCatalog.Filter("trigger governor hold"), a => a.Id == "triggers-reflex");
+        Assert.Contains(ManualCatalog.Filter("profile auto switch tray"), a => a.Id == "profiles-tray");
+        Assert.Contains(ManualCatalog.Filter("gauge fill percent"), a => a.Id == "gauge-workbench");
+        Assert.Contains(ManualCatalog.Filter("breakpoint step over"), a => a.Id == "debugger-breakpoints");
+
+        var shortcuts = ManualCatalog.Shortcuts("F9", "F6", "F8");
+        Assert.Contains(ManualCatalog.FilterShortcuts(shortcuts, "breakpoint"), s => s.Keys == "F9");
+        Assert.Contains(ManualCatalog.FilterShortcuts(shortcuts, "step over"), s => s.Keys == "F10");
     }
 }

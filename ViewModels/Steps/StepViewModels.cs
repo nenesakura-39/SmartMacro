@@ -115,6 +115,7 @@ public abstract class StepViewModel : ObservableObject
     private bool _hasError;
     private bool _hasWarning;
     private bool _isRunning;
+    private bool _hasBreakpoint;
 
     protected StepViewModel(MacroStep model)
     {
@@ -148,6 +149,13 @@ public abstract class StepViewModel : ObservableObject
     {
         get => _isRunning;
         set => SetProperty(ref _isRunning, value);
+    }
+
+    /// <summary>v1.8 Studio X Debugger: true when a breakpoint (F9) is set on this step.</summary>
+    public bool HasBreakpoint
+    {
+        get => _hasBreakpoint;
+        set => SetProperty(ref _hasBreakpoint, value);
     }
 
     // ---------------- Studio UI: folding, search and filter (view state only; never saved, never played) ----------------
