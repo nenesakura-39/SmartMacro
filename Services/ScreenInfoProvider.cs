@@ -12,6 +12,9 @@ public interface IScreenInfoProvider
 {
     /// <summary>The rectangle covering all monitors, in physical pixels.</summary>
     ScreenBounds GetVirtualScreen();
+
+    /// <summary>The title of the currently focused foreground window, or null if none / SmartMacro itself.</summary>
+    string? GetForegroundWindowTitle() => null;
 }
 
 /// <summary>
@@ -76,6 +79,27 @@ public sealed class ScreenInfoProvider : IScreenInfoProvider, IScreenLayout, IWi
             return true;
         }, IntPtr.Zero);
         return windows;
+    }
+
+    public string? GetForegroundWindowTitle()
+    {
+        try
+        {
+            var fg = NativeMethods.GetForegroundWindow();
+            if (fg == IntPtr.Zero) return null;
+            NativeMethods.GetWindowThreadProcessId(fg, out var pid);
+            if (pid == _ownProcessId) return null;
+            var length = WindowApi.GetWindowTextLength(fg);
+            if (length <= 0) return null;
+            var sb = new StringBuilder(length + 1);
+            WindowApi.GetWindowText(fg, sb, sb.Capacity);
+            var title = sb.ToString().Trim();
+            return title.Length > 0 ? title : null;
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     private WindowInfo? TryDescribe(IntPtr hwnd)

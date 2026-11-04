@@ -103,8 +103,15 @@ public partial class App : Application
 
         _hotkeys = new HotkeyService(_log);
         _hotkeys.Pressed += (_, action) => mainViewModel.Automation.HandleHotkey(action);
+        _hotkeys.MacroHotkeyPressed += (_, binding) => mainViewModel.HandleMacroHotkeyDown(binding);
+        _hotkeys.MacroHotkeyReleased += (_, binding) => mainViewModel.HandleMacroHotkeyUp(binding);
         _hotkeys.Attach(window);
         _hotkeys.Apply(mainViewModel.CurrentSettings);
+
+        mainViewModel.MacroHotkeysChanged += (_, _) =>
+        {
+            _hotkeys.ApplyMacroHotkeys(mainViewModel.GetActiveTriggerHotkeys());
+        };
 
         // Pause / resume (F8 by default) is only a global shortcut while a macro plays, so F8 works normally otherwise.
         mainViewModel.Automation.PropertyChanged += (_, e) =>
@@ -197,6 +204,7 @@ public partial class App : Application
     private void OnDispatcherUnhandledException(object sender, DispatcherUnhandledExceptionEventArgs e)
     {
         _log?.Error("Unexpected error.", e.Exception);
+        CrashReporter.WriteReport(_log?.LogDirectory, "DispatcherUnhandledException", e.Exception, AppInfo.Version, _log?.GetRecent());
         DarkMessageBox.Show("Unexpected error",
             $"Something went wrong:\n\n{e.Exception.Message}\n\nThe error was saved to the log. SmartMacro will keep running, but please save your work.",
             DialogKind.Error, "OK");
@@ -206,12 +214,16 @@ public partial class App : Application
     private void OnDomainUnhandledException(object sender, UnhandledExceptionEventArgs e)
     {
         if (e.ExceptionObject is Exception ex)
+        {
             _log?.Error("Fatal error.", ex);
+            CrashReporter.WriteReport(_log?.LogDirectory, "AppDomain.UnhandledException", ex, AppInfo.Version, _log?.GetRecent());
+        }
     }
 
     private void OnUnobservedTaskException(object? sender, UnobservedTaskExceptionEventArgs e)
     {
         _log?.Error("Background task error.", e.Exception);
+        CrashReporter.WriteReport(_log?.LogDirectory, "TaskScheduler.UnobservedTaskException", e.Exception, AppInfo.Version, _log?.GetRecent());
         e.SetObserved();
     }
 }

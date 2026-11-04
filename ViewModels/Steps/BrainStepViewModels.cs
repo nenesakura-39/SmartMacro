@@ -969,3 +969,317 @@ public sealed class SelfHealItemViewModel
         }
     }
 }
+
+/// <summary>One declarative macro trigger row in the Editor's ⚡ Triggers popover / dock tab (v1.4 "Reflex").</summary>
+public sealed class TriggerItemViewModel : ObservableObject
+{
+    private readonly MacroTrigger _model;
+    private readonly Action _changed;
+
+    public TriggerItemViewModel(MacroTrigger model, Action changed)
+    {
+        _model = model;
+        _changed = changed;
+    }
+
+    public static IReadOnlyList<Choice<TriggerKind>> KindChoices { get; } = new[]
+    {
+        new Choice<TriggerKind>(TriggerKind.Hotkey, "⌨ Keyboard shortcut"),
+        new Choice<TriggerKind>(TriggerKind.Schedule, "⏰ Schedule / Timer"),
+        new Choice<TriggerKind>(TriggerKind.WindowEvent, "🪟 Window opened / focused"),
+    };
+
+    public static IReadOnlyList<Choice<HotkeyTriggerMode>> HotkeyModeChoices { get; } = new[]
+    {
+        new Choice<HotkeyTriggerMode>(HotkeyTriggerMode.PressOnce, "Press once (starts or stops)"),
+        new Choice<HotkeyTriggerMode>(HotkeyTriggerMode.Toggle, "Toggle on / off"),
+        new Choice<HotkeyTriggerMode>(HotkeyTriggerMode.HoldToRun, "Hold to run (stops on release)"),
+        new Choice<HotkeyTriggerMode>(HotkeyTriggerMode.RepeatWhileHeld, "Repeat while held (loops until release)"),
+    };
+
+    public static IReadOnlyList<Choice<ScheduleRecurrence>> RecurrenceChoices { get; } = new[]
+    {
+        new Choice<ScheduleRecurrence>(ScheduleRecurrence.EveryNMinutes, "Every N minutes"),
+        new Choice<ScheduleRecurrence>(ScheduleRecurrence.DailyAtTime, "Daily at HH:mm (24h)"),
+        new Choice<ScheduleRecurrence>(ScheduleRecurrence.OnAppStartup, "Once when SmartMacro starts"),
+    };
+
+    public static IReadOnlyList<Choice<WindowTriggerEvent>> WindowEventChoices { get; } = new[]
+    {
+        new Choice<WindowTriggerEvent>(WindowTriggerEvent.WindowFocused, "When window gains focus"),
+        new Choice<WindowTriggerEvent>(WindowTriggerEvent.WindowOpened, "When window first opens"),
+    };
+
+    public static IReadOnlyList<Choice<TriggerConflictPolicy>> ConflictPolicyChoices { get; } = new[]
+    {
+        new Choice<TriggerConflictPolicy>(TriggerConflictPolicy.IgnoreIfBusy, "Skip if another macro is playing"),
+        new Choice<TriggerConflictPolicy>(TriggerConflictPolicy.StopCurrentAndRun, "Stop current macro & run this one"),
+        new Choice<TriggerConflictPolicy>(TriggerConflictPolicy.QueueNext, "Queue to run right after current macro"),
+    };
+
+    public static IReadOnlyList<Choice<TriggerConflictPolicy>> ConflictChoices => ConflictPolicyChoices;
+
+    public MacroTrigger Model => _model;
+
+    public string Name
+    {
+        get => _model.Name ?? string.Empty;
+        set
+        {
+            var v = value ?? string.Empty;
+            if (_model.Name == v) return;
+            _model.Name = v;
+            OnPropertyChanged();
+            _changed();
+        }
+    }
+
+    public bool Enabled
+    {
+        get => _model.Enabled;
+        set
+        {
+            if (_model.Enabled == value) return;
+            _model.Enabled = value;
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(SummaryText));
+            _changed();
+        }
+    }
+
+    public TriggerKind Kind
+    {
+        get => _model.Kind;
+        set
+        {
+            if (_model.Kind == value) return;
+            _model.Kind = value;
+            if (value == TriggerKind.Hotkey && _model.Hotkey is null)
+                _model.Hotkey = new HotkeyBinding(KeyModifiers.Control | KeyModifiers.Alt, 0x70);
+            if (value == TriggerKind.Schedule && _model.Recurrence == ScheduleRecurrence.DailyAtTime && string.IsNullOrWhiteSpace(_model.TimeOfDay))
+                _model.TimeOfDay = "09:00";
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(IsHotkey));
+            OnPropertyChanged(nameof(IsSchedule));
+            OnPropertyChanged(nameof(IsWindowEvent));
+            OnPropertyChanged(nameof(CanFilterByActiveWindow));
+            OnPropertyChanged(nameof(SummaryText));
+            _changed();
+        }
+    }
+
+    public bool IsHotkey => _model.Kind == TriggerKind.Hotkey;
+    public bool IsSchedule => _model.Kind == TriggerKind.Schedule;
+    public bool IsWindowEvent => _model.Kind == TriggerKind.WindowEvent;
+    public bool CanFilterByActiveWindow => _model.Kind is TriggerKind.Hotkey or TriggerKind.Schedule;
+
+    public HotkeyTriggerMode HotkeyMode
+    {
+        get => _model.HotkeyMode;
+        set
+        {
+            if (_model.HotkeyMode == value) return;
+            _model.HotkeyMode = value;
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(SummaryText));
+            _changed();
+        }
+    }
+
+    public bool Control
+    {
+        get => (_model.Hotkey?.Modifiers ?? KeyModifiers.None).HasFlag(KeyModifiers.Control);
+        set => SetModifier(KeyModifiers.Control, value);
+    }
+
+    public bool Shift
+    {
+        get => (_model.Hotkey?.Modifiers ?? KeyModifiers.None).HasFlag(KeyModifiers.Shift);
+        set => SetModifier(KeyModifiers.Shift, value);
+    }
+
+    public bool Alt
+    {
+        get => (_model.Hotkey?.Modifiers ?? KeyModifiers.None).HasFlag(KeyModifiers.Alt);
+        set => SetModifier(KeyModifiers.Alt, value);
+    }
+
+    public bool Windows
+    {
+        get => (_model.Hotkey?.Modifiers ?? KeyModifiers.None).HasFlag(KeyModifiers.Windows);
+        set => SetModifier(KeyModifiers.Windows, value);
+    }
+
+    public int VirtualKey
+    {
+        get => _model.Hotkey?.VirtualKey ?? 0x70;
+        set
+        {
+            var mods = _model.Hotkey?.Modifiers ?? (KeyModifiers.Control | KeyModifiers.Alt);
+            if (_model.Hotkey?.VirtualKey == value) return;
+            _model.Hotkey = new HotkeyBinding(mods, value);
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(ShortcutText));
+            OnPropertyChanged(nameof(SummaryText));
+            _changed();
+        }
+    }
+
+    public HotkeyBinding? Hotkey
+    {
+        get => _model.Hotkey;
+        set
+        {
+            if (Equals(_model.Hotkey, value)) return;
+            _model.Hotkey = value;
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(Control));
+            OnPropertyChanged(nameof(Shift));
+            OnPropertyChanged(nameof(Alt));
+            OnPropertyChanged(nameof(Windows));
+            OnPropertyChanged(nameof(VirtualKey));
+            OnPropertyChanged(nameof(ShortcutText));
+            OnPropertyChanged(nameof(HotkeyText));
+            OnPropertyChanged(nameof(SummaryText));
+            _changed();
+        }
+    }
+
+    public string ShortcutText => _model.Hotkey?.ToString() ?? "None";
+    public string HotkeyText => ShortcutText;
+
+    public ScheduleRecurrence Recurrence
+    {
+        get => _model.Recurrence;
+        set
+        {
+            if (_model.Recurrence == value) return;
+            _model.Recurrence = value;
+            if (value == ScheduleRecurrence.DailyAtTime && string.IsNullOrWhiteSpace(_model.TimeOfDay))
+                _model.TimeOfDay = "09:00";
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(IsEveryNMinutes));
+            OnPropertyChanged(nameof(IsDailyAtTime));
+            OnPropertyChanged(nameof(TimeOfDay));
+            OnPropertyChanged(nameof(SummaryText));
+            _changed();
+        }
+    }
+
+    public bool IsEveryNMinutes => _model.Recurrence == ScheduleRecurrence.EveryNMinutes;
+    public bool IsDailyAtTime => _model.Recurrence == ScheduleRecurrence.DailyAtTime;
+
+    public int IntervalMinutes
+    {
+        get => _model.IntervalMinutes;
+        set
+        {
+            if (_model.IntervalMinutes == value) return;
+            _model.IntervalMinutes = value;
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(SummaryText));
+            _changed();
+        }
+    }
+
+    public string TimeOfDay
+    {
+        get => _model.TimeOfDay ?? "09:00";
+        set
+        {
+            var trimmed = string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+            if (_model.TimeOfDay == trimmed) return;
+            _model.TimeOfDay = trimmed;
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(SummaryText));
+            _changed();
+        }
+    }
+
+    public WindowTriggerEvent WindowEvent
+    {
+        get => _model.WindowEvent;
+        set
+        {
+            if (_model.WindowEvent == value) return;
+            _model.WindowEvent = value;
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(SummaryText));
+            _changed();
+        }
+    }
+
+    public string WindowTitle
+    {
+        get => _model.WindowTitle ?? string.Empty;
+        set
+        {
+            var trimmed = string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+            if (_model.WindowTitle == trimmed) return;
+            _model.WindowTitle = trimmed;
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(WindowTitleMatch));
+            OnPropertyChanged(nameof(SummaryText));
+            _changed();
+        }
+    }
+
+    public string WindowTitleMatch
+    {
+        get => WindowTitle;
+        set => WindowTitle = value;
+    }
+
+    public bool OnlyWhenWindowActive
+    {
+        get => _model.OnlyWhenWindowActive;
+        set
+        {
+            if (_model.OnlyWhenWindowActive == value) return;
+            _model.OnlyWhenWindowActive = value;
+            OnPropertyChanged();
+            _changed();
+        }
+    }
+
+    public int CooldownMs
+    {
+        get => _model.CooldownMs;
+        set
+        {
+            if (_model.CooldownMs == value) return;
+            _model.CooldownMs = value;
+            OnPropertyChanged();
+            _changed();
+        }
+    }
+
+    public TriggerConflictPolicy ConflictPolicy
+    {
+        get => _model.ConflictPolicy;
+        set
+        {
+            if (_model.ConflictPolicy == value) return;
+            _model.ConflictPolicy = value;
+            OnPropertyChanged();
+            _changed();
+        }
+    }
+
+    public string SummaryText => _model.DescribeShort();
+
+    private void SetModifier(KeyModifiers flag, bool on)
+    {
+        var current = _model.Hotkey?.Modifiers ?? KeyModifiers.None;
+        var next = on ? current | flag : current & ~flag;
+        if (next == current) return;
+        _model.Hotkey = new HotkeyBinding(next, VirtualKey);
+        OnPropertyChanged(nameof(Control));
+        OnPropertyChanged(nameof(Shift));
+        OnPropertyChanged(nameof(Alt));
+        OnPropertyChanged(nameof(Windows));
+        OnPropertyChanged(nameof(ShortcutText));
+        OnPropertyChanged(nameof(SummaryText));
+        _changed();
+    }
+}

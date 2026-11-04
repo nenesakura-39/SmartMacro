@@ -393,13 +393,23 @@
                             </StackPanel>
                         </Button>
 
-                        <Button Style="{StaticResource GhostButton}" Padding="8,4" Margin="0,0,8,0"
+                        <Button Style="{StaticResource GhostButton}" Padding="8,4" Margin="0,0,4,0"
                                 Command="{Binding OpenBottomTabCommand}" CommandParameter="3"
                                 ToolTip="Open Background Watchers (popup &amp; disconnect guards) in bottom dock"
                                 AutomationProperties.Name="Open watchers dock">
                             <StackPanel Orientation="Horizontal">
                                 <ctrl:StudioIcon Kind="Watcher" Size="13" Foreground="{DynamicResource MemoryAccentBrush}" />
                                 <TextBlock Text="{Binding WatchersSummary}" FontSize="11.5" Margin="5,0,0,0" />
+                            </StackPanel>
+                        </Button>
+
+                        <Button Style="{StaticResource GhostButton}" Padding="8,4" Margin="0,0,8,0"
+                                Command="{Binding OpenBottomTabCommand}" CommandParameter="4"
+                                ToolTip="Open Triggers (per-macro hotkeys, schedules, window triggers &amp; Run Governor) in bottom dock"
+                                AutomationProperties.Name="Open triggers dock">
+                            <StackPanel Orientation="Horizontal">
+                                <ctrl:StudioIcon Kind="Bolt" Size="13" Foreground="{DynamicResource WarningBrush}" />
+                                <TextBlock Text="{Binding TriggersSummary}" FontSize="11.5" Margin="5,0,0,0" />
                             </StackPanel>
                         </Button>
 
@@ -1198,6 +1208,15 @@
                                     <TextBlock Text="{Binding WatchersSummary}" Margin="5,0,0,0" />
                                 </StackPanel>
                             </Button>
+
+                            <Button Style="{StaticResource GhostButton}" Padding="8,4" FontSize="11.5" Margin="2,0,0,0"
+                                    Command="{Binding OpenBottomTabCommand}" CommandParameter="4"
+                                    ToolTip="Toggle Triggers (per-macro hotkeys, schedules, window events &amp; Run Governor)">
+                                <StackPanel Orientation="Horizontal">
+                                    <ctrl:StudioIcon Kind="Bolt" Size="12" Foreground="{DynamicResource WarningBrush}" />
+                                    <TextBlock Text="{Binding TriggersSummary}" Margin="5,0,0,0" />
+                                </StackPanel>
+                            </Button>
                         </StackPanel>
 
                         <!-- Inline Test Result / Latest Log Preview -->
@@ -1434,6 +1453,105 @@
                                                             <TextBlock Text="Target checkpoint:" Style="{StaticResource MutedText}" VerticalAlignment="Center" Margin="0,0,8,0" />
                                                             <TextBox Text="{Binding CheckpointName, UpdateSourceTrigger=PropertyChanged}" Tag="e.g. start" Width="180" />
                                                         </StackPanel>
+                                                    </StackPanel>
+                                                </Border>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                </ScrollViewer>
+                            </DockPanel>
+
+                            <!-- TAB 4: PER-MACRO TRIGGERS & RUN GOVERNOR (v1.4 Reflex) -->
+                            <DockPanel>
+                                <DockPanel.Style>
+                                    <Style TargetType="DockPanel">
+                                        <Setter Property="Visibility" Value="Collapsed" />
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding SelectedBottomTab}" Value="4">
+                                                <Setter Property="Visibility" Value="Visible" />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </DockPanel.Style>
+                                <DockPanel DockPanel.Dock="Top" Margin="0,0,0,6">
+                                    <Button DockPanel.Dock="Right" Content="+ Add trigger" Command="{Binding AddTriggerCommand}" Padding="9,3" FontSize="11" />
+                                    <TextBlock Text="Per-macro shortcuts (Press Once / Toggle / Hold-to-Run / Repeat-While-Held), schedules, window triggers, and Run Governor conflict rules."
+                                               Style="{StaticResource MutedText}" FontSize="11.5" VerticalAlignment="Center" />
+                                </DockPanel>
+                                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                                    <ItemsControl ItemsSource="{Binding Triggers}" Focusable="False">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate DataType="{x:Type steps:TriggerItemViewModel}">
+                                                <Border Padding="10,8" Margin="0,0,0,8" CornerRadius="8" Background="{DynamicResource SurfaceAltBrush}"
+                                                        BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1">
+                                                    <StackPanel>
+                                                        <DockPanel>
+                                                            <Button DockPanel.Dock="Right" Style="{StaticResource DismissButton}" Margin="6,0,0,0"
+                                                                    Command="{Binding DataContext.RemoveTriggerCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                                                                    CommandParameter="{Binding}" ToolTip="Remove trigger" />
+                                                            <CheckBox DockPanel.Dock="Right" Style="{StaticResource ToggleSwitchCheckBoxStyle}" Content="Armed"
+                                                                      IsChecked="{Binding Enabled}" Margin="8,0,0,0" VerticalAlignment="Center" />
+                                                            <Grid>
+                                                                <Grid.ColumnDefinitions>
+                                                                    <ColumnDefinition Width="170" />
+                                                                    <ColumnDefinition Width="8" />
+                                                                    <ColumnDefinition Width="180" />
+                                                                    <ColumnDefinition Width="8" />
+                                                                    <ColumnDefinition Width="210" />
+                                                                    <ColumnDefinition Width="8" />
+                                                                    <ColumnDefinition Width="120" />
+                                                                </Grid.ColumnDefinitions>
+                                                                <TextBox Grid.Column="0" Text="{Binding Name, UpdateSourceTrigger=PropertyChanged}" Tag="Trigger label"
+                                                                         FontWeight="SemiBold" Padding="6,3" FontSize="12" />
+                                                                <ComboBox Grid.Column="2" ItemsSource="{x:Static steps:TriggerItemViewModel.KindChoices}"
+                                                                          DisplayMemberPath="Label" SelectedValuePath="Value" SelectedValue="{Binding Kind}" Padding="6,3" FontSize="11.5" />
+                                                                <ComboBox Grid.Column="4" ItemsSource="{x:Static steps:TriggerItemViewModel.ConflictChoices}"
+                                                                          DisplayMemberPath="Label" SelectedValuePath="Value" SelectedValue="{Binding ConflictPolicy}" Padding="6,3" FontSize="11.5"
+                                                                          ToolTip="Run Governor: what to do if another macro is already playing when this trigger fires" />
+                                                                <TextBox Grid.Column="6" Text="{Binding CooldownMs, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}"
+                                                                         Tag="Cooldown ms" Padding="6,3" FontSize="11.5" ToolTip="Cooldown after firing (ms)" />
+                                                            </Grid>
+                                                        </DockPanel>
+
+                                                        <!-- Hotkey settings -->
+                                                        <WrapPanel Margin="0,6,0,0" Visibility="{Binding IsHotkey, Converter={StaticResource BoolToVisibility}}">
+                                                            <TextBlock Text="Shortcut:" Style="{StaticResource MutedText}" VerticalAlignment="Center" Margin="0,0,6,0" />
+                                                            <TextBox Text="{Binding HotkeyText, Mode=OneWay}" IsReadOnly="True" Width="150" Padding="6,3" FontSize="11.5"
+                                                                     FontWeight="SemiBold" Cursor="Hand" PreviewKeyDown="TriggerHotkeyBox_PreviewKeyDown"
+                                                                     ToolTip="Click here and press the key combination (e.g. Ctrl+Shift+F6)" />
+                                                            <TextBlock Text="Mode:" Style="{StaticResource MutedText}" VerticalAlignment="Center" Margin="10,0,6,0" />
+                                                            <ComboBox ItemsSource="{x:Static steps:TriggerItemViewModel.HotkeyModeChoices}"
+                                                                      DisplayMemberPath="Label" SelectedValuePath="Value" SelectedValue="{Binding HotkeyMode}" Width="240" Padding="6,3" FontSize="11.5" />
+                                                            <CheckBox Content="Only in window:" IsChecked="{Binding OnlyWhenWindowActive}" VerticalAlignment="Center" Margin="10,0,6,0" />
+                                                            <TextBox Text="{Binding WindowTitle, UpdateSourceTrigger=PropertyChanged}" Tag="e.g. Excel, Roblox"
+                                                                     Width="160" Padding="6,3" FontSize="11.5"
+                                                                     ToolTip="When 'Only in window' is checked, the shortcut only fires while the active window title contains this text" />
+                                                        </WrapPanel>
+
+                                                        <!-- Schedule settings -->
+                                                        <WrapPanel Margin="0,6,0,0" Visibility="{Binding IsSchedule, Converter={StaticResource BoolToVisibility}}">
+                                                            <TextBlock Text="When:" Style="{StaticResource MutedText}" VerticalAlignment="Center" Margin="0,0,6,0" />
+                                                            <ComboBox ItemsSource="{x:Static steps:TriggerItemViewModel.RecurrenceChoices}"
+                                                                      DisplayMemberPath="Label" SelectedValuePath="Value" SelectedValue="{Binding Recurrence}" Width="220" Padding="6,3" FontSize="11.5" />
+                                                            <StackPanel Orientation="Horizontal" Margin="10,0,0,0" Visibility="{Binding IsEveryNMinutes, Converter={StaticResource BoolToVisibility}}">
+                                                                <TextBlock Text="Every (min):" Style="{StaticResource MutedText}" VerticalAlignment="Center" Margin="0,0,6,0" />
+                                                                <TextBox Text="{Binding IntervalMinutes, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}" Width="70" Padding="6,3" FontSize="11.5" />
+                                                            </StackPanel>
+                                                            <StackPanel Orientation="Horizontal" Margin="10,0,0,0" Visibility="{Binding IsDailyAtTime, Converter={StaticResource BoolToVisibility}}">
+                                                                <TextBlock Text="Time (HH:mm):" Style="{StaticResource MutedText}" VerticalAlignment="Center" Margin="0,0,6,0" />
+                                                                <TextBox Text="{Binding TimeOfDay, UpdateSourceTrigger=PropertyChanged}" Tag="09:00" Width="80" Padding="6,3" FontSize="11.5" FontFamily="{StaticResource MonoFont}" />
+                                                            </StackPanel>
+                                                        </WrapPanel>
+
+                                                        <!-- Window event settings -->
+                                                        <WrapPanel Margin="0,6,0,0" Visibility="{Binding IsWindowEvent, Converter={StaticResource BoolToVisibility}}">
+                                                            <TextBlock Text="Event:" Style="{StaticResource MutedText}" VerticalAlignment="Center" Margin="0,0,6,0" />
+                                                            <ComboBox ItemsSource="{x:Static steps:TriggerItemViewModel.WindowEventChoices}"
+                                                                      DisplayMemberPath="Label" SelectedValuePath="Value" SelectedValue="{Binding WindowEvent}" Width="220" Padding="6,3" FontSize="11.5" />
+                                                            <TextBlock Text="Window title contains:" Style="{StaticResource MutedText}" VerticalAlignment="Center" Margin="10,0,6,0" />
+                                                            <TextBox Text="{Binding WindowTitleMatch, UpdateSourceTrigger=PropertyChanged}" Tag="e.g. Excel, Discord, Game"
+                                                                     Width="220" Padding="6,3" FontSize="11.5" />
+                                                        </WrapPanel>
                                                     </StackPanel>
                                                 </Border>
                                             </DataTemplate>

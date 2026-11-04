@@ -117,12 +117,37 @@ public partial class EditorView : UserControl
     /// <summary>Ctrl+F anywhere in the editor: jump to the step search box.</summary>
     private void Editor_PreviewKeyDown(object sender, KeyEventArgs e)
     {
+        if (Keyboard.FocusedElement is TextBox { DataContext: TriggerItemViewModel }) return;
         if (e.Key == Key.F && Keyboard.Modifiers == ModifierKeys.Control && SearchBox.IsVisible)
         {
             SearchBox.Focus();
             SearchBox.SelectAll();
             e.Handled = true;
         }
+    }
+
+    /// <summary>Records the key chord pressed while a per-macro trigger shortcut box has focus.</summary>
+    private void TriggerHotkeyBox_PreviewKeyDown(object sender, KeyEventArgs e)
+    {
+        if (sender is not TextBox { DataContext: TriggerItemViewModel trigger }) return;
+
+        var key = e.Key == Key.System ? e.SystemKey : e.Key;
+        if (key == Key.Tab && Keyboard.Modifiers == ModifierKeys.None) return;
+        if (key is Key.LeftCtrl or Key.RightCtrl or Key.LeftShift or Key.RightShift or Key.LeftAlt or Key.RightAlt
+            or Key.LWin or Key.RWin or Key.ImeProcessed or Key.DeadCharProcessed or Key.None)
+        {
+            e.Handled = true;
+            return;
+        }
+
+        var modifiers = Core.Models.KeyModifiers.None;
+        if (Keyboard.Modifiers.HasFlag(ModifierKeys.Control)) modifiers |= Core.Models.KeyModifiers.Control;
+        if (Keyboard.Modifiers.HasFlag(ModifierKeys.Shift)) modifiers |= Core.Models.KeyModifiers.Shift;
+        if (Keyboard.Modifiers.HasFlag(ModifierKeys.Alt)) modifiers |= Core.Models.KeyModifiers.Alt;
+        if (Keyboard.Modifiers.HasFlag(ModifierKeys.Windows)) modifiers |= Core.Models.KeyModifiers.Windows;
+
+        trigger.Hotkey = new Core.Models.HotkeyBinding(modifiers, KeyInterop.VirtualKeyFromKey(key));
+        e.Handled = true;
     }
 
     /// <summary>Search box: Enter = next match, Shift+Enter = previous, Esc = clear and go back to the list.</summary>

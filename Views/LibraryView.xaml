@@ -31,9 +31,18 @@
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
 
-        <!-- ===== Header: title | Open folder, Reload, Import .smacro, New macro ===== -->
+        <!-- ===== Header: title | Triggers Armed, Open folder, Reload, Import .smacro, New macro ===== -->
         <DockPanel Grid.Row="0" Margin="0,0,0,14">
             <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                <ToggleButton Style="{StaticResource GhostToggle}"
+                              IsChecked="{Binding DataContext.AreTriggersArmed, RelativeSource={RelativeSource AncestorType=Window}, Mode=TwoWay}"
+                              ToolTip="Global switch for per-macro hotkeys, schedules, and window triggers"
+                              Margin="0,0,6,0">
+                    <StackPanel Orientation="Horizontal">
+                        <ctrl:StudioIcon Kind="Bolt" Size="13" Foreground="{DynamicResource WarningBrush}" />
+                        <TextBlock Text="{Binding DataContext.TriggersArmedStatusText, RelativeSource={RelativeSource AncestorType=Window}, FallbackValue='⚡ Triggers Armed'}" Margin="6,0,0,0" />
+                    </StackPanel>
+                </ToggleButton>
                 <Button Style="{StaticResource GhostButton}" Command="{Binding OpenFolderCommand}" ToolTip="Open the folder where macro files are stored" Margin="0,0,6,0">
                     <StackPanel Orientation="Horizontal">
                         <ctrl:StudioIcon Kind="Folder" Size="13" Foreground="{DynamicResource TextBrush}" />
@@ -217,6 +226,10 @@
                                                 <Border Style="{StaticResource CategoryPill}" Background="{DynamicResource MemorySoftBrush}" ToolTip="Variables and Background Watchers defined on this macro"
                                                         Visibility="{Binding HasBrainBadge, Converter={StaticResource BoolToVisibility}}">
                                                     <TextBlock Text="{Binding BrainBadgeText}" FontSize="9" FontWeight="SemiBold" Foreground="{DynamicResource MemoryAccentBrush}" />
+                                                </Border>
+                                                <Border Style="{StaticResource CategoryPill}" Background="{DynamicResource WarningSoftBrush}" ToolTip="Per-macro triggers (hotkey, schedule, or window event)"
+                                                        Visibility="{Binding HasTriggerSummary, Converter={StaticResource BoolToVisibility}}">
+                                                    <TextBlock Text="{Binding TriggerSummary}" FontSize="9" FontWeight="SemiBold" Foreground="{DynamicResource WarningBrush}" />
                                                 </Border>
                                                 <Border Style="{StaticResource CategoryPill}" Background="{DynamicResource AccentSoftBrush}" ToolTip="Uses Smart Target Intent (5-tier resilient relocation)"
                                                         Visibility="{Binding UsesIntent, Converter={StaticResource BoolToVisibility}}">

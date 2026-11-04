@@ -1,0 +1,28 @@
+name: CI
+
+on:
+  push:
+    branches: [ master, main ]
+  pull_request:
+    branches: [ master, main ]
+
+jobs:
+  build-and-test:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Restore dependencies
+        run: dotnet restore SmartMacro.slnx
+
+      - name: Build solution (0 warnings required)
+        run: dotnet build SmartMacro.slnx --no-restore -warnaserror
+
+      - name: Run unit tests
+        run: dotnet test SmartMacro.Tests/SmartMacro.Tests.csproj --no-build --logger "trx;LogFileName=test-results.trx"

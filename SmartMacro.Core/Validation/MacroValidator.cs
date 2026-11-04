@@ -1,8 +1,6 @@
 using System.Globalization;
-using SmartMacro.Core.Input;
 using SmartMacro.Core.Models;
 using SmartMacro.Core.Storage;
-using SmartMacro.Core.Targeting;
 using SmartMacro.Core.Vision;
 using SmartMacro.Core.Workflow;
 
@@ -55,8 +53,9 @@ public sealed class MacroValidationException : Exception
 
 /// <summary>
 /// Checks macros and steps. Errors block saving (and later, playback). Warnings are just hints.
+/// Split across <c>MacroValidator.cs</c>, <c>MacroValidator.Steps.cs</c>, and <c>MacroValidator.VisionAndSequence.cs</c>.
 /// </summary>
-public static class MacroValidator
+public static partial class MacroValidator
 {
     public const int MaxNameLength = 100;
     public const int MaxDescriptionLength = 2_000;
@@ -113,6 +112,22 @@ public static class MacroValidator
     public const int MaxWatchers = 32;
     public const int MaxRetryCount = 20;
     public const int MaxVariableBindings = 64;
+
+    // v1.4 "Reflex": per-macro triggers.
+    public const int MaxTriggers = MacroTrigger.MaxTriggersPerMacro;
+
+    /// <summary>Longest stored "what you clicked" picture (Base64 characters). A 56×56 thumbnail is about 10,000.</summary>
+    public const int MaxThumbnailLength = 1_000_000;
+
+    /// <summary>Smart-Aim accuracy limits (0.5 = 50 % similar … 1.0 = identical).</summary>
+    public const double MinSmartAimAccuracy = 0.5;
+
+    public const double MaxSmartAimAccuracy = 1.0;
+
+    /// <summary>Smart-Aim search distance limits (px each way).</summary>
+    public const int MinSmartAimRadiusPx = 0;
+
+    public const int MaxSmartAimRadiusPx = 2_000;
 
     public static bool HasErrors(this IEnumerable<ValidationIssue> issues) =>
         issues.Any(i => i.Severity == IssueSeverity.Error);
@@ -264,6 +279,7 @@ public static class MacroValidator
         }
 
         ValidateWatchers(issues, macro, topLevelCheckpoints, screen);
+        ValidateTriggers(issues, macro);
         ValidateBlocks(issues, macro.Steps);
         return issues;
     }
@@ -400,6 +416,88 @@ public static class MacroValidator
                         issues.Add(Error($"{label}: enter the checkpoint name to restart from.", nameof(Macro.Watchers)));
                     else if (!topLevelCheckpoints.Contains(wCp.Trim()))
                         issues.Add(Error($"{label}: checkpoint \"{wCp.Trim()}\" does not exist at the top level of this macro.", nameof(Macro.Watchers)));
+                    break;
+            }
+        }
+    }
+
+    private static void ValidateTriggers(List<ValidationIssue> issues, Macro macro)
+    {
+        if (macro.Triggers is not { Count: > 0 } triggers) return;
+        if (triggers.Count > MaxTriggers)
+        {
+            issues.Add(Error($"A macro can have at most {MaxTriggers} triggers.", nameof(Macro.Triggers)));
+            return;
+        }
+
+        var seenIds = new HashSet<Guid>();
+        var seenHotkeys = new HashSet<HotkeyBinding>();
+        for (var i = 0; i < triggers.Count; i++)
+        {
+            var t = triggers[i];
+            var label = $"Trigger #{i + 1}";
+            if (t is null)
+            {
+                issues.Add(Error($"{label} is empty.", nameof(Macro.Triggers)));
+                continue;
+            }
+
+            if (!string.IsNullOrWhiteSpace(t.Name))
+                label = $"Trigger \"{t.Name.Trim()}\"";
+
+            if (t.Id == Guid.Empty || !seenIds.Add(t.Id))
+                issues.Add(Error($"{label} has a missing or duplicate ID.", nameof(Macro.Triggers)));
+
+            if (string.IsNullOrWhiteSpace(t.Name) || t.Name.Trim().Length > MaxNameLength)
+                issues.Add(Error($"{label}: enter a trigger name up to {MaxNameLength} characters.", nameof(Macro.Triggers)));
+
+            if (!Enum.IsDefined(t.Kind) || !Enum.IsDefined(t.ConflictPolicy))
+            {
+                issues.Add(Error($"{label}: unknown trigger option.", nameof(Macro.Triggers)));
+                continue;
+            }
+
+            if (t.CooldownMs < 0 || t.CooldownMs > MacroTrigger.MaxCooldownMs)
+                issues.Add(Error($"{label}: cooldown must be 0 to {MacroTrigger.MaxCooldownMs:N0} ms.", nameof(Macro.Triggers)));
+
+            if (t.OnlyWhenWindowActive && (string.IsNullOrWhiteSpace(t.WindowTitle) || t.WindowTitle.Trim().Length > SearchArea.MaxWindowTitleLength))
+                issues.Add(Error($"{label}: enter the active window title to filter by (1 to {SearchArea.MaxWindowTitleLength} characters).", nameof(Macro.Triggers)));
+
+            switch (t.Kind)
+            {
+                case TriggerKind.Hotkey:
+                    if (!Enum.IsDefined(t.HotkeyMode))
+                        issues.Add(Error($"{label}: unknown hotkey trigger mode.", nameof(Macro.Triggers)));
+                    if (t.Hotkey is null)
+                        issues.Add(Error($"{label}: choose a shortcut key.", nameof(Macro.Triggers)));
+                    else if (t.Hotkey.Problem() is { } hkProblem)
+                        issues.Add(Error($"{label}: {hkProblem}", nameof(Macro.Triggers)));
+                    else if (t.Enabled && !seenHotkeys.Add(t.Hotkey))
+                        issues.Add(Warning($"{label}: shortcut {t.Hotkey} is used more than once on this macro.", nameof(Macro.Triggers)));
+                    break;
+
+                case TriggerKind.Schedule:
+                    if (!Enum.IsDefined(t.Recurrence))
+                    {
+                        issues.Add(Error($"{label}: unknown schedule recurrence.", nameof(Macro.Triggers)));
+                        break;
+                    }
+                    if (t.Recurrence == ScheduleRecurrence.EveryNMinutes
+                        && (t.IntervalMinutes < MacroTrigger.MinIntervalMinutes || t.IntervalMinutes > MacroTrigger.MaxIntervalMinutes))
+                    {
+                        issues.Add(Error($"{label}: interval must be {MacroTrigger.MinIntervalMinutes} to {MacroTrigger.MaxIntervalMinutes:N0} minutes.", nameof(Macro.Triggers)));
+                    }
+                    else if (t.Recurrence == ScheduleRecurrence.DailyAtTime && !MacroTrigger.TryParseTimeOfDay(t.TimeOfDay, out _, out _))
+                    {
+                        issues.Add(Error($"{label}: enter the daily time as 24-hour HH:mm (for example 09:00 or 18:30).", nameof(Macro.Triggers)));
+                    }
+                    break;
+
+                case TriggerKind.WindowEvent:
+                    if (!Enum.IsDefined(t.WindowEvent))
+                        issues.Add(Error($"{label}: unknown window event.", nameof(Macro.Triggers)));
+                    if (string.IsNullOrWhiteSpace(t.WindowTitle) || t.WindowTitle.Trim().Length > SearchArea.MaxWindowTitleLength)
+                        issues.Add(Error($"{label}: enter (part of) the window title to watch for (1 to {SearchArea.MaxWindowTitleLength} characters).", nameof(Macro.Triggers)));
                     break;
             }
         }
@@ -551,100 +649,6 @@ public static class MacroValidator
         return false;
     }
 
-    /// <summary>Longest stored "what you clicked" picture (Base64 characters). A 56×56 thumbnail is about 10,000.</summary>
-    public const int MaxThumbnailLength = 1_000_000;
-
-    /// <summary>Smart-Aim accuracy limits (0.5 = 50 % similar … 1.0 = identical).</summary>
-    public const double MinSmartAimAccuracy = 0.5;
-
-    public const double MaxSmartAimAccuracy = 1.0;
-
-    /// <summary>Smart-Aim search distance limits (px each way).</summary>
-    public const int MinSmartAimRadiusPx = 0;
-
-    public const int MaxSmartAimRadiusPx = 2_000;
-
-    /// <summary>"Offset X / Y" of a "last found spot" (or "move by") target.</summary>
-    private static void CheckOffset(List<ValidationIssue> issues, int offsetX, int offsetY)
-    {
-        if (Math.Abs((long)offsetX) > MaxOffset || Math.Abs((long)offsetY) > MaxOffset)
-            issues.Add(Error($"Offsets must be between -{MaxOffset} and {MaxOffset} pixels.", "Offset"));
-    }
-
-    /// <summary>Smart Click Snapshots: the recorded picture and the Smart-Aim settings.</summary>
-    private static void ValidateSmartClick(List<ValidationIssue> issues, MouseClickStep c)
-    {
-        if (c.TargetThumbnailBase64 is { } thumbnail)
-        {
-            if (thumbnail.Length > MaxThumbnailLength)
-            {
-                issues.Add(Error("The recorded \"what you clicked\" picture is too big. The macro may be damaged.", nameof(MouseClickStep.TargetThumbnailBase64)));
-                return;
-            }
-
-            if (c.SmartAimAtTarget && SmartClickConversion.TryDecodeThumbnail(c, out var error) is null)
-                issues.Add(Warning($"Smart-Aim can't use the recorded picture ({error}), so this click always uses its X / Y.", nameof(MouseClickStep.SmartAimAtTarget)));
-        }
-
-        if (c.TargetAnchorX is < 0 or > MaxTemplateSize || c.TargetAnchorY is < 0 or > MaxTemplateSize)
-            issues.Add(Error("The recorded click spot inside the picture is invalid. The macro may be damaged.", nameof(MouseClickStep.TargetAnchorX)));
-
-        if (double.IsNaN(c.SmartAimAccuracy) || c.SmartAimAccuracy < MinSmartAimAccuracy || c.SmartAimAccuracy > MaxSmartAimAccuracy)
-            issues.Add(Error($"Smart-Aim accuracy must be {MinSmartAimAccuracy:P0} to {MaxSmartAimAccuracy:P0}.", nameof(MouseClickStep.SmartAimAccuracy)));
-        if (c.SmartAimRadiusPx < MinSmartAimRadiusPx || c.SmartAimRadiusPx > MaxSmartAimRadiusPx)
-            issues.Add(Error($"The Smart-Aim distance must be {MinSmartAimRadiusPx} to {MaxSmartAimRadiusPx:N0} px.", nameof(MouseClickStep.SmartAimRadiusPx)));
-
-        if (c.SmartAimAtTarget)
-        {
-            if (!c.HasTargetThumbnail)
-                issues.Add(Warning("Smart-Aim needs a recorded picture of what was clicked, and this click has none, so it always uses its X / Y.", nameof(MouseClickStep.SmartAimAtTarget)));
-            else if (c.UseCurrentPosition || c.UseLastFoundText)
-                issues.Add(Warning("Smart-Aim only works with \"At a chosen position\": it looks for the picture around X / Y.", nameof(MouseClickStep.SmartAimAtTarget)));
-        }
-
-        if (c.Target is { } target && !IsValidTargetFingerprint(target))
-        {
-            issues.Add(Error("The recorded click Intent metadata is invalid or too long. The macro may be damaged.", nameof(MouseClickStep.Target)));
-        }
-
-        if (c.UseSmartIntent)
-        {
-            if (!c.HasTargetIntent && !c.HasTargetThumbnail)
-                issues.Add(Warning("Smart Intent has no recorded UI element, text, window, or picture for this click, so it will fall back to X / Y.", nameof(MouseClickStep.UseSmartIntent)));
-            else if (c.UseCurrentPosition || c.UseLastFoundText)
-                issues.Add(Warning("Smart Intent only applies when clicking \"At a chosen position\".", nameof(MouseClickStep.UseSmartIntent)));
-        }
-    }
-
-    private static bool IsValidTargetFingerprint(TargetFingerprint fp)
-    {
-        static bool TooLong(string? s) => s is { Length: > TargetFingerprint.MaxFieldLength };
-
-        if (TooLong(fp.ElementName) || TooLong(fp.AutomationId) || TooLong(fp.ControlType)
-            || TooLong(fp.ClassName) || TooLong(fp.NearbyText) || TooLong(fp.WindowTitle)
-            || TooLong(fp.WindowProcessName))
-            return false;
-
-        if (fp.ElementNormalizedX is { } nx && (double.IsNaN(nx) || double.IsInfinity(nx) || nx is < 0 or > 1))
-            return false;
-        if (fp.ElementNormalizedY is { } ny && (double.IsNaN(ny) || double.IsInfinity(ny) || ny is < 0 or > 1))
-            return false;
-
-        if (Math.Abs((long)fp.NearbyTextOffsetX) > MaxOffset || Math.Abs((long)fp.NearbyTextOffsetY) > MaxOffset)
-            return false;
-
-        if (fp.WindowWidth < 0 || fp.WindowHeight < 0
-            || fp.WindowWidth > MaxScreenCoordinate || fp.WindowHeight > MaxScreenCoordinate)
-            return false;
-
-        if (fp.WindowRelativeX is { } rx && Math.Abs((long)rx) > MaxScreenCoordinate)
-            return false;
-        if (fp.WindowRelativeY is { } ry && Math.Abs((long)ry) > MaxScreenCoordinate)
-            return false;
-
-        return true;
-    }
-
     /// <summary>
     /// Stricter check used before playback: everything from Validate, plus the macro must actually do something.
     /// </summary>
@@ -655,933 +659,4 @@ public static class MacroValidator
             issues.Add(Error("The macro has no enabled steps to run."));
         return issues;
     }
-
-    /// <summary>Checks a single step's own fields (no index information).</summary>
-    public static IReadOnlyList<ValidationIssue> ValidateStep(MacroStep step, ScreenBounds? screen = null)
-    {
-        ArgumentNullException.ThrowIfNull(step);
-        var issues = new List<ValidationIssue>();
-
-        if (step.Comment is { Length: > MaxCommentLength })
-            issues.Add(Error($"The comment can be at most {MaxCommentLength} characters.", nameof(MacroStep.Comment)));
-
-        switch (step)
-        {
-            case DelayStep d:
-                if (!Enum.IsDefined(d.Mode))
-                    issues.Add(Error("Unknown delay mode. The macro may be damaged.", nameof(DelayStep.Mode)));
-                if (d.DurationMs < 0)
-                    issues.Add(Error("The delay can't be negative.", nameof(DelayStep.DurationMs)));
-                else if (d.DurationMs > MaxDelayMs)
-                    issues.Add(Error($"The delay can be at most {MaxDelayMs:N0} ms (1 hour).", nameof(DelayStep.DurationMs)));
-                if (d.MinDurationMs < 0 || d.MinDurationMs > MaxDelayMs)
-                    issues.Add(Error($"The minimum adaptive wait must be between 0 and {MaxDelayMs:N0} ms.", nameof(DelayStep.MinDurationMs)));
-                if (d.MaxDurationMs < 0 || d.MaxDurationMs > MaxDelayMs)
-                    issues.Add(Error($"The maximum adaptive wait must be between 0 and {MaxDelayMs:N0} ms.", nameof(DelayStep.MaxDurationMs)));
-                else if (d.Mode != DelayMode.Fixed && d.MaxDurationMs > 0 && d.MaxDurationMs < d.MinDurationMs)
-                    issues.Add(Error("The maximum adaptive wait must be at least the minimum wait.", nameof(DelayStep.MaxDurationMs)));
-                if (d.QuietWindowMs < 0 || d.QuietWindowMs > 60_000)
-                    issues.Add(Error("The screen calm window must be between 0 and 60,000 ms.", nameof(DelayStep.QuietWindowMs)));
-                break;
-
-            case MouseMoveStep { UseRelativeDelta: true } r:
-                // Relative (3D camera) move: X / Y are only where it was recorded, the deltas are what plays.
-                if (Math.Abs((long)r.DeltaX) > MaxRelativeMove || Math.Abs((long)r.DeltaY) > MaxRelativeMove)
-                    issues.Add(Error($"A relative mouse move can be at most {MaxRelativeMove:N0} counts in each direction.", nameof(MouseMoveStep.DeltaX)));
-                else if (r.DeltaX == 0 && r.DeltaY == 0)
-                    issues.Add(Warning("This relative mouse move is 0, 0, so it does nothing.", nameof(MouseMoveStep.DeltaX)));
-                break;
-
-            case MouseMoveStep m:
-                if (!Enum.IsDefined(m.TargetMode))
-                    issues.Add(Error("Unknown \"where to move\" choice. The macro may be damaged.", nameof(MouseMoveStep.TargetMode)));
-                else if (m.TargetMode == ClickTargetMode.Coordinates)
-                    CheckPosition(issues, m.X, m.Y, screen);
-                else
-                    CheckOffset(issues, m.OffsetX, m.OffsetY);
-                CheckMovement(issues, m.MoveStyle, m.MoveDurationMs);
-                break;
-
-            case MouseClickStep c:
-                if (!Enum.IsDefined(c.Button))
-                    issues.Add(Error("Unknown mouse button.", nameof(MouseClickStep.Button)));
-                if (!Enum.IsDefined(c.Action))
-                    issues.Add(Error("Unknown click action.", nameof(MouseClickStep.Action)));
-                if (!c.UseCurrentPosition && !c.UseLastFoundText)
-                    CheckPosition(issues, c.X, c.Y, screen);
-                if (c.UseLastFoundText)
-                    CheckOffset(issues, c.OffsetX, c.OffsetY);
-                ValidateSmartClick(issues, c);
-                CheckMovement(issues, c.MoveStyle, c.MoveDurationMs);
-                if (c.DoubleClickIntervalMs < 0 || c.DoubleClickIntervalMs > MouseMotionDefaults.MaxDoubleClickIntervalMs)
-                    issues.Add(Error($"The double-click gap must be 0 to {MouseMotionDefaults.MaxDoubleClickIntervalMs:N0} ms.", nameof(MouseClickStep.DoubleClickIntervalMs)));
-                if (c.PostActionDelayMs < 0 || c.PostActionDelayMs > MouseMotionDefaults.MaxPostActionDelayMs)
-                    issues.Add(Error($"The wait after the click must be 0 to {MouseMotionDefaults.MaxPostActionDelayMs:N0} ms.", nameof(MouseClickStep.PostActionDelayMs)));
-                if (c.Action == MouseClickAction.Hold)
-                {
-                    if (c.HoldMs < 1 || c.HoldMs > MaxHoldMs)
-                        issues.Add(Error($"Set how long to hold the button: 1 to {MaxHoldMs:N0} ms.", nameof(MouseClickStep.HoldMs)));
-                }
-                else
-                {
-                    // The click hold is used by Click and Double click. New steps start with 35 ms, which isn't worth a
-                    // warning when the user later picks another action.
-                    CheckHold(issues, c.HoldMs, c.Action is MouseClickAction.Click or MouseClickAction.DoubleClick
-                                                || c.HoldMs == MouseMotionDefaults.ClickHoldMs, nameof(MouseClickStep.HoldMs), "Click / Double click");
-                }
-
-                if (c.Action == MouseClickAction.Drag)
-                {
-                    CheckPosition(issues, c.EndX, c.EndY, screen, "End position", "EndPosition");
-                    if (c.DragDurationMs < 0 || c.DragDurationMs > MaxHoldMs)
-                        issues.Add(Error($"The drag time must be 0 to {MaxHoldMs:N0} ms.", nameof(MouseClickStep.DragDurationMs)));
-                    if (!c.UseCurrentPosition && !c.UseLastFoundText && c.X == c.EndX && c.Y == c.EndY)
-                        issues.Add(Warning("The drag starts and ends at the same spot, so nothing is dragged. Pick an end position.", "EndPosition"));
-                }
-                break;
-
-            case MouseScrollStep s:
-                if (s.Delta == 0)
-                    issues.Add(Error("The scroll amount can't be 0. Scroll at least 1 notch.", nameof(MouseScrollStep.Delta)));
-                else if (Math.Abs((long)s.Delta) > MaxScrollDelta)
-                    issues.Add(Error($"The scroll amount must be between -{MaxScrollDelta} and {MaxScrollDelta}.", nameof(MouseScrollStep.Delta)));
-                if (!s.UseCurrentPosition)
-                    CheckPosition(issues, s.X, s.Y, screen);
-                break;
-
-            case KeyPressStep k:
-                if (!VirtualKeys.IsValid(k.VirtualKey))
-                    issues.Add(Error("Choose a valid key.", nameof(KeyPressStep.VirtualKey)));
-                if (!Enum.IsDefined(k.Action))
-                    issues.Add(Error("Unknown key action.", nameof(KeyPressStep.Action)));
-                const KeyModifiers allModifiers = KeyModifiers.Control | KeyModifiers.Shift | KeyModifiers.Alt | KeyModifiers.Windows;
-                if ((k.Modifiers & ~allModifiers) != 0)
-                    issues.Add(Error("Unknown modifier key.", nameof(KeyPressStep.Modifiers)));
-                else if (k.Modifiers != KeyModifiers.None && k.Action != KeyAction.Press)
-                    issues.Add(Warning("Modifier keys are only used with the Press action.", nameof(KeyPressStep.Modifiers)));
-                CheckHold(issues, k.HoldMs, k.Action == KeyAction.Press, nameof(KeyPressStep.HoldMs), "Press");
-                break;
-
-            case InputSequenceStep q:
-                ValidateSequence(issues, q);
-                break;
-
-            case TypeTextStep t:
-                if (string.IsNullOrEmpty(t.Text))
-                    issues.Add(Error("Enter the text to type.", nameof(TypeTextStep.Text)));
-                else if (t.Text.Length > MaxTextLength)
-                    issues.Add(Error($"The text can be at most {MaxTextLength:N0} characters.", nameof(TypeTextStep.Text)));
-                if (t.CharacterDelayMs < 0 || t.CharacterDelayMs > MaxCharacterDelayMs)
-                    issues.Add(Error($"The delay between characters must be 0 to {MaxCharacterDelayMs:N0} ms.", nameof(TypeTextStep.CharacterDelayMs)));
-                break;
-
-            case FindTextStep f:
-                if (string.IsNullOrWhiteSpace(f.Text))
-                    issues.Add(Error("Enter the text to look for.", nameof(FindTextStep.Text)));
-                else if (f.Text.Length > MaxSearchTextLength)
-                    issues.Add(Error($"The search text can be at most {MaxSearchTextLength} characters.", nameof(FindTextStep.Text)));
-                if (f.MinSimilarityPercent < 50 || f.MinSimilarityPercent > 100)
-                    issues.Add(Error("Match accuracy must be between 50% and 100%.", nameof(FindTextStep.MinSimilarityPercent)));
-                if (!Enum.IsDefined(f.MatchMode))
-                    issues.Add(Error("This step has an unknown option value."));
-                ValidateSearch(issues, f, screen, MinCheckIntervalMs);
-                break;
-
-            case FindImageStep img:
-                ValidateTemplate(issues, img);
-                if (img.MinSimilarityPercent < 50 || img.MinSimilarityPercent > 100)
-                    issues.Add(Error("Match accuracy must be between 50% and 100%.", nameof(FindImageStep.MinSimilarityPercent)));
-                else if (img.MinSimilarityPercent < 70)
-                    issues.Add(Warning("Match accuracy below 70% often matches the wrong thing. Test it with \"Test now\".", nameof(FindImageStep.MinSimilarityPercent)));
-                if (img.IgnoreEdgesPercent < 0 || img.IgnoreEdgesPercent > 40)
-                    issues.Add(Error("\"Ignore the edges\" must be 0% to 40%.", nameof(FindImageStep.IgnoreEdgesPercent)));
-                else if (img.IgnoreEdgesPercent > 0 && img.TemplateWidth > 0
-                         && TemplateMatcher.InnerArea(img.TemplateWidth, img.TemplateHeight, img.IgnoreEdgesPercent / 100.0) is null)
-                    issues.Add(Warning("The image is too small to ignore its edges, so the whole image is compared. Capture a bigger area.", nameof(FindImageStep.IgnoreEdgesPercent)));
-                ValidateSearch(issues, img, screen, MinVisionCheckIntervalMs);
-                if (img.EffectiveScope == SearchScope.CustomArea && img.TemplateWidth > 0
-                    && (img.RegionWidth < img.TemplateWidth || img.RegionHeight < img.TemplateHeight))
-                    issues.Add(Error("The search area is smaller than the image to find. Make the area bigger.", "Region"));
-                break;
-
-            case IfStep ifStep:
-                ValidateCondition(issues, ifStep.Condition, screen);
-                if (!Enum.IsDefined(ifStep.ThenAction))
-                    issues.Add(Error("This If step has an unknown \"when true\" action. The macro may be damaged.", nameof(IfStep.ThenAction)));
-                else if (ifStep.ThenAction != FoundTextAction.None)
-                {
-                    if (Math.Abs((long)ifStep.ThenOffsetX) > MaxOffset || Math.Abs((long)ifStep.ThenOffsetY) > MaxOffset)
-                        issues.Add(Error($"Offsets must be between -{MaxOffset} and {MaxOffset} pixels.", "ThenOffset"));
-                    if (ifStep.ThenAction == FoundTextAction.Hold && (ifStep.ThenHoldMs < 1 || ifStep.ThenHoldMs > MaxHoldMs))
-                        issues.Add(Error($"The hold time must be 1 to {MaxHoldMs:N0} ms.", nameof(IfStep.ThenHoldMs)));
-                    if (ifStep.Condition is { Negate: true })
-                        issues.Add(Warning("With \"is NOT on screen\" the condition is true when nothing is found, so there's nothing to click: the \"when true\" action never runs.", nameof(IfStep.ThenAction)));
-                    else if (ifStep.Condition is { Kind: ConditionKind.VariableCompare })
-                        issues.Add(Warning("A variable comparison has no screen spot to click, so the \"when true\" mouse action is ignored.", nameof(IfStep.ThenAction)));
-                }
-                break;
-
-            case ElseStep or EndIfStep or EndRepeatStep:
-                break; // nothing to set; their place in the list is checked by ValidateBlocks
-
-            case RepeatStep r:
-                ValidateRepeat(issues, r, screen);
-                break;
-
-            case FeedbackLoopStep feedback:
-                ValidateFeedbackLoop(issues, feedback, screen);
-                break;
-
-            case FindColorStep c:
-                if (!RgbColor.TryParse(c.Color, out _))
-                    issues.Add(Error("Enter the color as #RRGGBB (for example #FF0000 for red), or pick it from the screen.", nameof(FindColorStep.Color)));
-                if (c.UseSecondaryColor && !RgbColor.TryParse(string.IsNullOrWhiteSpace(c.SecondaryColor) ? "#FFFFFF" : c.SecondaryColor, out _))
-                    issues.Add(Error("Enter the second color as #RRGGBB (for example #FFFFFF for white), or pick it from the screen.", nameof(FindColorStep.SecondaryColor)));
-                if (c.Tolerance < 0 || c.Tolerance > 255)
-                    issues.Add(Error("Tolerance must be 0 to 255.", nameof(FindColorStep.Tolerance)));
-                else if (c.Tolerance > 100)
-                    issues.Add(Warning("A tolerance above 100 matches many different colors.", nameof(FindColorStep.Tolerance)));
-                if (c.MinPixels < 1 || c.MinPixels > MaxColorPixels)
-                    issues.Add(Error($"Minimum size must be 1 to {MaxColorPixels:N0} pixels.", nameof(FindColorStep.MinPixels)));
-                ValidateSearch(issues, c, screen, MinVisionCheckIntervalMs);
-                if (SearchArea.IsWholeMonitorOrMore(c))
-                    issues.Add(Warning("Searching a whole monitor (or every monitor) for a color often finds something else. Pick a small area or an app window if you can.", "Region"));
-                break;
-
-            case WaitForChangeStep w:
-                ValidateWaitForChange(issues, w, screen);
-                break;
-
-            case FocusWindowStep w:
-                if (string.IsNullOrWhiteSpace(w.WindowTitle))
-                    issues.Add(Error("Enter (part of) the window title, e.g. \"Roblox\", or pick it from the list.", nameof(FocusWindowStep.WindowTitle)));
-                else if (w.WindowTitle.Trim().Length > SearchArea.MaxWindowTitleLength)
-                    issues.Add(Error($"The window title can be at most {SearchArea.MaxWindowTitleLength} characters.", nameof(FocusWindowStep.WindowTitle)));
-                if (w.WaitForWindowMs < 0 || w.WaitForWindowMs > MaxDelayMs)
-                    issues.Add(Error($"\"Wait for the window\" must be 0 to {MaxDelayMs:N0} ms.", nameof(FocusWindowStep.WaitForWindowMs)));
-                if (w.SettleMs < 0 || w.SettleMs > MaxHoldMs)
-                    issues.Add(Error($"The pause after focusing must be 0 to {MaxHoldMs:N0} ms.", nameof(FocusWindowStep.SettleMs)));
-                if (!Enum.IsDefined(w.WhenNotFound))
-                    issues.Add(Error("This step has an unknown option value."));
-                ValidateFailurePolicy(issues, w.FailurePolicy);
-                break;
-
-            case ScreenshotStep s:
-                ValidateScreenshot(issues, s, screen);
-                break;
-
-            case SetVariableStep v:
-                ValidateSetVariable(issues, v, screen);
-                break;
-
-            case CheckpointStep cp:
-                if (!CheckpointStep.IsValidName(cp.Name))
-                    issues.Add(Error($"Enter a checkpoint name (1 to {CheckpointStep.MaxNameLength} characters, no line breaks).", nameof(CheckpointStep.Name)));
-                break;
-
-            case CallMacroStep call:
-                ValidateCallMacro(issues, call);
-                break;
-
-            default:
-                issues.Add(Error($"Unsupported step type: {step.GetType().Name}."));
-                break;
-        }
-
-        return issues;
-    }
-
-    /// <summary>Wait for screen change: an area on screen, how much must change, timing, and the "when it changes" action.</summary>
-    private static void ValidateWaitForChange(List<ValidationIssue> issues, WaitForChangeStep w, ScreenBounds? screen)
-    {
-        if (w.RegionWidth < 5 || w.RegionHeight < 5)
-            issues.Add(Error("The watched area must be at least 5×5 pixels. Use \"Pick area\".", "Region"));
-        else if (w.RegionWidth > MaxRegionSize || w.RegionHeight > MaxRegionSize)
-            issues.Add(Error($"The watched area can be at most {MaxRegionSize:N0} pixels wide or tall.", "Region"));
-        else
-        {
-            if (screen is not null && !w.Region.IntersectsWith(new Ocr.ScreenRect(screen.Left, screen.Top, screen.Width, screen.Height)))
-                issues.Add(Warning("The watched area is outside your current screen.", "Region"));
-            if ((long)w.RegionWidth * w.RegionHeight > LargeWatchAreaPixels)
-                issues.Add(Warning("The watched area is very large, so every look takes longer and unrelated changes (chat, animations) can trigger it. Pick only the part that matters.", "Region"));
-        }
-
-        if (!double.IsFinite(w.MinChangedPercent) || w.MinChangedPercent < MinChangedPercent || w.MinChangedPercent > 100)
-            issues.Add(Error($"\"How much must change\" must be {MinChangedPercent} to 100 %.", nameof(WaitForChangeStep.MinChangedPercent)));
-        if (w.PixelTolerance < 0 || w.PixelTolerance > 255)
-            issues.Add(Error("\"Ignore small colour shifts\" must be 0 to 255.", nameof(WaitForChangeStep.PixelTolerance)));
-        else if (w.PixelTolerance < 5)
-            issues.Add(Warning("A colour tolerance below 5 reacts to tiny flicker that you can't see. 20–40 is typical.", nameof(WaitForChangeStep.PixelTolerance)));
-        if (w.TimeoutMs < 0 || w.TimeoutMs > MaxDelayMs)
-            issues.Add(Error($"The wait time must be 0 to {MaxDelayMs:N0} ms.", nameof(WaitForChangeStep.TimeoutMs)));
-        if (w.CheckIntervalMs < MinVisionCheckIntervalMs || w.CheckIntervalMs > MaxCheckIntervalMs)
-            issues.Add(Error($"Check every must be {MinVisionCheckIntervalMs} to {MaxCheckIntervalMs:N0} ms.", nameof(WaitForChangeStep.CheckIntervalMs)));
-        if (!Enum.IsDefined(w.Action) || !Enum.IsDefined(w.WhenNotFound))
-            issues.Add(Error("This step has an unknown option value."));
-        else if (w.Action == FoundTextAction.Hold && (w.ActionHoldMs < 1 || w.ActionHoldMs > MaxHoldMs))
-            issues.Add(Error($"The hold time must be 1 to {MaxHoldMs:N0} ms.", nameof(WaitForChangeStep.ActionHoldMs)));
-        ValidateFailurePolicy(issues, w.FailurePolicy);
-    }
-
-    private static void ValidateSetVariable(List<ValidationIssue> issues, SetVariableStep v, ScreenBounds? screen)
-    {
-        if (!MacroVariableDefinition.IsValidName(v.VariableName))
-            issues.Add(Error($"Enter a valid variable name (start with a letter or _, then letters, digits, or _, up to {MacroVariableDefinition.MaxNameLength} chars).", nameof(SetVariableStep.VariableName)));
-        if (!Enum.IsDefined(v.VariableType) || !Enum.IsDefined(v.Operation) || !Enum.IsDefined(v.Source))
-            issues.Add(Error("This Set Variable step has an unknown option value."));
-        if ((v.Value?.Length ?? 0) > MacroVariableDefinition.MaxValueLength)
-            issues.Add(Error($"The value can be at most {MacroVariableDefinition.MaxValueLength:N0} characters.", nameof(SetVariableStep.Value)));
-
-        if (v.UsesScreenRegion)
-        {
-            if (v.RegionWidth < 5 || v.RegionHeight < 5)
-                issues.Add(Error("The screen region to read must be at least 5×5 pixels. Use \"Pick area\".", "Region"));
-            else if (v.RegionWidth > MaxRegionSize || v.RegionHeight > MaxRegionSize)
-                issues.Add(Error($"The screen region can be at most {MaxRegionSize:N0} pixels wide or tall.", "Region"));
-            else if (screen is not null && !v.Region.IntersectsWith(new Ocr.ScreenRect(screen.Left, screen.Top, screen.Width, screen.Height)))
-                issues.Add(Warning("The screen region is outside your current screen.", "Region"));
-        }
-    }
-
-    private static void ValidateCallMacro(List<ValidationIssue> issues, CallMacroStep call)
-    {
-        if (call.TargetMacroId == Guid.Empty && string.IsNullOrWhiteSpace(call.TargetMacroName))
-            issues.Add(Error("Choose a library sub-macro to call.", nameof(CallMacroStep.TargetMacroId)));
-        if ((call.TargetMacroName?.Length ?? 0) > MaxNameLength)
-            issues.Add(Error($"Sub-macro name can be at most {MaxNameLength} characters.", nameof(CallMacroStep.TargetMacroName)));
-
-        ValidateBindings(issues, call.Inputs, isOutput: false, nameof(CallMacroStep.Inputs));
-        ValidateBindings(issues, call.Outputs, isOutput: true, nameof(CallMacroStep.Outputs));
-    }
-
-    private static void ValidateBindings(List<ValidationIssue> issues, List<VariableBinding>? bindings, bool isOutput, string property)
-    {
-        if (bindings is null) return;
-        if (bindings.Count > MaxVariableBindings)
-        {
-            issues.Add(Error($"At most {MaxVariableBindings} variable bindings are allowed.", property));
-            return;
-        }
-
-        foreach (var b in bindings)
-        {
-            if (b is null)
-            {
-                issues.Add(Error("A variable binding is empty.", property));
-                continue;
-            }
-
-            if (!MacroVariableDefinition.IsValidName(b.TargetVariable))
-                issues.Add(Error($"Enter a valid target variable name in {(isOutput ? "Outputs" : "Inputs")}.", property));
-
-            if (isOutput)
-            {
-                if (!MacroVariableDefinition.IsValidName(b.SourceExpression))
-                    issues.Add(Error("Enter a valid sub-macro variable name to read in Outputs.", property));
-            }
-            else if ((b.SourceExpression?.Length ?? 0) > MacroVariableDefinition.MaxValueLength)
-            {
-                issues.Add(Error($"Binding value can be at most {MacroVariableDefinition.MaxValueLength:N0} characters.", property));
-            }
-        }
-    }
-
-    private static void ValidateFailurePolicy(List<ValidationIssue> issues, StepFailurePolicy? policy)
-    {
-        if (policy is null) return;
-        if (!Enum.IsDefined(policy.Action))
-        {
-            issues.Add(Error("Unknown failure policy action.", nameof(StepFailurePolicy.Action)));
-            return;
-        }
-
-        switch (policy.Action)
-        {
-            case StepFailureAction.Retry:
-                if (policy.RetryCount < 1 || policy.RetryCount > MaxRetryCount)
-                    issues.Add(Error($"Retry count must be 1 to {MaxRetryCount}.", nameof(StepFailurePolicy.RetryCount)));
-                if (policy.RetryDelayMs < 0 || policy.RetryDelayMs > MaxCheckIntervalMs)
-                    issues.Add(Error($"Retry delay must be 0 to {MaxCheckIntervalMs:N0} ms.", nameof(StepFailurePolicy.RetryDelayMs)));
-                break;
-
-            case StepFailureAction.RunRecoveryMacro:
-                if ((policy.RecoveryMacroId is null || policy.RecoveryMacroId == Guid.Empty) && string.IsNullOrWhiteSpace(policy.RecoveryMacroName))
-                    issues.Add(Error("Choose a recovery macro to run when this step fails.", nameof(StepFailurePolicy.RecoveryMacroId)));
-                else if ((policy.RecoveryMacroName?.Length ?? 0) > MaxNameLength)
-                    issues.Add(Error($"Recovery macro name can be at most {MaxNameLength} characters.", nameof(StepFailurePolicy.RecoveryMacroName)));
-                break;
-
-            case StepFailureAction.RestartFromCheckpoint:
-                if (!CheckpointStep.IsValidName(policy.CheckpointName))
-                    issues.Add(Error($"Enter the checkpoint name to restart from (1 to {CheckpointStep.MaxNameLength} chars).", nameof(StepFailurePolicy.CheckpointName)));
-                break;
-        }
-    }
-
-    /// <summary>Screenshot: what to capture (an area / window when chosen), a usable folder and file name prefix.</summary>
-    private static void ValidateScreenshot(List<ValidationIssue> issues, ScreenshotStep s, ScreenBounds? screen)
-    {
-        if (!Enum.IsDefined(s.Area))
-        {
-            issues.Add(Error("This step has an unknown option value."));
-            return;
-        }
-
-        if (s.Area == ScreenshotArea.CustomArea)
-        {
-            if (s.RegionWidth < 5 || s.RegionHeight < 5)
-                issues.Add(Error("The screenshot area must be at least 5×5 pixels. Use \"Pick area\".", "Region"));
-            else if (s.RegionWidth > MaxRegionSize || s.RegionHeight > MaxRegionSize)
-                issues.Add(Error($"The screenshot area can be at most {MaxRegionSize:N0} pixels wide or tall.", "Region"));
-            else if (screen is not null && !s.Region.IntersectsWith(new Ocr.ScreenRect(screen.Left, screen.Top, screen.Width, screen.Height)))
-                issues.Add(Warning("The screenshot area is outside your current screen.", "Region"));
-        }
-        else if (s.Area == ScreenshotArea.Window)
-        {
-            if (string.IsNullOrWhiteSpace(s.WindowTitle))
-                issues.Add(Error("Enter (part of) the window title to take a screenshot of.", nameof(ScreenshotStep.WindowTitle)));
-            else if (s.WindowTitle.Trim().Length > SearchArea.MaxWindowTitleLength)
-                issues.Add(Error($"The window title can be at most {SearchArea.MaxWindowTitleLength} characters.", nameof(ScreenshotStep.WindowTitle)));
-        }
-
-        if (!string.IsNullOrWhiteSpace(s.FolderPath))
-        {
-            var folder = s.FolderPath.Trim();
-            if (folder.Length > MaxFolderPathLength || folder.IndexOfAny(Path.GetInvalidPathChars()) >= 0 || !Path.IsPathRooted(folder))
-                issues.Add(Error("Choose a full folder path, e.g. C:\\Users\\you\\Pictures\\Catches (or leave it empty for Pictures\\SmartMacro Screenshots).", nameof(ScreenshotStep.FolderPath)));
-        }
-
-        if ((s.FileNamePrefix?.Trim().Length ?? 0) > ScreenshotFiles.MaxPrefixLength)
-            issues.Add(Error($"The file name prefix can be at most {ScreenshotFiles.MaxPrefixLength} characters.", nameof(ScreenshotStep.FileNamePrefix)));
-        else if (ScreenshotFiles.HasInvalidFileNameChars(s.FileNamePrefix))
-            issues.Add(Warning("The file name prefix has characters a file name can't contain (< > : \" / \\ | ? *); they're replaced by _.", nameof(ScreenshotStep.FileNamePrefix)));
-    }
-
-    /// <summary>
-    /// Repeat: known mode; a count for Times; a condition plus a required safety limit (max turns and/or max time)
-    /// for While / Until; limits in range.
-    /// </summary>
-    private static void ValidateRepeat(List<ValidationIssue> issues, RepeatStep r, ScreenBounds? screen)
-    {
-        if (!Enum.IsDefined(r.Mode) || !Enum.IsDefined(r.WhenLimitReached))
-        {
-            issues.Add(Error("This Repeat step has an unknown option value. The macro may be damaged."));
-            return;
-        }
-
-        if (r.MaxDurationMs < 0 || r.MaxDurationMs > MaxLoopDurationMs)
-            issues.Add(Error($"Max time must be 0 (no time limit) to {MaxLoopDurationMs:N0} ms (24 hours).", nameof(RepeatStep.MaxDurationMs)));
-        if (r.KeepCheckingForMs is < 0 or > RepeatStep.MaxKeepCheckingForMs)
-            issues.Add(Error($"\"Keep checking before leaving\" must be 0 to {RepeatStep.MaxKeepCheckingForMs:N0} ms.", nameof(RepeatStep.KeepCheckingForMs)));
-
-        if (r.Mode == RepeatMode.Times)
-        {
-            if (r.Count < 1 || r.Count > MaxLoopCount)
-                issues.Add(Error($"Repeat count must be 1 to {MaxLoopCount:N0}.", nameof(RepeatStep.Count)));
-            return;
-        }
-
-        if (r.MaxIterations < 0 || r.MaxIterations > MaxLoopCount)
-            issues.Add(Error($"Max turns must be 0 (no turn limit) to {MaxLoopCount:N0}.", nameof(RepeatStep.MaxIterations)));
-        else if (r.MaxIterations == 0 && r.MaxDurationMs == 0)
-            issues.Add(Error("A Repeat while / until loop needs a safety limit: set Max turns and/or Max time, so it can't run forever.", nameof(RepeatStep.MaxIterations)));
-
-        if (r.Condition is null)
-            issues.Add(Error("Choose the condition for this loop.", nameof(RepeatStep.Condition)));
-        else
-            ValidateCondition(issues, r.Condition, screen);
-    }
-
-    /// <summary>
-    /// A condition needs search settings of a supported kind; those are checked with the same rules as the
-    /// Find text / image / color step (messages start with "Condition:").
-    /// </summary>
-    private static void ValidateCondition(List<ValidationIssue> issues, Condition? condition, ScreenBounds? screen,
-        string label = "Condition", string property = "Condition")
-    {
-        if (condition is null)
-        {
-            issues.Add(Error($"{label}: choose what the condition checks.", property));
-            return;
-        }
-
-        if (condition.Comparison is { } comp && condition.Check is null)
-        {
-            if (!MacroVariableDefinition.IsValidName(comp.VariableName))
-                issues.Add(Error($"{label}: enter a valid variable name to compare.", property + ".VariableName"));
-            if (!Enum.IsDefined(comp.Operator))
-                issues.Add(Error($"{label}: unknown variable comparison operator.", property + ".Operator"));
-            if ((comp.RightValue?.Length ?? 0) > MacroVariableDefinition.MaxValueLength)
-                issues.Add(Error($"{label}: comparison value can be at most {MacroVariableDefinition.MaxValueLength:N0} characters.", property + ".RightValue"));
-            return;
-        }
-
-        if (condition.Check is null)
-        {
-            issues.Add(Error($"{label}: choose what the condition looks for (text, image, color, or variable).", property));
-            return;
-        }
-
-        if (condition.Search is not { } search)
-        {
-            issues.Add(Error($"{label}: a condition can't use a \"{condition.Check.GetType().Name}\" step. Use text, image or color. The macro may be damaged.", property));
-            return;
-        }
-
-        foreach (var issue in ValidateStep(search, screen))
-        {
-            // The "when found" action, wait goal and "when not found" choice aren't used by conditions.
-            if (issue.Property is nameof(ScreenSearchStep.Action) or nameof(ScreenSearchStep.WhenNotFound) or nameof(ScreenSearchStep.Goal)
-                or nameof(StepFailurePolicy.Action) or nameof(StepFailurePolicy.RetryCount) or nameof(StepFailurePolicy.RetryDelayMs)
-                or nameof(StepFailurePolicy.RecoveryMacroId) or nameof(StepFailurePolicy.CheckpointName)) continue;
-            issues.Add(issue with { Message = label + ": " + issue.Message, Property = property + "." + (issue.Property ?? "") });
-        }
-    }
-
-    /// <summary>
-    /// Feedback loop (Stage 4): a bar area on screen, a valid marker colour, a zone, rules that press something,
-    /// a key or button, rate limits, a required max runtime, a lost-target policy and optional stop conditions.
-    /// Every number has a range, so a damaged or hand-edited file can't make the loop run wild.
-    /// </summary>
-    private static void ValidateFeedbackLoop(List<ValidationIssue> issues, FeedbackLoopStep f, ScreenBounds? screen)
-    {
-        if (!Enum.IsDefined(f.Orientation) || !Enum.IsDefined(f.ZoneMode) || !Enum.IsDefined(f.InputKind)
-            || !Enum.IsDefined(f.WhenBeforeZone) || !Enum.IsDefined(f.WhenInsideZone) || !Enum.IsDefined(f.WhenAfterZone)
-            || !Enum.IsDefined(f.WhenTargetLost) || !Enum.IsDefined(f.WhenTimeUp) || !Enum.IsDefined(f.WhenFailed)
-            || !Enum.IsDefined(f.Preset))
-        {
-            issues.Add(Error("This Feedback loop step has an unknown option value. The macro may be damaged."));
-            return;
-        }
-
-        // Observe: the bar area.
-        const string region = "Region";
-        if (f.RegionWidth < 5 || f.RegionHeight < 5)
-            issues.Add(Error("The bar area must be at least 5×5 pixels. Use \"Pick bar area\".", region));
-        else if (f.RegionWidth > MaxRegionSize || f.RegionHeight > MaxRegionSize)
-            issues.Add(Error($"The bar area can be at most {MaxRegionSize:N0} pixels wide or tall.", region));
-        else
-        {
-            var length = f.Orientation == BarOrientation.Horizontal ? f.RegionWidth : f.RegionHeight;
-            if (length < MinBarLength)
-                issues.Add(Error($"The bar area must be at least {MinBarLength} pixels long in the direction the marker moves. Check \"Direction\".", region));
-            if ((long)f.RegionWidth * f.RegionHeight > LargeFeedbackAreaPixels)
-                issues.Add(Warning("The bar area is large, so every frame takes longer. Pick only the bar itself.", region));
-            if (screen is not null && !f.Region.IntersectsWith(new Ocr.ScreenRect(screen.Left, screen.Top, screen.Width, screen.Height)))
-                issues.Add(Warning("The bar area is outside your current screen.", region));
-        }
-
-        // Observe: the marker.
-        if (!RgbColor.TryParse(f.MarkerColor, out var marker))
-            issues.Add(Error("Enter the marker color as #RRGGBB, or pick it from the screen.", nameof(FeedbackLoopStep.MarkerColor)));
-        if (f.UseSecondaryMarkerColor && !RgbColor.TryParse(string.IsNullOrWhiteSpace(f.SecondaryMarkerColor) ? "#FFFFFF" : f.SecondaryMarkerColor, out _))
-            issues.Add(Error("Enter the second marker color as #RRGGBB, or pick it from the screen.", nameof(FeedbackLoopStep.SecondaryMarkerColor)));
-        CheckTolerance(issues, f.MarkerTolerance, nameof(FeedbackLoopStep.MarkerTolerance), "marker");
-        if (f.MarkerMinPixels < 1 || f.MarkerMinPixels > MaxColorPixels)
-            issues.Add(Error($"The marker's minimum size must be 1 to {MaxColorPixels:N0} pixels.", nameof(FeedbackLoopStep.MarkerMinPixels)));
-        if (f.MaxJumpPercent < 1 || f.MaxJumpPercent > 100)
-            issues.Add(Error("The glitch filter (largest jump in one frame) must be 1 to 100 %.", nameof(FeedbackLoopStep.MaxJumpPercent)));
-
-        // Target zone.
-        if (f.ZoneMode == FeedbackZoneMode.Fixed)
-        {
-            if (f.ZoneStartPercent < 0 || f.ZoneEndPercent > 100 || f.ZoneStartPercent >= f.ZoneEndPercent)
-                issues.Add(Error("The zone must start before it ends, between 0 % and 100 % (for example 40 to 60).", nameof(FeedbackLoopStep.ZoneStartPercent)));
-            else if (f.DeadBandPercent > 0 && f.DeadBandPercent * 2 >= f.ZoneEndPercent - f.ZoneStartPercent)
-                issues.Add(Warning("The dead band is as wide as half the zone or more, so the marker may never count as inside it. Use a smaller dead band.", nameof(FeedbackLoopStep.DeadBandPercent)));
-        }
-        else
-        {
-            if (!RgbColor.TryParse(f.ZoneColor, out var zone))
-                issues.Add(Error("Enter the zone color as #RRGGBB, or pick it from the screen.", nameof(FeedbackLoopStep.ZoneColor)));
-            else if (RgbColor.TryParse(f.MarkerColor, out _) && Overlaps(marker, f.MarkerTolerance, zone, f.ZoneTolerance))
-                issues.Add(Warning("The marker and zone colors are so close (with their tolerances) that one can be mistaken for the other. Lower a tolerance or pick more different colors.", nameof(FeedbackLoopStep.ZoneColor)));
-            if (f.UseSecondaryZoneColor && !RgbColor.TryParse(string.IsNullOrWhiteSpace(f.SecondaryZoneColor) ? "#FFFFFF" : f.SecondaryZoneColor, out _))
-                issues.Add(Error("Enter the second zone color as #RRGGBB, or pick it from the screen.", nameof(FeedbackLoopStep.SecondaryZoneColor)));
-            CheckTolerance(issues, f.ZoneTolerance, nameof(FeedbackLoopStep.ZoneTolerance), "zone");
-            if (f.ZoneMinPixels < 1 || f.ZoneMinPixels > MaxColorPixels)
-                issues.Add(Error($"The zone's minimum size must be 1 to {MaxColorPixels:N0} pixels.", nameof(FeedbackLoopStep.ZoneMinPixels)));
-        }
-
-        // Decide.
-        if (f.DeadBandPercent < 0 || f.DeadBandPercent > MaxDeadBandPercent)
-            issues.Add(Error($"The dead band must be 0 to {MaxDeadBandPercent} %.", nameof(FeedbackLoopStep.DeadBandPercent)));
-        var actions = new[] { f.WhenBeforeZone, f.WhenInsideZone, f.WhenAfterZone };
-        if (f.WhenBeforeZone == FeedbackAction.Pulse || f.WhenAfterZone == FeedbackAction.Pulse)
-            issues.Add(Error("\"Pulse\" only works while the marker is INSIDE the zone. Use Hold or Release before / after it.", "Rules"));
-        if (f.ControlMode != FeedbackControlMode.SmartPredictive // smart mode has its own hover pulse check below
-            && f.WhenInsideZone == FeedbackAction.Pulse && (f.PulsePeriodMs < 50 || f.PulsePeriodMs > MaxInputChangeMs))
-            issues.Add(Error($"The pulse cycle must be 50 to {MaxInputChangeMs:N0} ms.", nameof(FeedbackLoopStep.PulsePeriodMs)));
-        if (f.FinishWhenInZone && f.WhenInsideZone is not (FeedbackAction.Tap or FeedbackAction.Release))
-            issues.Add(Error("\"Finish when the marker reaches the zone\" needs the INSIDE rule to be Tap (click) or Release.", nameof(FeedbackLoopStep.FinishWhenInZone)));
-        if (!actions.Any(a => a is FeedbackAction.Hold or FeedbackAction.Tap or FeedbackAction.Pulse))
-            issues.Add(Error("None of the rules presses anything. Set at least one place to \"Hold\" or \"Tap\".", "Rules"));
-        else if (actions.Contains(FeedbackAction.Hold) && !actions.Contains(FeedbackAction.Release) && !actions.Contains(FeedbackAction.Tap))
-            issues.Add(Warning("A rule holds the input but no rule releases it, so it stays held until the loop ends.", "Rules"));
-
-        // Smart Predictive (Feedback Loop 2.0).
-        var smart = f.ControlMode == FeedbackControlMode.SmartPredictive;
-        if (!Enum.IsDefined(f.ControlMode))
-            issues.Add(Error("Unknown control mode.", nameof(FeedbackLoopStep.ControlMode)));
-        if (smart)
-        {
-            if (Playback.PredictiveFeedbackSettings.HoldDirectionOf(f) == 0)
-                issues.Add(Error("Smart Predictive needs to know which way holding moves the bar: set one side (before / after the zone) to Hold and the other to Release.", "Rules"));
-            if (f.FinishWhenInZone)
-                issues.Add(Error("\"Finish when the marker reaches the zone\" is for Classic timing loops. Switch the control mode to Classic Simple Hold.", nameof(FeedbackLoopStep.FinishWhenInZone)));
-            if (!double.IsFinite(f.LeadPredictionFactor) || f.LeadPredictionFactor < 0 || f.LeadPredictionFactor > MaxLeadPredictionSeconds)
-                issues.Add(Error($"The lead prediction must be 0 to {MaxLeadPredictionSeconds} seconds (0.18 = predict 180 ms ahead).", nameof(FeedbackLoopStep.LeadPredictionFactor)));
-            if (f.DeadzonePx < 0 || f.DeadzonePx > MaxDeadzonePx)
-                issues.Add(Error($"The dead zone must be 0 to {MaxDeadzonePx} pixels.", nameof(FeedbackLoopStep.DeadzonePx)));
-            if (f.UsePwmMicroPulse && (f.PulsePeriodMs < 20 || f.PulsePeriodMs > MaxInputChangeMs))
-                issues.Add(Error($"The hover pulse cycle must be 20 to {MaxInputChangeMs:N0} ms.", nameof(FeedbackLoopStep.PulsePeriodMs)));
-        }
-
-        // Act.
-        if (f.InputKind == FeedbackInputKind.MouseButton)
-        {
-            if (!Enum.IsDefined(f.MouseButton))
-                issues.Add(Error("Unknown mouse button.", nameof(FeedbackLoopStep.MouseButton)));
-        }
-        else if (!VirtualKeys.IsValid(f.VirtualKey))
-        {
-            issues.Add(Error("Choose a valid key.", nameof(FeedbackLoopStep.VirtualKey)));
-        }
-        else if (f.VirtualKey == 0x1B)
-        {
-            issues.Add(Warning("Esc is also SmartMacro's emergency stop key (only when you press it yourself). Another key is clearer.", nameof(FeedbackLoopStep.VirtualKey)));
-        }
-
-        if (f.TapMs < 1 || f.TapMs > MaxTapMs)
-            issues.Add(Error($"The tap length must be 1 to {MaxTapMs:N0} ms.", nameof(FeedbackLoopStep.TapMs)));
-
-        // Limits.
-        if (f.MaxCapturesPerSecond < 1 || f.MaxCapturesPerSecond > MaxCapturesPerSecond)
-            issues.Add(Error($"Captures per second must be 1 to {MaxCapturesPerSecond}.", nameof(FeedbackLoopStep.MaxCapturesPerSecond)));
-        else if (f.MaxCapturesPerSecond > 60 && !smart) // Smart Predictive is built for 120 Hz (it measures speeds)
-            issues.Add(Warning("More than 60 captures per second is usually faster than the screen updates; it mostly uses more CPU. Check \"Measure loop speed\".", nameof(FeedbackLoopStep.MaxCapturesPerSecond)));
-
-        if (f.MinInputChangeMs < 0 || f.MinInputChangeMs > MaxInputChangeMs)
-            issues.Add(Error($"The minimum time between input changes must be 0 to {MaxInputChangeMs:N0} ms.", nameof(FeedbackLoopStep.MinInputChangeMs)));
-        else if (f.MinInputChangeMs < 16 && !smart) // Smart Predictive pulses on purpose (games average the duty cycle)
-            issues.Add(Warning("Changes less than 16 ms apart can be faster than a game's frame, so the game may miss some.", nameof(FeedbackLoopStep.MinInputChangeMs)));
-
-        if (f.MaxRuntimeMs < MinFeedbackRuntimeMs || f.MaxRuntimeMs > MaxFeedbackRuntimeMs)
-            issues.Add(Error($"A feedback loop needs a max runtime of {MinFeedbackRuntimeMs} to {MaxFeedbackRuntimeMs:N0} ms (1 hour), so it can't run forever.", nameof(FeedbackLoopStep.MaxRuntimeMs)));
-
-        if (f.LostTimeoutMs < 0 || f.LostTimeoutMs > MaxLostTimeoutMs)
-            issues.Add(Error($"\"Target missing for\" must be 0 to {MaxLostTimeoutMs:N0} ms.", nameof(FeedbackLoopStep.LostTimeoutMs)));
-
-        // Stop when.
-        if (f.CompleteWhen is not null)
-            ValidateFeedbackCondition(issues, f.CompleteWhen, screen, "Done when", nameof(FeedbackLoopStep.CompleteWhen));
-        if (f.FailWhen is not null)
-            ValidateFeedbackCondition(issues, f.FailWhen, screen, "Failed when", nameof(FeedbackLoopStep.FailWhen));
-
-        if (f.CompleteWhen is null && f.WhenTargetLost == FeedbackLostAction.ReleaseAndWait && f.WhenTimeUp == LoopLimitBehavior.StopMacro)
-            issues.Add(Warning("This loop can only end with an error (when its max runtime is reached). Add a \"done when\" condition, or let it continue when the time is up or the target is gone.", nameof(FeedbackLoopStep.WhenTimeUp)));
-    }
-
-    /// <summary>A stop condition of a feedback loop: the normal condition rules, plus hints about what costs time here.</summary>
-    private static void ValidateFeedbackCondition(List<ValidationIssue> issues, Condition condition, ScreenBounds? screen, string label, string property)
-    {
-        ValidateCondition(issues, condition, screen, label, property);
-        if (condition.Search is not { } search) return;
-
-        if (search is FindTextStep)
-            issues.Add(Warning($"{label}: reading text (OCR) takes about 50-300 ms, and the loop can't react while it reads. An image or color condition is much faster.", property));
-        if (search.TimeoutMs > 0)
-            issues.Add(Warning($"{label}: \"keep checking for\" isn't used here; the loop looks once every \"check every\" while it runs.", property));
-    }
-
-    private static void CheckTolerance(List<ValidationIssue> issues, int tolerance, string property, string what)
-    {
-        if (tolerance < 0 || tolerance > 255)
-            issues.Add(Error($"The {what} tolerance must be 0 to 255.", property));
-        else if (tolerance > 100)
-            issues.Add(Warning($"A {what} tolerance above 100 matches many different colors.", property));
-    }
-
-    /// <summary>True if some colour would match both colours (their tolerance boxes overlap on every channel).</summary>
-    private static bool Overlaps(RgbColor a, int toleranceA, RgbColor b, int toleranceB)
-    {
-        var reach = Math.Max(0, toleranceA) + Math.Max(0, toleranceB);
-        return Math.Abs(a.R - b.R) <= reach && Math.Abs(a.G - b.G) <= reach && Math.Abs(a.B - b.B) <= reach;
-    }
-
-    private static void CheckHold(List<ValidationIssue> issues, int holdMs, bool applies, string property, string actionName)
-    {
-        if (holdMs < 0 || holdMs > MaxHoldMs)
-            issues.Add(Error($"The hold time must be 0 to {MaxHoldMs:N0} ms.", property));
-        else if (holdMs > 0 && !applies)
-            issues.Add(Warning($"The hold time is only used with the {actionName} action.", property));
-    }
-
-    /// <summary>
-    /// Checks every recorded event. A damaged event (out-of-order time, unknown key, huge movement) is an error,
-    /// so a broken or hand-edited file can't make playback do something wild.
-    /// </summary>
-    private static void ValidateSequence(List<ValidationIssue> issues, InputSequenceStep step)
-    {
-        const string property = nameof(InputSequenceStep.Events);
-        var events = step.Events;
-        if (events is null || events.Count == 0)
-        {
-            issues.Add(Error("This step has no recorded input.", property));
-            return;
-        }
-
-        if (events.Count > MaxSequenceEvents)
-        {
-            issues.Add(Error($"A recorded input step can have at most {MaxSequenceEvents:N0} events.", property));
-            return;
-        }
-
-        long previous = 0;
-        var keysDown = new HashSet<int>();
-        var buttonsDown = new HashSet<MacroMouseButton>();
-        for (var i = 0; i < events.Count; i++)
-        {
-            var e = events[i];
-            string? problem = null;
-
-            if (e.TimeUs < previous)
-                problem = "is earlier than the event before it";
-            else if (e.TimeUs > MaxSequenceDurationUs)
-                problem = "is more than 1 hour after the start";
-            else
-            {
-                if (e.HasPosition && (Math.Abs((long)e.X) > MaxScreenCoordinate || Math.Abs((long)e.Y) > MaxScreenCoordinate))
-                    problem = "has a cursor position far outside any screen";
-                else switch (e.Kind)
-                {
-                    case InputEventKind.MouseMove:
-                        if (Math.Abs((long)e.Dx) > MaxRelativeMove || Math.Abs((long)e.Dy) > MaxRelativeMove)
-                            problem = "moves the mouse too far in one go";
-                        break;
-                    case InputEventKind.MouseDown:
-                    case InputEventKind.MouseUp:
-                        if (!Enum.IsDefined(e.Button)) problem = "uses an unknown mouse button";
-                        else if (e.Kind == InputEventKind.MouseDown) buttonsDown.Add(e.Button);
-                        else buttonsDown.Remove(e.Button);
-                        break;
-                    case InputEventKind.Wheel:
-                    case InputEventKind.HorizontalWheel:
-                        if (e.Delta == 0 || Math.Abs((long)e.Delta) > MaxScrollDelta) problem = "has an invalid scroll amount";
-                        break;
-                    case InputEventKind.KeyDown:
-                    case InputEventKind.KeyUp:
-                        if (!VirtualKeys.IsValid(e.VirtualKey)) problem = "uses an invalid key";
-                        else if (e.ScanCode is < 0 or > 0xFF) problem = "has an invalid scan code";
-                        else if (e.Kind == InputEventKind.KeyDown) keysDown.Add(e.VirtualKey);
-                        else keysDown.Remove(e.VirtualKey);
-                        break;
-                    default:
-                        problem = "has an unknown type";
-                        break;
-                }
-            }
-
-            if (problem is not null)
-            {
-                issues.Add(Error($"Recorded event {i + 1:N0} {problem}. The recording may be damaged.", property));
-                return; // one message is enough; a damaged list usually has many bad events
-            }
-
-            previous = e.TimeUs;
-        }
-
-        if (keysDown.Count > 0 || buttonsDown.Count > 0)
-            issues.Add(Warning("Some keys or buttons are still held at the end of the recording; they'll be released when this step finishes.", property));
-
-        ValidateMouseSegments(issues, step);
-        ValidateSequenceClickTargets(issues, step);
-    }
-
-    /// <summary>
-    /// Pictures of clicks inside recorded input: each must belong to a button-down event, once, and stay a sane size.
-    /// Only "✂ Break into steps" reads them, so problems are warnings that say the pictures will be dropped.
-    /// </summary>
-    private static void ValidateSequenceClickTargets(List<ValidationIssue> issues, InputSequenceStep step)
-    {
-        if (step.ClickTargets is not { Count: > 0 } targets) return;
-        const string property = nameof(InputSequenceStep.ClickTargets);
-        var seen = new HashSet<int>();
-        foreach (var target in targets)
-        {
-            var hasPicture = !string.IsNullOrEmpty(target?.TargetThumbnailBase64);
-            var hasIntent = target?.Target is { HasAnySignal: true };
-            var bad = target is null
-                      || target.EventIndex < 0 || target.EventIndex >= step.Events.Count
-                      || step.Events[target.EventIndex].Kind != InputEventKind.MouseDown
-                      || !seen.Add(target.EventIndex)
-                      || (!hasPicture && !hasIntent)
-                      || (hasPicture && (target.TargetThumbnailBase64.Length > MaxThumbnailLength
-                                         || target.AnchorX is < 0 or > MaxTemplateSize
-                                         || target.AnchorY is < 0 or > MaxTemplateSize))
-                      || (target.Target is { } fp && !IsValidTargetFingerprint(fp));
-            if (!bad) continue;
-            issues.Add(Warning("Some \"what you clicked\" pictures inside this recorded input don't match its clicks; they won't be used when you break it into steps.", property));
-            return;
-        }
-    }
-
-    /// <summary>
-    /// Smart recordings: the segments must be sorted, start at a valid time and use known modes. A cursor-position
-    /// segment needs recorded positions; movement without one is always played as relative movement.
-    /// </summary>
-    private static void ValidateMouseSegments(List<ValidationIssue> issues, InputSequenceStep step)
-    {
-        const string property = nameof(InputSequenceStep.MouseSegments);
-        var segments = step.MouseSegments;
-        if (segments is null) return;
-
-        if (segments.Count == 0)
-        {
-            issues.Add(Error("The mouse playback parts of this recording are missing. The recording may be damaged.", property));
-            return;
-        }
-
-        if (segments.Count > MaxMouseSegments)
-        {
-            issues.Add(Error($"A recorded input step can have at most {MaxMouseSegments:N0} mouse parts.", property));
-            return;
-        }
-
-        long previous = -1;
-        for (var i = 0; i < segments.Count; i++)
-        {
-            var segment = segments[i];
-            string? problem = null;
-            if (segment is null) problem = "is empty";
-            else if (i == 0 && segment.StartUs != 0) problem = "doesn't start at the beginning of the recording";
-            else if (segment.StartUs <= previous) problem = "starts before the part before it ends";
-            else if (segment.StartUs > MaxSequenceDurationUs) problem = "starts more than 1 hour after the beginning";
-            else if (!Enum.IsDefined(segment.Detected) || !Enum.IsDefined(segment.Choice) || !Enum.IsDefined(segment.Evidence))
-                problem = "has an unknown option value";
-
-            if (problem is not null)
-            {
-                issues.Add(Error($"Mouse part {i + 1:N0} {problem}. The recording may be damaged.", property));
-                return;
-            }
-
-            previous = segment!.StartUs;
-        }
-
-        if (segments.Any(s => s.Effective == MouseMovementMode.CursorPosition)
-            && step.Events is { } events && events.Any(e => e.Kind == InputEventKind.MouseMove && !e.HasPosition))
-            issues.Add(Warning("Some mouse movement has no recorded cursor position; it's played as relative movement.", property));
-    }
-
-    /// <summary>Shared checks for Find text / image / color: area, timing, goal, action, offsets.</summary>
-    private static void ValidateSearch(List<ValidationIssue> issues, ScreenSearchStep f, ScreenBounds? screen, int minInterval)
-    {
-        if (f.Scope is { } scope && !Enum.IsDefined(scope))
-            issues.Add(Error("This step has an unknown \"where to look\" value. Choose where to look again.", nameof(ScreenSearchStep.Scope)));
-        else if (f.EffectiveScope == SearchScope.Monitor && (f.MonitorNumber < 1 || f.MonitorNumber > SearchArea.MaxMonitorNumber))
-            issues.Add(Error($"Choose a monitor from 1 to {SearchArea.MaxMonitorNumber}.", nameof(ScreenSearchStep.MonitorNumber)));
-        else if (f.EffectiveScope == SearchScope.Window)
-        {
-            if (string.IsNullOrWhiteSpace(f.WindowTitle))
-                issues.Add(Error("Choose the app window to search in (or type part of its title).", nameof(ScreenSearchStep.WindowTitle)));
-            else if (f.WindowTitle.Length > SearchArea.MaxWindowTitleLength)
-                issues.Add(Error($"The window title can be at most {SearchArea.MaxWindowTitleLength} characters.", nameof(ScreenSearchStep.WindowTitle)));
-        }
-
-        CheckMovement(issues, f.MoveStyle, f.MoveDurationMs);
-        if (f.ClickHoldMs < 0 || f.ClickHoldMs > MaxHoldMs)
-            issues.Add(Error($"The click hold must be 0 to {MaxHoldMs:N0} ms.", nameof(ScreenSearchStep.ClickHoldMs)));
-        if (f.DoubleClickIntervalMs < 0 || f.DoubleClickIntervalMs > MouseMotionDefaults.MaxDoubleClickIntervalMs)
-            issues.Add(Error($"The double-click gap must be 0 to {MouseMotionDefaults.MaxDoubleClickIntervalMs:N0} ms.", nameof(ScreenSearchStep.DoubleClickIntervalMs)));
-        if (f.PostActionDelayMs < 0 || f.PostActionDelayMs > MouseMotionDefaults.MaxPostActionDelayMs)
-            issues.Add(Error($"The wait after the click must be 0 to {MouseMotionDefaults.MaxPostActionDelayMs:N0} ms.", nameof(ScreenSearchStep.PostActionDelayMs)));
-
-        if (f.EffectiveScope == SearchScope.CustomArea)
-        {
-            if (f.RegionWidth < 5 || f.RegionHeight < 5)
-                issues.Add(Error("The search area must be at least 5×5 pixels.", "Region"));
-            else if (f.RegionWidth > MaxRegionSize || f.RegionHeight > MaxRegionSize)
-                issues.Add(Error($"The search area can be at most {MaxRegionSize:N0} pixels wide or tall.", "Region"));
-            else if (screen is not null && !new Ocr.ScreenRect(f.RegionX, f.RegionY, f.RegionWidth, f.RegionHeight)
-                         .IntersectsWith(new Ocr.ScreenRect(screen.Left, screen.Top, screen.Width, screen.Height)))
-                issues.Add(Warning("The search area is outside your current screen.", "Region"));
-        }
-
-        if (f.TimeoutMs < 0 || f.TimeoutMs > MaxDelayMs)
-            issues.Add(Error($"The wait time must be 0 to {MaxDelayMs:N0} ms.", nameof(ScreenSearchStep.TimeoutMs)));
-        if (f.CheckIntervalMs < minInterval || f.CheckIntervalMs > MaxCheckIntervalMs)
-            issues.Add(Error($"Check every must be {minInterval} to {MaxCheckIntervalMs:N0} ms.", nameof(ScreenSearchStep.CheckIntervalMs)));
-        if (Math.Abs((long)f.OffsetX) > MaxOffset || Math.Abs((long)f.OffsetY) > MaxOffset)
-            issues.Add(Error($"Offsets must be between -{MaxOffset} and {MaxOffset} pixels.", "Offset"));
-        if (!Enum.IsDefined(f.Action) || !Enum.IsDefined(f.WhenNotFound) || !Enum.IsDefined(f.Goal))
-            issues.Add(Error("This step has an unknown option value."));
-        else if (f.Goal == WaitGoal.Disappear && f.Action != FoundTextAction.None)
-            issues.Add(Warning("The \"when found\" action isn't used while waiting for something to disappear.", nameof(ScreenSearchStep.Action)));
-        else if (f.Action == FoundTextAction.Hold && (f.ActionHoldMs < 1 || f.ActionHoldMs > MaxHoldMs))
-            issues.Add(Error($"The hold time must be 1 to {MaxHoldMs:N0} ms.", nameof(ScreenSearchStep.ActionHoldMs)));
-        ValidateFailurePolicy(issues, f.FailurePolicy);
-    }
-
-    /// <summary>Movement style must be known; the glide time 0 to 5 s.</summary>
-    private static void CheckMovement(List<ValidationIssue> issues, MouseMoveStyle? style, int durationMs)
-    {
-        if (style is { } s && !Enum.IsDefined(s))
-            issues.Add(Error("Unknown movement style.", "MoveStyle"));
-        else if (style is MouseMoveStyle.SmoothGlide or MouseMoveStyle.HumanCurve
-                 && (durationMs < 0 || durationMs > MouseMotionDefaults.MaxMoveDurationMs))
-            issues.Add(Error($"The glide time must be 0 to {MouseMotionDefaults.MaxMoveDurationMs:N0} ms.", "MoveDurationMs"));
-    }
-
-    /// <summary>The stored picture must exist, decode to its stated size, and not be one flat color.</summary>
-    private static void ValidateTemplate(List<ValidationIssue> issues, FindImageStep step)
-    {
-        const string property = nameof(FindImageStep.TemplateData);
-        if (string.IsNullOrEmpty(step.TemplateData))
-        {
-            issues.Add(Error("Capture the image to look for first (\"Capture image\").", property));
-            return;
-        }
-
-        if (step.TemplateWidth < MinTemplateSize || step.TemplateHeight < MinTemplateSize
-            || step.TemplateWidth > MaxTemplateSize || step.TemplateHeight > MaxTemplateSize)
-        {
-            issues.Add(Error($"The image must be {MinTemplateSize} to {MaxTemplateSize} pixels wide and tall. Capture a different area.", property));
-            return;
-        }
-
-        if (step.TemplateData.Length > MaxTemplateDataLength)
-        {
-            issues.Add(Error("The stored image is too large. The macro may be damaged; capture the image again.", property));
-            return;
-        }
-
-        if (!TemplateCache.TryGetOrDecode(step.TemplateData, step.TemplateWidth, step.TemplateHeight, out var image, out var error))
-        {
-            issues.Add(Error(error ?? "The stored image is damaged.", property));
-            return;
-        }
-
-        if (TemplateMatcher.IsFlat(image!))
-            issues.Add(Error("The image is a single flat color, so its shape can't be matched. Capture an area with some detail, or use a \"Find color\" step.", property));
-    }
-
-    /// <summary>
-    /// A fixed mouse position: far outside any possible screen is an error (a typo or damaged file); outside the current
-    /// monitors is only a warning, because the macro may have been made with another monitor layout.
-    /// </summary>
-    private static void CheckPosition(List<ValidationIssue> issues, int x, int y, ScreenBounds? screen,
-        string label = "Position", string property = "Position")
-    {
-        if (Math.Abs((long)x) > MaxScreenCoordinate || Math.Abs((long)y) > MaxScreenCoordinate)
-            issues.Add(Error($"{label} ({x}, {y}) is far outside any screen (X and Y must be between -{MaxScreenCoordinate:N0} and {MaxScreenCoordinate:N0}). Use \"Pick position\" to choose a spot on your screen.", property));
-        else if (screen is not null && !screen.Contains(x, y))
-            issues.Add(Warning($"{label} ({x}, {y}) is outside your current screen area ({screen}). Use \"Pick position\" to choose a spot on your screen.", property));
-    }
-
-    private static ValidationIssue Error(string message, string? property = null) =>
-        new(IssueSeverity.Error, message, Property: property);
-
-    private static ValidationIssue Warning(string message, string? property = null) =>
-        new(IssueSeverity.Warning, message, Property: property);
 }

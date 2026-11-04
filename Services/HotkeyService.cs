@@ -1,5 +1,6 @@
 using System.Windows;
 using System.Windows.Interop;
+using System.Windows.Threading;
 using SmartMacro.Core.Logging;
 using SmartMacro.Core.Models;
 using static SmartMacro.Services.Input.NativeMethods;
@@ -18,23 +19,41 @@ public enum HotkeyAction
 /// The keys come from Settings and can be changed while the app runs.
 /// Record and Play / Stop are always registered. Pause / Resume (F8 by default) is only registered while a macro plays
 /// (<see cref="SetPauseActive"/>), so the key keeps working normally in other apps the rest of the time.
+/// Also registers per-macro shortcuts (v1.4 "Reflex") and polls key release for Hold-to-run / Repeat-while-held modes.
 /// </summary>
 public sealed class HotkeyService : IDisposable
 {
+    private const int MacroHotkeyBaseId = 1_000;
+
     private readonly ILogService _log;
     private readonly List<int> _registered = new();
+    private readonly Dictionary<int, HotkeyBinding> _macroHotkeysById = new();
+    private readonly HashSet<HotkeyBinding> _heldMacroBindings = new();
+    private readonly DispatcherTimer _holdPollTimer;
     private HwndSource? _source;
     private IntPtr _hwnd;
     private HotkeyBinding _pauseBinding = HotkeyBinding.DefaultPause;
     private bool _pauseActive;
     private bool _pauseRegistered;
+    private List<HotkeyBinding> _desiredMacroHotkeys = new();
 
     public HotkeyService(ILogService log)
     {
         _log = log;
+        _holdPollTimer = new DispatcherTimer(DispatcherPriority.Input)
+        {
+            Interval = TimeSpan.FromMilliseconds(25),
+        };
+        _holdPollTimer.Tick += OnHoldPollTick;
     }
 
     public event EventHandler<HotkeyAction>? Pressed;
+
+    /// <summary>Raised when a registered per-macro shortcut is pressed down.</summary>
+    public event EventHandler<HotkeyBinding>? MacroHotkeyPressed;
+
+    /// <summary>Raised when a held per-macro shortcut is released.</summary>
+    public event EventHandler<HotkeyBinding>? MacroHotkeyReleased;
 
     /// <summary>Hooks into the window's messages. Call after the window has been shown.</summary>
     public void Attach(Window window)
@@ -53,7 +72,16 @@ public sealed class HotkeyService : IDisposable
         Register(HotkeyAction.TogglePlayback, settings.PlayHotkey, failed);
         _pauseBinding = settings.PauseHotkey;
         if (_pauseActive) RegisterPause(failed);
+        RegisterMacroHotkeysInternal();
         return failed;
+    }
+
+    /// <summary>(Re-)registers per-macro trigger shortcuts across all armed macros in the library.</summary>
+    public void ApplyMacroHotkeys(IEnumerable<HotkeyBinding> bindings)
+    {
+        _desiredMacroHotkeys = bindings?.Distinct().ToList() ?? new List<HotkeyBinding>();
+        UnregisterMacroHotkeys();
+        RegisterMacroHotkeysInternal();
     }
 
     /// <summary>
@@ -86,6 +114,7 @@ public sealed class HotkeyService : IDisposable
 
     public void Dispose()
     {
+        _holdPollTimer.Stop();
         UnregisterAll();
         _source?.RemoveHook(WndProc);
         _source = null;
@@ -95,12 +124,7 @@ public sealed class HotkeyService : IDisposable
     {
         if (_hwnd == IntPtr.Zero) return;
 
-        var modifiers = MOD_NOREPEAT;
-        if (binding.Modifiers.HasFlag(KeyModifiers.Control)) modifiers |= MOD_CONTROL;
-        if (binding.Modifiers.HasFlag(KeyModifiers.Shift)) modifiers |= MOD_SHIFT;
-        if (binding.Modifiers.HasFlag(KeyModifiers.Alt)) modifiers |= MOD_ALT;
-        if (binding.Modifiers.HasFlag(KeyModifiers.Windows)) modifiers |= MOD_WIN;
-
+        var modifiers = ToNativeModifiers(binding.Modifiers);
         var id = (int)action;
         if (RegisterHotKey(_hwnd, id, modifiers, (uint)binding.VirtualKey))
         {
@@ -113,11 +137,75 @@ public sealed class HotkeyService : IDisposable
         }
     }
 
+    private void RegisterMacroHotkeysInternal()
+    {
+        if (_hwnd == IntPtr.Zero || _desiredMacroHotkeys.Count == 0) return;
+
+        var nextId = MacroHotkeyBaseId;
+        foreach (var binding in _desiredMacroHotkeys)
+        {
+            if (binding.Problem() is not null) continue;
+            var id = nextId++;
+            var modifiers = ToNativeModifiers(binding.Modifiers);
+            if (RegisterHotKey(_hwnd, id, modifiers, (uint)binding.VirtualKey))
+            {
+                _registered.Add(id);
+                _macroHotkeysById[id] = binding;
+            }
+        }
+    }
+
+    private void UnregisterMacroHotkeys()
+    {
+        foreach (var id in _macroHotkeysById.Keys.ToList())
+        {
+            if (_hwnd != IntPtr.Zero) UnregisterHotKey(_hwnd, id);
+            _registered.Remove(id);
+        }
+
+        _macroHotkeysById.Clear();
+    }
+
+    private static uint ToNativeModifiers(KeyModifiers modifiers)
+    {
+        var flags = MOD_NOREPEAT;
+        if (modifiers.HasFlag(KeyModifiers.Control)) flags |= MOD_CONTROL;
+        if (modifiers.HasFlag(KeyModifiers.Shift)) flags |= MOD_SHIFT;
+        if (modifiers.HasFlag(KeyModifiers.Alt)) flags |= MOD_ALT;
+        if (modifiers.HasFlag(KeyModifiers.Windows)) flags |= MOD_WIN;
+        return flags;
+    }
+
     private void UnregisterAll()
     {
         foreach (var id in _registered) UnregisterHotKey(_hwnd, id);
         _registered.Clear();
+        _macroHotkeysById.Clear();
+        _heldMacroBindings.Clear();
+        _holdPollTimer.Stop();
         _pauseRegistered = false;
+    }
+
+    private void OnHoldPollTick(object? sender, EventArgs e)
+    {
+        if (_heldMacroBindings.Count == 0)
+        {
+            _holdPollTimer.Stop();
+            return;
+        }
+
+        foreach (var binding in _heldMacroBindings.ToList())
+        {
+            var isKeyDown = (GetAsyncKeyState(binding.VirtualKey) & 0x8000) != 0;
+            if (!isKeyDown)
+            {
+                _heldMacroBindings.Remove(binding);
+                MacroHotkeyReleased?.Invoke(this, binding);
+            }
+        }
+
+        if (_heldMacroBindings.Count == 0)
+            _holdPollTimer.Stop();
     }
 
     private IntPtr WndProc(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
@@ -129,6 +217,13 @@ public sealed class HotkeyService : IDisposable
             {
                 handled = true;
                 Pressed?.Invoke(this, (HotkeyAction)id);
+            }
+            else if (_macroHotkeysById.TryGetValue(id, out var binding))
+            {
+                handled = true;
+                _heldMacroBindings.Add(binding);
+                if (!_holdPollTimer.IsEnabled) _holdPollTimer.Start();
+                MacroHotkeyPressed?.Invoke(this, binding);
             }
         }
 

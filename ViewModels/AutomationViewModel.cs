@@ -455,6 +455,9 @@ public sealed class AutomationViewModel : ObservableObject, IDisposable
     /// <summary>Name of the currently running macro, or the current play target when idle.</summary>
     public string RunningMacroTitle => IsPlaying && !string.IsNullOrWhiteSpace(_runningMacroName) ? _runningMacroName : TargetText;
 
+    /// <summary>ID of the macro that is currently playing (or null when idle).</summary>
+    public Guid? RunningMacroId => IsPlaying ? _runningMacroId : null;
+
     private static string FormatElapsed(TimeSpan elapsed) =>
         elapsed.TotalHours >= 1
             ? $"{(int)elapsed.TotalHours:00}:{elapsed.Minutes:00}:{elapsed.Seconds:00}"

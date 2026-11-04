@@ -52,6 +52,9 @@ public sealed class MacroListItemViewModel : ObservableObject
     public string? BrainBadgeText { get; private set; }
     public bool HasBrainBadge => !string.IsNullOrEmpty(BrainBadgeText);
 
+    public string TriggerSummary => _macro.TriggerSummary;
+    public bool HasTriggerSummary => !string.IsNullOrEmpty(TriggerSummary);
+
     // Proportional Star weights for the Workflow Fingerprint Strip on the card
     public GridLength InputWeight { get; private set; } = new(0, GridUnitType.Star);
     public GridLength VisionWeight { get; private set; } = new(0, GridUnitType.Star);

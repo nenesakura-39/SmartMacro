@@ -166,6 +166,9 @@ internal static class NativeMethods
     [DllImport("user32.dll")]
     public static extern IntPtr GetForegroundWindow();
 
+    [DllImport("user32.dll")]
+    public static extern short GetAsyncKeyState(int vKey);
+
     public const uint GA_ROOT = 2;
 
     [DllImport("user32.dll")]

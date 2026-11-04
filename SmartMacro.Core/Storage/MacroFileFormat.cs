@@ -31,7 +31,7 @@ public static class MacroFileFormat
         var version = MacroDocument.RequiredSchemaVersion(macro);
         if (bundled.Count > 0)
         {
-            version = Math.Max(version, MacroDocument.CurrentSchemaVersion);
+            version = Math.Max(version, 16);
             foreach (var sub in bundled)
                 version = Math.Max(version, MacroDocument.RequiredSchemaVersion(sub));
         }
@@ -272,6 +272,14 @@ public static class MacroFileFormat
             }
 
             if (watchers.Count == 0) macro.Watchers = null;
+        }
+
+        if (macro.Triggers is { } triggers)
+        {
+            triggers.RemoveAll(t => t is null);
+            foreach (var t in triggers)
+                t.Id = Guid.NewGuid();
+            if (triggers.Count == 0) macro.Triggers = null;
         }
 
         macro.Id = Guid.NewGuid();

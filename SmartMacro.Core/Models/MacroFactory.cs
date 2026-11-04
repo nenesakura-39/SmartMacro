@@ -55,6 +55,11 @@ public static class MacroFactory
                 if (watcher.Condition?.Check is { } check) check.Id = Guid.NewGuid();
             }
         }
+        if (copy.Triggers is { } triggers)
+        {
+            foreach (var trigger in triggers)
+                trigger.Id = Guid.NewGuid();
+        }
         return copy;
     }
 

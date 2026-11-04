@@ -121,6 +121,26 @@ public sealed class Macro
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public List<MacroWatcher>? Watchers { get; set; }
 
+    // ---------------- v1.4 "Reflex": Declarative Triggers (format 17) ----------------
+
+    /// <summary>
+    /// Per-macro triggers (Hotkey with PressOnce / Toggle / HoldToRun / RepeatWhileHeld, Schedule, WindowEvent).
+    /// Null or omitted when unused so older macros stay byte-for-byte unchanged.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public List<MacroTrigger>? Triggers { get; set; }
+
+    /// <summary>
+    /// Short badge text summarizing enabled triggers on this macro (e.g. "Ctrl+Alt+F1 (Hold)"), or empty if none.
+    /// </summary>
+    [JsonIgnore]
+    public string TriggerSummary =>
+        Triggers is { Count: > 0 } list && list.Where(t => t is { Enabled: true }).ToList() is { Count: > 0 } active
+            ? active.Count == 1
+                ? active[0].DescribeShort()
+                : $"{active[0].DescribeShort()} (+{active.Count - 1})"
+            : string.Empty;
+
     /// <summary>
     /// A shallow copy of this macro (same ID, name, speed, target window, Humanize, …) that plays
     /// <paramref name="steps"/> instead of its own list. The steps themselves aren't copied. Used by "Play from here",
@@ -173,8 +193,10 @@ public sealed class MacroDocument
     /// 16 = adds v1.2 "Brain": Variables (Macro.Variables, SetVariableStep, ConditionKind.VariableCompare), Resilience
     ///     (StepFailurePolicy Retry / RunRecoveryMacro / RestartFromCheckpoint, CheckpointStep, Macro.Watchers), and
     ///     Composition (CallMacroStep + bundled SubMacros).
+    /// 17 = adds v1.4 "Reflex": Declarative per-macro Triggers (Macro.Triggers: Hotkey PressOnce / Toggle / HoldToRun /
+    ///     RepeatWhileHeld, Schedule EveryNMinutes / DailyAtTime / OnAppStartup, WindowEvent Focused / Opened).
     /// </summary>
-    public const int CurrentSchemaVersion = 16;
+    public const int CurrentSchemaVersion = 17;
 
     public int SchemaVersion { get; set; }
     public Macro? Macro { get; set; }
@@ -195,6 +217,7 @@ public sealed class MacroDocument
     public static int RequiredSchemaVersion(Macro macro)
     {
         ArgumentNullException.ThrowIfNull(macro);
+        if (UsesVersion17MacroFeatures(macro)) return 17;
         if (UsesVersion16MacroFeatures(macro)) return 16;
         if (macro.Steps is null) return UsesVersion11Features(macro) ? 11 : 1;
 
@@ -235,6 +258,10 @@ public sealed class MacroDocument
         macro.HumanizePlayback || macro.ScaleCoordinatesToWindow || macro.TargetWindowTitle is not null
         || macro.ClickJitterPx is not null || macro.DelayJitterPercent is not null
         || macro.ReferenceWidth != 0 || macro.ReferenceHeight != 0;
+
+    /// <summary>True if the macro declares Triggers added in format 17.</summary>
+    private static bool UsesVersion17MacroFeatures(Macro macro) =>
+        macro.Triggers is { Count: > 0 };
 
     /// <summary>True if the macro declares Variables or Watchers added in format 16.</summary>
     private static bool UsesVersion16MacroFeatures(Macro macro) =>

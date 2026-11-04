@@ -50,12 +50,20 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     private readonly ILogService _log;
     private readonly IDialogService _dialogs;
     private readonly IMacroRepository _repository;
+    private readonly IScreenInfoProvider _screen;
+    private readonly DispatcherTimer _triggerTimer;
 
     private AppPage _currentPage = AppPage.Library;
     private string _statusMessage = "Starting…";
     private StatusKind _statusKind = StatusKind.Info;
     private AppSettings _settings = new();
     private bool _isInitialized;
+
+    /// <summary>v1.4 Reflex: deterministic trigger engine (per-macro hotkeys, schedules, window triggers, Run Governor).</summary>
+    public TriggerEvaluator TriggerEngine { get; } = new();
+
+    /// <summary>Raised when active per-macro hotkey triggers change so the Windows hotkey service can re-register them.</summary>
+    public event EventHandler? MacroHotkeysChanged;
 
     public MainViewModel(
         IMacroRepository repository,
@@ -70,13 +78,25 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         _log = log;
         _dialogs = dialogs;
         _repository = repository;
+        _screen = screen;
+
+        _triggerTimer = new DispatcherTimer(DispatcherPriority.Background, dispatcher)
+        {
+            Interval = TimeSpan.FromSeconds(1),
+        };
+        _triggerTimer.Tick += (_, _) => _ = EvaluateBackgroundTriggersAsync();
+        ToggleTriggersArmedCommand = new RelayCommand(() => AreTriggersArmed = !AreTriggersArmed);
 
         Logs = new LogViewModel(log, dispatcher);
 
         Editor = new EditorViewModel(
             repository, log, dialogs, screen,
             defaultDelayMs: () => _settings.DefaultDelayMs,
-            onSaved: saved => Library!.Upsert(saved),
+            onSaved: saved =>
+            {
+                Library!.Upsert(saved);
+                MacroHotkeysChanged?.Invoke(this, EventArgs.Empty);
+            },
             setStatus: SetStatus,
             goToLibrary: () => CurrentPage = AppPage.Library,
             findTextTools: automation.FindTextTools,
@@ -86,7 +106,11 @@ public sealed class MainViewModel : ObservableObject, IDisposable
             repository, log, dialogs,
             confirmBeforeDelete: () => _settings.ConfirmBeforeDelete,
             openInEditor: OpenInEditorAsync,
-            afterDelete: id => Editor.OnMacroDeleted(id),
+            afterDelete: id =>
+            {
+                Editor.OnMacroDeleted(id);
+                MacroHotkeysChanged?.Invoke(this, EventArgs.Empty);
+            },
             setStatus: SetStatus,
             playMacro: macro => Automation!.PlayMacroAsync(macro),
             canPlay: () => Automation?.IsIdle ?? false);
@@ -121,7 +145,21 @@ public sealed class MainViewModel : ObservableObject, IDisposable
             return resolved is null ? null : MacroJson.Clone(resolved);
         };
         automation.Engine.VariablesChanged += (_, snap) => dispatcher.InvokeAsync(() => Editor.UpdateLiveVariables(snap));
-        Automation.PlaybackFinished += (_, info) => Editor.ShowPlaybackResult(info.MacroId, info.Result);
+        Automation.PlaybackFinished += (_, info) =>
+        {
+            Editor.ShowPlaybackResult(info.MacroId, info.Result);
+            if (TriggerEngine.DequeueNext() is { Kind: TriggerDecisionKind.StartMacro, Macro: { } nextMacro })
+            {
+                _ = dispatcher.InvokeAsync(async () =>
+                {
+                    if (Automation.IsIdle)
+                    {
+                        _log.Info($"⚡ Trigger queue: starting queued macro \"{nextMacro.Name}\".");
+                        await Automation.PlayMacroAsync(MacroJson.Clone(nextMacro));
+                    }
+                });
+            }
+        };
 
         Editor.PropertyChanged += (_, e) =>
         {
@@ -146,6 +184,8 @@ public sealed class MainViewModel : ObservableObject, IDisposable
             {
                 Automation.RefreshTarget();
                 if (Editor.HasMacro) Editor.RefreshSubMacroLinks();
+                if (e.PropertyName is nameof(LibraryViewModel.CountText) or "")
+                    MacroHotkeysChanged?.Invoke(this, EventArgs.Empty);
             }
         };
 
@@ -359,6 +399,121 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         if (StatusKind is StatusKind.Info)
             SetStatus(Library.Items.Count == 0 ? "Ready. Create your first macro to get started." : $"Ready. {Library.CountText} loaded.", StatusKind.Info);
         Automation.RefreshTarget();
+        MacroHotkeysChanged?.Invoke(this, EventArgs.Empty);
+        _triggerTimer.Start();
+        await EvaluateBackgroundTriggersAsync();
+    }
+
+    // ---------------- v1.4 Reflex: Per-macro triggers & Run Governor ----------------
+
+    public RelayCommand ToggleTriggersArmedCommand { get; }
+
+    /// <summary>Global master switch for per-macro triggers (hotkeys, schedules, window triggers).</summary>
+    public bool AreTriggersArmed
+    {
+        get => TriggerEngine.IsArmed;
+        set
+        {
+            if (TriggerEngine.IsArmed == value) return;
+            TriggerEngine.IsArmed = value;
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(TriggersArmedStatusText));
+            MacroHotkeysChanged?.Invoke(this, EventArgs.Empty);
+            SetStatus(value ? "⚡ Macro triggers armed." : "⚡ Macro triggers disarmed.", StatusKind.Info);
+        }
+    }
+
+    public string TriggersArmedStatusText => TriggerEngine.IsArmed ? "⚡ Triggers Armed" : "⚡ Triggers Paused";
+
+    /// <summary>Returns all distinct valid hotkeys used by enabled macro triggers across the library (empty when disarmed).</summary>
+    public IReadOnlyList<HotkeyBinding> GetActiveTriggerHotkeys()
+    {
+        if (!TriggerEngine.IsArmed) return Array.Empty<HotkeyBinding>();
+        var list = new List<HotkeyBinding>();
+        foreach (var item in Library.Items)
+        {
+            if (item.Macro.Triggers is not { Count: > 0 } triggers) continue;
+            foreach (var trigger in triggers)
+            {
+                if (!trigger.Enabled || trigger.Kind != TriggerKind.Hotkey || trigger.Hotkey is not { VirtualKey: > 0 } hk)
+                    continue;
+                if (!list.Contains(hk))
+                    list.Add(hk);
+            }
+        }
+        return list;
+    }
+
+    public void HandleMacroHotkeyDown(HotkeyBinding binding)
+    {
+        if (Automation.IsRecording) return;
+        var macros = Library.Items.Select(i => i.Macro).ToList();
+        var fg = _screen.GetForegroundWindowTitle();
+        var decision = TriggerEngine.EvaluateHotkeyDown(
+            macros,
+            binding,
+            fg,
+            Automation.RunningMacroId,
+            DateTimeOffset.UtcNow);
+        _ = ExecuteTriggerDecisionAsync(decision);
+    }
+
+    public void HandleMacroHotkeyUp(HotkeyBinding binding)
+    {
+        if (Automation.IsRecording) return;
+        var decision = TriggerEngine.EvaluateHotkeyUp(
+            binding,
+            Automation.RunningMacroId);
+        _ = ExecuteTriggerDecisionAsync(decision);
+    }
+
+    public async Task EvaluateBackgroundTriggersAsync()
+    {
+        if (!TriggerEngine.IsArmed || Automation.IsRecording) return;
+        var macros = Library.Items.Select(i => i.Macro).ToList();
+        if (macros.Count == 0) return;
+
+        var fg = _screen.GetForegroundWindowTitle();
+        IReadOnlyList<string> openWindows = _screen is Core.Vision.IScreenLayout layout
+            ? layout.GetWindows().Select(w => w.Title).Where(t => !string.IsNullOrWhiteSpace(t)).ToList()
+            : Array.Empty<string>();
+
+        var decisions = TriggerEngine.EvaluateTick(
+            macros,
+            DateTimeOffset.Now,
+            openWindows,
+            fg,
+            Automation.RunningMacroId);
+
+        foreach (var decision in decisions)
+            await ExecuteTriggerDecisionAsync(decision);
+    }
+
+    private async Task ExecuteTriggerDecisionAsync(TriggerDecision decision)
+    {
+        switch (decision.Kind)
+        {
+            case TriggerDecisionKind.StartMacro when decision.Macro is { } macro:
+                _log.Info($"⚡ {decision.Reason} → starting \"{macro.Name}\".");
+                await Automation.PlayMacroAsync(MacroJson.Clone(macro));
+                break;
+
+            case TriggerDecisionKind.StopPlaying:
+                _log.Info($"⚡ {decision.Reason} → stopping playback.");
+                if (Automation.StopCommand.CanExecute(null))
+                    Automation.StopCommand.Execute(null);
+                break;
+
+            case TriggerDecisionKind.StopAndStartMacro when decision.Macro is { } macro:
+                _log.Info($"⚡ {decision.Reason} → stopping current run and starting \"{macro.Name}\".");
+                await Automation.StopAllAsync();
+                await Automation.PlayMacroAsync(MacroJson.Clone(macro));
+                break;
+
+            case TriggerDecisionKind.QueueMacro when decision.Macro is { } macro:
+                SetStatus($"⚡ Queued \"{macro.Name}\" ({TriggerEngine.QueuedCount} in queue).", StatusKind.Info);
+                break;
+        }
     }
 
     public void SetStatus(string message, StatusKind kind)
@@ -389,6 +544,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
 
     public void Dispose()
     {
+        _triggerTimer.Stop();
         _log.Info("SmartMacro closed.");
         Automation.Dispose();
         Logs.Dispose();
@@ -523,6 +679,8 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         foreach (var entry in log.GetRecent().TakeLast(40))
             text.Append(entry.Timestamp.ToLocalTime().ToString("HH:mm:ss")).Append(' ').Append(entry.Level).Append(": ").Append(entry.Message)
                 .AppendLine(entry.Details is null ? "" : $" ({entry.Details})");
+        if (CrashReporter.GetLatestCrashSummary(paths.LogsDirectory) is { } latestCrash)
+            text.AppendLine().AppendLine(latestCrash);
         return text.ToString();
     }
 }

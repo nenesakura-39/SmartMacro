@@ -628,7 +628,7 @@ public class SubMacroAndBundlingTests
     [Fact]
     public void Schema_version_16_and_legacy_failure_policy_preserve_backward_compatibility()
     {
-        Assert.Equal(16, MacroDocument.CurrentSchemaVersion);
+        Assert.True(MacroDocument.CurrentSchemaVersion >= 16); // 17 since v1.4 Reflex
 
         // Plain macro stays Schema 1; FindTextStep with Continue / SkipNextStep / StopMacro stays Schema 7!
         Assert.Equal(1, MacroDocument.RequiredSchemaVersion(Aaa.MacroWith(new DelayStep { DurationMs = 100 })));
