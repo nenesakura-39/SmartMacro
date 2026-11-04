@@ -1,181 +1,145 @@
 # SmartMacro
 
-**Desktop automation for Windows: record, edit, play, and find text on screen.**
+**All-round AAA desktop & game macro studio for Windows — record, build, debug, and automate workflows visually.**
 
-Owner & developer: **Riku** · Version 1.0.0
+Owner & developer: **Riku** · Version **1.8.0 ("Studio X")** · `.NET 10` (WPF, `win-x64`)
 
-SmartMacro records your mouse and keyboard, lets you edit the result step by step, and plays it back.
-It can also wait for text to appear on screen and click it, using the text recognition (OCR) built into Windows.
-Everything stays on your PC. Nothing is uploaded.
+SmartMacro is a local-first Windows automation studio designed for both **daily productivity ("Workbench")** and **gaming ("Arena")**. It records mouse and keyboard input across desktop apps and 3D games, turns recordings into structured visual workflows, and provides computer vision (template matching, pixel color, HUD gauge % reading, Windows OCR), branching logic, typed variables, background watchers, per-macro triggers, and an interactive step debugger — all with **zero scripting required** and **zero cloud uploads**.
 
 ---
 
-## Requirements
+## System Architecture
 
-- Windows 10 version 2004 (May 2020 Update) or newer, or Windows 11, 64-bit.
-- Nothing else to install. The release package includes everything it needs.
-- For the **Find text (OCR)** step, Windows needs an OCR language. Most PCs already have one for their display language. Check under **Settings → Text recognition** in SmartMacro.
-  - If it's missing, go to Windows Settings → Time & language → Language & region. Open your language's options, add "Optical character recognition", then restart SmartMacro.
+```mermaid
+flowchart TB
+    subgraph Triggers["⚡ v1.4 Reflex & v1.5 Context (Triggers, Profiles & Tray)"]
+        HK["Per-Macro Hotkeys\n(PressOnce · HoldToRun · RepeatWhileHeld · Toggle)"]
+        SCHED["Schedules & Timers\n(Startup · Interval · Daily HH:mm)"]
+        WIN["Window Events & Auto-Profiles\n(Window Appears/Focused · Foreground Profile Router)"]
+        GOV["Run Governor\n(IgnoreIfBusy · QueueNext · PreemptCurrent)"]
+        HK & SCHED & WIN --> GOV
+    end
 
-## Install / run
+    subgraph Studio["🎛 v1.8 Studio X Workflow IDE"]
+        TB["Searchable Toolbox\n+ 10 1-Click Blueprints"]
+        CANVAS["Block-Aware Step Canvas\n+ Minimap + F9 Breakpoints"]
+        DBG["Interactive Debugger\n(F9 Break · F10 Step Over · Ctrl+T Test Step)"]
+        DOCK["Bottom Dock\n(Activity · Problems · Live Variables · Watchers · Triggers)"]
+    end
 
-1. Unzip `SmartMacro-1.0.0-win-x64.zip` to any folder, for example `Documents\SmartMacro`.
-2. Double-click **SmartMacro.exe**.
-3. The first time, Windows SmartScreen may say "Windows protected your PC". The app isn't code-signed, because signing certificates are paid. Click **More info → Run anyway**.
+    subgraph Engine["🚀 Playback & Vision Engine (SmartMacro.Core)"]
+        INTENT["🧭 5-Tier Smart Intent Relocator\n(UIA → OCR → Multi-Scale Image → Window → Coords)"]
+        VISION["👁 Vision & HUD Probes\n(Hot-Spot ROI <1ms · Gauge Fill 0-100% · OCR · Color)"]
+        BRAIN["🧠 Brain Runtime\n(Typed Variables · Text/CSV Ops · Checkpoints · Watchers · Sub-Macros)"]
+        SERVO["⚖️ Real-Time Feedback Servo\n(High-FPS Minigame Bar Tracking)"]
+    end
 
-Your macros and settings live in `%LOCALAPPDATA%\SmartMacro`, separate from the app folder. Updating means replacing the app folder; your macros stay.
+    GOV --> Engine
+    Studio <--> Engine
+```
 
-## Quick start
+---
 
-1. **Record:** press **Record** (or Ctrl+Shift+F9), do your task, then press Ctrl+Shift+F9 again. A new macro opens in the editor.
-2. **Edit:** select a step to change it on the right. Use the left panel to add steps. Reorder with the arrows (Alt+Up/Down) and delete with Delete.
-3. **Play:** press **Play** (or Ctrl+Shift+F10).
-   - In the editor header, set how many times to repeat (0 = until stopped), the speed, and a wait between repeats.
-   - **Where new steps go:** at the top of the toolbox choose *After the selected step* or *At the end* (right-click a
-     step button for the other choice). Drag steps to reorder them, or right-click a step for Move to top / bottom
-     (Alt+Home / Alt+End). An If or Repeat moved to the top / bottom (or dragged) takes its whole block along, and moves
-     that would break a block are refused with an explanation.
-   - **Mouse positions:** in Move mouse, Mouse click and Scroll wheel, click **Pick position** and then click the spot on
-     your screen (Esc cancels); X and Y are filled in for you. **Use cursor position (3 s)** takes wherever the mouse is
-     after a short countdown.
-4. **Find text:** add a **Find text (OCR)** step. Type the text, optionally click **Pick area on screen**, press **Test now**, and choose what happens when it's found (for example, "Click it").
+## Key Capabilities
 
-## Recording (one Record button for apps and games)
+### 1. 🧭 Smart Dual-Stream Recording & 5-Tier Intent Relocator (`v1.0`–`v1.1 "Intent"`)
+- **One Record button for apps and games:** SmartMacro records screen coordinates and raw relative mouse movement simultaneously on one timeline. Free-cursor segments become editable **Move / Click / Key / Delay** steps; locked/hidden-cursor camera turns become **Recorded input** steps with automatic stuck-key protection.
+- **5-Tier Resilient Target Relocator:** When **Intent Recording** is enabled, recorded clicks capture a multi-anchor fingerprint off-thread and relocate automatically if windows move or resize:
+  1. **UI Automation element** (`AutomationId`, `Name`, `ControlType`, normalized interior click point)
+  2. **Nearby OCR text anchor** + pixel offset
+  3. **56×56 Image Snapshot** (1:1 fast path + **75%–150% multi-scale pyramid** for DPI/zoom changes)
+  4. **Window-Relative coordinate anchor**
+  5. **Recorded coordinates fallback**
+- **🩹 Opt-in Smart Self-Heal:** When playback relocates a drifted click by `≥ 25 px`, the editor offers a 1-click banner to update the step's coordinates (`Ctrl+Z` undoes it; macros are never rewritten silently).
+- **⏱ Adaptive Timing & 🎲 Humanize:** Delay steps can wait a fixed duration, **Until screen settles** (continues early once loading animations stop), or **Until screen changes** (continues the instant new pixels appear). Optional **Humanize** adds subtle click jitter (kept inside matched bounds), natural delay variation, and curved mouse glides.
 
-You don't have to pick a mode first. SmartMacro records every mouse event **twice on one timeline**: where the
-cursor was (screen position) *and* how far the mouse moved (relative movement), plus the exact down/up time of every
-key and button. When you stop, it looks at what the cursor was doing:
+### 2. 🧠 Brain: Variables, Checkpoints, Watchers & Sub-Macros (`v1.2 "Brain"`)
+- **Typed Variables & `{placeholders}`:** Declare `Number`, `Text`, or `Boolean` variables with live runtime values in the bottom dock. Use `{varName}` inside **Type text**, **Find text**, **Focus window**, or **Screenshot** steps.
+- **Screen & List Data Sources:** Set, add, subtract, or transform variables from constants, **🔢 Read number on screen (OCR)**, **Read text on screen**, **📊 Read bar / gauge fill % (`0–100%`)**, **Clipboard**, **Last found X/Y**, **Loop counter**, **Elapsed seconds**, or **📋 Item from list variable (at loop turn)**.
+- **📍 Checkpoints & Per-Step Failure Policies:** On any vision search or window focus timeout, choose to **Continue**, **Skip next step**, **Stop**, **🔁 Retry (`N` extra attempts)**, **🛡 Run a recovery sub-macro**, or **📍 Jump back to a Checkpoint** (capped at 25 restarts per run).
+- **🛡 Background Watchers:** Periodic interrupt guards checked between steps (with configurable interval and cooldown) to dismiss surprise popups, run recovery sub-macros, or jump to a checkpoint.
+- **📦 Sub-Macros & Self-Contained `.smacro` Bundles:** Call reusable library macros with isolated variable memory and Input/Output parameter bindings. Static and runtime call-graph validation prevents recursion cycles. Exporting from the Library automatically bundles all transitive sub-macros into a single `.smacro` file.
 
-- **The cursor moved freely** (apps, menus, shop buttons) → normal editable steps: Click, Press, Move, Delay.
-- **A game hid or locked the cursor while the mouse moved** (turning the camera, holding the right button to look
-  around) → one **Recorded input** step that plays that part as relative movement, like a real mouse.
-  Keys and buttons held across the change (for example holding W while turning) stay in that step so they're never cut.
+### 3. ⚡ Reflex: Per-Macro Triggers & Run Governor (`v1.4 "Reflex"`)
+- **4 Per-Macro Hotkey Modes:** Attach hotkeys directly to any macro in the **⚡ Triggers** dock:
+  - **Press once to run**
+  - **Hold to run (stop when released)**
+  - **Repeat while held (loop until released)**
+  - **Toggle start / stop**
+- **Schedules & Window Event Triggers:** Trigger macros **On app startup**, **Every N seconds**, **Daily at `HH:mm`**, or when a matching **Window appears / gains focus**.
+- **Run Governor & Master Armed Switch:** Configure per-trigger conflict handling (**Ignore if busy**, **Queue next** up to 8 runs, or **Preempt & stop current**) and toggle all background triggers with the top-bar **⚡ Triggers Armed** pill.
 
-Open a **Recorded input** step to see its parts. Each part says what was detected and why ("the cursor was hidden",
-"the mouse moved but the cursor stayed in place"…). If SmartMacro guessed wrong, change the part to
-**Cursor position** or **Relative movement** — no need to record again. Each part always plays the mouse one way only.
+### 4. 🗂 Context: App/Game Profiles & System Tray Resident Mode (`v1.5 "Context"`)
+- **Profiles & Foreground Auto-Switching:** Tag macros with a profile (`Work`, `Excel`, `Elden Ring`, etc.) and filter by profile pill in the Library. Enable **Auto-switch active profile from foreground window** in Settings so profile-scoped triggers only fire when their target app or game is in front (while global macros stay active everywhere).
+- **Resident System Tray Mode:** Enable **Minimize to system tray when closing the main window** to keep triggers armed silently in the background with a tray icon and quick context menu (**Stop All**, **Pause / Resume**, **Triggers Armed**, **Open Studio**).
 
-Tips for games:
+### 5. 📊 Eyes, Arena & Workbench Upgrades (`v1.6 "Eyes"` + `v1.7 "Workbench + Arena"`)
+- **HUD Bar & Progress Gauge Reader (`0–100%`):** Measures horizontal (`LeftToRight`, `RightToLeft`) and vertical (`BottomToTop`, `TopToBottom`) health, mana, stamina, or progress bars by fill color and tolerance — automatically filtering out centered text overlays (`100/100`) and scaling cleanly across `1080p`, `1440p`, and `4K` via `RelativeRect`.
+- **Hot-Spot ROI Turbo (`< 1 ms`):** Image searches remember where their template was last seen and check a `±24 px` neighborhood first in under a millisecond before falling back to a full-area scan.
+- **Workbench Text Cleanup & Window Snap:** Clean up scraped or clipboard text with **Trim whitespace**, **Extract digits only**, **UPPERCASE**, and **lowercase** operations, iterate over CSV/multi-line lists with `LineAtLoopIndex`, and snap target windows (`SnapLeftHalf`, `SnapRightHalf`, `Maximize`, `CenterOnPrimary`) via **Focus window**.
 
-1. Put your character in the **same spot facing the same way** before recording and before playing.
-2. Keep the game's mouse sensitivity, window size and frame rate the same as when you recorded.
-3. Use the record shortcut to stop (clicking SmartMacro's own Stop button isn't recorded, but clicking the taskbar is).
+### 6. 🎛 Studio X: 3-Pane IDE & Interactive Debugger (`v1.8 "Studio X"`)
+- **3-Pane Studio Workspace:** Searchable Toolbox with instant filtering, block-indented Workflow Canvas with color-coded guide rails and right-edge **Workflow Minimap**, sticky **Inspector**, and `Ctrl+K` **Command Palette**.
+- **🔴 Interactive Step Debugger (`F9` / `F10`):**
+  - Press **`F9`** (or click **🔴 Break**) on any step to toggle a breakpoint badge (`🔴 BREAK`).
+  - When playback hits a breakpoint, it pauses right before executing that step, safely releases held keys/buttons, and highlights the step.
+  - Inspect live variable values in the **🧠 Variables** dock, press **`F10`** (**⏭ Step**) to execute one step and pause before the next, or press **`F8`** to resume normal speed.
+- **🧪 Instant Vision Testing (`Ctrl+T`):** Test any Find Image / Color / Text step or `If`/`Repeat` condition against the live screen without running the macro — flashes a green reticle on a match or an amber reticle on the closest near-miss with its similarity score.
+- **10 1-Click Blueprints & Searchable Studio Manual:** Load complete starter workflows (including **Arena Auto-Potion / Gauge Guard**, **Arena Skill Priority Rotation**, **Workbench List / Row Loop**, **Screen Counter Goal Loop**, and **Checkpoint & Retry Recovery Flow**) with a single click.
 
-Even with a perfect recording, a game can play it back a little differently: frame rate, physics, network lag and game
-updates all change results, and some games ignore simulated input. Small differences can add up over a long recording.
-SmartMacro never tries to get around anti-cheat.
+---
 
-**Advanced:** Settings → Recording mode still offers the older **Desktop only** and **Game only** recorders as fallbacks.
-Macros made with them keep working exactly as before.
+## Keyboard Shortcuts
 
-## Find image and Find color (visual detection)
+| Shortcut | Action | Scope |
+| :--- | :--- | :--- |
+| `Ctrl+Shift+F9` *(customizable)* | Start / stop recording | Global (anywhere) |
+| `Ctrl+Shift+F10` *(customizable)* | Play macro / stop playback | Global (anywhere) |
+| `F8` *(customizable)* | Pause / resume playback (releases held keys while paused) | Global while playing |
+| `Esc` | Emergency stop (releases all held keys and buttons immediately) | Global while playing |
+| `F9` | 🔴 Toggle debugger breakpoint on selected step | Editor |
+| `F10` | ⏭ Step over: run one step while paused and pause before the next | Editor / While paused |
+| `Ctrl+T` | 🧪 Test Step: test vision detection once (with near-miss score) or run action step once | Editor |
+| `Ctrl+F5` | ▶ Run step: play only the selected step (or whole `If` / `Repeat` block) | Editor |
+| `Shift+F5` | ⏭ Play from the selected step to the end | Editor |
+| `Ctrl+K` | Open Command Palette (add steps, blueprints, play, auto-fix, speed…) | Editor |
+| `Ctrl+F` | Search steps in workflow (`F3` / `Shift+F3` next/previous match) | Editor |
+| `Ctrl+S` | Save workflow | Editor |
+| `Ctrl+Z` / `Ctrl+Y` | Undo / Redo (`Ctrl+Shift+Z` also redoes) | Editor |
+| `Ctrl+C` / `Ctrl+V` / `Ctrl+D` | Block-aware Copy / Paste / Duplicate | Step list |
+| `Space` | Enable / disable selected steps (or whole `If` / `Repeat` block) | Step list |
+| `←` / `→` | Fold / unfold selected `If` / `Repeat` block | Step list |
+| `Alt+↑` / `Alt+↓` | Block-aware move step up / down (`Alt+Home` / `Alt+End` for top / bottom) | Step list |
+| `Ctrl+Shift+I` / `Ctrl+Shift+R` | Wrap selected steps in `If … End If` / `Repeat … End Repeat` | Step list |
 
-These steps look at the screen instead of using fixed positions, so a macro keeps working when a button moves.
-Everything stays on your PC; no screenshots are uploaded.
+---
 
-- **Find image:** click **Capture image** and drag a box tightly around a button or icon. The step waits until that
-  picture appears (or **disappears**) and can move to / click it. **Match accuracy** (90 % is a good start) says how
-  similar it must be; **Ignore color** matches the shape only. It finds the picture only at the **same size**, so
-  changing display scaling, game resolution or graphics quality may need a new capture.
-- **Find color:** pick a color from the screen (**Pick from screen**), set a **tolerance** and a **small search area**.
-  The biggest patch of that color counts as found. This is simple color matching, not object recognition: anything
-  else with a similar color in the area also counts. **Track for 3 s** follows a moving colored marker in the area and
-  reports its positions (0–100 % along the area) and how many frames per second were reached.
-- **Find text** can now also **wait until the text disappears** (for example "Loading…").
-- **Test now** checks a step without playing the macro and opens a picture with the matches marked
-  (saved as `Logs\last-image-test.png` / `Logs\last-color-test.png`). The log says how long each capture and search took.
-- A **Mouse click** step can click "what the last Find text / image / color step found".
-- Games in exclusive full-screen mode may look black to screen capture; use windowed or borderless mode.
+## Requirements & Installation
 
-## If / Else and Repeat (conditions and loops)
+- **OS:** Windows 10 version 2004 (May 2020 Update) or newer, or Windows 11 (`x64`).
+- **OCR:** Uses the Windows built-in OCR engine (`Windows.Media.Ocr`). Check **Settings → Text recognition** in SmartMacro to verify your display language's OCR pack is installed.
+- **Data location:** Macros, settings, logs, and crash diagnostics are stored locally in `%LOCALAPPDATA%\SmartMacro` (never inside the application folder, so upgrading preserves your library).
 
-The toolbox has a **Logic** section. Blocks are marked by pairs of steps, and the steps between them are indented:
+### Build, Verify & Package from Source
 
-- **If … Else … End If:** the If checks a **condition** — some text, an image or a color **is** (or **is NOT**) on
-  screen, using the same settings and **Test now** as Find text / image / color. True → the steps up to Else run;
-  false → the steps after Else run (Else is optional). "Keep checking for" lets the If wait for the condition to
-  become true (0 = look once). That also covers "wait until visible, otherwise do something else".
-- **Repeat … End Repeat:** a number of times, **while** a condition is true, or **until** it becomes true. The
-  condition is checked before every turn. While / Until loops **must** have a safety limit (Max turns and/or Max
-  time), and you choose whether reaching it stops the macro or just leaves the loop.
-- Adding If or Repeat from the toolbox also adds its End. **Wrap in If / Wrap in Repeat** (above the step list) puts
-  a block around the selected steps (Shift+click to select several). Deleting an If or Repeat removes its markers
-  but keeps the steps inside.
-- The Problems list shows blocks that don't match up (an End If without an If, blocks closed in the wrong order,
-  more than 8 levels deep). Such macros can't be saved or played.
-- Esc / Stop / Pause work inside loops and while a condition waits; held keys and buttons are always released.
-- Macros with blocks are saved as file format 5 (older SmartMacro builds will say the file is from a newer version).
-  Macros without blocks keep their old format. Conditions are plain settings, never scripts or code.
+Requires the **.NET 10 SDK** on Windows:
 
-## Feedback loop (keep a moving marker in a zone)
+```powershell
+# Build with -warnaserror and run all 1,235 unit tests (logs written to artifacts\build.log & artifacts\test.log)
+cmd /c tools\verify.cmd
 
-Some minigames show a bar with a moving marker and a target zone, and you have to hold or release a key / mouse
-button to keep the marker in the zone. The **Feedback loop** step does that kind of thing in real time:
+# Run tests, publish a self-contained single-file win-x64 EXE, verify notices, and create the release ZIP
+tools\publish.cmd
+```
 
-1. **The bar and the marker:** **Pick bar area** (drag tightly around the bar), then **Pick from screen** for the
-   marker color. The direction (left ↔ right or up ↕ down) is set from the shape of the area.
-2. **The target zone:** either a fixed part of the bar (for example 40–60 %) or **found by its color** (a zone that
-   moves – pick its color too).
-3. **What to do** when the marker is left of / inside / right of the zone: **Hold down**, **Release**,
-   **Keep as it is**, or **Tap once when it gets there**. A **dead band** stops flicker at the zone edges.
-4. **Which input:** one mouse button (pressed where the cursor is – put a *Move mouse* step before the loop) or one key.
-5. **Limits (required):** captures per second, minimum time between input changes, a **max runtime**, and what to do
-   when the marker can't be seen for a while (release and keep looking / continue with the next step / stop).
-6. **Stop when (optional):** a **done** condition and a **failed** condition – the same text / image / color
-   conditions as If and Repeat.
+---
 
-Before using real input, use the two buttons at the bottom: **Measure loop speed** (how many frames per second your
-PC manages for this area, and a suggested setting) and **Preview 10 s** (runs the loop for real but presses nothing;
-a small window shows what it sees and what it would do). `docs\feedback-test-page.html` is a little offline test page
-with a moving marker and a "catch game" to practise on before any game.
+## Safety & Honest Limits
 
-While a loop runs, Stop, Esc and Pause work every frame; the key / button is always released when it ends for any
-reason. The log gets one summary line per loop (frames, frames per second, capture and detection time, input changes,
-why it ended). Macros with a Feedback loop are saved as file format 6.
-
-Honest limits: it reacts to what it sees, a few frames late (capture + detection + the game's own delay, usually
-somewhere around 20–100 ms in total). That's fine for simple "keep the marker in the zone" bars; it handles zones with
-momentum, very fast markers, flashing effects or look-alike colors much worse, and it can't win every minigame. It only
-compares colors, never reads game memory, and doesn't get around anti-cheat.
-
-## Safety
-
-- **Esc** on your keyboard stops playback immediately.
-- Ctrl+Shift+F10 also stops playback. You can change all shortcuts in **Settings → Keyboard shortcuts**.
-- While recording or playing, a small banner at the top of the screen shows what SmartMacro is doing.
-- Keys or mouse buttons held by a macro are always released when it stops, and while it's paused (they're pressed again when you resume).
-
-## Library
-
-- **Play / Edit / Duplicate / Delete** each macro. Deleted macros go to a Trash folder, so you can still recover them.
-- **Export…** saves a macro as a `.smartmacro` file to share or back up. **Import** adds macros from files.
-  - Imported files are checked first. They can only contain SmartMacro actions, never programs.
-
-## Known limits
-
-- Windows doesn't allow normal apps to control or record apps running **as administrator**. Nothing works on the lock screen or on UAC prompts.
-- Some games with anti-cheat ignore simulated input. SmartMacro doesn't try to bypass this.
-- Mouse positions are exact screen pixels. If you change monitors, resolution or scaling, recorded clicks may land in the wrong place. Use **Find text** steps for more robust macros.
-- OCR reads normal horizontal text best. Very small, stylized or rotated text may not be found.
-- Feedback loops react a few frames late and only compare colors; they can't handle every minigame (see above).
-- Find image only finds the picture at the size it was captured, and Find color only compares colors. Neither one
-  "understands" what is on screen, and neither can guarantee that a game will react to the clicks it sends.
-
-## Troubleshooting
-
-- **Settings → Copy diagnostics** copies version, Windows, screen and OCR info plus the recent log, for bug reports.
-- Daily log files: `%LOCALAPPDATA%\SmartMacro\Logs`.
-- **Find text → Test now** saves `Logs\last-ocr-test.png`, which shows exactly what was captured.
-- **Find image / Find color → Test now** shows (and saves) the captured area with matches marked: green = the one a
-  macro would use, orange = other matches. "Not found" results include the best similarity seen.
-- **Clicks in a game's menus don't register:** check the log for lines starting with "Input check:". They say if the
-  game window wasn't active (the click only switched to it) or if the game had locked the mouse.
-- **The camera didn't turn (or the cursor jumped instead):** open the **Recorded input** step and check its parts. A
-  camera part must say "Plays as: relative movement"; a menu part should say "cursor position". Change the part if not.
-- After recording, the log says how many cursor and camera parts were found.
-- **A Feedback loop doesn't react / reacts wrongly:** use **Preview 10 s** first. If it says "marker UNCLEAR" or
-  "MISSING" a lot, pick a tighter bar area, pick the color again or change the tolerance. If the preview is right but
-  the game doesn't react, the game may ignore simulated input or need the cursor over its window (add a Move mouse step).
+- **Emergency Stop & Stuck-Key Failsafe:** Pressing physical `Esc` stops playback immediately. Every key and mouse button pressed by SmartMacro is tracked and released when playback finishes, stops, pauses, or if an error occurs.
+- **Administrator Apps (UIPI):** Windows blocks normal processes from sending input to elevated (Run as Administrator) windows, the lock screen, or UAC prompts. Run SmartMacro as Administrator if your target game or app runs as Administrator.
+- **Exclusive Fullscreen:** GDI screen capture sees black in exclusive fullscreen games; switch the game to **Borderless Windowed** or **Windowed** mode for vision steps.
+- **Anti-Cheat:** SmartMacro uses standard Win32 input and screen capture APIs (`SendInput`, `BitBlt`, `Windows.Media.Ocr`, `UIAutomation`) and never reads game memory or attempts to bypass anti-cheat software.
 
 ---
 
