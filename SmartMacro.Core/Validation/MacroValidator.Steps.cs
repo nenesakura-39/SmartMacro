@@ -104,6 +104,8 @@ public static partial class MacroValidator
             case KeyPressStep k:
                 if (!VirtualKeys.IsValid(k.VirtualKey))
                     issues.Add(Error("Choose a valid key.", nameof(KeyPressStep.VirtualKey)));
+                if (k.ScanCode is < 0 or > 0xFF)
+                    issues.Add(Error("Hardware scan code must be between 0 and 255.", nameof(KeyPressStep.ScanCode)));
                 if (!Enum.IsDefined(k.Action))
                     issues.Add(Error("Unknown key action.", nameof(KeyPressStep.Action)));
                 const KeyModifiers allModifiers = KeyModifiers.Control | KeyModifiers.Shift | KeyModifiers.Alt | KeyModifiers.Windows;
@@ -134,17 +136,23 @@ public static partial class MacroValidator
                     issues.Add(Error($"The search text can be at most {MaxSearchTextLength} characters.", nameof(FindTextStep.Text)));
                 if (f.MinSimilarityPercent < 50 || f.MinSimilarityPercent > 100)
                     issues.Add(Error("Match accuracy must be between 50% and 100%.", nameof(FindTextStep.MinSimilarityPercent)));
-                if (!Enum.IsDefined(f.MatchMode))
+                if (!Enum.IsDefined(f.MatchMode) || !Enum.IsDefined(f.Preprocess))
                     issues.Add(Error("This step has an unknown option value."));
                 ValidateSearch(issues, f, screen, MinCheckIntervalMs);
                 break;
 
             case FindImageStep img:
                 ValidateTemplate(issues, img);
+                if (!Enum.IsDefined(img.Detector))
+                    issues.Add(Error("Unknown image detector mode.", nameof(FindImageStep.Detector)));
                 if (img.MinSimilarityPercent < 50 || img.MinSimilarityPercent > 100)
                     issues.Add(Error("Match accuracy must be between 50% and 100%.", nameof(FindImageStep.MinSimilarityPercent)));
                 else if (img.MinSimilarityPercent < 70)
                     issues.Add(Warning("Match accuracy below 70% often matches the wrong thing. Test it with \"Test now\".", nameof(FindImageStep.MinSimilarityPercent)));
+                if (img.MinVisiblePercent != 0 && (img.MinVisiblePercent < 40 || img.MinVisiblePercent > 100))
+                    issues.Add(Error("\"Minimum visible part\" must be 0% (whole image) or 40% to 100%.", nameof(FindImageStep.MinVisiblePercent)));
+                if (img.RotationRangeDeg is < 0 or > 45)
+                    issues.Add(Error("\"Rotation tolerance\" must be 0° to 45°.", nameof(FindImageStep.RotationRangeDeg)));
                 if (img.IgnoreEdgesPercent < 0 || img.IgnoreEdgesPercent > 40)
                     issues.Add(Error("\"Ignore the edges\" must be 0% to 40%.", nameof(FindImageStep.IgnoreEdgesPercent)));
                 else if (img.IgnoreEdgesPercent > 0 && img.TemplateWidth > 0
@@ -185,6 +193,8 @@ public static partial class MacroValidator
                 break;
 
             case FindColorStep c:
+                if (!Enum.IsDefined(c.ColorSpace) || !Enum.IsDefined(c.SelectRule))
+                    issues.Add(Error("This Find color step has an unknown option value."));
                 if (!RgbColor.TryParse(c.Color, out _))
                     issues.Add(Error("Enter the color as #RRGGBB (for example #FF0000 for red), or pick it from the screen.", nameof(FindColorStep.Color)));
                 if (c.UseSecondaryColor && !RgbColor.TryParse(string.IsNullOrWhiteSpace(c.SecondaryColor) ? "#FFFFFF" : c.SecondaryColor, out _))
@@ -195,6 +205,14 @@ public static partial class MacroValidator
                     issues.Add(Warning("A tolerance above 100 matches many different colors.", nameof(FindColorStep.Tolerance)));
                 if (c.MinPixels < 1 || c.MinPixels > MaxColorPixels)
                     issues.Add(Error($"Minimum size must be 1 to {MaxColorPixels:N0} pixels.", nameof(FindColorStep.MinPixels)));
+                if (c.MaxPixels < 0 || c.MaxPixels > MaxColorPixels)
+                    issues.Add(Error($"Maximum size must be 0 (unlimited) to {MaxColorPixels:N0} pixels.", nameof(FindColorStep.MaxPixels)));
+                else if (c.MaxPixels > 0 && c.MaxPixels < c.MinPixels)
+                    issues.Add(Error("Maximum size must be at least the minimum size (or 0 for unlimited).", nameof(FindColorStep.MaxPixels)));
+                if (c.MinCircularityPercent is < 0 or > 100)
+                    issues.Add(Error("Minimum roundness must be 0% to 100%.", nameof(FindColorStep.MinCircularityPercent)));
+                if (c.MinFillPercent is < 0 or > 100)
+                    issues.Add(Error("Minimum fill density must be 0% to 100%.", nameof(FindColorStep.MinFillPercent)));
                 ValidateSearch(issues, c, screen, MinVisionCheckIntervalMs);
                 if (SearchArea.IsWholeMonitorOrMore(c))
                     issues.Add(Warning("Searching a whole monitor (or every monitor) for a color often finds something else. Pick a small area or an app window if you can.", "Region"));

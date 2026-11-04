@@ -79,7 +79,7 @@ public static class RecordingCleanup
     public static List<RawInputEvent> ReleasesAtStop(IReadOnlyList<RawInputEvent> events, long stopTimeMs)
     {
         ArgumentNullException.ThrowIfNull(events);
-        var keys = new List<int>();
+        var keys = new List<(int Vk, int Scan, bool Ext)>();
         var buttons = new List<MacroMouseButton>();
         int x = 0, y = 0;
         var lastTime = 0L;
@@ -89,10 +89,10 @@ public static class RecordingCleanup
             switch (e.Kind)
             {
                 case RawInputKind.KeyDown:
-                    if (!keys.Contains(e.VirtualKey)) keys.Add(e.VirtualKey);
+                    if (!keys.Any(k => k.Vk == e.VirtualKey)) keys.Add((e.VirtualKey, e.ScanCode, e.Extended));
                     break;
                 case RawInputKind.KeyUp:
-                    keys.Remove(e.VirtualKey);
+                    keys.RemoveAll(k => k.Vk == e.VirtualKey);
                     break;
                 case RawInputKind.MouseDown:
                     if (!buttons.Contains(e.Button)) buttons.Add(e.Button);
@@ -110,7 +110,8 @@ public static class RecordingCleanup
 
         var at = Math.Max(stopTimeMs, lastTime);
         var releases = new List<RawInputEvent>(keys.Count + buttons.Count);
-        for (var i = keys.Count - 1; i >= 0; i--) releases.Add(new RawInputEvent(at, RawInputKind.KeyUp, VirtualKey: keys[i]));
+        for (var i = keys.Count - 1; i >= 0; i--)
+            releases.Add(new RawInputEvent(at, RawInputKind.KeyUp, VirtualKey: keys[i].Vk, ScanCode: keys[i].Scan, Extended: keys[i].Ext));
         foreach (var button in buttons) releases.Add(new RawInputEvent(at, RawInputKind.MouseUp, x, y, button));
         return releases;
     }

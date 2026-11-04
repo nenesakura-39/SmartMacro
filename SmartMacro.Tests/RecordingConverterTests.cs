@@ -136,4 +136,107 @@ public class RecordingConverterTests
 
         Assert.False(MacroValidator.Validate(macro).HasErrors());
     }
+
+    [Fact]
+    public void XButton1_and_XButton2_clicks_are_converted_and_described()
+    {
+        var steps = RecordingConverter.Convert(new[]
+        {
+            Down(0, 100, 200, MacroMouseButton.XButton1), Up(50, 100, 200, MacroMouseButton.XButton1),
+            Down(500, 300, 400, MacroMouseButton.XButton2), Up(560, 300, 400, MacroMouseButton.XButton2),
+        });
+
+        Assert.Equal(
+            "Click mouse 4 (back) button at (100, 200) (hold 50 ms) | Wait 450 ms | Click mouse 5 (forward) button at (300, 400) (hold 60 ms)",
+            Describe(steps));
+    }
+
+    [Fact]
+    public void KeyPressStep_preserves_hardware_ScanCode_and_Extended_flag()
+    {
+        var steps = RecordingConverter.Convert(new[]
+        {
+            new RawInputEvent(0, RawInputKind.KeyDown, VirtualKey: 0x57, ScanCode: 0x11, Extended: false),
+            new RawInputEvent(60, RawInputKind.KeyUp, VirtualKey: 0x57, ScanCode: 0x11, Extended: false),
+            new RawInputEvent(200, RawInputKind.KeyDown, VirtualKey: 0x26, ScanCode: 0x48, Extended: true), // Up Arrow (unreleased)
+        }, new RecordingOptions { MinDelayMs = 1000 });
+
+        Assert.Equal(3, steps.Count);
+        var wTap = Assert.IsType<KeyPressStep>(steps[0]);
+        Assert.Equal(KeyAction.Press, wTap.Action);
+        Assert.Equal(0x11, wTap.ScanCode);
+        Assert.False(wTap.Extended);
+
+        var upDown = Assert.IsType<KeyPressStep>(steps[1]);
+        Assert.Equal(KeyAction.Down, upDown.Action);
+        Assert.Equal(0x48, upDown.ScanCode);
+        Assert.True(upDown.Extended);
+
+        var upRelease = Assert.IsType<KeyPressStep>(steps[2]);
+        Assert.Equal(KeyAction.Up, upRelease.Action);
+        Assert.Equal(0x48, upRelease.ScanCode);
+        Assert.True(upRelease.Extended);
+    }
+
+    [Fact]
+    public void CoordinateScaling_scales_InputSequenceStep_positions()
+    {
+        var seq = new InputSequenceStep
+        {
+            StartX = 960,
+            StartY = 540,
+            Events = new List<InputEvent>
+            {
+                new() { TimeUs = 0, Kind = InputEventKind.MouseMove, X = 960, Y = 540, HasPosition = true },
+                new() { TimeUs = 10_000, Kind = InputEventKind.MouseDown, Button = MacroMouseButton.Left, X = 1920, Y = 1080, HasPosition = true },
+                new() { TimeUs = 20_000, Kind = InputEventKind.KeyDown, VirtualKey = 0x41 },
+            },
+        };
+
+        var scaler = new SmartMacro.Core.Playback.CoordinateMapping(
+            new SmartMacro.Core.Ocr.ScreenRect(0, 0, 1920, 1080),
+            new SmartMacro.Core.Ocr.ScreenRect(0, 0, 3840, 2160));
+
+        SmartMacro.Core.Playback.CoordinateScaling.ApplyInPlace(new MacroStep[] { seq }, scaler);
+
+        Assert.Equal(1920, seq.StartX);
+        Assert.Equal(1080, seq.StartY);
+        Assert.Equal(1920, seq.Events[0].X);
+        Assert.Equal(1080, seq.Events[0].Y);
+        Assert.Equal(3840, seq.Events[1].X);
+        Assert.Equal(2160, seq.Events[1].Y);
+    }
+
+    [Fact]
+    public void ExpandInputSequence_preserves_ScanCode_and_Extended_flags()
+    {
+        var seq = new InputSequenceStep
+        {
+            Events = new List<InputEvent>
+            {
+                new() { TimeUs = 0, Kind = InputEventKind.KeyDown, VirtualKey = 0x26, ScanCode = 0x48, Extended = true },
+                new() { TimeUs = 40_000, Kind = InputEventKind.KeyUp, VirtualKey = 0x26, ScanCode = 0x48, Extended = true },
+            },
+        };
+
+        var expanded = SmartMacro.Core.Workflow.StepCleanup.ExpandInputSequence(seq);
+        var keyStep = Assert.Single(expanded.OfType<KeyPressStep>());
+        Assert.Equal(0x26, keyStep.VirtualKey);
+        Assert.Equal(0x48, keyStep.ScanCode);
+        Assert.True(keyStep.Extended);
+    }
+
+    [Fact]
+    public void SmartClickConversion_rejects_Mouse4_and_Mouse5_buttons()
+    {
+        var click = new MouseClickStep
+        {
+            Button = MacroMouseButton.XButton1,
+            Action = MouseClickAction.Click,
+            TargetThumbnailBase64 = Convert.ToBase64String(new byte[] { 1, 2, 3 }),
+        };
+
+        Assert.False(SmartMacro.Core.Workflow.SmartClickConversion.HasConvertibleAction(click));
+        Assert.Contains("Left or Right", SmartMacro.Core.Workflow.SmartClickConversion.WhyNotConvertible(click) ?? "");
+    }
 }

@@ -61,6 +61,12 @@ public partial class App : Application
         AppDomain.CurrentDomain.UnhandledException += OnDomainUnhandledException;
         TaskScheduler.UnobservedTaskException += OnUnobservedTaskException;
 
+        ShutdownMode = ShutdownMode.OnExplicitShutdown;
+        var splash = new Views.SplashLoadingWindow();
+        splash.Show();
+        splash.ReportStage(0.18, "MOUNTING STORAGE & TELEMETRY");
+        await Task.Delay(75);
+
         var dialogs = new DialogService();
         var repository = new JsonMacroRepository(paths.MacrosDirectory, paths.TrashDirectory);
         var settingsStore = new JsonSettingsStore(paths.SettingsFile);
@@ -68,6 +74,8 @@ public partial class App : Application
         var window = new MainWindow();
 
         // Recording / playback pieces. The run-mode host reads the current settings through the view model.
+        splash.ReportStage(0.45, "CALIBRATING HIGH-RES TIMELINE & VISION");
+        await Task.Delay(75);
         MainViewModel? viewModel = null;
         _runHost = new RunModeHost(window, () => viewModel?.CurrentSettings ?? new AppSettings());
         var ocr = new WindowsOcrService();
@@ -93,6 +101,9 @@ public partial class App : Application
             new FindTextTools(window, ocr, Path.Combine(paths.LogsDirectory, "last-ocr-test.png"), screenInfo),
             new VisionTools(window, screenCapture, paths.LogsDirectory, screenInfo, ocr, uiAutomation));
 
+        splash.ReportStage(0.74, "BINDING INPUT HOOKS & WORKSPACE");
+        await Task.Delay(65);
+
         var mainViewModel = new MainViewModel(repository, settingsStore, _log, dialogs, screenInfo, paths, Dispatcher, automation);
         viewModel = mainViewModel;
         _mainViewModel = mainViewModel;
@@ -100,7 +111,31 @@ public partial class App : Application
         ThemeManager.Apply(mainViewModel.CurrentSettings);
         window.DataContext = mainViewModel;
         MainWindow = window;
+        ShutdownMode = ShutdownMode.OnMainWindowClose;
+
+        try
+        {
+            splash.ReportStage(0.92, "LOADING MACRO LIBRARY");
+            await _mainViewModel.InitializeAsync();
+            ThemeManager.Apply(mainViewModel.CurrentSettings);
+            Services.Vision.OverlayCaptureService.AllowObsCapture = mainViewModel.CurrentSettings.ShowOverlaysInObsAndRecording;
+        }
+        catch (Exception ex)
+        {
+            _log.Error("Startup failed.", ex);
+            _mainViewModel.SetStatus($"Startup problem: {ex.Message}", StatusKind.Error);
+        }
+
+        window.Opacity = 0;
         window.Show();
+        await splash.CompleteAndCloseAsync();
+
+        var mainFadeIn = new System.Windows.Media.Animation.DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(220))
+        {
+            EasingFunction = new System.Windows.Media.Animation.CubicEase { EasingMode = System.Windows.Media.Animation.EasingMode.EaseOut },
+        };
+        window.BeginAnimation(UIElement.OpacityProperty, mainFadeIn);
+        window.Activate();
 
         _hotkeys = new HotkeyService(_log);
         _hotkeys.Pressed += (_, action) => mainViewModel.Automation.HandleHotkey(action);
@@ -142,16 +177,6 @@ public partial class App : Application
             if (failed.Count > 0)
                 mainViewModel.SetStatus($"These shortcuts are used by another program and won't work: {string.Join(", ", failed)}. Change them in Settings.", StatusKind.Warning);
         };
-
-        try
-        {
-            await _mainViewModel.InitializeAsync();
-        }
-        catch (Exception ex)
-        {
-            _log.Error("Startup failed.", ex);
-            _mainViewModel.SetStatus($"Startup problem: {ex.Message}", StatusKind.Error);
-        }
     }
 
     protected override void OnExit(ExitEventArgs e)

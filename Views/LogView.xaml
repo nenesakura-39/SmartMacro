@@ -25,22 +25,28 @@
                 </Button>
             </StackPanel>
             <StackPanel>
-                <TextBlock Text="Logs" Style="{StaticResource PageTitle}" />
-                <TextBlock Text="What SmartMacro has been doing, newest first. Everything is also saved to a daily log file on this PC."
+                <TextBlock Text="Telemetry &amp; Activity Logs" Style="{StaticResource PageTitle}" />
+                <TextBlock Text="Real-time execution telemetry, OCR matches, and system events (newest first). Automatically persisted to daily logs on this PC."
                            Style="{StaticResource PageSubtitle}" />
             </StackPanel>
         </DockPanel>
 
-        <!-- ===== Studio log surface ===== -->
+        <!-- ===== Studio log surface v3 ===== -->
         <Border Style="{StaticResource Card}" Padding="0" Background="{DynamicResource StepsCanvasBrush}" ClipToBounds="True">
             <DockPanel>
                 <!-- Toolbar: search | level filter pills | count | Copy Log / Clear Log -->
-                <Border DockPanel.Dock="Top" Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,0,1"
-                        CornerRadius="10,10,0,0" Padding="10,8">
+                <Border DockPanel.Dock="Top" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,0,1"
+                        CornerRadius="10,10,0,0" Padding="12,10">
+                    <Border.Background>
+                        <LinearGradientBrush StartPoint="0,0" EndPoint="1,0">
+                            <GradientStop Color="#16182C" Offset="0" />
+                            <GradientStop Color="#101220" Offset="1" />
+                        </LinearGradientBrush>
+                    </Border.Background>
                     <DockPanel>
                         <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
                             <Border Style="{StaticResource Pill}" Margin="0,0,10,0">
-                                <TextBlock Text="{Binding CountText}" FontSize="11" Foreground="{DynamicResource MutedTextBrush}" />
+                                <TextBlock Text="{Binding CountText}" FontFamily="{StaticResource MonoFont}" FontWeight="SemiBold" FontSize="11" Foreground="{DynamicResource AccentHoverBrush}" />
                             </Border>
                             <Button Command="{Binding CopyCommand}" Margin="0,0,6,0" Padding="10,5" FontSize="12"
                                     ToolTip="Copy Log: copies the entries shown (oldest first) for bug reports" AutomationProperties.Name="Copy log">
@@ -59,8 +65,8 @@
                         </StackPanel>
 
                         <StackPanel Orientation="Horizontal">
-                            <Grid Width="300">
-                                <TextBox Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}" Tag="Search the log" Padding="30,6,28,6"
+                            <Grid Width="310">
+                                <TextBox Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}" Tag="Search telemetry entries…" Padding="30,6,28,6"
                                          AutomationProperties.Name="Search the log" />
                                 <TextBlock Text="&#xE721;" Style="{StaticResource IconText}" Foreground="{DynamicResource MutedTextBrush}"
                                            HorizontalAlignment="Left" Margin="10,0,0,0" IsHitTestVisible="False" FontSize="12" />
@@ -89,39 +95,49 @@
 
                 <Grid>
                     <ListBox ItemsSource="{Binding EntriesView}" ItemContainerStyle="{StaticResource PlainListItem}" Background="Transparent" BorderThickness="0"
-                             Padding="6,6,6,6" ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                             Padding="8,8,8,8" ScrollViewer.HorizontalScrollBarVisibility="Disabled"
                              VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling"
                              AutomationProperties.Name="Log entries">
                         <ListBox.ItemTemplate>
                             <DataTemplate>
-                                <Grid Margin="4,3">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="64" />
-                                        <ColumnDefinition Width="66" />
-                                        <ColumnDefinition Width="*" />
-                                    </Grid.ColumnDefinitions>
-                                    <TextBlock Text="{Binding TimeText}" Foreground="{DynamicResource SubtleTextBrush}" FontFamily="{StaticResource MonoFont}" FontSize="11.5"
-                                               VerticalAlignment="Top" Margin="0,2,0,0" />
-                                    <Border Grid.Column="1" Style="{StaticResource Pill}" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="0,1,0,0"
-                                            Background="{Binding Converter={StaticResource LogPill}, ConverterParameter=Soft}" MinWidth="52">
-                                        <TextBlock Text="{Binding Converter={StaticResource LogPill}, ConverterParameter=Label}" FontSize="9" FontWeight="Bold"
-                                                   HorizontalAlignment="Center"
-                                                   Foreground="{Binding Converter={StaticResource LogPill}, ConverterParameter=Brush}" />
-                                    </Border>
-                                    <StackPanel Grid.Column="2">
-                                        <TextBlock Text="{Binding Message}" TextWrapping="Wrap" FontSize="12" />
-                                        <TextBlock Text="{Binding Details}" Foreground="{DynamicResource MutedTextBrush}" FontSize="11" TextWrapping="Wrap"
-                                                   FontFamily="{StaticResource MonoFont}" Margin="0,2,0,0"
-                                                   Visibility="{Binding Details, Converter={StaticResource NullToVisibility}}" />
-                                    </StackPanel>
-                                </Grid>
+                                <Border x:Name="LogRowCard" Margin="2,2" Padding="10,6" CornerRadius="7"
+                                        Background="#121426" BorderBrush="#1C2038" BorderThickness="1">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="68" />
+                                            <ColumnDefinition Width="68" />
+                                            <ColumnDefinition Width="*" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Text="{Binding TimeText}" Foreground="{DynamicResource SubtleTextBrush}" FontFamily="{StaticResource MonoFont}" FontSize="11.5"
+                                                   VerticalAlignment="Top" Margin="0,2,0,0" />
+                                        <Border Grid.Column="1" Style="{StaticResource Pill}" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="0,1,0,0"
+                                                Background="{Binding Converter={StaticResource LogPill}, ConverterParameter=Soft}" MinWidth="54">
+                                            <TextBlock Text="{Binding Converter={StaticResource LogPill}, ConverterParameter=Label}" FontSize="9" FontWeight="Bold"
+                                                       FontFamily="{StaticResource MonoFont}"
+                                                       HorizontalAlignment="Center"
+                                                       Foreground="{Binding Converter={StaticResource LogPill}, ConverterParameter=Brush}" />
+                                        </Border>
+                                        <StackPanel Grid.Column="2">
+                                            <TextBlock Text="{Binding Message}" TextWrapping="Wrap" FontSize="12" />
+                                            <TextBlock Text="{Binding Details}" Foreground="{DynamicResource MutedTextBrush}" FontSize="11" TextWrapping="Wrap"
+                                                       FontFamily="{StaticResource MonoFont}" Margin="0,3,0,0"
+                                                       Visibility="{Binding Details, Converter={StaticResource NullToVisibility}}" />
+                                        </StackPanel>
+                                    </Grid>
+                                </Border>
+                                <DataTemplate.Triggers>
+                                    <Trigger SourceName="LogRowCard" Property="IsMouseOver" Value="True">
+                                        <Setter TargetName="LogRowCard" Property="Background" Value="#1A1D34" />
+                                        <Setter TargetName="LogRowCard" Property="BorderBrush" Value="{DynamicResource InputBorderBrush}" />
+                                    </Trigger>
+                                </DataTemplate.Triggers>
                             </DataTemplate>
                         </ListBox.ItemTemplate>
                     </ListBox>
                     <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center"
                                 Visibility="{Binding IsEmpty, Converter={StaticResource BoolToVisibility}}">
-                        <TextBlock Text="&#xE9D9;" Style="{StaticResource IconText}" FontSize="26" Foreground="{DynamicResource MutedTextBrush}" HorizontalAlignment="Center" />
-                        <TextBlock Text="No log entries yet." Foreground="{DynamicResource MutedTextBrush}" Margin="0,10,0,0" />
+                        <ctrl:StudioIcon Kind="Logs" Size="28" Foreground="{DynamicResource SubtleTextBrush}" HorizontalAlignment="Center" />
+                        <TextBlock Text="No telemetry entries recorded yet." Foreground="{DynamicResource MutedTextBrush}" Margin="0,10,0,0" />
                     </StackPanel>
                     <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center"
                                 Visibility="{Binding IsFilteredEmpty, Converter={StaticResource BoolToVisibility}}">

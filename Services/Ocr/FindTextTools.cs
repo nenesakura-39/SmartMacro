@@ -97,7 +97,7 @@ public sealed class FindTextTools : IFindTextTools
         var picture = savedImage is null ? "" : $"\nA picture of what was captured was saved to: {savedImage}";
 
         var matches = OcrTextMatcher.Find(read, step.Text, step.MatchMode, step.CaseSensitive, step.MinSimilarityPercent / 100.0,
-                step.NormalizeLookAlikes);
+                step.NormalizeLookAlikes, step.UseRegexPattern);
         if (matches.Count > 0)
         {
             var best = matches[0];

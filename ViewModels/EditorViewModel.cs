@@ -109,6 +109,7 @@ public sealed partial class EditorViewModel : ObservableObject
         MoveToBottomCommand = new RelayCommand(() => MoveSelected(MoveDirection.ToBottom), () => CanMove(up: false));
         AddToEndCommand = new RelayCommand(p => AddStep(p, InsertPosition.AtEnd, forcePosition: true), p => HasMacro && p is StepKind);
         InsertAfterSelectedCommand = new RelayCommand(p => AddStep(p, InsertPosition.AfterSelected, forcePosition: true), p => HasMacro && p is StepKind);
+        InsertQuickAfterRowCommand = new RelayCommand(InsertQuickAfterRow, p => HasMacro && p is StepViewModel);
         SaveCommand = new AsyncRelayCommand(async () => await SaveAsync(), HandleUnexpectedError, () => HasMacro && !_isSaving);
         RevertCommand = new RelayCommand(Revert, () => HasMacro && IsDirty);
         GoToLibraryCommand = new RelayCommand(goToLibrary);
@@ -474,6 +475,17 @@ public sealed partial class EditorViewModel : ObservableObject
     /// <summary>Adds the step kind given as parameter right after the selected step (or at the end if none).</summary>
     public RelayCommand InsertAfterSelectedCommand { get; }
 
+    /// <summary>Inserts a default step right after the hovered row when the user clicks the between-step '+' rail.</summary>
+    public RelayCommand InsertQuickAfterRowCommand { get; }
+
+    private void InsertQuickAfterRow(object? parameter)
+    {
+        if (!HasMacro || parameter is not StepViewModel row) return;
+        SelectedStep = row;
+        var kind = row.Model is DelayStep ? StepKind.MouseClick : StepKind.Delay;
+        AddStep(kind, InsertPosition.AfterSelected, forcePosition: true);
+    }
+
     /// <summary>
     /// Raised after a move with the steps that should be selected afterwards (the view selects them in the list,
     /// so a multi-step selection survives the move).
@@ -593,8 +605,11 @@ public sealed partial class EditorViewModel : ObservableObject
         get => _selectedStep;
         set
         {
+            var previous = _selectedStep;
             if (SetProperty(ref _selectedStep, value))
             {
+                if (previous is KeyPressStepViewModel { IsRecordingKey: true } prevKey)
+                    prevKey.IsRecordingKey = false;
                 if (value is not null && (value.Model is IfStep or ElseStep or RepeatStep || value.IndentLevel > 0))
                     AddAtEnd = false;
                 UpdateBlockPartnerHighlights();
@@ -992,6 +1007,44 @@ public sealed partial class EditorViewModel : ObservableObject
         }
 
         UpdateBlockPartnerHighlights();
+        UpdateTimelineOffsets();
+    }
+
+    private void UpdateTimelineOffsets()
+    {
+        var cumulativeMs = 0.0;
+        var speed = _speed > 0 && double.IsFinite(_speed) ? _speed : 1.0;
+
+        for (var i = 0; i < Steps.Count; i++)
+        {
+            var vm = Steps[i];
+            var step = vm.Model;
+            vm.TimelineOffsetText = FormatTimelineOffset(cumulativeMs);
+
+            if (!step.Enabled) continue;
+            var stepMs = step switch
+            {
+                DelayStep d => d.DurationMs / speed,
+                MouseClickStep { Action: MouseClickAction.Drag } c => c.DragDurationMs / speed,
+                MouseClickStep { HoldMs: > 0 } c => c.HoldMs / speed,
+                MouseMoveStep { UseRelativeDelta: false, MoveStyle: MouseMoveStyle.SmoothGlide or MouseMoveStyle.HumanCurve } m => m.MoveDurationMs / speed,
+                KeyPressStep { Action: KeyAction.Press, HoldMs: > 0 } k => k.HoldMs / speed,
+                InputSequenceStep q => (q.Events.Count == 0 ? 0.0 : Math.Max(0L, q.Events[^1].TimeUs) / 1000.0) / speed,
+                TypeTextStep t => (t.Text?.Length ?? 0) * Math.Max(8, t.CharacterDelayMs) / speed,
+                _ => 0.0,
+            };
+            if (stepMs > 0 && double.IsFinite(stepMs))
+                cumulativeMs += stepMs;
+        }
+    }
+
+    private static string FormatTimelineOffset(double ms)
+    {
+        if (ms < 1000) return $"+{ms / 1000.0:0.00}s";
+        if (ms < 60_000) return $"+{ms / 1000.0:0.0}s";
+        var mins = (int)(ms / 60_000);
+        var secs = (ms % 60_000) / 1000.0;
+        return $"+{mins}m{secs:00}s";
     }
 
     private void UpdateBlockPartnerHighlights()

@@ -2,7 +2,7 @@
 
 **All-round AAA desktop & game macro studio for Windows — record, build, debug, and automate workflows visually.**
 
-Owner & developer: **Riku** · Version **1.8.0 ("Studio X")** · `.NET 10` (WPF, `win-x64`)
+Owner & developer: **Riku** · Version **1.0.0** (first public release) · `.NET 10` (WPF, `win-x64`)
 
 SmartMacro is a local-first Windows automation studio designed for both **daily productivity ("Workbench")** and **gaming ("Arena")**. It records mouse and keyboard input across desktop apps and 3D games, turns recordings into structured visual workflows, and provides computer vision (template matching, pixel color, HUD gauge % reading, Windows OCR), branching logic, typed variables, background watchers, per-macro triggers, and an interactive step debugger — all with **zero scripting required** and **zero cloud uploads**.
 
@@ -12,7 +12,7 @@ SmartMacro is a local-first Windows automation studio designed for both **daily 
 
 ```mermaid
 flowchart TB
-    subgraph Triggers["⚡ v1.4 Reflex & v1.5 Context (Triggers, Profiles & Tray)"]
+    subgraph Triggers["⚡ Reflex & Context (Triggers, Profiles & Tray)"]
         HK["Per-Macro Hotkeys\n(PressOnce · HoldToRun · RepeatWhileHeld · Toggle)"]
         SCHED["Schedules & Timers\n(Startup · Interval · Daily HH:mm)"]
         WIN["Window Events & Auto-Profiles\n(Window Appears/Focused · Foreground Profile Router)"]
@@ -20,7 +20,7 @@ flowchart TB
         HK & SCHED & WIN --> GOV
     end
 
-    subgraph Studio["🎛 v1.8 Studio X Workflow IDE"]
+    subgraph Studio["🎛 Studio X Workflow IDE"]
         TB["Searchable Toolbox\n+ 10 1-Click Blueprints"]
         CANVAS["Block-Aware Step Canvas\n+ Minimap + F9 Breakpoints"]
         DBG["Interactive Debugger\n(F9 Break · F10 Step Over · Ctrl+T Test Step)"]
@@ -42,7 +42,7 @@ flowchart TB
 
 ## Key Capabilities
 
-### 1. 🧭 Smart Dual-Stream Recording & 5-Tier Intent Relocator (`v1.0`–`v1.1 "Intent"`)
+### 1. 🧭 Smart Dual-Stream Recording & 5-Tier Intent Relocator ("Intent")
 - **One Record button for apps and games:** SmartMacro records screen coordinates and raw relative mouse movement simultaneously on one timeline. Free-cursor segments become editable **Move / Click / Key / Delay** steps; locked/hidden-cursor camera turns become **Recorded input** steps with automatic stuck-key protection.
 - **5-Tier Resilient Target Relocator:** When **Intent Recording** is enabled, recorded clicks capture a multi-anchor fingerprint off-thread and relocate automatically if windows move or resize:
   1. **UI Automation element** (`AutomationId`, `Name`, `ControlType`, normalized interior click point)
@@ -53,14 +53,14 @@ flowchart TB
 - **🩹 Opt-in Smart Self-Heal:** When playback relocates a drifted click by `≥ 25 px`, the editor offers a 1-click banner to update the step's coordinates (`Ctrl+Z` undoes it; macros are never rewritten silently).
 - **⏱ Adaptive Timing & 🎲 Humanize:** Delay steps can wait a fixed duration, **Until screen settles** (continues early once loading animations stop), or **Until screen changes** (continues the instant new pixels appear). Optional **Humanize** adds subtle click jitter (kept inside matched bounds), natural delay variation, and curved mouse glides.
 
-### 2. 🧠 Brain: Variables, Checkpoints, Watchers & Sub-Macros (`v1.2 "Brain"`)
+### 2. 🧠 Brain: Variables, Checkpoints, Watchers & Sub-Macros ("Brain")
 - **Typed Variables & `{placeholders}`:** Declare `Number`, `Text`, or `Boolean` variables with live runtime values in the bottom dock. Use `{varName}` inside **Type text**, **Find text**, **Focus window**, or **Screenshot** steps.
 - **Screen & List Data Sources:** Set, add, subtract, or transform variables from constants, **🔢 Read number on screen (OCR)**, **Read text on screen**, **📊 Read bar / gauge fill % (`0–100%`)**, **Clipboard**, **Last found X/Y**, **Loop counter**, **Elapsed seconds**, or **📋 Item from list variable (at loop turn)**.
 - **📍 Checkpoints & Per-Step Failure Policies:** On any vision search or window focus timeout, choose to **Continue**, **Skip next step**, **Stop**, **🔁 Retry (`N` extra attempts)**, **🛡 Run a recovery sub-macro**, or **📍 Jump back to a Checkpoint** (capped at 25 restarts per run).
 - **🛡 Background Watchers:** Periodic interrupt guards checked between steps (with configurable interval and cooldown) to dismiss surprise popups, run recovery sub-macros, or jump to a checkpoint.
 - **📦 Sub-Macros & Self-Contained `.smacro` Bundles:** Call reusable library macros with isolated variable memory and Input/Output parameter bindings. Static and runtime call-graph validation prevents recursion cycles. Exporting from the Library automatically bundles all transitive sub-macros into a single `.smacro` file.
 
-### 3. ⚡ Reflex: Per-Macro Triggers & Run Governor (`v1.4 "Reflex"`)
+### 3. ⚡ Reflex: Per-Macro Triggers & Run Governor ("Reflex")
 - **4 Per-Macro Hotkey Modes:** Attach hotkeys directly to any macro in the **⚡ Triggers** dock:
   - **Press once to run**
   - **Hold to run (stop when released)**
@@ -69,16 +69,16 @@ flowchart TB
 - **Schedules & Window Event Triggers:** Trigger macros **On app startup**, **Every N seconds**, **Daily at `HH:mm`**, or when a matching **Window appears / gains focus**.
 - **Run Governor & Master Armed Switch:** Configure per-trigger conflict handling (**Ignore if busy**, **Queue next** up to 8 runs, or **Preempt & stop current**) and toggle all background triggers with the top-bar **⚡ Triggers Armed** pill.
 
-### 4. 🗂 Context: App/Game Profiles & System Tray Resident Mode (`v1.5 "Context"`)
+### 4. 🗂 Context: App/Game Profiles & System Tray Resident Mode ("Context")
 - **Profiles & Foreground Auto-Switching:** Tag macros with a profile (`Work`, `Excel`, `Elden Ring`, etc.) and filter by profile pill in the Library. Enable **Auto-switch active profile from foreground window** in Settings so profile-scoped triggers only fire when their target app or game is in front (while global macros stay active everywhere).
 - **Resident System Tray Mode:** Enable **Minimize to system tray when closing the main window** to keep triggers armed silently in the background with a tray icon and quick context menu (**Stop All**, **Pause / Resume**, **Triggers Armed**, **Open Studio**).
 
-### 5. 📊 Eyes, Arena & Workbench Upgrades (`v1.6 "Eyes"` + `v1.7 "Workbench + Arena"`)
+### 5. 📊 Eyes, Arena & Workbench Upgrades ("Eyes" + "Workbench + Arena")
 - **HUD Bar & Progress Gauge Reader (`0–100%`):** Measures horizontal (`LeftToRight`, `RightToLeft`) and vertical (`BottomToTop`, `TopToBottom`) health, mana, stamina, or progress bars by fill color and tolerance — automatically filtering out centered text overlays (`100/100`) and scaling cleanly across `1080p`, `1440p`, and `4K` via `RelativeRect`.
 - **Hot-Spot ROI Turbo (`< 1 ms`):** Image searches remember where their template was last seen and check a `±24 px` neighborhood first in under a millisecond before falling back to a full-area scan.
 - **Workbench Text Cleanup & Window Snap:** Clean up scraped or clipboard text with **Trim whitespace**, **Extract digits only**, **UPPERCASE**, and **lowercase** operations, iterate over CSV/multi-line lists with `LineAtLoopIndex`, and snap target windows (`SnapLeftHalf`, `SnapRightHalf`, `Maximize`, `CenterOnPrimary`) via **Focus window**.
 
-### 6. 🎛 Studio X: 3-Pane IDE & Interactive Debugger (`v1.8 "Studio X"`)
+### 6. 🎛 Studio X: 3-Pane IDE & Interactive Debugger ("Studio X")
 - **3-Pane Studio Workspace:** Searchable Toolbox with instant filtering, block-indented Workflow Canvas with color-coded guide rails and right-edge **Workflow Minimap**, sticky **Inspector**, and `Ctrl+K` **Command Palette**.
 - **🔴 Interactive Step Debugger (`F9` / `F10`):**
   - Press **`F9`** (or click **🔴 Break**) on any step to toggle a breakpoint badge (`🔴 BREAK`).

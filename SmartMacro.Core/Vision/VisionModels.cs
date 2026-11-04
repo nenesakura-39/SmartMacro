@@ -52,6 +52,11 @@ public sealed class ScreenCaptureUnavailableException : Exception
 public sealed record VisualMatch(ScreenRect Bounds, double Score)
 {
     public double MatchedScale { get; init; } = 1.0;
+
+    /// <summary>
+    /// Fraction of the template's cells that were visible / unoccluded (0..1; 1.0 when not occluded).
+    /// </summary>
+    public double VisibleFraction { get; init; } = 1.0;
 }
 
 /// <summary>

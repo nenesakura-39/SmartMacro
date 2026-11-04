@@ -8,13 +8,13 @@
              d:DataContext="{d:DesignInstance Type=vm:ManualViewModel}"
              d:DesignWidth="1100" d:DesignHeight="700">
     <UserControl.Resources>
-        <!-- A key cap for the cheat-sheet ("Ctrl+K"). -->
+        <!-- 3D mechanical keycap for the cheat-sheet ("Ctrl+K"). -->
         <Style x:Key="KeyCap" TargetType="Border">
             <Setter Property="Background" Value="{DynamicResource InputBrush}" />
             <Setter Property="BorderBrush" Value="{DynamicResource InputBorderBrush}" />
-            <Setter Property="BorderThickness" Value="1,1,1,2" />
-            <Setter Property="CornerRadius" Value="5" />
-            <Setter Property="Padding" Value="7,2,7,3" />
+            <Setter Property="BorderThickness" Value="1,1,1,3" />
+            <Setter Property="CornerRadius" Value="6" />
+            <Setter Property="Padding" Value="8,2,8,3" />
             <Setter Property="HorizontalAlignment" Value="Left" />
             <Setter Property="VerticalAlignment" Value="Center" />
         </Style>
@@ -23,8 +23,8 @@
     <DockPanel>
         <!-- ===== Header ===== -->
         <StackPanel DockPanel.Dock="Top" Margin="0,0,0,12">
-            <TextBlock Text="📚 SmartMacro Studio Guide" Style="{StaticResource PageTitle}" />
-            <TextBlock Text="Guides, ready-to-run macro recipes, every shortcut and fixes for common problems. Recipes load straight into the Workflow Editor."
+            <TextBlock Text="📚 SmartMacro Studio Guide &amp; Recipes" Style="{StaticResource PageTitle}" />
+            <TextBlock Text="Guides, ready-to-run 1-click macro recipes, keyboard shortcuts, and troubleshooting. Recipes load directly into the Workflow Editor."
                        Style="{StaticResource PageSubtitle}" TextWrapping="Wrap" />
         </StackPanel>
 
@@ -34,8 +34,9 @@
                 <DockPanel>
                     <Button DockPanel.Dock="Right" Style="{StaticResource GhostButton}" Content="✕ Clear" Padding="8,4" FontSize="11" Margin="8,0,0,0"
                             Command="{Binding ClearSearchCommand}" AutomationProperties.Name="Clear the search" />
-                    <TextBlock DockPanel.Dock="Right" Text="{Binding ResultText}" Foreground="{DynamicResource MutedTextBrush}" FontSize="11.5"
-                               VerticalAlignment="Center" Margin="12,0,0,0" />
+                    <Border DockPanel.Dock="Right" Style="{StaticResource Pill}" VerticalAlignment="Center" Margin="12,0,0,0">
+                        <TextBlock Text="{Binding ResultText}" Foreground="{DynamicResource AccentHoverBrush}" FontFamily="{StaticResource MonoFont}" FontWeight="SemiBold" FontSize="11" />
+                    </Border>
                     <Grid>
                         <TextBox x:Name="SearchBox" Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged, Delay=120}" FontSize="13.5"
                                  Padding="10,7,8,7" Tag="🔍 Search guides, steps, hotkeys, or troubleshooting..."
@@ -82,7 +83,7 @@
                     <StackPanel>
                         <TextBlock Text="⌨️ STUDIO SHORTCUT CHEAT-SHEET" Style="{StaticResource SetupCardTitle}" />
                         <TextBlock Text="Global keys (first three) can be changed in Settings → Keyboard shortcuts. Editor keys never fire while you type in a text box."
-                                   Style="{StaticResource MutedText}" FontSize="11.5" Margin="0,0,0,8" TextWrapping="Wrap" />
+                                   Style="{StaticResource MutedText}" FontSize="11.5" Margin="0,4,0,8" TextWrapping="Wrap" />
                         <ItemsControl ItemsSource="{Binding Shortcuts}" Focusable="False" AutomationProperties.Name="Keyboard shortcuts">
                             <ItemsControl.ItemTemplate>
                                 <DataTemplate>
@@ -109,76 +110,99 @@
                     </StackPanel>
                 </Border>
 
-                <!-- Guide and recipe cards -->
+                <!-- Guide and recipe cards v3 -->
                 <ItemsControl ItemsSource="{Binding Articles}" Focusable="False" AutomationProperties.Name="Guides">
                     <ItemsControl.ItemTemplate>
                         <DataTemplate>
-                            <Border x:Name="ArticleCard" Style="{StaticResource Card}" Padding="16,14" Margin="0,0,0,12">
-                                <StackPanel>
-                                    <DockPanel>
-                                        <Border DockPanel.Dock="Right" Style="{StaticResource Pill}" VerticalAlignment="Top" Margin="10,0,0,0">
-                                            <TextBlock Text="{Binding CategoryLabel}" FontSize="10.5" Foreground="{DynamicResource MutedTextBrush}" />
-                                        </Border>
-                                        <Border x:Name="GlyphBadge" Width="34" Height="34" CornerRadius="9" Background="{DynamicResource AccentSoftBrush}"
-                                                VerticalAlignment="Top">
-                                            <TextBlock Text="{Binding Glyph}" FontSize="16" HorizontalAlignment="Center" VerticalAlignment="Center" />
-                                        </Border>
-                                        <StackPanel Margin="12,0,0,0">
-                                            <TextBlock Text="{Binding Title}" FontSize="15" FontWeight="SemiBold" TextWrapping="Wrap" />
-                                            <TextBlock Text="{Binding Summary}" Foreground="{DynamicResource MutedTextBrush}" FontSize="12.5" TextWrapping="Wrap"
-                                                       Margin="0,2,0,0" />
-                                        </StackPanel>
-                                    </DockPanel>
+                            <Border x:Name="ArticleCard"
+                                    BorderBrush="{DynamicResource StepCardBorderBrush}"
+                                    BorderThickness="1"
+                                    CornerRadius="11"
+                                    Margin="0,0,0,12"
+                                    ClipToBounds="True">
+                                <Border.Background>
+                                    <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+                                        <GradientStop Color="#181A2E" Offset="0" />
+                                        <GradientStop Color="#111322" Offset="1" />
+                                    </LinearGradientBrush>
+                                </Border.Background>
+                                <Grid>
+                                    <!-- Top specular glass rim -->
+                                    <Border Height="1" VerticalAlignment="Top" Margin="10,0"
+                                            Background="{DynamicResource GlassRimBorderBrush}" Opacity="0.6" />
+                                    <!-- Left 4px accent bar -->
+                                    <Border x:Name="LeftBar" Width="4" HorizontalAlignment="Left"
+                                            CornerRadius="11,0,0,11" Background="{DynamicResource AccentBrush}" Opacity="0.85" />
 
-                                    <ItemsControl ItemsSource="{Binding Sections}" Margin="46,6,0,0" Focusable="False">
-                                        <ItemsControl.ItemTemplate>
-                                            <DataTemplate>
-                                                <StackPanel Margin="0,6,0,0">
-                                                    <TextBlock Text="{Binding Heading}" FontWeight="SemiBold" FontSize="12.5" Foreground="{DynamicResource AccentBrush}"
-                                                               Visibility="{Binding HasHeading, Converter={StaticResource BoolToVisibility}}" Margin="0,0,0,2" />
-                                                    <TextBlock Text="{Binding Body}" TextWrapping="Wrap" FontSize="12.5" LineHeight="19"
-                                                               Visibility="{Binding HasBody, Converter={StaticResource BoolToVisibility}}" />
-                                                    <ItemsControl ItemsSource="{Binding Points}" Focusable="False" Margin="2,3,0,0"
-                                                                  Visibility="{Binding HasPoints, Converter={StaticResource BoolToVisibility}}">
-                                                        <ItemsControl.ItemTemplate>
-                                                            <DataTemplate>
-                                                                <DockPanel Margin="0,2,0,0">
-                                                                    <TextBlock DockPanel.Dock="Left" Text="•" Foreground="{DynamicResource AccentBrush}" FontSize="12.5"
-                                                                               Margin="0,0,8,0" />
-                                                                    <TextBlock Text="{Binding}" TextWrapping="Wrap" FontSize="12.5" LineHeight="19"
-                                                                               Foreground="{DynamicResource TextBrush}" />
-                                                                </DockPanel>
-                                                            </DataTemplate>
-                                                        </ItemsControl.ItemTemplate>
-                                                    </ItemsControl>
-                                                </StackPanel>
-                                            </DataTemplate>
-                                        </ItemsControl.ItemTemplate>
-                                    </ItemsControl>
-
-                                    <!-- Macro Recipe card: one click inserts it into the editor -->
-                                    <Border x:Name="RecipeBar" Visibility="Collapsed" Margin="46,12,0,0" Padding="12,9" CornerRadius="8"
-                                            Background="{DynamicResource VisionSoftBrush}" BorderBrush="{DynamicResource VisionAccentBrush}" BorderThickness="1">
+                                    <StackPanel Margin="18,14,16,14">
                                         <DockPanel>
-                                            <Button DockPanel.Dock="Right" Style="{StaticResource PrimaryButton}" Padding="12,6"
-                                                    Command="{Binding DataContext.LoadRecipeCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
-                                                    CommandParameter="{Binding}" AutomationProperties.Name="Load this example into the editor"
-                                                    ToolTip="Adds these steps after the selected step of the macro open in the editor (or to a new macro) and opens the Editor. Ctrl+Z undoes it.">
-                                                <TextBlock Text="➕ Load Example into Editor" FontWeight="SemiBold" />
-                                            </Button>
-                                            <StackPanel VerticalAlignment="Center" Margin="0,0,12,0">
-                                                <TextBlock Text="🎮 MACRO RECIPE" FontSize="10" FontWeight="Bold" Foreground="{DynamicResource VisionAccentBrush}" />
-                                                <TextBlock Text="Loads as normal, editable steps. The Problems list shows what is left to set up." FontSize="11.5"
-                                                           Foreground="{DynamicResource MutedTextBrush}" TextWrapping="Wrap" />
+                                            <Border DockPanel.Dock="Right" Style="{StaticResource Pill}" VerticalAlignment="Top" Margin="10,0,0,0">
+                                                <TextBlock Text="{Binding CategoryLabel}" FontFamily="{StaticResource MonoFont}" FontSize="10.5" Foreground="{DynamicResource AccentHoverBrush}" />
+                                            </Border>
+                                            <Border x:Name="GlyphBadge" Width="36" Height="36" CornerRadius="9"
+                                                    Background="{DynamicResource AccentSoftBrush}"
+                                                    BorderBrush="{DynamicResource InputBorderBrush}" BorderThickness="1"
+                                                    VerticalAlignment="Top">
+                                                <TextBlock Text="{Binding Glyph}" FontSize="16" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                            </Border>
+                                            <StackPanel Margin="12,0,0,0">
+                                                <TextBlock Text="{Binding Title}" FontSize="15" FontWeight="Bold" TextWrapping="Wrap" />
+                                                <TextBlock Text="{Binding Summary}" Foreground="{DynamicResource MutedTextBrush}" FontSize="12.5" TextWrapping="Wrap"
+                                                           Margin="0,2,0,0" />
                                             </StackPanel>
                                         </DockPanel>
-                                    </Border>
-                                </StackPanel>
+
+                                        <ItemsControl ItemsSource="{Binding Sections}" Margin="48,6,0,0" Focusable="False">
+                                            <ItemsControl.ItemTemplate>
+                                                <DataTemplate>
+                                                    <StackPanel Margin="0,6,0,0">
+                                                        <TextBlock Text="{Binding Heading}" FontWeight="SemiBold" FontSize="12.5" Foreground="{DynamicResource AccentHoverBrush}"
+                                                                   Visibility="{Binding HasHeading, Converter={StaticResource BoolToVisibility}}" Margin="0,0,0,2" />
+                                                        <TextBlock Text="{Binding Body}" TextWrapping="Wrap" FontSize="12.5" LineHeight="19"
+                                                                   Visibility="{Binding HasBody, Converter={StaticResource BoolToVisibility}}" />
+                                                        <ItemsControl ItemsSource="{Binding Points}" Focusable="False" Margin="2,3,0,0"
+                                                                      Visibility="{Binding HasPoints, Converter={StaticResource BoolToVisibility}}">
+                                                            <ItemsControl.ItemTemplate>
+                                                                <DataTemplate>
+                                                                    <DockPanel Margin="0,2,0,0">
+                                                                        <TextBlock DockPanel.Dock="Left" Text="•" Foreground="{DynamicResource AccentBrush}" FontSize="12.5"
+                                                                                   Margin="0,0,8,0" />
+                                                                        <TextBlock Text="{Binding}" TextWrapping="Wrap" FontSize="12.5" LineHeight="19"
+                                                                                   Foreground="{DynamicResource TextBrush}" />
+                                                                    </DockPanel>
+                                                                </DataTemplate>
+                                                            </ItemsControl.ItemTemplate>
+                                                        </ItemsControl>
+                                                    </StackPanel>
+                                                </DataTemplate>
+                                            </ItemsControl.ItemTemplate>
+                                        </ItemsControl>
+
+                                        <!-- Macro Recipe card: one click inserts it into the editor -->
+                                        <Border x:Name="RecipeBar" Visibility="Collapsed" Margin="48,12,0,0" Padding="12,9" CornerRadius="8"
+                                                Background="{DynamicResource VisionSoftBrush}" BorderBrush="{DynamicResource VisionAccentBrush}" BorderThickness="1">
+                                            <DockPanel>
+                                                <Button DockPanel.Dock="Right" Style="{StaticResource PrimaryButton}" Padding="12,6"
+                                                        Command="{Binding DataContext.LoadRecipeCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                                        CommandParameter="{Binding}" AutomationProperties.Name="Load this example into the editor"
+                                                        ToolTip="Adds these steps after the selected step of the macro open in the editor (or to a new macro) and opens the Editor. Ctrl+Z undoes it.">
+                                                    <TextBlock Text="➕ Load Example into Editor" FontWeight="SemiBold" />
+                                                </Button>
+                                                <StackPanel VerticalAlignment="Center" Margin="0,0,12,0">
+                                                    <TextBlock Text="🎮 MACRO RECIPE" FontFamily="{StaticResource MonoFont}" FontSize="10" FontWeight="Bold" Foreground="{DynamicResource VisionAccentBrush}" />
+                                                    <TextBlock Text="Loads as normal, editable steps. The Problems list shows what is left to set up." FontSize="11.5"
+                                                               Foreground="{DynamicResource MutedTextBrush}" TextWrapping="Wrap" />
+                                                </StackPanel>
+                                            </DockPanel>
+                                        </Border>
+                                    </StackPanel>
+                                </Grid>
                             </Border>
                             <DataTemplate.Triggers>
                                 <DataTrigger Binding="{Binding IsRecipe}" Value="True">
                                     <Setter TargetName="RecipeBar" Property="Visibility" Value="Visible" />
                                     <Setter TargetName="ArticleCard" Property="BorderBrush" Value="{DynamicResource VisionAccentBrush}" />
+                                    <Setter TargetName="LeftBar" Property="Background" Value="{DynamicResource VisionAccentBrush}" />
                                     <Setter TargetName="GlyphBadge" Property="Background" Value="{DynamicResource VisionSoftBrush}" />
                                 </DataTrigger>
                             </DataTemplate.Triggers>

@@ -23,8 +23,13 @@ internal static class NativeMethods
     public const uint MOUSEEVENTF_RIGHTUP = 0x0010;
     public const uint MOUSEEVENTF_MIDDLEDOWN = 0x0020;
     public const uint MOUSEEVENTF_MIDDLEUP = 0x0040;
+    public const uint MOUSEEVENTF_XDOWN = 0x0080;
+    public const uint MOUSEEVENTF_XUP = 0x0100;
     public const uint MOUSEEVENTF_WHEEL = 0x0800;
     public const uint MOUSEEVENTF_HWHEEL = 0x1000;
+
+    public const uint XBUTTON1 = 0x0001;
+    public const uint XBUTTON2 = 0x0002;
 
     public const uint KEYEVENTF_EXTENDEDKEY = 0x0001;
     public const uint KEYEVENTF_KEYUP = 0x0002;
@@ -46,9 +51,12 @@ internal static class NativeMethods
     public const int WM_MBUTTONDOWN = 0x0207;
     public const int WM_MBUTTONUP = 0x0208;
     public const int WM_MOUSEWHEEL = 0x020A;
+    public const int WM_XBUTTONDOWN = 0x020B;
+    public const int WM_XBUTTONUP = 0x020C;
     public const int WM_MOUSEHWHEEL = 0x020E;
     public const int WM_HOTKEY = 0x0312;
 
+    public const uint LLKHF_EXTENDED = 0x01;
     public const uint LLKHF_INJECTED = 0x10;
     public const uint LLMHF_INJECTED = 0x01;
 
@@ -454,6 +462,10 @@ internal static class NativeMethods
     public const ushort RI_MOUSE_RIGHT_BUTTON_UP = 0x0008;
     public const ushort RI_MOUSE_MIDDLE_BUTTON_DOWN = 0x0010;
     public const ushort RI_MOUSE_MIDDLE_BUTTON_UP = 0x0020;
+    public const ushort RI_MOUSE_BUTTON_4_DOWN = 0x0040;
+    public const ushort RI_MOUSE_BUTTON_4_UP = 0x0080;
+    public const ushort RI_MOUSE_BUTTON_5_DOWN = 0x0100;
+    public const ushort RI_MOUSE_BUTTON_5_UP = 0x0200;
     public const ushort RI_MOUSE_WHEEL = 0x0400;
     public const ushort RI_MOUSE_HWHEEL = 0x0800;
     public const ushort RI_KEY_BREAK = 0x01;

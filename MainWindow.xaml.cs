@@ -209,26 +209,30 @@ public partial class MainWindow : Window
     {
         var pinned = DataContext is MainViewModel { IsSidebarPinned: true };
         SidebarRail.BeginAnimation(WidthProperty, null);
+        SidebarRail.ClearValue(WidthProperty);
         SidebarRail.Effect = null;
-        WorkspaceHeaderLabel.Visibility = pinned ? Visibility.Visible : Visibility.Collapsed;
-        StudioHeaderLabel.Visibility = pinned ? Visibility.Visible : Visibility.Collapsed;
-        PinLabelText.Visibility = pinned ? Visibility.Visible : Visibility.Collapsed;
-        SidebarFooterCard.Visibility = pinned ? Visibility.Visible : Visibility.Collapsed;
+        var vis = pinned ? Visibility.Visible : Visibility.Collapsed;
+        WorkspaceHeaderLabel.SetCurrentValue(VisibilityProperty, vis);
+        StudioHeaderLabel.SetCurrentValue(VisibilityProperty, vis);
+        PinLabelText.SetCurrentValue(VisibilityProperty, vis);
+        PinLabelText.SetCurrentValue(System.Windows.Controls.TextBlock.TextProperty, pinned ? "Pinned" : "Pin sidebar");
+        SidebarFooterCard.SetCurrentValue(VisibilityProperty, vis);
     }
 
     private void SetSidebarOverlayExpanded(bool expanded)
     {
         double targetWidth = expanded ? 192 : 56;
-        WorkspaceHeaderLabel.Visibility = expanded ? Visibility.Visible : Visibility.Collapsed;
-        StudioHeaderLabel.Visibility = expanded ? Visibility.Visible : Visibility.Collapsed;
-        PinLabelText.Visibility = expanded ? Visibility.Visible : Visibility.Collapsed;
-        SidebarFooterCard.Visibility = expanded ? Visibility.Visible : Visibility.Collapsed;
+        var vis = expanded ? Visibility.Visible : Visibility.Collapsed;
+        WorkspaceHeaderLabel.SetCurrentValue(VisibilityProperty, vis);
+        StudioHeaderLabel.SetCurrentValue(VisibilityProperty, vis);
+        PinLabelText.SetCurrentValue(VisibilityProperty, vis);
+        SidebarFooterCard.SetCurrentValue(VisibilityProperty, vis);
         SidebarRail.Effect = expanded ? TryFindResource("ShadowPopover") as System.Windows.Media.Effects.Effect : null;
 
         if (!ThemeManager.AreAnimationsEnabled)
         {
             SidebarRail.BeginAnimation(WidthProperty, null);
-            SidebarRail.Width = targetWidth;
+            SidebarRail.SetCurrentValue(WidthProperty, targetWidth);
             return;
         }
 

@@ -62,6 +62,8 @@ public sealed class Win32InputSimulator : IInputSimulator
 
     // The last absolute cursor move that hasn't been followed by a button change yet (for the settle before a press / release).
     private bool _movedSinceButton;
+    private int _movesSinceButtonCount;
+    private double _lastMoveStepDistPx;
     private long _lastMoveTimestamp;
     private int _lastMoveX;
     private int _lastMoveY;
@@ -114,6 +116,17 @@ public sealed class Win32InputSimulator : IInputSimulator
             throw new InputSimulationException(
                 $"Windows refused to move the mouse (error {Marshal.GetLastWin32Error()}). This can happen when the screen is locked or a secure window is open.");
 
+        if (_movedSinceButton)
+        {
+            _movesSinceButtonCount++;
+            _lastMoveStepDistPx = Math.Sqrt((double)(x - _lastMoveX) * (x - _lastMoveX) + (double)(y - _lastMoveY) * (y - _lastMoveY));
+        }
+        else
+        {
+            _movesSinceButtonCount = 1;
+            _lastMoveStepDistPx = double.MaxValue;
+        }
+
         _movedSinceButton = true;
         _lastMoveTimestamp = Stopwatch.GetTimestamp();
         _lastMoveX = x;
@@ -158,10 +171,22 @@ public sealed class Win32InputSimulator : IInputSimulator
     private bool SettleBeforeButton(bool hoverNudge = true)
     {
         if (!_movedSinceButton) return false;
+        var smoothPathArrival = _movesSinceButtonCount >= 2 && _lastMoveStepDistPx <= 28;
         _movedSinceButton = false;
+        _movesSinceButtonCount = 0;
 
         var x = _lastMoveX;
         var y = _lastMoveY;
+
+        if (smoothPathArrival)
+        {
+            // Cursor arrived via a multi-step glide or recorded path: intermediate WM_MOUSEMOVE events already
+            // updated hover state, so skip the artificial 15 ms hover wiggle and 1 px release nudge.
+            SendAbsoluteMove(x, y);
+            SetCursorPos(x, y);
+            PreciseSleepUntil(_lastMoveTimestamp, hoverNudge ? 2 : 4);
+            return false;
+        }
 
         // Hover nudge: a tiny RELATIVE wiggle (+2,+2 then back) spread over ~15 ms, so the app gets real movement
         // events at the spot (MouseEnter / hover), even when the cursor arrived long ago or by a jump.
@@ -217,14 +242,18 @@ public sealed class Win32InputSimulator : IInputSimulator
 
     private void MouseButtonCore(MacroMouseButton button, bool down)
     {
-        var flags = (button, down) switch
+        var (flags, mouseData) = (button, down) switch
         {
-            (MacroMouseButton.Left, true) => MOUSEEVENTF_LEFTDOWN,
-            (MacroMouseButton.Left, false) => MOUSEEVENTF_LEFTUP,
-            (MacroMouseButton.Right, true) => MOUSEEVENTF_RIGHTDOWN,
-            (MacroMouseButton.Right, false) => MOUSEEVENTF_RIGHTUP,
-            (MacroMouseButton.Middle, true) => MOUSEEVENTF_MIDDLEDOWN,
-            (MacroMouseButton.Middle, false) => MOUSEEVENTF_MIDDLEUP,
+            (MacroMouseButton.Left, true) => (MOUSEEVENTF_LEFTDOWN, 0u),
+            (MacroMouseButton.Left, false) => (MOUSEEVENTF_LEFTUP, 0u),
+            (MacroMouseButton.Right, true) => (MOUSEEVENTF_RIGHTDOWN, 0u),
+            (MacroMouseButton.Right, false) => (MOUSEEVENTF_RIGHTUP, 0u),
+            (MacroMouseButton.Middle, true) => (MOUSEEVENTF_MIDDLEDOWN, 0u),
+            (MacroMouseButton.Middle, false) => (MOUSEEVENTF_MIDDLEUP, 0u),
+            (MacroMouseButton.XButton1, true) => (MOUSEEVENTF_XDOWN, XBUTTON1),
+            (MacroMouseButton.XButton1, false) => (MOUSEEVENTF_XUP, XBUTTON1),
+            (MacroMouseButton.XButton2, true) => (MOUSEEVENTF_XDOWN, XBUTTON2),
+            (MacroMouseButton.XButton2, false) => (MOUSEEVENTF_XUP, XBUTTON2),
             _ => throw new ArgumentOutOfRangeException(nameof(button)),
         };
         var jumped = SettleBeforeButton(hoverNudge: down);
@@ -239,7 +268,7 @@ public sealed class Win32InputSimulator : IInputSimulator
             }
 
             DiagnoseClickTarget(button);
-            Send(MouseInput(flags, 0));
+            Send(MouseInput(flags, mouseData));
             _jumpClickDown[button] = jumped ? Stopwatch.GetTimestamp() : 0;
             _jumpClickUp[button] = 0;
             return;
@@ -250,12 +279,12 @@ public sealed class Win32InputSimulator : IInputSimulator
         {
             PreciseSleepUntil(pressedAt, MinClickHoldMs);
             _jumpClickDown[button] = 0;
-            Send(MouseInput(flags, 0));
+            Send(MouseInput(flags, mouseData));
             _jumpClickUp[button] = Stopwatch.GetTimestamp();
             return;
         }
 
-        Send(MouseInput(flags, 0));
+        Send(MouseInput(flags, mouseData));
         _jumpClickUp[button] = 0;
     }
 

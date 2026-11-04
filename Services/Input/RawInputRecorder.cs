@@ -488,6 +488,10 @@ public sealed class RawInputRecorder : IRelativeInputRecorder, IDisposable
             if ((flags & RI_MOUSE_RIGHT_BUTTON_UP) != 0) Add(InputEvent.ButtonUp(timeUs, MacroMouseButton.Right));
             if ((flags & RI_MOUSE_MIDDLE_BUTTON_DOWN) != 0) Add(InputEvent.ButtonDown(timeUs, MacroMouseButton.Middle));
             if ((flags & RI_MOUSE_MIDDLE_BUTTON_UP) != 0) Add(InputEvent.ButtonUp(timeUs, MacroMouseButton.Middle));
+            if ((flags & RI_MOUSE_BUTTON_4_DOWN) != 0) Add(InputEvent.ButtonDown(timeUs, MacroMouseButton.XButton1));
+            if ((flags & RI_MOUSE_BUTTON_4_UP) != 0) Add(InputEvent.ButtonUp(timeUs, MacroMouseButton.XButton1));
+            if ((flags & RI_MOUSE_BUTTON_5_DOWN) != 0) Add(InputEvent.ButtonDown(timeUs, MacroMouseButton.XButton2));
+            if ((flags & RI_MOUSE_BUTTON_5_UP) != 0) Add(InputEvent.ButtonUp(timeUs, MacroMouseButton.XButton2));
             if ((flags & RI_MOUSE_WHEEL) != 0) Add(InputEvent.WheelEvent(timeUs, (short)m.usButtonData));
             if ((flags & RI_MOUSE_HWHEEL) != 0) Add(InputEvent.WheelEvent(timeUs, (short)m.usButtonData, horizontal: true));
         }
@@ -537,13 +541,21 @@ public sealed class RawInputRecorder : IRelativeInputRecorder, IDisposable
             if ((buttonFlags & RI_MOUSE_RIGHT_BUTTON_UP) != 0) Add(InputEvent.ButtonUp(timeUs, MacroMouseButton.Right, x, y), cursorFlags);
             if ((buttonFlags & RI_MOUSE_MIDDLE_BUTTON_DOWN) != 0) Add(InputEvent.ButtonDown(timeUs, MacroMouseButton.Middle, x, y), cursorFlags, target);
             if ((buttonFlags & RI_MOUSE_MIDDLE_BUTTON_UP) != 0) Add(InputEvent.ButtonUp(timeUs, MacroMouseButton.Middle, x, y), cursorFlags);
+            if ((buttonFlags & RI_MOUSE_BUTTON_4_DOWN) != 0) Add(InputEvent.ButtonDown(timeUs, MacroMouseButton.XButton1, x, y), cursorFlags, target);
+            if ((buttonFlags & RI_MOUSE_BUTTON_4_UP) != 0) Add(InputEvent.ButtonUp(timeUs, MacroMouseButton.XButton1, x, y), cursorFlags);
+            if ((buttonFlags & RI_MOUSE_BUTTON_5_DOWN) != 0) Add(InputEvent.ButtonDown(timeUs, MacroMouseButton.XButton2, x, y), cursorFlags, target);
+            if ((buttonFlags & RI_MOUSE_BUTTON_5_UP) != 0) Add(InputEvent.ButtonUp(timeUs, MacroMouseButton.XButton2, x, y), cursorFlags);
             if ((buttonFlags & RI_MOUSE_WHEEL) != 0) Add(InputEvent.WheelAt(timeUs, (short)buttonData, false, x, y), cursorFlags);
             if ((buttonFlags & RI_MOUSE_HWHEEL) != 0) Add(InputEvent.WheelAt(timeUs, (short)buttonData, true, x, y), cursorFlags);
         }
 
-        private const ushort ButtonDownMask = RI_MOUSE_LEFT_BUTTON_DOWN | RI_MOUSE_RIGHT_BUTTON_DOWN | RI_MOUSE_MIDDLE_BUTTON_DOWN;
+        private const ushort ButtonDownMask =
+            RI_MOUSE_LEFT_BUTTON_DOWN | RI_MOUSE_RIGHT_BUTTON_DOWN | RI_MOUSE_MIDDLE_BUTTON_DOWN
+            | RI_MOUSE_BUTTON_4_DOWN | RI_MOUSE_BUTTON_5_DOWN;
 
-        private const ushort ButtonMask = ButtonDownMask | RI_MOUSE_LEFT_BUTTON_UP | RI_MOUSE_RIGHT_BUTTON_UP | RI_MOUSE_MIDDLE_BUTTON_UP;
+        private const ushort ButtonMask =
+            ButtonDownMask | RI_MOUSE_LEFT_BUTTON_UP | RI_MOUSE_RIGHT_BUTTON_UP | RI_MOUSE_MIDDLE_BUTTON_UP
+            | RI_MOUSE_BUTTON_4_UP | RI_MOUSE_BUTTON_5_UP;
 
         /// <summary>Re-reads whether the cursor is hidden and how far it may move (ClipCursor).</summary>
         private void RefreshCursorState(long timeUs)

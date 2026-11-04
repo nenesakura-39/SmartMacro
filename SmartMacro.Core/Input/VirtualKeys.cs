@@ -1,6 +1,11 @@
 namespace SmartMacro.Core.Input;
 
-public sealed record KeyInfo(int Code, string Name);
+public sealed record KeyInfo(int Code, string Name)
+{
+    public string Label => Name;
+    public int VirtualKey => Code;
+    public string DisplayName => Name;
+}
 
 /// <summary>
 /// Friendly names for common Windows virtual-key codes.

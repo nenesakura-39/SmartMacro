@@ -60,9 +60,14 @@ public static class SmartClickConversion
         (Math.Clamp(step.TargetAnchorX ?? width / 2, 0, Math.Max(0, width - 1)),
          Math.Clamp(step.TargetAnchorY ?? height / 2, 0, Math.Max(0, height - 1)));
 
-    /// <summary>True for the click actions a Find image step can do on what it finds (Click / Double click / Hold).</summary>
+    /// <summary>True for the click actions a Find image step can do on what it finds (Left Click / Double click / Hold, or Right Click).</summary>
     public static bool HasConvertibleAction(MouseClickStep step) =>
-        step.Action is MouseClickAction.Click or MouseClickAction.DoubleClick or MouseClickAction.Hold;
+        step.Button switch
+        {
+            MacroMouseButton.Left => step.Action is MouseClickAction.Click or MouseClickAction.DoubleClick or MouseClickAction.Hold,
+            MacroMouseButton.Right => step.Action == MouseClickAction.Click,
+            _ => false,
+        };
 
     /// <summary>
     /// Null when the step can be converted, otherwise a plain sentence why not (no picture, a damaged picture, a
@@ -72,6 +77,10 @@ public static class SmartClickConversion
     {
         ArgumentNullException.ThrowIfNull(step);
         if (!step.HasTargetThumbnail) return "This click has no recorded picture (only recorded clicks have one).";
+        if (step.Button is not (MacroMouseButton.Left or MacroMouseButton.Right))
+            return "Only Left or Right button clicks can become a \"Find image & click\" step.";
+        if (step.Button == MacroMouseButton.Right && step.Action != MouseClickAction.Click)
+            return "For the Right mouse button, only a single click can become a \"Find image & click\" step.";
         if (!HasConvertibleAction(step)) return "Only a single click, double click or hold can become a \"Find image & click\" step.";
         if (TryDecodeThumbnail(step, out var error) is null) return $"The recorded picture can't be used: {error}";
         return null;

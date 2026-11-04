@@ -21,7 +21,7 @@ public sealed class DelayStepViewModel : StepViewModel
         AddDurationCommand = new RelayCommand(p =>
         {
             if (TryParseAdditiveMs(p, out var ms))
-                DurationMs = ms == 0 ? 0 : Math.Max(0, DurationMs) + ms;
+                DurationMs = ms == 0 ? 0 : Math.Max(0, Math.Max(0, DurationMs) + ms);
         });
         ResetDurationCommand = new RelayCommand(_ => DurationMs = 0);
         SetDurationCommand = AddDurationCommand;
@@ -290,7 +290,7 @@ public sealed class MouseClickStepViewModel : StepViewModel
         AddDurationCommand = new RelayCommand(p =>
         {
             if (TryParseAdditiveMs(p, out var ms))
-                HoldMs = ms == 0 ? 0 : Math.Max(0, HoldMs) + ms;
+                HoldMs = ms == 0 ? 0 : Math.Max(0, Math.Max(0, HoldMs) + ms);
         });
         ResetDurationCommand = new RelayCommand(_ => HoldMs = 0);
         SetDurationCommand = AddDurationCommand;
@@ -971,7 +971,7 @@ public sealed class KeyPressStepViewModel : StepViewModel
         AddDurationCommand = new RelayCommand(p =>
         {
             if (TryParseAdditiveMs(p, out var ms))
-                HoldMs = ms == 0 ? 0 : Math.Max(0, HoldMs) + ms;
+                HoldMs = ms == 0 ? 0 : Math.Max(0, Math.Max(0, HoldMs) + ms);
         });
         ResetDurationCommand = new RelayCommand(_ => HoldMs = 0);
         SetDurationCommand = AddDurationCommand;
@@ -985,10 +985,90 @@ public sealed class KeyPressStepViewModel : StepViewModel
 
     public static IReadOnlyList<KeyAction> Actions { get; } = Enum.GetValues<KeyAction>();
 
+    private bool _isRecordingKey;
+    private RelayCommand? _toggleKeyRecordCommand;
+
+    public RelayCommand ToggleKeyRecordCommand => _toggleKeyRecordCommand ??= new RelayCommand(_ => IsRecordingKey = !IsRecordingKey);
+
+    public bool IsRecordingKey
+    {
+        get => _isRecordingKey;
+        set
+        {
+            if (SetProperty(ref _isRecordingKey, value))
+                OnPropertyChanged(nameof(KeyRecorderButtonText));
+        }
+    }
+
+    public string KeyRecorderButtonText => _isRecordingKey
+        ? "⌨ Listening… Press any key (Esc to cancel)"
+        : "🎹 Press Key to Bind…";
+
+    public string KeycapDisplayText => KeycapBadge ?? VirtualKeys.GetName(_step.VirtualKey);
+
+    public string HardwareKeyInfoText => _step.ScanCode > 0
+        ? $"VK 0x{_step.VirtualKey:X2} · ScanCode 0x{_step.ScanCode:X2}{(_step.Extended ? " (Extended E0)" : "")}"
+        : $"VK 0x{_step.VirtualKey:X2} · Standard Virtual-Key";
+
+    public int ScanCode
+    {
+        get => _step.ScanCode;
+        set
+        {
+            if (_step.ScanCode == value) return;
+            _step.ScanCode = Math.Clamp(value, 0, 0xFF);
+            NotifyChanged();
+            OnPropertyChanged(nameof(HardwareKeyInfoText));
+        }
+    }
+
+    public bool Extended
+    {
+        get => _step.Extended;
+        set
+        {
+            if (_step.Extended == value) return;
+            _step.Extended = value;
+            NotifyChanged();
+            OnPropertyChanged(nameof(HardwareKeyInfoText));
+        }
+    }
+
+    public void ApplyRecordedKey(int virtualKey, int scanCode, bool extended, KeyModifiers modifiers)
+    {
+        if (!VirtualKeys.IsValid(virtualKey)) return;
+        _step.VirtualKey = virtualKey;
+        _step.ScanCode = Math.Clamp(scanCode, 0, 0xFF);
+        _step.Extended = extended;
+        if (_step.Action == KeyAction.Press)
+            _step.Modifiers = modifiers;
+
+        IsRecordingKey = false;
+        OnPropertyChanged(nameof(VirtualKey));
+        OnPropertyChanged(nameof(ScanCode));
+        OnPropertyChanged(nameof(Extended));
+        OnPropertyChanged(nameof(Ctrl));
+        OnPropertyChanged(nameof(Shift));
+        OnPropertyChanged(nameof(Alt));
+        OnPropertyChanged(nameof(Win));
+        OnPropertyChanged(nameof(KeycapDisplayText));
+        OnPropertyChanged(nameof(HardwareKeyInfoText));
+        NotifyChanged(nameof(VirtualKey));
+    }
+
     public int VirtualKey
     {
         get => _step.VirtualKey;
-        set { if (_step.VirtualKey == value) return; _step.VirtualKey = value; NotifyChanged(); }
+        set
+        {
+            if (_step.VirtualKey == value) return;
+            _step.VirtualKey = value;
+            _step.ScanCode = 0;
+            _step.Extended = false;
+            NotifyChanged();
+            OnPropertyChanged(nameof(KeycapDisplayText));
+            OnPropertyChanged(nameof(HardwareKeyInfoText));
+        }
     }
 
     public KeyAction Action
@@ -1043,6 +1123,8 @@ public sealed class KeyPressStepViewModel : StepViewModel
         var updated = on ? _step.Modifiers | modifier : _step.Modifiers & ~modifier;
         if (updated == _step.Modifiers) return;
         _step.Modifiers = updated;
+        OnPropertyChanged(nameof(KeycapDisplayText));
+        NotifyChanged(propertyName);
         NotifyChanged(propertyName);
     }
 }

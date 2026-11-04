@@ -116,6 +116,22 @@ public static class CoordinateScaling
                 case MouseScrollStep s:
                     (s.X, s.Y) = mapping.Map(s.X, s.Y);
                     break;
+                case InputSequenceStep seq:
+                {
+                    if (seq.StartX != 0 || seq.StartY != 0)
+                        (seq.StartX, seq.StartY) = mapping.Map(seq.StartX, seq.StartY);
+                    for (var i = 0; i < seq.Events.Count; i++)
+                    {
+                        var ev = seq.Events[i];
+                        if (ev.HasPosition && ev.IsMouse)
+                        {
+                            var (nx, ny) = mapping.Map(ev.X, ev.Y);
+                            seq.Events[i] = ev with { X = nx, Y = ny };
+                        }
+                    }
+
+                    break;
+                }
                 case FeedbackLoopStep f:
                 {
                     var bar = mapping.MapRect(new ScreenRect(f.RegionX, f.RegionY, f.RegionWidth, f.RegionHeight));

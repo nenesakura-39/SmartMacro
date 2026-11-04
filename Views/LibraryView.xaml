@@ -12,14 +12,15 @@
     <UserControl.Resources>
         <!-- Small action button on a macro card (icon + label, ghost style). -->
         <Style x:Key="CardActionButton" TargetType="Button" BasedOn="{StaticResource GhostButton}">
-            <Setter Property="Padding" Value="8,4" />
+            <Setter Property="Padding" Value="9,4" />
             <Setter Property="FontSize" Value="11" />
-            <Setter Property="Margin" Value="0,0,4,0" />
+            <Setter Property="Margin" Value="0,0,5,0" />
         </Style>
         <!-- Category pill on a macro card: colored text on its soft background. -->
         <Style x:Key="CategoryPill" TargetType="Border" BasedOn="{StaticResource Pill}">
             <Setter Property="Margin" Value="0,0,6,0" />
-            <Setter Property="Padding" Value="7,1,7,2" />
+            <Setter Property="Padding" Value="7,2,7,2" />
+            <Setter Property="CornerRadius" Value="5" />
         </Style>
     </UserControl.Resources>
 
@@ -72,7 +73,7 @@
             </StackPanel>
             <StackPanel>
                 <TextBlock Text="Macro Library" Style="{StaticResource PageTitle}" />
-                <TextBlock Text="Your macros as Studio cards with live Workflow Fingerprint strips. Double-click a card to edit it, or play, share and organize directly." Style="{StaticResource PageSubtitle}" />
+                <TextBlock Text="Your macros as Obsidian Neon Studio cards with live Workflow Fingerprint strips. Double-click any card to edit, or play and export directly." Style="{StaticResource PageSubtitle}" />
             </StackPanel>
         </DockPanel>
 
@@ -87,20 +88,20 @@
         </Border>
 
         <!-- ===== Search / filter bar ===== -->
-        <Border Grid.Row="2" Style="{StaticResource Card}" Padding="10,8" Margin="0,0,0,12">
+        <Border Grid.Row="2" Style="{StaticResource Card}" Padding="12,9" Margin="0,0,0,12">
             <DockPanel>
                 <Border DockPanel.Dock="Right" Style="{StaticResource Pill}" Margin="12,0,0,0">
-                    <TextBlock Text="{Binding CountText}" Foreground="{DynamicResource MutedTextBrush}" FontSize="11" />
+                    <TextBlock Text="{Binding CountText}" Foreground="{DynamicResource AccentHoverBrush}" FontFamily="{StaticResource MonoFont}" FontWeight="SemiBold" FontSize="11" />
                 </Border>
                 <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center" Margin="12,0,0,0">
                     <TextBlock Text="🗂 Profile:" Foreground="{DynamicResource MutedTextBrush}" FontSize="11.5" VerticalAlignment="Center" Margin="0,0,6,0" />
                     <ComboBox ItemsSource="{Binding ProfileChoices}" SelectedItem="{Binding SelectedProfileFilter}"
-                              MinWidth="140" Padding="8,4" FontSize="11.5"
+                              MinWidth="148" Padding="8,4" FontSize="11.5"
                               ToolTip="Filter macros by app or game profile" AutomationProperties.Name="Filter by profile" />
                 </StackPanel>
-                <Grid MaxWidth="520" HorizontalAlignment="Left">
+                <Grid MaxWidth="540" HorizontalAlignment="Left">
                     <TextBox x:Name="SearchBox" Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}"
-                             Tag="Search by name or description (or type vision, ocr, feedback, logic, input)"
+                             Tag="Search by name, description, or category (vision, ocr, feedback, logic, input)…"
                              Padding="32,7,30,7" AutomationProperties.Name="Search macros"
                              ToolTip="Filters the cards as you type: by name or description, or by category (vision, ocr, feedback, logic, input, errors)." />
                     <TextBlock Text="&#xE721;" Style="{StaticResource IconText}" Foreground="{DynamicResource MutedTextBrush}"
@@ -116,14 +117,14 @@
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*" />
                 <ColumnDefinition Width="14" />
-                <ColumnDefinition Width="300" />
+                <ColumnDefinition Width="320" />
             </Grid.ColumnDefinitions>
 
-            <!-- ===== Studio Macro Cards ===== -->
+            <!-- ===== Studio Macro Cards v3 ===== -->
             <Border Grid.Column="0" Style="{StaticResource Card}" Padding="0" Background="{DynamicResource StepsCanvasBrush}" ClipToBounds="True">
                 <Grid>
                     <ListBox x:Name="MacroList" ItemsSource="{Binding ItemsView}" SelectedItem="{Binding SelectedItem}" IsSynchronizedWithCurrentItem="False"
-                             Padding="10,10,10,4" Background="Transparent" BorderThickness="0"
+                             Padding="12,12,12,6" Background="Transparent" BorderThickness="0"
                              ScrollViewer.HorizontalScrollBarVisibility="Disabled"
                              VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling"
                              AutomationProperties.Name="Macros"
@@ -134,172 +135,210 @@
                         </ListBox.InputBindings>
                         <ListBox.ItemContainerStyle>
                             <Style TargetType="ListBoxItem" BasedOn="{StaticResource StepCardItem}">
-                                <Setter Property="Margin" Value="0,0,0,8" />
+                                <Setter Property="Margin" Value="0,0,0,9" />
                                 <EventSetter Event="MouseDoubleClick" Handler="MacroItem_DoubleClick" />
                             </Style>
                         </ListBox.ItemContainerStyle>
                         <ListBox.ItemTemplate>
                             <DataTemplate DataType="{x:Type vm:MacroListItemViewModel}">
-                                <Border x:Name="Card" Background="{DynamicResource StepCardBrush}" BorderBrush="{DynamicResource StepCardBorderBrush}"
-                                        BorderThickness="1.5" CornerRadius="10" Padding="12,10,12,8" SnapsToDevicePixels="True">
+                                <Border x:Name="Card"
+                                        BorderBrush="{DynamicResource StepCardBorderBrush}"
+                                        BorderThickness="1"
+                                        CornerRadius="11"
+                                        ClipToBounds="True"
+                                        SnapsToDevicePixels="True">
+                                    <Border.Background>
+                                        <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+                                            <GradientStop Color="#191B30" Offset="0" />
+                                            <GradientStop Color="#111322" Offset="1" />
+                                        </LinearGradientBrush>
+                                    </Border.Background>
                                     <Grid>
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="Auto" />
-                                            <ColumnDefinition Width="*" />
-                                        </Grid.ColumnDefinitions>
-                                        <Grid.RowDefinitions>
-                                            <RowDefinition Height="Auto" />
-                                            <RowDefinition Height="Auto" />
-                                            <RowDefinition Height="Auto" />
-                                        </Grid.RowDefinitions>
+                                        <!-- Top specular glass highlight rim -->
+                                        <Border Height="1" VerticalAlignment="Top" Margin="10,0"
+                                                Background="{DynamicResource GlassRimBorderBrush}"
+                                                Opacity="0.6" IsHitTestVisible="False" />
 
-                                        <!-- Icon badge -->
-                                        <Border Grid.RowSpan="2" Width="38" Height="38" CornerRadius="9" Background="{DynamicResource AccentSoftBrush}" VerticalAlignment="Top">
-                                            <ctrl:StudioIcon Kind="Library" Size="16" Foreground="{DynamicResource AccentBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" />
-                                        </Border>
+                                        <!-- Left 4px glowing studio accent bar -->
+                                        <Border x:Name="LeftAccentBar" Width="4" HorizontalAlignment="Left"
+                                                CornerRadius="11,0,0,11"
+                                                Background="{DynamicResource AccentBrush}" Opacity="0.85" />
 
-                                        <!-- Title row: name, problems, step count badge, last modified -->
-                                        <DockPanel Grid.Column="1" Margin="12,0,0,0">
-                                            <TextBlock DockPanel.Dock="Right" Text="{Binding ModifiedAgoText}" FontSize="11" Foreground="{DynamicResource SubtleTextBrush}"
-                                                       VerticalAlignment="Center" Margin="10,0,0,0" ToolTip="{Binding ModifiedText}" />
-                                            <Border DockPanel.Dock="Right" Style="{StaticResource Pill}" Margin="8,0,0,0" ToolTip="{Binding RepeatText}">
-                                                <TextBlock Text="{Binding StepCountText}" FontSize="11" FontWeight="SemiBold" Foreground="{DynamicResource TextBrush}" />
+                                        <Grid Margin="14,11,14,10">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="Auto" />
+                                                <ColumnDefinition Width="*" />
+                                            </Grid.ColumnDefinitions>
+                                            <Grid.RowDefinitions>
+                                                <RowDefinition Height="Auto" />
+                                                <RowDefinition Height="Auto" />
+                                                <RowDefinition Height="Auto" />
+                                            </Grid.RowDefinitions>
+
+                                            <!-- Icon badge -->
+                                            <Border Grid.RowSpan="2" Width="40" Height="40" CornerRadius="10"
+                                                    Background="{DynamicResource AccentSoftBrush}"
+                                                    BorderBrush="{DynamicResource InputBorderBrush}" BorderThickness="1"
+                                                    VerticalAlignment="Top">
+                                                <ctrl:StudioIcon Kind="Library" Size="17" Foreground="{DynamicResource AccentHoverBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" />
                                             </Border>
-                                            <StackPanel Orientation="Horizontal">
-                                                <TextBlock Text="{Binding Name}" FontSize="14" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
-                                                <Border Style="{StaticResource Pill}" Margin="8,0,0,0" Background="{DynamicResource ErrorSoftBrush}"
-                                                        ToolTip="This macro has problems. Open it to see them in the Problems list."
-                                                        Visibility="{Binding HasErrors, Converter={StaticResource BoolToVisibility}}">
-                                                    <StackPanel Orientation="Horizontal">
-                                                        <ctrl:StudioIcon Kind="ErrorCircle" Size="10" Foreground="{DynamicResource ErrorBrush}" />
-                                                        <TextBlock Text="NEEDS FIXING" FontSize="9" FontWeight="Bold" Foreground="{DynamicResource ErrorBrush}" Margin="4,0,0,0" />
-                                                    </StackPanel>
+
+                                            <!-- Title row: name, problems, step count badge, last modified -->
+                                            <DockPanel Grid.Column="1" Margin="12,0,0,0">
+                                                <TextBlock DockPanel.Dock="Right" Text="{Binding ModifiedAgoText}" FontSize="11"
+                                                           FontFamily="{StaticResource MonoFont}"
+                                                           Foreground="{DynamicResource SubtleTextBrush}"
+                                                           VerticalAlignment="Center" Margin="10,0,0,0" ToolTip="{Binding ModifiedText}" />
+                                                <Border DockPanel.Dock="Right" CornerRadius="6" Padding="8,2" Margin="8,0,0,0"
+                                                        Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1"
+                                                        ToolTip="{Binding RepeatText}">
+                                                    <TextBlock Text="{Binding StepCountText}" FontFamily="{StaticResource MonoFont}" FontSize="11" FontWeight="SemiBold" Foreground="{DynamicResource AccentHoverBrush}" />
                                                 </Border>
+                                                <StackPanel Orientation="Horizontal">
+                                                    <TextBlock Text="{Binding Name}" FontSize="14.5" FontWeight="Bold" TextTrimming="CharacterEllipsis" />
+                                                    <Border Style="{StaticResource Pill}" Margin="8,0,0,0" Background="{DynamicResource ErrorSoftBrush}"
+                                                            ToolTip="This macro has validation issues. Open it in the Editor to inspect."
+                                                            Visibility="{Binding HasErrors, Converter={StaticResource BoolToVisibility}}">
+                                                        <StackPanel Orientation="Horizontal">
+                                                            <ctrl:StudioIcon Kind="ErrorCircle" Size="10" Foreground="{DynamicResource ErrorBrush}" />
+                                                            <TextBlock Text="NEEDS FIXING" FontSize="9" FontWeight="Bold" Foreground="{DynamicResource ErrorBrush}" Margin="4,0,0,0" />
+                                                        </StackPanel>
+                                                    </Border>
+                                                </StackPanel>
+                                            </DockPanel>
+
+                                            <!-- Description + Workflow Fingerprint Strip + category pills -->
+                                            <StackPanel Grid.Row="1" Grid.Column="1" Margin="12,4,0,0">
+                                                <TextBlock Text="{Binding Description}" Foreground="{DynamicResource MutedTextBrush}" FontSize="12" TextTrimming="CharacterEllipsis" />
+
+                                                <!-- Workflow Fingerprint Strip (proportional category composition bar) -->
+                                                <Border Height="5" CornerRadius="2.5" Background="{DynamicResource SurfaceBrush}" Margin="0,8,0,0" ClipToBounds="True"
+                                                        ToolTip="Workflow Fingerprint: proportional breakdown of Input, Vision, Logic, Brain &amp; Feedback steps"
+                                                        Visibility="{Binding HasSteps, Converter={StaticResource BoolToVisibility}}">
+                                                    <Grid>
+                                                        <Grid.ColumnDefinitions>
+                                                            <ColumnDefinition Width="{Binding InputWeight}" />
+                                                            <ColumnDefinition Width="{Binding VisionWeight}" />
+                                                            <ColumnDefinition Width="{Binding LogicWeight}" />
+                                                            <ColumnDefinition Width="{Binding MemoryWeight}" />
+                                                            <ColumnDefinition Width="{Binding FeedbackWeight}" />
+                                                            <ColumnDefinition Width="{Binding UtilityWeight}" />
+                                                        </Grid.ColumnDefinitions>
+                                                        <Border Grid.Column="0" Background="{DynamicResource InputAccentBrush}" />
+                                                        <Border Grid.Column="1" Background="{DynamicResource VisionAccentBrush}" />
+                                                        <Border Grid.Column="2" Background="{DynamicResource LogicAccentBrush}" />
+                                                        <Border Grid.Column="3" Background="{DynamicResource MemoryAccentBrush}" />
+                                                        <Border Grid.Column="4" Background="{DynamicResource FeedbackAccentBrush}" />
+                                                        <Border Grid.Column="5" Background="{DynamicResource UtilityAccentBrush}" />
+                                                    </Grid>
+                                                </Border>
+
+                                                <WrapPanel Margin="0,8,0,0">
+                                                    <Border Style="{StaticResource CategoryPill}" Background="{DynamicResource AccentSoftBrush}" ToolTip="App / Game Profile tag"
+                                                            Visibility="{Binding HasProfile, Converter={StaticResource BoolToVisibility}}">
+                                                        <StackPanel Orientation="Horizontal">
+                                                            <TextBlock Text="🗂 " FontSize="9" Foreground="{DynamicResource AccentBrush}" />
+                                                            <TextBlock Text="{Binding ProfileName}" FontSize="9" FontWeight="Bold" Foreground="{DynamicResource AccentBrush}" />
+                                                        </StackPanel>
+                                                    </Border>
+                                                    <Border Style="{StaticResource CategoryPill}" Background="{DynamicResource InputSoftBrush}" ToolTip="Mouse, keyboard or recorded input"
+                                                            Visibility="{Binding UsesInput, Converter={StaticResource BoolToVisibility}}">
+                                                        <TextBlock Text="INPUT" FontSize="9" FontWeight="Bold" Foreground="{DynamicResource InputAccentBrush}" />
+                                                    </Border>
+                                                    <Border Style="{StaticResource CategoryPill}" Background="{DynamicResource VisionSoftBrush}" ToolTip="Find image / Find color (or image / color conditions)"
+                                                            Visibility="{Binding UsesVision, Converter={StaticResource BoolToVisibility}}">
+                                                        <TextBlock Text="VISION" FontSize="9" FontWeight="Bold" Foreground="{DynamicResource VisionAccentBrush}" />
+                                                    </Border>
+                                                    <Border Style="{StaticResource CategoryPill}" Background="{DynamicResource VisionSoftBrush}" ToolTip="Find text with OCR (or text conditions)"
+                                                            Visibility="{Binding UsesOcr, Converter={StaticResource BoolToVisibility}}">
+                                                        <TextBlock Text="OCR" FontSize="9" FontWeight="Bold" Foreground="{DynamicResource VisionAccentBrush}" />
+                                                    </Border>
+                                                    <Border Style="{StaticResource CategoryPill}" Background="{DynamicResource FeedbackSoftBrush}" ToolTip="Feedback loop (minigame follower)"
+                                                            Visibility="{Binding UsesFeedback, Converter={StaticResource BoolToVisibility}}">
+                                                        <TextBlock Text="FEEDBACK LOOP" FontSize="9" FontWeight="Bold" Foreground="{DynamicResource FeedbackAccentBrush}" />
+                                                    </Border>
+                                                    <Border Style="{StaticResource CategoryPill}" Background="{DynamicResource LogicSoftBrush}" ToolTip="If / Repeat blocks"
+                                                            Visibility="{Binding UsesLogic, Converter={StaticResource BoolToVisibility}}">
+                                                        <TextBlock Text="LOGIC" FontSize="9" FontWeight="Bold" Foreground="{DynamicResource LogicAccentBrush}" />
+                                                    </Border>
+                                                    <Border Style="{StaticResource CategoryPill}" Background="{DynamicResource MemorySoftBrush}" ToolTip="Brain steps (Variables, Checkpoints, Sub-Macros, Watchers)"
+                                                            Visibility="{Binding UsesMemory, Converter={StaticResource BoolToVisibility}}">
+                                                        <TextBlock Text="BRAIN" FontSize="9" FontWeight="Bold" Foreground="{DynamicResource MemoryAccentBrush}" />
+                                                    </Border>
+                                                    <Border Style="{StaticResource CategoryPill}" Background="{DynamicResource MemorySoftBrush}" ToolTip="Variables and Background Watchers defined on this macro"
+                                                            Visibility="{Binding HasBrainBadge, Converter={StaticResource BoolToVisibility}}">
+                                                        <TextBlock Text="{Binding BrainBadgeText}" FontSize="9" FontWeight="SemiBold" Foreground="{DynamicResource MemoryAccentBrush}" />
+                                                    </Border>
+                                                    <Border Style="{StaticResource CategoryPill}" Background="{DynamicResource WarningSoftBrush}" ToolTip="Per-macro triggers (hotkey, schedule, or window event)"
+                                                            Visibility="{Binding HasTriggerSummary, Converter={StaticResource BoolToVisibility}}">
+                                                        <TextBlock Text="{Binding TriggerSummary}" FontSize="9" FontWeight="SemiBold" Foreground="{DynamicResource WarningBrush}" />
+                                                    </Border>
+                                                    <Border Style="{StaticResource CategoryPill}" Background="{DynamicResource AccentSoftBrush}" ToolTip="Uses Smart Target Intent (5-tier resilient relocation)"
+                                                            Visibility="{Binding UsesIntent, Converter={StaticResource BoolToVisibility}}">
+                                                        <TextBlock Text="🧭 INTENT" FontSize="9" FontWeight="Bold" Foreground="{DynamicResource AccentBrush}" />
+                                                    </Border>
+                                                    <Border Style="{StaticResource CategoryPill}" Background="{DynamicResource TimingSoftBrush}" ToolTip="Humanize is on (small random click offsets and timing)"
+                                                            Visibility="{Binding UsesHumanize, Converter={StaticResource BoolToVisibility}}">
+                                                        <TextBlock Text="HUMANIZE" FontSize="9" FontWeight="Bold" Foreground="{DynamicResource TimingAccentBrush}" />
+                                                    </Border>
+                                                    <Border Style="{StaticResource CategoryPill}" Background="{DynamicResource RecordedSoftBrush}" ToolTip="Bound to a target window / auto-adjusts its coordinates"
+                                                            Visibility="{Binding UsesTargetWindow, Converter={StaticResource BoolToVisibility}}">
+                                                        <TextBlock Text="🎯 TARGET" FontSize="9" FontWeight="Bold" Foreground="{DynamicResource RecordedAccentBrush}" />
+                                                    </Border>
+                                                </WrapPanel>
                                             </StackPanel>
-                                        </DockPanel>
 
-                                        <!-- Description + Workflow Fingerprint Strip + category pills -->
-                                        <StackPanel Grid.Row="1" Grid.Column="1" Margin="12,3,0,0">
-                                            <TextBlock Text="{Binding Description}" Foreground="{DynamicResource MutedTextBrush}" FontSize="12" TextTrimming="CharacterEllipsis" />
-
-                                            <!-- Workflow Fingerprint Strip (proportional category composition bar) -->
-                                            <Border Height="4" CornerRadius="2" Background="{DynamicResource SurfaceAltBrush}" Margin="0,7,0,0" ClipToBounds="True"
-                                                    ToolTip="Workflow Fingerprint: proportional breakdown of Input, Vision, Logic, Brain &amp; Feedback steps"
-                                                    Visibility="{Binding HasSteps, Converter={StaticResource BoolToVisibility}}">
-                                                <Grid>
-                                                    <Grid.ColumnDefinitions>
-                                                        <ColumnDefinition Width="{Binding InputWeight}" />
-                                                        <ColumnDefinition Width="{Binding VisionWeight}" />
-                                                        <ColumnDefinition Width="{Binding LogicWeight}" />
-                                                        <ColumnDefinition Width="{Binding MemoryWeight}" />
-                                                        <ColumnDefinition Width="{Binding FeedbackWeight}" />
-                                                        <ColumnDefinition Width="{Binding UtilityWeight}" />
-                                                    </Grid.ColumnDefinitions>
-                                                    <Border Grid.Column="0" Background="{DynamicResource InputAccentBrush}" />
-                                                    <Border Grid.Column="1" Background="{DynamicResource VisionAccentBrush}" />
-                                                    <Border Grid.Column="2" Background="{DynamicResource LogicAccentBrush}" />
-                                                    <Border Grid.Column="3" Background="{DynamicResource MemoryAccentBrush}" />
-                                                    <Border Grid.Column="4" Background="{DynamicResource FeedbackAccentBrush}" />
-                                                    <Border Grid.Column="5" Background="{DynamicResource UtilityAccentBrush}" />
-                                                </Grid>
-                                            </Border>
-
-                                            <WrapPanel Margin="0,7,0,0">
-                                                <Border Style="{StaticResource CategoryPill}" Background="{DynamicResource AccentSoftBrush}" ToolTip="App / Game Profile tag"
-                                                        Visibility="{Binding HasProfile, Converter={StaticResource BoolToVisibility}}">
-                                                    <StackPanel Orientation="Horizontal">
-                                                        <TextBlock Text="🗂 " FontSize="9" Foreground="{DynamicResource AccentBrush}" />
-                                                        <TextBlock Text="{Binding ProfileName}" FontSize="9" FontWeight="Bold" Foreground="{DynamicResource AccentBrush}" />
-                                                    </StackPanel>
-                                                </Border>
-                                                <Border Style="{StaticResource CategoryPill}" Background="{DynamicResource InputSoftBrush}" ToolTip="Mouse, keyboard or recorded input"
-                                                        Visibility="{Binding UsesInput, Converter={StaticResource BoolToVisibility}}">
-                                                    <TextBlock Text="INPUT" FontSize="9" FontWeight="Bold" Foreground="{DynamicResource InputAccentBrush}" />
-                                                </Border>
-                                                <Border Style="{StaticResource CategoryPill}" Background="{DynamicResource VisionSoftBrush}" ToolTip="Find image / Find color (or image / color conditions)"
-                                                        Visibility="{Binding UsesVision, Converter={StaticResource BoolToVisibility}}">
-                                                    <TextBlock Text="VISION" FontSize="9" FontWeight="Bold" Foreground="{DynamicResource VisionAccentBrush}" />
-                                                </Border>
-                                                <Border Style="{StaticResource CategoryPill}" Background="{DynamicResource VisionSoftBrush}" ToolTip="Find text with OCR (or text conditions)"
-                                                        Visibility="{Binding UsesOcr, Converter={StaticResource BoolToVisibility}}">
-                                                    <TextBlock Text="OCR" FontSize="9" FontWeight="Bold" Foreground="{DynamicResource VisionAccentBrush}" />
-                                                </Border>
-                                                <Border Style="{StaticResource CategoryPill}" Background="{DynamicResource FeedbackSoftBrush}" ToolTip="Feedback loop (minigame follower)"
-                                                        Visibility="{Binding UsesFeedback, Converter={StaticResource BoolToVisibility}}">
-                                                    <TextBlock Text="FEEDBACK LOOP" FontSize="9" FontWeight="Bold" Foreground="{DynamicResource FeedbackAccentBrush}" />
-                                                </Border>
-                                                <Border Style="{StaticResource CategoryPill}" Background="{DynamicResource LogicSoftBrush}" ToolTip="If / Repeat blocks"
-                                                        Visibility="{Binding UsesLogic, Converter={StaticResource BoolToVisibility}}">
-                                                    <TextBlock Text="LOGIC" FontSize="9" FontWeight="Bold" Foreground="{DynamicResource LogicAccentBrush}" />
-                                                </Border>
-                                                <Border Style="{StaticResource CategoryPill}" Background="{DynamicResource MemorySoftBrush}" ToolTip="Brain steps (Variables, Checkpoints, Sub-Macros, Watchers)"
-                                                        Visibility="{Binding UsesMemory, Converter={StaticResource BoolToVisibility}}">
-                                                    <TextBlock Text="BRAIN" FontSize="9" FontWeight="Bold" Foreground="{DynamicResource MemoryAccentBrush}" />
-                                                </Border>
-                                                <Border Style="{StaticResource CategoryPill}" Background="{DynamicResource MemorySoftBrush}" ToolTip="Variables and Background Watchers defined on this macro"
-                                                        Visibility="{Binding HasBrainBadge, Converter={StaticResource BoolToVisibility}}">
-                                                    <TextBlock Text="{Binding BrainBadgeText}" FontSize="9" FontWeight="SemiBold" Foreground="{DynamicResource MemoryAccentBrush}" />
-                                                </Border>
-                                                <Border Style="{StaticResource CategoryPill}" Background="{DynamicResource WarningSoftBrush}" ToolTip="Per-macro triggers (hotkey, schedule, or window event)"
-                                                        Visibility="{Binding HasTriggerSummary, Converter={StaticResource BoolToVisibility}}">
-                                                    <TextBlock Text="{Binding TriggerSummary}" FontSize="9" FontWeight="SemiBold" Foreground="{DynamicResource WarningBrush}" />
-                                                </Border>
-                                                <Border Style="{StaticResource CategoryPill}" Background="{DynamicResource AccentSoftBrush}" ToolTip="Uses Smart Target Intent (5-tier resilient relocation)"
-                                                        Visibility="{Binding UsesIntent, Converter={StaticResource BoolToVisibility}}">
-                                                    <TextBlock Text="🧭 INTENT" FontSize="9" FontWeight="Bold" Foreground="{DynamicResource AccentBrush}" />
-                                                </Border>
-                                                <Border Style="{StaticResource CategoryPill}" Background="{DynamicResource TimingSoftBrush}" ToolTip="Humanize is on (small random click offsets and timing)"
-                                                        Visibility="{Binding UsesHumanize, Converter={StaticResource BoolToVisibility}}">
-                                                    <TextBlock Text="HUMANIZE" FontSize="9" FontWeight="Bold" Foreground="{DynamicResource TimingAccentBrush}" />
-                                                </Border>
-                                                <Border Style="{StaticResource CategoryPill}" Background="{DynamicResource RecordedSoftBrush}" ToolTip="Bound to a target window / auto-adjusts its coordinates"
-                                                        Visibility="{Binding UsesTargetWindow, Converter={StaticResource BoolToVisibility}}">
-                                                    <TextBlock Text="🎯 TARGET" FontSize="9" FontWeight="Bold" Foreground="{DynamicResource RecordedAccentBrush}" />
-                                                </Border>
+                                            <!-- Quick actions -->
+                                            <WrapPanel Grid.Row="2" Grid.Column="1" Margin="12,9,0,0">
+                                                <Button Style="{StaticResource PlayButton}" Padding="11,4" FontSize="11" Margin="0,0,6,0"
+                                                        Command="{Binding DataContext.PlayItemCommand, RelativeSource={RelativeSource AncestorType=ListBox}}" CommandParameter="{Binding}"
+                                                        ToolTip="Play the saved version of this macro (Esc stops it)" AutomationProperties.Name="Play macro">
+                                                    <TextBlock Text="▶ Play" />
+                                                </Button>
+                                                <Button Style="{StaticResource CardActionButton}"
+                                                        Command="{Binding DataContext.OpenCommand, RelativeSource={RelativeSource AncestorType=ListBox}}" CommandParameter="{Binding}"
+                                                        ToolTip="Open this macro in the Workflow Editor (or double-click the card)" AutomationProperties.Name="Edit macro">
+                                                    <TextBlock Text="✏ Edit" />
+                                                </Button>
+                                                <Button Style="{StaticResource CardActionButton}"
+                                                        Command="{Binding DataContext.DuplicateCommand, RelativeSource={RelativeSource AncestorType=ListBox}}" CommandParameter="{Binding}"
+                                                        ToolTip="Make a copy of this macro" AutomationProperties.Name="Duplicate macro">
+                                                    <TextBlock Text="📋 Duplicate" />
+                                                </Button>
+                                                <Button Style="{StaticResource CardActionButton}"
+                                                        Command="{Binding DataContext.ExportCommand, RelativeSource={RelativeSource AncestorType=ListBox}}" CommandParameter="{Binding}"
+                                                        ToolTip="Export .smacro: save this macro as one self-contained file (pictures included) to share with a friend or back up"
+                                                        AutomationProperties.Name="Export macro as .smacro">
+                                                    <TextBlock Text="📤 Export .smacro" />
+                                                </Button>
+                                                <Button Style="{StaticResource CardActionButton}" Foreground="{DynamicResource ErrorBrush}"
+                                                        Command="{Binding DataContext.DeleteCommand, RelativeSource={RelativeSource AncestorType=ListBox}}" CommandParameter="{Binding}"
+                                                        ToolTip="Move this macro to SmartMacro's Trash folder" AutomationProperties.Name="Delete macro">
+                                                    <TextBlock Text="🗑 Delete" />
+                                                </Button>
                                             </WrapPanel>
-                                        </StackPanel>
-
-                                        <!-- Quick actions -->
-                                        <WrapPanel Grid.Row="2" Grid.Column="1" Margin="12,8,0,0">
-                                            <Button Style="{StaticResource PlayButton}" Padding="10,4" FontSize="11" Margin="0,0,6,0"
-                                                    Command="{Binding DataContext.PlayItemCommand, RelativeSource={RelativeSource AncestorType=ListBox}}" CommandParameter="{Binding}"
-                                                    ToolTip="Play the saved version of this macro (Esc stops it)" AutomationProperties.Name="Play macro">
-                                                <TextBlock Text="▶ Play" />
-                                            </Button>
-                                            <Button Style="{StaticResource CardActionButton}"
-                                                    Command="{Binding DataContext.OpenCommand, RelativeSource={RelativeSource AncestorType=ListBox}}" CommandParameter="{Binding}"
-                                                    ToolTip="Open this macro in the Workflow Editor (or double-click the card)" AutomationProperties.Name="Edit macro">
-                                                <TextBlock Text="✏ Edit" />
-                                            </Button>
-                                            <Button Style="{StaticResource CardActionButton}"
-                                                    Command="{Binding DataContext.DuplicateCommand, RelativeSource={RelativeSource AncestorType=ListBox}}" CommandParameter="{Binding}"
-                                                    ToolTip="Make a copy of this macro" AutomationProperties.Name="Duplicate macro">
-                                                <TextBlock Text="📋 Duplicate" />
-                                            </Button>
-                                            <Button Style="{StaticResource CardActionButton}"
-                                                    Command="{Binding DataContext.ExportCommand, RelativeSource={RelativeSource AncestorType=ListBox}}" CommandParameter="{Binding}"
-                                                    ToolTip="Export .smacro: save this macro as one self-contained file (pictures included) to share with a friend or back up"
-                                                    AutomationProperties.Name="Export macro as .smacro">
-                                                <TextBlock Text="📤 Export .smacro" />
-                                            </Button>
-                                            <Button Style="{StaticResource CardActionButton}" Foreground="{DynamicResource ErrorBrush}"
-                                                    Command="{Binding DataContext.DeleteCommand, RelativeSource={RelativeSource AncestorType=ListBox}}" CommandParameter="{Binding}"
-                                                    ToolTip="Move this macro to SmartMacro's Trash folder" AutomationProperties.Name="Delete macro">
-                                                <TextBlock Text="🗑 Delete" />
-                                            </Button>
-                                        </WrapPanel>
+                                        </Grid>
                                     </Grid>
                                 </Border>
                                 <DataTemplate.Triggers>
                                     <DataTrigger Binding="{Binding IsMouseOver, ElementName=Card}" Value="True">
                                         <Setter TargetName="Card" Property="BorderBrush" Value="{DynamicResource InputBorderBrush}" />
+                                        <Setter TargetName="Card" Property="Background">
+                                            <Setter.Value>
+                                                <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+                                                    <GradientStop Color="#212440" Offset="0" />
+                                                    <GradientStop Color="#16182C" Offset="1" />
+                                                </LinearGradientBrush>
+                                            </Setter.Value>
+                                        </Setter>
                                     </DataTrigger>
                                     <DataTrigger Binding="{Binding IsSelected, RelativeSource={RelativeSource AncestorType=ListBoxItem}}" Value="True">
                                         <Setter TargetName="Card" Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
+                                        <Setter TargetName="Card" Property="BorderThickness" Value="1.5" />
                                         <Setter TargetName="Card" Property="Background" Value="{DynamicResource SelectedCardBrush}" />
                                         <Setter TargetName="Card" Property="Effect">
                                             <Setter.Value>
-                                                <DropShadowEffect Color="#3B82F6" BlurRadius="12" ShadowDepth="0" Opacity="0.4" />
+                                                <DropShadowEffect Color="#6366F1" BlurRadius="14" ShadowDepth="0" Opacity="0.38" />
                                             </Setter.Value>
                                         </Setter>
                                     </DataTrigger>
@@ -342,19 +381,39 @@
                 </Grid>
             </Border>
 
-            <!-- ===== Details inspector ===== -->
-            <Border Grid.Column="2" Style="{StaticResource Card}" Padding="0">
+            <!-- ===== Details inspector v3 ===== -->
+            <Border Grid.Column="2" Style="{StaticResource Card}" Padding="0" ClipToBounds="True">
                 <Grid>
-                    <TextBlock Text="Select a macro to see its details." Style="{StaticResource MutedText}" HorizontalAlignment="Center" VerticalAlignment="Center"
-                               Visibility="{Binding HasSelection, Converter={StaticResource BoolToVisibility}, ConverterParameter=Invert}" />
+                    <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Margin="20"
+                                Visibility="{Binding HasSelection, Converter={StaticResource BoolToVisibility}, ConverterParameter=Invert}">
+                        <ctrl:StudioIcon Kind="Library" Size="28" Foreground="{DynamicResource SubtleTextBrush}" HorizontalAlignment="Center" />
+                        <TextBlock Text="Select a macro to inspect its telemetry and history."
+                                   Style="{StaticResource MutedText}" TextAlignment="Center" Margin="0,10,0,0" />
+                    </StackPanel>
 
                     <DockPanel Visibility="{Binding HasSelection, Converter={StaticResource BoolToVisibility}}">
-                        <Border DockPanel.Dock="Top" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,0,1" Padding="14,12">
-                            <StackPanel DataContext="{Binding SelectedItem}">
-                                <TextBlock Text="DETAILS" Style="{StaticResource SetupCardTitle}" />
-                                <TextBlock Text="{Binding Name}" FontSize="17" FontWeight="SemiBold" TextWrapping="Wrap" Margin="0,6,0,0" />
-                                <TextBlock Text="{Binding Description}" Style="{StaticResource MutedText}" FontSize="12" Margin="0,4,0,0" TextWrapping="Wrap" />
-                            </StackPanel>
+                        <!-- Sticky Hero Header -->
+                        <Border DockPanel.Dock="Top" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,0,1" ClipToBounds="True">
+                            <Border.Background>
+                                <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+                                    <GradientStop Color="#206366F1" Offset="0" />
+                                    <GradientStop Color="#08000000" Offset="1" />
+                                </LinearGradientBrush>
+                            </Border.Background>
+                            <Grid>
+                                <Border Height="2" VerticalAlignment="Top" Background="{DynamicResource AccentBrush}" Opacity="0.85" />
+                                <StackPanel DataContext="{Binding SelectedItem}" Margin="14,14,14,12">
+                                    <DockPanel>
+                                        <Border DockPanel.Dock="Right" CornerRadius="6" Padding="7,2" Background="{DynamicResource SurfaceBrush}"
+                                                BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" VerticalAlignment="Center">
+                                            <TextBlock Text="{Binding StepCountText}" FontFamily="{StaticResource MonoFont}" FontSize="10.5" FontWeight="SemiBold" Foreground="{DynamicResource AccentHoverBrush}" />
+                                        </Border>
+                                        <TextBlock Text="MACRO INSPECTOR" Style="{StaticResource SetupCardTitle}" VerticalAlignment="Center" />
+                                    </DockPanel>
+                                    <TextBlock Text="{Binding Name}" FontSize="16.5" FontWeight="Bold" TextWrapping="Wrap" Margin="0,8,0,0" />
+                                    <TextBlock Text="{Binding Description}" Style="{StaticResource MutedText}" FontSize="12" Margin="0,4,0,0" TextWrapping="Wrap" />
+                                </StackPanel>
+                            </Grid>
                         </Border>
 
                         <Border DockPanel.Dock="Bottom" Style="{StaticResource InspectorActionBar}">
@@ -363,8 +422,8 @@
                                     <Button Style="{StaticResource PlayButton}" Command="{Binding PlayItemCommand}" Margin="0,0,3,0" ToolTip="Play the saved version of this macro">
                                         <TextBlock Text="▶ Play" />
                                     </Button>
-                                    <Button Command="{Binding OpenCommand}" Margin="3,0,0,0" ToolTip="Open it in the Workflow Editor">
-                                        <TextBlock Text="✏ Edit" />
+                                    <Button Style="{StaticResource TestActionButton}" Command="{Binding OpenCommand}" Margin="3,0,0,0" ToolTip="Open it in the Workflow Editor">
+                                        <TextBlock Text="✏ Edit in Studio" />
                                     </Button>
                                 </UniformGrid>
                                 <Button Command="{Binding ExportCommand}" HorizontalAlignment="Stretch" Margin="0,0,0,6"
@@ -382,28 +441,48 @@
                             </StackPanel>
                         </Border>
 
-                        <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="14,10">
+                        <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="14,6,14,12">
                             <StackPanel DataContext="{Binding SelectedItem}">
                                 <Border Style="{StaticResource SetupCard}">
                                     <StackPanel>
-                                        <TextBlock Text="CONTENTS" Style="{StaticResource SetupCardTitle}" />
-                                        <TextBlock Text="{Binding StepCountText}" FontWeight="SemiBold" Margin="0,6,0,0" />
+                                        <TextBlock Text="1 · WORKFLOW TELEMETRY" Style="{StaticResource SetupCardTitle}" />
+                                        <TextBlock Text="{Binding StepCountText}" FontWeight="SemiBold" FontSize="13" Margin="0,8,0,0" />
                                         <TextBlock Text="{Binding RepeatText}" Style="{StaticResource MutedText}" FontSize="12" Margin="0,2,0,0" />
+                                        <Border Height="5" CornerRadius="2.5" Background="{DynamicResource SurfaceBrush}" Margin="0,10,0,0" ClipToBounds="True"
+                                                Visibility="{Binding HasSteps, Converter={StaticResource BoolToVisibility}}">
+                                            <Grid>
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="{Binding InputWeight}" />
+                                                    <ColumnDefinition Width="{Binding VisionWeight}" />
+                                                    <ColumnDefinition Width="{Binding LogicWeight}" />
+                                                    <ColumnDefinition Width="{Binding MemoryWeight}" />
+                                                    <ColumnDefinition Width="{Binding FeedbackWeight}" />
+                                                    <ColumnDefinition Width="{Binding UtilityWeight}" />
+                                                </Grid.ColumnDefinitions>
+                                                <Border Grid.Column="0" Background="{DynamicResource InputAccentBrush}" />
+                                                <Border Grid.Column="1" Background="{DynamicResource VisionAccentBrush}" />
+                                                <Border Grid.Column="2" Background="{DynamicResource LogicAccentBrush}" />
+                                                <Border Grid.Column="3" Background="{DynamicResource MemoryAccentBrush}" />
+                                                <Border Grid.Column="4" Background="{DynamicResource FeedbackAccentBrush}" />
+                                                <Border Grid.Column="5" Background="{DynamicResource UtilityAccentBrush}" />
+                                            </Grid>
+                                        </Border>
                                     </StackPanel>
                                 </Border>
                                 <Border Style="{StaticResource SetupCard}">
                                     <StackPanel>
-                                        <TextBlock Text="HISTORY" Style="{StaticResource SetupCardTitle}" />
-                                        <TextBlock Text="Last modified" Style="{StaticResource FieldLabel}" Margin="0,6,0,2" />
-                                        <TextBlock Text="{Binding ModifiedText}" />
+                                        <TextBlock Text="2 · TIMESTAMPS &amp; HISTORY" Style="{StaticResource SetupCardTitle}" />
+                                        <TextBlock Text="Last modified" Style="{StaticResource FieldLabel}" Margin="0,8,0,2" />
+                                        <TextBlock Text="{Binding ModifiedText}" FontFamily="{StaticResource MonoFont}" FontSize="11.5" />
                                         <TextBlock Text="Created" Style="{StaticResource FieldLabel}" Margin="0,8,0,2" />
-                                        <TextBlock Text="{Binding CreatedText}" />
+                                        <TextBlock Text="{Binding CreatedText}" FontFamily="{StaticResource MonoFont}" FontSize="11.5" />
                                     </StackPanel>
                                 </Border>
                                 <Border Style="{StaticResource SetupCard}">
                                     <StackPanel>
-                                        <TextBlock Text="ID" Style="{StaticResource SetupCardTitle}" />
-                                        <TextBox Text="{Binding IdText, Mode=OneWay}" IsReadOnly="True" FontSize="11" Padding="6,4" Margin="0,6,0,0"
+                                        <TextBlock Text="3 · MACRO IDENTIFIER" Style="{StaticResource SetupCardTitle}" />
+                                        <TextBox Text="{Binding IdText, Mode=OneWay}" IsReadOnly="True"
+                                                 FontFamily="{StaticResource MonoFont}" FontSize="11" Padding="7,5" Margin="0,8,0,0"
                                                  Foreground="{DynamicResource MutedTextBrush}" />
                                     </StackPanel>
                                 </Border>

@@ -1,3 +1,4 @@
+using SmartMacro.Core.Models;
 using SmartMacro.Core.Ocr;
 
 namespace SmartMacro.Core.Vision;
@@ -6,7 +7,39 @@ namespace SmartMacro.Core.Vision;
 /// One connected patch of matching pixels. Bounds are in picture pixels. CenterX / CenterY is the average
 /// position of the patch's pixels (better than the middle of the box for odd shapes). PixelCount = size.
 /// </summary>
-public sealed record ColorBlob(ScreenRect Bounds, int PixelCount, double CenterX, double CenterY);
+public sealed record ColorBlob(ScreenRect Bounds, int PixelCount, double CenterX, double CenterY)
+{
+    /// <summary>Share of the bounding box filled by matching pixels (0..1).</summary>
+    public double FillRatio => Bounds.IsEmpty ? 0 : Math.Clamp((double)PixelCount / Math.Max(1, Bounds.Width * Bounds.Height), 0, 1);
+
+    /// <summary>
+    /// Compactness / circularity estimate (0..1): combines fill density and aspect ratio (<c>min(W,H)/max(W,H)</c>).
+    /// A solid circle or compact square scores high (~0.75–1.0); a long thin bar or sparse particle streak scores low (&lt; 0.25).
+    /// </summary>
+    public double Circularity
+    {
+        get
+        {
+            if (Bounds.IsEmpty || Bounds.Width <= 0 || Bounds.Height <= 0) return 0;
+            double aspect = (double)Math.Min(Bounds.Width, Bounds.Height) / Math.Max(Bounds.Width, Bounds.Height);
+            return Math.Clamp(FillRatio * aspect * 1.2732395, 0, 1); // 4/pi ≈ 1.2732 so an ideal filled circle is ~1.0
+        }
+    }
+}
+
+/// <summary>Vision 2.0 extended options for <see cref="ColorFinder.FindObjects(BgraImage, RgbColor, RgbColor?, int, ColorSearchOptions, CancellationToken)"/>.</summary>
+public sealed record ColorSearchOptions
+{
+    public int MinPixels { get; init; } = 1;
+    public int MaxPixels { get; init; }
+    public int MaxResults { get; init; } = 20;
+    public bool MatchShades { get; init; }
+    public ColorSpaceKind ColorSpace { get; init; } = ColorSpaceKind.Rgb;
+    public ColorSelectRule SelectRule { get; init; } = ColorSelectRule.Largest;
+    public int MinCircularityPercent { get; init; }
+    public int MinFillPercent { get; init; }
+    public (int X, int Y)? ReferencePoint { get; init; }
+}
 
 /// <summary>
 /// Result of a colour search: the patches found (biggest first, at most the requested number) and how many pixels
@@ -140,17 +173,40 @@ public static class ColorFinder
     /// ball then belong to the ball. White, grey and other hues still don't match.
     /// </param>
     public static ColorSearchResult FindObjects(BgraImage image, RgbColor color, RgbColor? secondaryColor, int tolerance, int minPixels = 1,
-        int maxResults = 20, CancellationToken cancellationToken = default, bool matchShades = false)
+        int maxResults = 20, CancellationToken cancellationToken = default, bool matchShades = false) =>
+        FindObjects(image, color, secondaryColor, tolerance, new ColorSearchOptions
+        {
+            MinPixels = minPixels,
+            MaxResults = maxResults,
+            MatchShades = matchShades,
+        }, cancellationToken);
+
+    /// <summary>
+    /// Vision 2.0 colour object finder: supports RGB, HSV, and perceptual CIE L*a*b* colour spaces, min/max pixel size,
+    /// circularity &amp; fill density filters (to reject ragged particle sprays), and target selection rules.
+    /// </summary>
+    public static ColorSearchResult FindObjects(BgraImage image, RgbColor color, RgbColor? secondaryColor, int tolerance,
+        ColorSearchOptions options, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(image);
+        options ??= new ColorSearchOptions();
         tolerance = Math.Clamp(tolerance, 0, 255);
-        minPixels = Math.Max(1, minPixels);
-        maxResults = Math.Max(1, maxResults);
+        var minPixels = Math.Max(1, options.MinPixels);
+        var maxPixels = options.MaxPixels > 0 ? Math.Max(minPixels, options.MaxPixels) : 0;
+        var maxResults = Math.Max(1, options.MaxResults);
+        var matchShades = options.MatchShades;
+        var colorSpace = options.ColorSpace;
 
         int width = image.Width, height = image.Height;
         var p = image.Pixels;
         var hasSecondary = secondaryColor is not null;
         int sr = secondaryColor?.R ?? 0, sg = secondaryColor?.G ?? 0, sb = secondaryColor?.B ?? 0;
+
+        RgbToHsv(color.R, color.G, color.B, out var th1, out var ts1, out var tv1);
+        RgbToHsv((byte)sr, (byte)sg, (byte)sb, out var th2, out var ts2, out var tv2);
+        RgbToLab(color.R, color.G, color.B, out var tl1, out var ta1, out var tb1);
+        RgbToLab((byte)sr, (byte)sg, (byte)sb, out var tl2, out var ta2, out var tb2);
+
         const int cell = ClusterCellSize;
         int cw = (width + cell - 1) / cell, ch = (height + cell - 1) / cell;
 
@@ -171,10 +227,18 @@ public static class ColorFinder
             for (var x = 0; x < width; x++)
             {
                 var i = row + x * 4;
-                var hit = (Math.Abs(p[i] - color.B) <= tolerance && Math.Abs(p[i + 1] - color.G) <= tolerance && Math.Abs(p[i + 2] - color.R) <= tolerance)
-                          || (hasSecondary && Math.Abs(p[i] - sb) <= tolerance && Math.Abs(p[i + 1] - sg) <= tolerance && Math.Abs(p[i + 2] - sr) <= tolerance)
-                          || (matchShades && (IsShadeOf(p[i], p[i + 1], p[i + 2], color.B, color.G, color.R, tolerance)
-                                              || (hasSecondary && IsShadeOf(p[i], p[i + 1], p[i + 2], sb, sg, sr, tolerance))));
+                byte pb = p[i], pg = p[i + 1], pr = p[i + 2];
+                bool hit = colorSpace switch
+                {
+                    ColorSpaceKind.Hsv => MatchesHsv(pr, pg, pb, th1, ts1, tv1, tolerance, matchShades)
+                                          || (hasSecondary && MatchesHsv(pr, pg, pb, th2, ts2, tv2, tolerance, matchShades)),
+                    ColorSpaceKind.LabDeltaE => MatchesLab(pr, pg, pb, tl1, ta1, tb1, tolerance, matchShades)
+                                                || (hasSecondary && MatchesLab(pr, pg, pb, tl2, ta2, tb2, tolerance, matchShades)),
+                    _ => (Math.Abs(pb - color.B) <= tolerance && Math.Abs(pg - color.G) <= tolerance && Math.Abs(pr - color.R) <= tolerance)
+                         || (hasSecondary && Math.Abs(pb - sb) <= tolerance && Math.Abs(pg - sg) <= tolerance && Math.Abs(pr - sr) <= tolerance)
+                         || (matchShades && (IsShadeOf(pb, pg, pr, color.B, color.G, color.R, tolerance)
+                                             || (hasSecondary && IsShadeOf(pb, pg, pr, sb, sg, sr, tolerance)))),
+                };
                 if (!hit) continue;
 
                 matching++;
@@ -199,6 +263,9 @@ public static class ColorFinder
 
         var clusters = new List<ColorBlob>();
         if (matching == 0) return new ColorSearchResult(clusters, 0);
+
+        double minCirc = Math.Clamp(options.MinCircularityPercent / 100.0, 0, 1);
+        double minFill = Math.Clamp(options.MinFillPercent / 100.0, 0, 1);
 
         // Join touching occupied cells (8 neighbours) without recursion.
         var visited = new bool[cw * ch];
@@ -237,12 +304,101 @@ public static class ColorFinder
                 }
             }
 
-            if (pixels >= minPixels)
-                clusters.Add(new ColorBlob(new ScreenRect(left, top, right - left + 1, bottom - top + 1), pixels, sx / (double)pixels, sy / (double)pixels));
+            if (pixels < minPixels) continue;
+            if (maxPixels > 0 && pixels > maxPixels) continue;
+
+            var blob = new ColorBlob(new ScreenRect(left, top, right - left + 1, bottom - top + 1), pixels, sx / (double)pixels, sy / (double)pixels);
+            if (minFill > 0 && blob.FillRatio + 1e-6 < minFill) continue;
+            if (minCirc > 0 && blob.Circularity + 1e-6 < minCirc) continue;
+            clusters.Add(blob);
         }
 
-        clusters.Sort((a, b) => b.PixelCount.CompareTo(a.PixelCount));
+        SortBlobs(clusters, options.SelectRule, options.ReferencePoint ?? (width / 2, height / 2));
         if (clusters.Count > maxResults) clusters.RemoveRange(maxResults, clusters.Count - maxResults);
         return new ColorSearchResult(clusters, matching);
+    }
+
+    private static void SortBlobs(List<ColorBlob> blobs, ColorSelectRule rule, (int X, int Y) refPt)
+    {
+        switch (rule)
+        {
+            case ColorSelectRule.NearestToCenter:
+            case ColorSelectRule.NearestToLastSpot:
+                blobs.Sort((a, b) =>
+                {
+                    double da = (a.CenterX - refPt.X) * (a.CenterX - refPt.X) + (a.CenterY - refPt.Y) * (a.CenterY - refPt.Y);
+                    double db = (b.CenterX - refPt.X) * (b.CenterX - refPt.X) + (b.CenterY - refPt.Y) * (b.CenterY - refPt.Y);
+                    int cmp = da.CompareTo(db);
+                    return cmp != 0 ? cmp : b.PixelCount.CompareTo(a.PixelCount);
+                });
+                break;
+
+            case ColorSelectRule.TopMost:
+                blobs.Sort((a, b) =>
+                {
+                    int cmp = a.Bounds.Y.CompareTo(b.Bounds.Y);
+                    return cmp != 0 ? cmp : a.Bounds.X.CompareTo(b.Bounds.X);
+                });
+                break;
+
+            default:
+                blobs.Sort((a, b) => b.PixelCount.CompareTo(a.PixelCount));
+                break;
+        }
+    }
+
+    internal static void RgbToHsv(byte r, byte g, byte b, out float h, out float s, out float v)
+    {
+        float rf = r / 255f, gf = g / 255f, bf = b / 255f;
+        float max = Math.Max(rf, Math.Max(gf, bf));
+        float min = Math.Min(rf, Math.Min(gf, bf));
+        float delta = max - min;
+        v = max * 255f;
+        s = max <= 1e-5f ? 0f : (delta / max) * 255f;
+        if (delta <= 1e-5f) { h = 0f; return; }
+        if (max == rf) h = 60f * (((gf - bf) / delta) % 6f);
+        else if (max == gf) h = 60f * (((bf - rf) / delta) + 2f);
+        else h = 60f * (((rf - gf) / delta) + 4f);
+        if (h < 0f) h += 360f;
+    }
+
+    private static bool MatchesHsv(byte r, byte g, byte b, float th, float ts, float tv, int tolerance, bool matchShades)
+    {
+        RgbToHsv(r, g, b, out float h, out float s, out float v);
+        // For near-achromatic colours (white/grey/black), compare value and saturation directly.
+        if (ts < 25f)
+            return Math.Abs(s - ts) <= tolerance + 15 && Math.Abs(v - tv) <= (matchShades ? tolerance * 2f : tolerance);
+
+        float hueDiff = Math.Abs(h - th);
+        if (hueDiff > 180f) hueDiff = 360f - hueDiff;
+        float allowedHue = Math.Max(4f, tolerance * 0.7f);
+        float allowedSat = matchShades ? Math.Max(35f, tolerance * 2.2f) : Math.Max(15f, tolerance * 1.4f);
+        float allowedVal = matchShades ? Math.Max(65f, tolerance * 3.0f) : Math.Max(15f, tolerance * 1.4f);
+        return hueDiff <= allowedHue && Math.Abs(s - ts) <= allowedSat && Math.Abs(v - tv) <= allowedVal;
+    }
+
+    internal static void RgbToLab(byte r, byte g, byte b, out float l, out float a, out float bLab)
+    {
+        // Fast sRGB -> CIE L*a*b* approximation for perceptual Delta-E comparisons.
+        float rf = r / 255f, gf = g / 255f, bf = b / 255f;
+        float x = 0.4124f * rf + 0.3576f * gf + 0.1805f * bf;
+        float y = 0.2126f * rf + 0.7152f * gf + 0.0722f * bf;
+        float z = 0.0193f * rf + 0.1192f * gf + 0.9505f * bf;
+        float fx = LabF(x / 0.95047f), fy = LabF(y), fz = LabF(z / 1.08883f);
+        l = 116f * fy - 16f;
+        a = 500f * (fx - fy);
+        bLab = 200f * (fy - fz);
+
+        static float LabF(float t) => t > 0.008856f ? MathF.Cbrt(t) : 7.787f * t + 16f / 116f;
+    }
+
+    private static bool MatchesLab(byte r, byte g, byte b, float tl, float ta, float tb, int tolerance, bool matchShades)
+    {
+        RgbToLab(r, g, b, out float l, out float a, out float bLab);
+        float dl = (l - tl) * (matchShades ? 0.45f : 1.0f);
+        float da = a - ta;
+        float db = bLab - tb;
+        float deltaE = MathF.Sqrt(dl * dl + da * da + db * db);
+        return deltaE <= tolerance * 0.65f + 2f;
     }
 }

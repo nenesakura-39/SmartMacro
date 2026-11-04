@@ -433,10 +433,10 @@ public static class SmartRecordingConverter
                     raw.Add(new RawInputEvent(ms, RawInputKind.HorizontalWheel, X: x, Y: y, Delta: e.Delta));
                     break;
                 case InputEventKind.KeyDown:
-                    raw.Add(new RawInputEvent(ms, RawInputKind.KeyDown, VirtualKey: SpecificVirtualKey(e)));
+                    raw.Add(new RawInputEvent(ms, RawInputKind.KeyDown, VirtualKey: SpecificVirtualKey(e), ScanCode: e.ScanCode, Extended: e.Extended));
                     break;
                 case InputEventKind.KeyUp:
-                    raw.Add(new RawInputEvent(ms, RawInputKind.KeyUp, VirtualKey: SpecificVirtualKey(e)));
+                    raw.Add(new RawInputEvent(ms, RawInputKind.KeyUp, VirtualKey: SpecificVirtualKey(e), ScanCode: e.ScanCode, Extended: e.Extended));
                     break;
             }
         }

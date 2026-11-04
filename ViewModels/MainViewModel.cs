@@ -611,6 +611,27 @@ public sealed class MainViewModel : ObservableObject, IDisposable
 
         try
         {
+            var refBounds = CoordinateScaling.CurrentTarget(macro, _screen as Core.Vision.IScreenLayout);
+            macro.ReferenceLeft = refBounds.X;
+            macro.ReferenceTop = refBounds.Y;
+            macro.ReferenceWidth = refBounds.Width;
+            macro.ReferenceHeight = refBounds.Height;
+        }
+        catch
+        {
+            // Fallback to virtual screen bounds if layout probe is unavailable.
+            var vs = _screen.GetVirtualScreen();
+            if (vs.Width > 0 && vs.Height > 0)
+            {
+                macro.ReferenceLeft = vs.Left;
+                macro.ReferenceTop = vs.Top;
+                macro.ReferenceWidth = vs.Width;
+                macro.ReferenceHeight = vs.Height;
+            }
+        }
+
+        try
+        {
             await _repository.SaveAsync(macro);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or Core.Validation.MacroValidationException)

@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
@@ -10,12 +10,13 @@
     <UseWPF>true</UseWPF>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <AssemblyTitle>SmartMacro</AssemblyTitle>
-    <Product>SmartMacro</Product>
+    <Product>SmartMacro Studio</Product>
     <Version>1.0.0</Version>
     <ApplicationIcon>Assets\SmartMacro.ico</ApplicationIcon>
-    <Company>Riku</Company>
-    <Authors>Riku</Authors>
-    <Copyright>© 2026 Riku</Copyright>
+    <Company>KuroLogic</Company>
+    <Authors>Riku (KuroLogic)</Authors>
+    <Description>SmartMacro AAA Automation, Vision &amp; 1:1 Input Studio</Description>
+    <Copyright>© 2026 Riku · KuroLogic</Copyright>
     <!-- The Core library and tests live in sub-folders with their own projects; don't compile them twice. -->
     <DefaultItemExcludes>$(DefaultItemExcludes);SmartMacro.Core\**;SmartMacro.Tests\**;artifacts\**;release\**;publish\**</DefaultItemExcludes>
   </PropertyGroup>
@@ -29,6 +30,7 @@
     <Resource Include="Assets\SmartMacro.ico" />
     <!-- KuroLogic studio logo, shown in Settings → About (source: tools/brand/kurologic-logo.svg). -->
     <Resource Include="Assets\KuroLogic-Logo.png" />
+    <Resource Include="Assets\KuroLogic-Banner-1920x1080.png" />
   </ItemGroup>
 
   <ItemGroup>

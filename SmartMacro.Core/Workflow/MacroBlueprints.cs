@@ -105,7 +105,7 @@ public static class MacroBlueprints
             "submacro composition call subroutine helper parameter input output bundle"),
         new MacroBlueprintInfo(MacroBlueprint.ArenaAutoPotionLoop, "🧪", "Smart HP / Mana Auto-Potion",
             "Read HP Bar % → If {hp} < 35% → Press Potion Key",
-            "Reads your game's HP / Mana bar fill percentage (0–100%) using the v1.6 HUD Gauge Reader and automatically presses your potion key when health drops below 35%.",
+            "Reads your game's HP / Mana bar fill percentage (0–100%) using the HUD Gauge Reader and automatically presses your potion key when health drops below 35%.",
             "arena game hp mana health bar gauge potion heal survival", EnablesHumanize: true),
         new MacroBlueprintInfo(MacroBlueprint.ArenaSkillPriorityRotation, "⚔️", "Priority Cooldown Rotation",
             "If Ultimate Ready → Else Skill 1 → Else Basic Attack",

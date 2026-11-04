@@ -255,6 +255,8 @@ public sealed partial class PlaybackEngine
                 break;
 
             case KeyPressStep k:
+            {
+                var mainKey = new HeldKey(k.VirtualKey, k.ScanCode, k.Extended);
                 switch (k.Action)
                 {
                     case KeyAction.Press when k.HoldMs > 0:
@@ -264,11 +266,11 @@ public sealed partial class PlaybackEngine
                         foreach (var vk in modifiers)
                         {
                             _input.Key(vk, true);
-                            held.Keys.Add(new HeldKey(vk));
+                            held.PressKey(new HeldKey(vk));
                         }
 
-                        _input.Key(k.VirtualKey, true);
-                        held.Keys.Add(new HeldKey(k.VirtualKey));
+                        SendKey(mainKey, down: true);
+                        held.PressKey(mainKey);
 
                         // Synthetic SendInput does not trigger OS hardware typematic auto-repeat. For non-modifier keys
                         // held >= 300 ms, wait the standard ~250 ms typematic delay and then emit repeated KeyDown
@@ -283,7 +285,7 @@ public sealed partial class PlaybackEngine
 
                             while (elapsedHoldMs < k.HoldMs)
                             {
-                                _input.Key(k.VirtualKey, true);
+                                SendKey(mainKey, down: true);
                                 var stepMs = Math.Min(typematicRepeatMs, k.HoldMs - elapsedHoldMs);
                                 AdvanceHold(stepMs / speed);
                                 await WaitForTimelineAsync(token).ConfigureAwait(false);
@@ -296,12 +298,12 @@ public sealed partial class PlaybackEngine
                             await WaitForTimelineAsync(token).ConfigureAwait(false);
                         }
 
-                        _input.Key(k.VirtualKey, false);
-                        held.Keys.Remove(new HeldKey(k.VirtualKey));
+                        SendKey(mainKey, down: false);
+                        held.ReleaseKey(mainKey);
                         for (var i = modifiers.Count - 1; i >= 0; i--)
                         {
                             _input.Key(modifiers[i], false);
-                            held.Keys.Remove(new HeldKey(modifiers[i]));
+                            held.ReleaseKey(new HeldKey(modifiers[i]));
                         }
 
                         break;
@@ -310,24 +312,25 @@ public sealed partial class PlaybackEngine
                     {
                         var modifiers = ModifierKeys(k.Modifiers);
                         foreach (var vk in modifiers) _input.Key(vk, true);
-                        _input.Key(k.VirtualKey, true);
-                        _input.Key(k.VirtualKey, false);
+                        SendKey(mainKey, down: true);
+                        SendKey(mainKey, down: false);
                         for (var i = modifiers.Count - 1; i >= 0; i--) _input.Key(modifiers[i], false);
                         break;
                     }
                     case KeyAction.Down:
-                        _input.Key(k.VirtualKey, true);
-                        held.Keys.Add(new HeldKey(k.VirtualKey));
+                        SendKey(mainKey, down: true);
+                        held.PressKey(mainKey);
                         break;
                     case KeyAction.Up:
-                        _input.Key(k.VirtualKey, false);
-                        held.Keys.Remove(new HeldKey(k.VirtualKey));
+                        SendKey(mainKey, down: false);
+                        held.ReleaseKey(mainKey);
                         break;
                 }
 
                 // Deadline-synced like clicks: sending the key doesn't push the rest of the macro back.
                 KeepStepOverheadOnTimeline();
                 break;
+            }
 
             case TypeTextStep t:
                 await TypeTextAsync(t, speed, token).ConfigureAwait(false);

@@ -3,6 +3,7 @@
                     xmlns:models="clr-namespace:SmartMacro.Core.Models;assembly=SmartMacro.Core"
                     xmlns:steps="clr-namespace:SmartMacro.ViewModels.Steps"
                     xmlns:vision="clr-namespace:SmartMacro.Services.Vision"
+                    xmlns:ctrl="clr-namespace:SmartMacro.Controls"
                     xmlns:conv="clr-namespace:SmartMacro.Converters">
 
     <ResourceDictionary.MergedDictionaries>
@@ -13,44 +14,55 @@
         <StackPanel>
             <ContentControl Content="{Binding}" ContentTemplate="{StaticResource StepHeaderTemplate}" Focusable="False" Visibility="{Binding IsStandalone, Converter={StaticResource BoolToVisibility}}" />
 
-            <TextBlock Text="Wait mode" Style="{StaticResource FieldLabel}" Margin="0,18,0,4" />
-            <ComboBox ItemsSource="{x:Static steps:DelayStepViewModel.Modes}" DisplayMemberPath="Label" SelectedValuePath="Value"
-                      SelectedValue="{Binding Mode}" AutomationProperties.Name="Wait mode" />
-            <TextBlock Text="{Binding AdaptiveModeHelp}" Style="{StaticResource MutedText}" FontSize="11" Margin="0,4,0,0" TextWrapping="Wrap" />
+            <Border Style="{StaticResource SetupCard}">
+                <StackPanel>
+                    <TextBlock Text="1 · WAIT STRATEGY &amp; MODE" Style="{StaticResource SetupCardTitle}" />
+                    <TextBlock Text="Wait mode" Style="{StaticResource FieldLabel}" Margin="0,8,0,4" />
+                    <ComboBox ItemsSource="{x:Static steps:DelayStepViewModel.Modes}" DisplayMemberPath="Label" SelectedValuePath="Value"
+                              SelectedValue="{Binding Mode}" AutomationProperties.Name="Wait mode" />
+                    <TextBlock Text="{Binding AdaptiveModeHelp}" Style="{StaticResource MutedText}" FontSize="11" Margin="0,4,0,0" TextWrapping="Wrap" />
 
-            <Grid Margin="0,12,0,0" Visibility="{Binding IsAdaptive, Converter={StaticResource BoolToVisibility}}">
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="*" />
-                    <ColumnDefinition Width="10" />
-                    <ColumnDefinition Width="*" />
-                </Grid.ColumnDefinitions>
-                <StackPanel Grid.Column="0">
-                    <TextBlock Text="Minimum wait (ms)" Style="{StaticResource FieldLabel}" />
-                    <TextBox Text="{Binding MinDurationMs, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}"
-                             AutomationProperties.Name="Minimum wait in milliseconds"
-                             ToolTip="Always wait at least this long before checking the screen (lets animations start)." />
+                    <Grid Margin="0,12,0,0" Visibility="{Binding IsAdaptive, Converter={StaticResource BoolToVisibility}}">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="10" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <StackPanel Grid.Column="0">
+                            <TextBlock Text="Minimum wait (ms)" Style="{StaticResource FieldLabel}" />
+                            <TextBox Text="{Binding MinDurationMs, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}"
+                                     AutomationProperties.Name="Minimum wait in milliseconds"
+                                     ToolTip="Always wait at least this long before checking the screen (lets animations start)." />
+                        </StackPanel>
+                        <StackPanel Grid.Column="2">
+                            <TextBlock Text="Max timeout (ms)" Style="{StaticResource FieldLabel}" />
+                            <TextBox Text="{Binding MaxDurationMs, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}"
+                                     AutomationProperties.Name="Maximum timeout in milliseconds"
+                                     ToolTip="Safety cap: continue after this many milliseconds even if the screen is still moving." />
+                        </StackPanel>
+                    </Grid>
                 </StackPanel>
-                <StackPanel Grid.Column="2">
-                    <TextBlock Text="Max timeout (ms)" Style="{StaticResource FieldLabel}" />
-                    <TextBox Text="{Binding MaxDurationMs, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}"
-                             AutomationProperties.Name="Maximum timeout in milliseconds"
-                             ToolTip="Safety cap: continue after this many milliseconds even if the screen is still moving." />
+            </Border>
+
+            <Border Style="{StaticResource SetupCard}">
+                <StackPanel>
+                    <TextBlock Text="2 · DURATION &amp; QUICK STEPPERS" Style="{StaticResource SetupCardTitle}" />
+                    <TextBlock Text="{Binding DurationFieldLabel}" Style="{StaticResource FieldLabel}" Margin="0,8,0,4" />
+                    <TextBox Text="{Binding DurationMs, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}" AutomationProperties.Name="Wait time in milliseconds" />
+                    <TextBlock Text="{Binding SecondsText}" Style="{StaticResource MutedText}" FontSize="12" Margin="0,4,0,0" />
+
+                    <TextBlock Text="Quick steppers" Style="{StaticResource FieldLabel}" />
+                    <WrapPanel Margin="0,6,0,0">
+                        <Button Content="-50ms" Command="{Binding AddDurationCommand}" CommandParameter="-50" Padding="10,5" Margin="0,0,6,6" />
+                        <Button Content="+50ms" Command="{Binding AddDurationCommand}" CommandParameter="+50" Padding="10,5" Margin="0,0,6,6" />
+                        <Button Content="+100ms" Command="{Binding AddDurationCommand}" CommandParameter="+100" Padding="10,5" Margin="0,0,6,6" />
+                        <Button Content="+500ms" Command="{Binding AddDurationCommand}" CommandParameter="+500" Padding="10,5" Margin="0,0,6,6" />
+                        <Button Content="+1s" Command="{Binding AddDurationCommand}" CommandParameter="+1000" Padding="10,5" Margin="0,0,6,6" />
+                        <Button Content="+5s" Command="{Binding AddDurationCommand}" CommandParameter="+5000" Padding="10,5" Margin="0,0,6,6" />
+                        <Button Content="Reset (0ms)" Command="{Binding ResetDurationCommand}" Padding="10,5" Margin="0,0,6,6" />
+                    </WrapPanel>
                 </StackPanel>
-            </Grid>
-
-            <TextBlock Text="{Binding DurationFieldLabel}" Style="{StaticResource FieldLabel}" Margin="0,14,0,4" />
-            <TextBox Text="{Binding DurationMs, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}" AutomationProperties.Name="Wait time in milliseconds" />
-            <TextBlock Text="{Binding SecondsText}" Style="{StaticResource MutedText}" FontSize="12" Margin="0,4,0,0" />
-
-            <TextBlock Text="Quick add" Style="{StaticResource FieldLabel}" />
-            <!-- Quick presets wrap onto a second line on narrow panels instead of being squeezed / cut off. -->
-            <WrapPanel Margin="0,6,0,0">
-                <Button Content="+100ms" Command="{Binding AddDurationCommand}" CommandParameter="+100" Padding="10,5" Margin="0,0,6,6" />
-                <Button Content="+500ms" Command="{Binding AddDurationCommand}" CommandParameter="+500" Padding="10,5" Margin="0,0,6,6" />
-                <Button Content="+1s" Command="{Binding AddDurationCommand}" CommandParameter="+1000" Padding="10,5" Margin="0,0,6,6" />
-                <Button Content="+5s" Command="{Binding AddDurationCommand}" CommandParameter="+5000" Padding="10,5" Margin="0,0,6,6" />
-                <Button Content="Reset (0ms)" Command="{Binding ResetDurationCommand}" Padding="10,5" Margin="0,0,6,6" />
-            </WrapPanel>
+            </Border>
 
             <ContentControl Content="{Binding}" ContentTemplate="{StaticResource StepFooterTemplate}" Focusable="False" Visibility="{Binding IsStandalone, Converter={StaticResource BoolToVisibility}}" />
         </StackPanel>
@@ -59,55 +71,69 @@
     <DataTemplate DataType="{x:Type steps:MouseMoveStepViewModel}">
         <StackPanel>
             <ContentControl Content="{Binding}" ContentTemplate="{StaticResource StepHeaderTemplate}" Focusable="False" Visibility="{Binding IsStandalone, Converter={StaticResource BoolToVisibility}}" />
-            <!-- 3D camera: relative mouse movement (dx, dy) instead of a screen position. -->
-            <CheckBox IsChecked="{Binding UseRelativeDelta}" Margin="0,16,0,0" AutomationProperties.Name="Relative mouse delta for 3D camera"
-                      Content="🎮 Relative mouse delta (3D camera / cursor-locked games)"
-                      ToolTip="Sends relative mouse movement (like a real mouse) instead of putting the cursor on X / Y. Games that lock the cursor (right-click camera, shift-lock, first person) turn the camera by it." />
-            <StackPanel Visibility="{Binding UseRelativeDelta, Converter={StaticResource BoolToVisibility}}">
-                <Grid Margin="0,8,0,0">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*" />
-                        <ColumnDefinition Width="12" />
-                        <ColumnDefinition Width="*" />
-                    </Grid.ColumnDefinitions>
-                    <StackPanel Grid.Column="0">
-                        <TextBlock Text="Delta X (+ = right)" Style="{StaticResource FieldLabel}" />
-                        <TextBox Text="{Binding DeltaX, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}" AutomationProperties.Name="Delta X" />
+
+            <Border Style="{StaticResource SetupCard}">
+                <StackPanel>
+                    <TextBlock Text="1 · TARGET DESTINATION &amp; MODE" Style="{StaticResource SetupCardTitle}" />
+                    <!-- 3D camera: relative mouse movement (dx, dy) instead of a screen position. -->
+                    <CheckBox IsChecked="{Binding UseRelativeDelta}" Margin="0,10,0,0" AutomationProperties.Name="Relative mouse delta for 3D camera"
+                              Content="🎮 Relative mouse delta (3D camera / cursor-locked games)"
+                              ToolTip="Sends relative mouse movement (like a real mouse) instead of putting the cursor on X / Y. Games that lock the cursor (right-click camera, shift-lock, first person) turn the camera by it." />
+                    <StackPanel Visibility="{Binding UseRelativeDelta, Converter={StaticResource BoolToVisibility}}">
+                        <Grid Margin="0,8,0,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="12" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Grid.Column="0">
+                                <TextBlock Text="Delta X (+ = right)" Style="{StaticResource FieldLabel}" />
+                                <TextBox Text="{Binding DeltaX, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}" AutomationProperties.Name="Delta X" />
+                            </StackPanel>
+                            <StackPanel Grid.Column="2">
+                                <TextBlock Text="Delta Y (+ = down)" Style="{StaticResource FieldLabel}" />
+                                <TextBox Text="{Binding DeltaY, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}" AutomationProperties.Name="Delta Y" />
+                            </StackPanel>
+                        </Grid>
+                        <TextBlock Style="{StaticResource MutedText}" FontSize="11" Margin="0,6,0,0" TextWrapping="Wrap"
+                                   Text="Mouse counts, like a physical mouse reports them. The camera turns by the same amount as when you recorded it (same in-game sensitivity). Windows' pointer acceleration can bend the visible cursor's path; games that read raw input aren't affected." />
                     </StackPanel>
-                    <StackPanel Grid.Column="2">
-                        <TextBlock Text="Delta Y (+ = down)" Style="{StaticResource FieldLabel}" />
-                        <TextBox Text="{Binding DeltaY, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}" AutomationProperties.Name="Delta Y" />
+                    <StackPanel Visibility="{Binding IsAbsolute, Converter={StaticResource BoolToVisibility}}">
+                        <TextBlock Text="Where to move" Style="{StaticResource FieldLabel}" Margin="0,12,0,4" />
+                        <ComboBox ItemsSource="{x:Static steps:MouseMoveStepViewModel.Targets}" DisplayMemberPath="Label" SelectedValuePath="Value"
+                                  SelectedValue="{Binding TargetMode}" AutomationProperties.Name="Where to move"
+                                  ToolTip="A chosen position (X / Y), the center of what the last Find step / If condition found plus an offset, or a distance from wherever the cursor is." />
+                        <StackPanel Visibility="{Binding UsesFixedPosition, Converter={StaticResource BoolToVisibility}}">
+                            <TextBlock Text="Destination" Style="{StaticResource FieldLabel}" Margin="0,10,0,0" />
+                            <ContentControl Content="{Binding}" ContentTemplate="{StaticResource PositionPickerTemplate}" Focusable="False" />
+                        </StackPanel>
+                        <StackPanel Visibility="{Binding UsesOffset, Converter={StaticResource BoolToVisibility}}">
+                            <ContentControl Content="{Binding}" ContentTemplate="{StaticResource OffsetFieldsTemplate}" Focusable="False" />
+                            <ContentControl Content="{Binding}" ContentTemplate="{StaticResource OffsetPickerTemplate}" Focusable="False" />
+                            <TextBlock Text="{Binding OffsetHelp}" Style="{StaticResource MutedText}" FontSize="11" Margin="0,4,0,0" TextWrapping="Wrap" />
+                        </StackPanel>
                     </StackPanel>
-                </Grid>
-                <TextBlock Style="{StaticResource MutedText}" FontSize="11" Margin="0,6,0,0" TextWrapping="Wrap"
-                           Text="Mouse counts, like a physical mouse reports them. The camera turns by the same amount as when you recorded it (same in-game sensitivity). Windows' pointer acceleration can bend the visible cursor's path; games that read raw input aren't affected." />
-            </StackPanel>
-            <StackPanel Visibility="{Binding IsAbsolute, Converter={StaticResource BoolToVisibility}}">
-            <TextBlock Text="Where to move" Style="{StaticResource FieldLabel}" Margin="0,18,0,4" />
-            <ComboBox ItemsSource="{x:Static steps:MouseMoveStepViewModel.Targets}" DisplayMemberPath="Label" SelectedValuePath="Value"
-                      SelectedValue="{Binding TargetMode}" AutomationProperties.Name="Where to move"
-                      ToolTip="A chosen position (X / Y), the center of what the last Find step / If condition found plus an offset, or a distance from wherever the cursor is." />
-            <StackPanel Visibility="{Binding UsesFixedPosition, Converter={StaticResource BoolToVisibility}}">
-                <TextBlock Text="Destination" Style="{StaticResource FieldLabel}" Margin="0,12,0,0" />
-                <ContentControl Content="{Binding}" ContentTemplate="{StaticResource PositionPickerTemplate}" Focusable="False" />
-            </StackPanel>
-            <StackPanel Visibility="{Binding UsesOffset, Converter={StaticResource BoolToVisibility}}">
-                <ContentControl Content="{Binding}" ContentTemplate="{StaticResource OffsetFieldsTemplate}" Focusable="False" />
-                <ContentControl Content="{Binding}" ContentTemplate="{StaticResource OffsetPickerTemplate}" Focusable="False" />
-                <TextBlock Text="{Binding OffsetHelp}" Style="{StaticResource MutedText}" FontSize="11" Margin="0,4,0,0" TextWrapping="Wrap" />
-            </StackPanel>
-            <TextBlock Text="Movement style" Style="{StaticResource FieldLabel}" Margin="0,16,0,4"
-                       ToolTip="How the cursor travels there. Smooth Glide and Human Curve send real mouse movement (sliders, hover effects and games notice it); Instant jumps." />
-            <ComboBox ItemsSource="{x:Static steps:StepViewModel.MoveStyles}" DisplayMemberPath="Label" SelectedValuePath="Value"
-                      SelectedValue="{Binding MoveStyle}" AutomationProperties.Name="Movement style"
-                      ToolTip="Smooth Glide: straight line at about 120 updates per second. Human Curve: a slight natural arc that speeds up and slows down. Instant: jumps there." />
-            <StackPanel Visibility="{Binding Glides, Converter={StaticResource BoolToVisibility}}">
-                <TextBlock Text="Glide duration (ms)" Style="{StaticResource FieldLabel}" ToolTip="How long the glide takes. 120 ms feels natural." />
-                <TextBox Text="{Binding MoveDurationMs, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}" Width="100" HorizontalAlignment="Left"
-                         AutomationProperties.Name="Glide duration in milliseconds" ToolTip="How long the glide takes. 120 ms feels natural; it's added to the macro's run time." />
-            </StackPanel>
-            <TextBlock Text="{Binding MoveHelp}" Style="{StaticResource MutedText}" FontSize="11" Margin="0,8,0,0" TextWrapping="Wrap" />
-            </StackPanel>
+                </StackPanel>
+            </Border>
+
+            <Border Style="{StaticResource SetupCard}" Visibility="{Binding IsAbsolute, Converter={StaticResource BoolToVisibility}}">
+                <StackPanel>
+                    <TextBlock Text="2 · MOTION PROFILE &amp; TRAJECTORY CURVE" Style="{StaticResource SetupCardTitle}" />
+                    <TextBlock Text="Movement style" Style="{StaticResource FieldLabel}" Margin="0,8,0,4"
+                               ToolTip="How the cursor travels there. Smooth Glide and Human Curve send real mouse movement (sliders, hover effects and games notice it); Instant jumps." />
+                    <ComboBox ItemsSource="{x:Static steps:StepViewModel.MoveStyles}" DisplayMemberPath="Label" SelectedValuePath="Value"
+                              SelectedValue="{Binding MoveStyle}" AutomationProperties.Name="Movement style"
+                              ToolTip="Smooth Glide: straight line at about 120 updates per second. Human Curve: a slight natural arc that speeds up and slows down. Instant: jumps there." />
+                    <StackPanel Visibility="{Binding Glides, Converter={StaticResource BoolToVisibility}}">
+                        <TextBlock Text="Glide duration (ms)" Style="{StaticResource FieldLabel}" ToolTip="How long the glide takes. 120 ms feels natural." />
+                        <TextBox Text="{Binding MoveDurationMs, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}" Width="120" HorizontalAlignment="Left"
+                                 AutomationProperties.Name="Glide duration in milliseconds" ToolTip="How long the glide takes. 120 ms feels natural; it's added to the macro's run time." />
+                    </StackPanel>
+                    <ctrl:MotionCurvePreview MoveStyle="{Binding MoveStyle}" DurationMs="{Binding MoveDurationMs}" />
+                    <TextBlock Text="{Binding MoveHelp}" Style="{StaticResource MutedText}" FontSize="11" Margin="0,8,0,0" TextWrapping="Wrap" />
+                </StackPanel>
+            </Border>
+
             <ContentControl Content="{Binding}" ContentTemplate="{StaticResource StepFooterTemplate}" Focusable="False" Visibility="{Binding IsStandalone, Converter={StaticResource BoolToVisibility}}" />
         </StackPanel>
     </DataTemplate>
@@ -146,7 +172,6 @@
                             <Grid>
                                 <Image Source="{Binding TargetThumbnail}" Stretch="Uniform" RenderOptions.BitmapScalingMode="NearestNeighbor"
                                        AutomationProperties.Name="Picture of what was clicked" ToolTip="What was under the cursor when this click was recorded." />
-                                <!-- A small crosshair over the middle, where (normally) the click was. -->
                                 <Rectangle Width="1" Height="14" Fill="{DynamicResource VisionAccentBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" Opacity="0.85" IsHitTestVisible="False" />
                                 <Rectangle Width="14" Height="1" Fill="{DynamicResource VisionAccentBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" Opacity="0.85" IsHitTestVisible="False" />
                             </Grid>
@@ -212,59 +237,75 @@
                 </StackPanel>
             </Border>
 
-            <StackPanel>
+            <Border Style="{StaticResource SetupCard}">
                 <StackPanel>
-                    <TextBlock Text="Button" Style="{StaticResource FieldLabel}" Margin="0,18,0,4" />
-                    <ComboBox ItemsSource="{x:Static steps:MouseClickStepViewModel.Buttons}" SelectedItem="{Binding Button}" AutomationProperties.Name="Mouse button"
-                              ToolTip="Which mouse button: Left (normal click), Right (context menu) or Middle (wheel button)." />
+                    <TextBlock Text="1 · BUTTON, ACTION &amp; HOLD TIMING" Style="{StaticResource SetupCardTitle}" />
+                    <Grid Margin="0,8,0,0">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="10" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <StackPanel Grid.Column="0">
+                            <TextBlock Text="Button" Style="{StaticResource FieldLabel}" Margin="0,0,0,4" />
+                            <ComboBox ItemsSource="{x:Static steps:MouseClickStepViewModel.Buttons}" SelectedItem="{Binding Button}" AutomationProperties.Name="Mouse button"
+                                      ToolTip="Which mouse button: Left, Right, Middle, XButton1 (Back / Mouse 4), or XButton2 (Forward / Mouse 5)." />
+                        </StackPanel>
+                        <StackPanel Grid.Column="2">
+                            <TextBlock Text="Action type" Style="{StaticResource FieldLabel}" Margin="0,0,0,4" />
+                            <ComboBox ItemsSource="{x:Static steps:MouseClickStepViewModel.Actions}" DisplayMemberPath="Label" SelectedValuePath="Value"
+                                      SelectedValue="{Binding Action}" AutomationProperties.Name="Click action type" />
+                        </StackPanel>
+                    </Grid>
+                    <TextBlock Text="{Binding ActionHelp}" Style="{StaticResource MutedText}" FontSize="11" Margin="0,6,0,0" TextWrapping="Wrap" />
+
+                    <StackPanel Visibility="{Binding UsesHoldTime, Converter={StaticResource BoolToVisibility}}">
+                        <TextBlock Text="Hold duration (ms, 0 = instant click)" Style="{StaticResource FieldLabel}"
+                                   ToolTip="How long the button stays down before it's released. Recordings fill in exactly how long you held it (e.g. a 550 ms rod cast; never less than 12 ms). Click / double click: 35 ms is reliable in games. Hold for a duration: e.g. 850 for a casting meter." />
+                        <TextBox Text="{Binding HoldDurationMs, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}"
+                                 AutomationProperties.Name="Hold duration in milliseconds"
+                                 ToolTip="How long the button stays down before it's released (0 = instant click; recordings fill in exactly how long you held it). Speed divides it, e.g. 550 ms at 2× = 275 ms." />
+                        <WrapPanel Margin="0,6,0,0">
+                            <Button Content="-10ms" Command="{Binding AddDurationCommand}" CommandParameter="-10" Padding="10,5" Margin="0,0,6,6" />
+                            <Button Content="+10ms" Command="{Binding AddDurationCommand}" CommandParameter="+10" Padding="10,5" Margin="0,0,6,6" />
+                            <Button Content="+100ms" Command="{Binding AddDurationCommand}" CommandParameter="+100" Padding="10,5" Margin="0,0,6,6" />
+                            <Button Content="+500ms" Command="{Binding AddDurationCommand}" CommandParameter="+500" Padding="10,5" Margin="0,0,6,6" />
+                            <Button Content="+1s" Command="{Binding AddDurationCommand}" CommandParameter="+1000" Padding="10,5" Margin="0,0,6,6" />
+                            <Button Content="+5s" Command="{Binding AddDurationCommand}" CommandParameter="+5000" Padding="10,5" Margin="0,0,6,6" />
+                            <Button Content="Reset (0ms)" Command="{Binding ResetDurationCommand}" Padding="10,5" Margin="0,0,6,6" />
+                        </WrapPanel>
+                    </StackPanel>
                 </StackPanel>
+            </Border>
+
+            <Border Style="{StaticResource SetupCard}">
                 <StackPanel>
-                    <TextBlock Text="Action type" Style="{StaticResource FieldLabel}" Margin="0,18,0,4" />
-                    <ComboBox ItemsSource="{x:Static steps:MouseClickStepViewModel.Actions}" DisplayMemberPath="Label" SelectedValuePath="Value"
-                              SelectedValue="{Binding Action}" AutomationProperties.Name="Click action type" />
+                    <TextBlock Text="2 · TARGET COORDINATES &amp; DRAG PATH" Style="{StaticResource SetupCardTitle}" />
+                    <TextBlock Text="Where to click" Style="{StaticResource FieldLabel}" Margin="0,8,0,4" />
+                    <ComboBox ItemsSource="{x:Static steps:MouseClickStepViewModel.Targets}" DisplayMemberPath="Label" SelectedValuePath="Value"
+                              SelectedValue="{Binding Target}" AutomationProperties.Name="Where to click"
+                              ToolTip="A chosen position (X / Y), wherever the cursor is when the step runs, or the spot the last Find text / image / color step found." />
+                    <ContentControl Content="{Binding}" ContentTemplate="{StaticResource PositionPickerTemplate}" Focusable="False" Margin="0,4,0,0"
+                                    Visibility="{Binding UsesFixedPosition, Converter={StaticResource BoolToVisibility}}" />
+                    <StackPanel Visibility="{Binding UsesLastFound, Converter={StaticResource BoolToVisibility}}">
+                        <ContentControl Content="{Binding}" ContentTemplate="{StaticResource OffsetFieldsTemplate}" Focusable="False" />
+                        <ContentControl Content="{Binding}" ContentTemplate="{StaticResource OffsetPickerTemplate}" Focusable="False" />
+                        <TextBlock Style="{StaticResource MutedText}" FontSize="11" Margin="0,4,0,0" TextWrapping="Wrap"
+                                   Text="Clicks the center of what the last Find step or If / Repeat condition found, moved by the offset. Example: If the game board image is on screen → click (+100, 0) = the cell 100 px right of the board's center." />
+                    </StackPanel>
+                    <TextBlock Style="{StaticResource MutedText}" FontSize="11" Margin="0,8,0,0" TextWrapping="Wrap"
+                               Text="Choose where the click should happen (for a drag: where it starts). With a chosen position, the cursor first moves to X / Y (the movement style is under Advanced), then the button is used there. Pick position lets you choose the spot directly on your screen." />
+
+                    <StackPanel Visibility="{Binding IsDrag, Converter={StaticResource BoolToVisibility}}">
+                        <TextBlock Text="Drag to (end position)" Style="{StaticResource FieldLabel}" Margin="0,14,0,0" />
+                        <ContentControl Content="{Binding EndPoint}" ContentTemplate="{StaticResource PositionPickerTemplate}" Focusable="False" />
+                        <TextBlock Text="Drag time (ms)" Style="{StaticResource FieldLabel}" />
+                        <TextBox Text="{Binding DragDurationMs, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}" Width="120" HorizontalAlignment="Left"
+                                 AutomationProperties.Name="Drag time in milliseconds"
+                                 ToolTip="How long the cursor takes to glide from the start to the end while holding the button. 300-800 ms works for most sliders; 0 = jump straight there." />
+                    </StackPanel>
                 </StackPanel>
-            </StackPanel>
-            <TextBlock Text="{Binding ActionHelp}" Style="{StaticResource MutedText}" FontSize="11" Margin="0,4,0,0" TextWrapping="Wrap" />
-
-            <StackPanel Visibility="{Binding UsesHoldTime, Converter={StaticResource BoolToVisibility}}">
-                <TextBlock Text="Hold duration (ms, 0 = instant click)" Style="{StaticResource FieldLabel}"
-                           ToolTip="How long the button stays down before it's released. Recordings fill in exactly how long you held it (e.g. a 550 ms rod cast; never less than 12 ms). Click / double click: 35 ms is reliable in games. Hold for a duration: e.g. 850 for a casting meter." />
-                <TextBox Text="{Binding HoldDurationMs, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}"
-                         AutomationProperties.Name="Hold duration in milliseconds"
-                         ToolTip="How long the button stays down before it's released (0 = instant click; recordings fill in exactly how long you held it). Speed divides it, e.g. 550 ms at 2× = 275 ms." />
-                <!-- Quick presets wrap onto a second line on narrow panels instead of being squeezed / cut off. -->
-                <WrapPanel Margin="0,6,0,0">
-                    <Button Content="+100ms" Command="{Binding AddDurationCommand}" CommandParameter="+100" Padding="10,5" Margin="0,0,6,6" />
-                    <Button Content="+500ms" Command="{Binding AddDurationCommand}" CommandParameter="+500" Padding="10,5" Margin="0,0,6,6" />
-                    <Button Content="+1s" Command="{Binding AddDurationCommand}" CommandParameter="+1000" Padding="10,5" Margin="0,0,6,6" />
-                    <Button Content="+5s" Command="{Binding AddDurationCommand}" CommandParameter="+5000" Padding="10,5" Margin="0,0,6,6" />
-                    <Button Content="Reset (0ms)" Command="{Binding ResetDurationCommand}" Padding="10,5" Margin="0,0,6,6" />
-                </WrapPanel>
-            </StackPanel>
-
-            <TextBlock Text="Where to click" Style="{StaticResource FieldLabel}" Margin="0,18,0,4" />
-            <ComboBox ItemsSource="{x:Static steps:MouseClickStepViewModel.Targets}" DisplayMemberPath="Label" SelectedValuePath="Value"
-                      SelectedValue="{Binding Target}" AutomationProperties.Name="Where to click"
-                      ToolTip="A chosen position (X / Y), wherever the cursor is when the step runs, or the spot the last Find text / image / color step found." />
-            <ContentControl Content="{Binding}" ContentTemplate="{StaticResource PositionPickerTemplate}" Focusable="False" Margin="0,4,0,0"
-                            Visibility="{Binding UsesFixedPosition, Converter={StaticResource BoolToVisibility}}" />
-            <StackPanel Visibility="{Binding UsesLastFound, Converter={StaticResource BoolToVisibility}}">
-                <ContentControl Content="{Binding}" ContentTemplate="{StaticResource OffsetFieldsTemplate}" Focusable="False" />
-                <ContentControl Content="{Binding}" ContentTemplate="{StaticResource OffsetPickerTemplate}" Focusable="False" />
-                <TextBlock Style="{StaticResource MutedText}" FontSize="11" Margin="0,4,0,0" TextWrapping="Wrap"
-                           Text="Clicks the center of what the last Find step or If / Repeat condition found, moved by the offset. Example: If the game board image is on screen → click (+100, 0) = the cell 100 px right of the board's center." />
-            </StackPanel>
-            <TextBlock Style="{StaticResource MutedText}" FontSize="11" Margin="0,8,0,0" TextWrapping="Wrap"
-                       Text="Choose where the click should happen (for a drag: where it starts). With a chosen position, the cursor first moves to X / Y (the movement style is under Advanced), then the button is used there. Pick position lets you choose the spot directly on your screen." />
-
-            <StackPanel Visibility="{Binding IsDrag, Converter={StaticResource BoolToVisibility}}">
-                <TextBlock Text="Drag to (end position)" Style="{StaticResource FieldLabel}" Margin="0,18,0,0" />
-                <ContentControl Content="{Binding EndPoint}" ContentTemplate="{StaticResource PositionPickerTemplate}" Focusable="False" />
-                <TextBlock Text="Drag time (ms)" Style="{StaticResource FieldLabel}" />
-                <TextBox Text="{Binding DragDurationMs, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}" Width="100" HorizontalAlignment="Left"
-                         AutomationProperties.Name="Drag time in milliseconds"
-                         ToolTip="How long the cursor takes to glide from the start to the end while holding the button. 300-800 ms works for most sliders; 0 = jump straight there." />
-            </StackPanel>
+            </Border>
 
             <Expander Header="Advanced Tuning &amp; Movement" Style="{StaticResource AdvancedExpander}"
                       ToolTip="How the cursor travels to the click spot, the double-click gap and the wait after the click.">
@@ -276,19 +317,20 @@
                               ToolTip="Smooth Glide: straight line at about 120 updates per second. Human Curve: a slight natural arc that speeds up and slows down. Instant: jumps there (with a tiny hover nudge before the press)." />
                     <StackPanel IsEnabled="{Binding Glides}">
                         <TextBlock Text="Glide duration (ms)" Style="{StaticResource FieldLabel}" ToolTip="How long the glide to the click spot takes. 120 ms feels natural." />
-                        <TextBox Text="{Binding MoveDurationMs, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}" Width="100" HorizontalAlignment="Left"
+                        <TextBox Text="{Binding MoveDurationMs, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}" Width="120" HorizontalAlignment="Left"
                                  AutomationProperties.Name="Glide duration in milliseconds" ToolTip="How long the glide to the click spot takes. 120 ms feels natural." />
+                        <ctrl:MotionCurvePreview MoveStyle="{Binding MoveStyle}" DurationMs="{Binding MoveDurationMs}" />
                     </StackPanel>
                     <StackPanel Visibility="{Binding IsDoubleClick, Converter={StaticResource BoolToVisibility}}">
                         <TextBlock Text="Double-click gap (ms)" Style="{StaticResource FieldLabel}"
                                    ToolTip="Pause between the two clicks. 65 ms works in most games; 0 = back to back." />
-                        <TextBox Text="{Binding DoubleClickIntervalMs, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}" Width="100" HorizontalAlignment="Left"
+                        <TextBox Text="{Binding DoubleClickIntervalMs, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}" Width="120" HorizontalAlignment="Left"
                                  AutomationProperties.Name="Double-click gap in milliseconds" ToolTip="Pause between the two clicks. 65 ms works in most games; 0 = back to back." />
                     </StackPanel>
                     <StackPanel Visibility="{Binding UsesClickTiming, Converter={StaticResource BoolToVisibility}}">
                         <TextBlock Text="Wait after click (ms)" Style="{StaticResource FieldLabel}"
                                    ToolTip="Pause after the click so the app or game can react before the next step. 0 = go on right away." />
-                        <TextBox Text="{Binding PostActionDelayMs, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}" Width="100" HorizontalAlignment="Left"
+                        <TextBox Text="{Binding PostActionDelayMs, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}" Width="120" HorizontalAlignment="Left"
                                  AutomationProperties.Name="Wait after click in milliseconds" ToolTip="Pause after the click so the app or game can react before the next step. 0 = go on right away." />
                     </StackPanel>
                 </StackPanel>
@@ -302,29 +344,44 @@
         <StackPanel>
             <ContentControl Content="{Binding}" ContentTemplate="{StaticResource StepHeaderTemplate}" Focusable="False" Visibility="{Binding IsStandalone, Converter={StaticResource BoolToVisibility}}" />
 
-            <StackPanel Margin="0,18,0,0">
+            <Border Style="{StaticResource SetupCard}">
                 <StackPanel>
-                    <TextBlock Text="Direction" Style="{StaticResource FieldLabel}" Margin="0,0,0,4" />
-                    <ComboBox ItemsSource="{x:Static steps:MouseScrollStepViewModel.Directions}" DisplayMemberPath="Label" SelectedValuePath="Value"
-                              SelectedValue="{Binding Direction}" AutomationProperties.Name="Scroll direction"
-                              ToolTip="Up / Down turn the wheel like a normal mouse. Left / Right scroll sideways (tilt wheel)." />
+                    <TextBlock Text="1 · SCROLL DIRECTION &amp; NOTCHES" Style="{StaticResource SetupCardTitle}" />
+                    <Grid Margin="0,8,0,0">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="10" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <StackPanel Grid.Column="0">
+                            <TextBlock Text="Direction" Style="{StaticResource FieldLabel}" Margin="0,0,0,4" />
+                            <ComboBox ItemsSource="{x:Static steps:MouseScrollStepViewModel.Directions}" DisplayMemberPath="Label" SelectedValuePath="Value"
+                                      SelectedValue="{Binding Direction}" AutomationProperties.Name="Scroll direction"
+                                      ToolTip="Up / Down turn the wheel like a normal mouse. Left / Right scroll sideways (tilt wheel)." />
+                        </StackPanel>
+                        <StackPanel Grid.Column="2">
+                            <TextBlock Text="Number of notches" Style="{StaticResource FieldLabel}" Margin="0,0,0,4" />
+                            <TextBox Text="{Binding Notches, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}" AutomationProperties.Name="Number of notches"
+                                     ToolTip="How far to scroll: 1 notch = one click of a mouse wheel." />
+                        </StackPanel>
+                    </Grid>
+                    <TextBlock Text="{Binding AmountText}" Style="{StaticResource MutedText}" FontSize="11" Margin="0,4,0,0" TextWrapping="Wrap" />
                 </StackPanel>
-                <StackPanel>
-                    <TextBlock Text="Number of notches" Style="{StaticResource FieldLabel}" Margin="0,0,0,4" />
-                    <TextBox Text="{Binding Notches, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}" AutomationProperties.Name="Number of notches"
-                             ToolTip="How far to scroll: 1 notch = one click of a mouse wheel." />
-                </StackPanel>
-            </StackPanel>
-            <TextBlock Text="{Binding AmountText}" Style="{StaticResource MutedText}" FontSize="11" Margin="0,4,0,0" TextWrapping="Wrap" />
+            </Border>
 
-            <TextBlock Text="Scroll position" Style="{StaticResource FieldLabel}" />
-            <ComboBox ItemsSource="{x:Static steps:MouseScrollStepViewModel.PositionModes}" DisplayMemberPath="Label" SelectedValuePath="Value"
-                      SelectedValue="{Binding UseCurrentPosition}" AutomationProperties.Name="Scroll position"
-                      ToolTip="Windows scrolls whatever is under the cursor. Choose a position to move the cursor there first." />
-            <ContentControl Content="{Binding}" ContentTemplate="{StaticResource PositionPickerTemplate}" Focusable="False" Margin="0,4,0,0"
-                            Visibility="{Binding UsesFixedPosition, Converter={StaticResource BoolToVisibility}}" />
-            <TextBlock Style="{StaticResource MutedText}" FontSize="11" Margin="0,8,0,0" TextWrapping="Wrap"
-                       Text="Scrolls whatever is under the cursor. With a chosen position the cursor first jumps to X / Y, then the wheel turns; otherwise it scrolls wherever the cursor already is." />
+            <Border Style="{StaticResource SetupCard}">
+                <StackPanel>
+                    <TextBlock Text="2 · CURSOR TARGET POSITION" Style="{StaticResource SetupCardTitle}" />
+                    <TextBlock Text="Scroll position" Style="{StaticResource FieldLabel}" Margin="0,8,0,4" />
+                    <ComboBox ItemsSource="{x:Static steps:MouseScrollStepViewModel.PositionModes}" DisplayMemberPath="Label" SelectedValuePath="Value"
+                              SelectedValue="{Binding UseCurrentPosition}" AutomationProperties.Name="Scroll position"
+                              ToolTip="Windows scrolls whatever is under the cursor. Choose a position to move the cursor there first." />
+                    <ContentControl Content="{Binding}" ContentTemplate="{StaticResource PositionPickerTemplate}" Focusable="False" Margin="0,4,0,0"
+                                    Visibility="{Binding UsesFixedPosition, Converter={StaticResource BoolToVisibility}}" />
+                    <TextBlock Style="{StaticResource MutedText}" FontSize="11" Margin="0,8,0,0" TextWrapping="Wrap"
+                               Text="Scrolls whatever is under the cursor. With a chosen position the cursor first jumps to X / Y, then the wheel turns; otherwise it scrolls wherever the cursor already is." />
+                </StackPanel>
+            </Border>
 
             <Expander Header="Exact amount (advanced)" Margin="0,12,0,0" Foreground="{DynamicResource MutedTextBrush}">
                 <StackPanel Margin="0,6,0,0">
@@ -342,37 +399,99 @@
         <StackPanel>
             <ContentControl Content="{Binding}" ContentTemplate="{StaticResource StepHeaderTemplate}" Focusable="False" Visibility="{Binding IsStandalone, Converter={StaticResource BoolToVisibility}}" />
 
-            <TextBlock Text="Key" Style="{StaticResource FieldLabel}" Margin="0,18,0,4" />
-            <ComboBox ItemsSource="{x:Static steps:KeyPressStepViewModel.Keys}" DisplayMemberPath="Name" SelectedValuePath="Code"
-                      SelectedValue="{Binding VirtualKey}" IsTextSearchEnabled="True" TextSearch.TextPath="Name"
-                      AutomationProperties.Name="Key" />
+            <!-- 1. 3D Hardware Keycap & Interactive Key Recorder -->
+            <Border Style="{StaticResource SetupCard}" Margin="0,14,0,0">
+                <StackPanel>
+                    <TextBlock Text="1 · KEY BINDING &amp; HARDWARE SCANCODE" Style="{StaticResource SetupCardTitle}" />
+                    <Grid Margin="0,10,0,6">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="12" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <Border Grid.Column="0" MinWidth="68" Height="46" Padding="12,6" CornerRadius="8"
+                                Background="{DynamicResource SurfaceBrush}"
+                                BorderBrush="{DynamicResource InputBorderBrush}"
+                                BorderThickness="1.5,1.5,1.5,4"
+                                VerticalAlignment="Center">
+                            <TextBlock Text="{Binding KeycapDisplayText}"
+                                       FontFamily="{StaticResource MonoFont}"
+                                       FontSize="14"
+                                       FontWeight="Bold"
+                                       HorizontalAlignment="Center"
+                                       VerticalAlignment="Center" />
+                        </Border>
+                        <StackPanel Grid.Column="2" VerticalAlignment="Center">
+                            <Button Command="{Binding ToggleKeyRecordCommand}"
+                                    Style="{StaticResource TestActionButton}"
+                                    HorizontalAlignment="Stretch"
+                                    ToolTip="Click and press any physical key or shortcut on your keyboard to bind its Virtual-Key and Hardware ScanCode.">
+                                <TextBlock Text="{Binding KeyRecorderButtonText}" FontWeight="SemiBold" />
+                            </Button>
+                            <TextBlock Text="{Binding HardwareKeyInfoText}"
+                                       FontFamily="{StaticResource MonoFont}"
+                                       Style="{StaticResource MutedText}"
+                                       FontSize="10.5"
+                                       Margin="2,5,0,0" />
+                        </StackPanel>
+                    </Grid>
+                </StackPanel>
+            </Border>
 
-            <TextBlock Text="Action" Style="{StaticResource FieldLabel}" />
-            <ComboBox ItemsSource="{x:Static steps:KeyPressStepViewModel.Actions}" SelectedItem="{Binding Action}" AutomationProperties.Name="Key action" />
-            <TextBlock Style="{StaticResource MutedText}" FontSize="11" Margin="0,4,0,0"
-                       Text="Press = down and up. Down / Up let you hold a key across several steps." />
+            <!-- 2. Key Selection & Action -->
+            <Border Style="{StaticResource SetupCard}">
+                <StackPanel>
+                    <TextBlock Text="2 · KEY SELECTION &amp; ACTION" Style="{StaticResource SetupCardTitle}" />
+                    <Grid Margin="0,8,0,0">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="10" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <StackPanel Grid.Column="0">
+                            <TextBlock Text="Key" Style="{StaticResource FieldLabel}" Margin="0,0,0,4" />
+                            <ComboBox ItemsSource="{x:Static steps:KeyPressStepViewModel.Keys}" DisplayMemberPath="Name" SelectedValuePath="Code"
+                                      SelectedValue="{Binding VirtualKey}" IsTextSearchEnabled="True" TextSearch.TextPath="Name"
+                                      AutomationProperties.Name="Key" />
+                        </StackPanel>
+                        <StackPanel Grid.Column="2">
+                            <TextBlock Text="Action" Style="{StaticResource FieldLabel}" Margin="0,0,0,4" />
+                            <ComboBox ItemsSource="{x:Static steps:KeyPressStepViewModel.Actions}" SelectedItem="{Binding Action}" AutomationProperties.Name="Key action" />
+                        </StackPanel>
+                    </Grid>
+                    <TextBlock Style="{StaticResource MutedText}" FontSize="11" Margin="0,6,0,0"
+                               Text="Press = down and up. Down / Up let you hold a key across several steps." />
+                </StackPanel>
+            </Border>
 
-            <TextBlock Text="Hold the key for (ms, Press only)" Style="{StaticResource FieldLabel}" />
-            <TextBox Text="{Binding HoldMs, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}" IsEnabled="{Binding IsPress}"
-                     AutomationProperties.Name="Hold time in milliseconds" />
-            <!-- Quick presets wrap onto a second line on narrow panels instead of being squeezed / cut off. -->
-            <WrapPanel Margin="0,6,0,0" IsEnabled="{Binding IsPress}">
-                <Button Content="+100ms" Command="{Binding AddDurationCommand}" CommandParameter="+100" Padding="10,5" Margin="0,0,6,6" />
-                <Button Content="+500ms" Command="{Binding AddDurationCommand}" CommandParameter="+500" Padding="10,5" Margin="0,0,6,6" />
-                <Button Content="+1s" Command="{Binding AddDurationCommand}" CommandParameter="+1000" Padding="10,5" Margin="0,0,6,6" />
-                <Button Content="+5s" Command="{Binding AddDurationCommand}" CommandParameter="+5000" Padding="10,5" Margin="0,0,6,6" />
-                <Button Content="Reset (0ms)" Command="{Binding ResetDurationCommand}" Padding="10,5" Margin="0,0,6,6" />
-            </WrapPanel>
-            <TextBlock Style="{StaticResource MutedText}" FontSize="11" Margin="0,4,0,0"
-                       Text="0 = instant tap. Recordings fill in how long you actually held the key (e.g. a short W tap in a game)." />
+            <!-- 3. Hold Timing & Modifier Keys -->
+            <Border Style="{StaticResource SetupCard}">
+                <StackPanel>
+                    <TextBlock Text="3 · HOLD TIMING &amp; MODIFIER KEYS" Style="{StaticResource SetupCardTitle}" />
+                    <TextBlock Text="Hold the key for (ms, Press only)" Style="{StaticResource FieldLabel}" Margin="0,8,0,4" />
+                    <TextBox Text="{Binding HoldMs, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}" IsEnabled="{Binding IsPress}"
+                             AutomationProperties.Name="Hold time in milliseconds" />
+                    <WrapPanel Margin="0,6,0,0" IsEnabled="{Binding IsPress}">
+                        <Button Content="-10ms" Command="{Binding AddDurationCommand}" CommandParameter="-10" Padding="10,5" Margin="0,0,6,6" />
+                        <Button Content="+10ms" Command="{Binding AddDurationCommand}" CommandParameter="+10" Padding="10,5" Margin="0,0,6,6" />
+                        <Button Content="+100ms" Command="{Binding AddDurationCommand}" CommandParameter="+100" Padding="10,5" Margin="0,0,6,6" />
+                        <Button Content="+500ms" Command="{Binding AddDurationCommand}" CommandParameter="+500" Padding="10,5" Margin="0,0,6,6" />
+                        <Button Content="+1s" Command="{Binding AddDurationCommand}" CommandParameter="+1000" Padding="10,5" Margin="0,0,6,6" />
+                        <Button Content="+5s" Command="{Binding AddDurationCommand}" CommandParameter="+5000" Padding="10,5" Margin="0,0,6,6" />
+                        <Button Content="Reset (0ms)" Command="{Binding ResetDurationCommand}" Padding="10,5" Margin="0,0,6,6" />
+                    </WrapPanel>
+                    <TextBlock Style="{StaticResource MutedText}" FontSize="11" Margin="0,4,0,0"
+                               Text="0 = instant tap. Recordings fill in how long you actually held the key (e.g. a short W tap in a game)." />
 
-            <TextBlock Text="With modifier keys (Press only)" Style="{StaticResource FieldLabel}" />
-            <WrapPanel IsEnabled="{Binding IsPress}">
-                <CheckBox Content="Ctrl" IsChecked="{Binding Ctrl}" Margin="0,0,16,6" />
-                <CheckBox Content="Shift" IsChecked="{Binding Shift}" Margin="0,0,16,6" />
-                <CheckBox Content="Alt" IsChecked="{Binding Alt}" Margin="0,0,16,6" />
-                <CheckBox Content="Win" IsChecked="{Binding Win}" Margin="0,0,16,6" />
-            </WrapPanel>
+                    <TextBlock Text="With modifier keys (Press only)" Style="{StaticResource FieldLabel}" />
+                    <WrapPanel IsEnabled="{Binding IsPress}" Margin="0,4,0,0">
+                        <CheckBox Content="Ctrl" IsChecked="{Binding Ctrl}" Margin="0,0,16,6" />
+                        <CheckBox Content="Shift" IsChecked="{Binding Shift}" Margin="0,0,16,6" />
+                        <CheckBox Content="Alt" IsChecked="{Binding Alt}" Margin="0,0,16,6" />
+                        <CheckBox Content="Win" IsChecked="{Binding Win}" Margin="0,0,16,6" />
+                    </WrapPanel>
+                </StackPanel>
+            </Border>
 
             <ContentControl Content="{Binding}" ContentTemplate="{StaticResource StepFooterTemplate}" Focusable="False" Visibility="{Binding IsStandalone, Converter={StaticResource BoolToVisibility}}" />
         </StackPanel>
@@ -382,122 +501,144 @@
         <StackPanel>
             <ContentControl Content="{Binding}" ContentTemplate="{StaticResource StepHeaderTemplate}" Focusable="False" Visibility="{Binding IsStandalone, Converter={StaticResource BoolToVisibility}}" />
 
-            <TextBlock Text="Text to type" Style="{StaticResource FieldLabel}" Margin="0,18,0,4" />
-            <TextBox Text="{Binding Text, UpdateSourceTrigger=PropertyChanged}" AcceptsReturn="True" AcceptsTab="True" TextWrapping="Wrap"
-                     MinHeight="90" MaxHeight="220" VerticalContentAlignment="Top" VerticalScrollBarVisibility="Auto"
-                     MaxLength="10000" AutomationProperties.Name="Text to type" />
-            <TextBlock Text="{Binding CharacterCountText}" Style="{StaticResource MutedText}" FontSize="11" Margin="0,4,0,0" />
+            <Border Style="{StaticResource SetupCard}">
+                <StackPanel>
+                    <TextBlock Text="1 · TEXT PAYLOAD" Style="{StaticResource SetupCardTitle}" />
+                    <TextBlock Text="Text to type" Style="{StaticResource FieldLabel}" Margin="0,8,0,4" />
+                    <TextBox Text="{Binding Text, UpdateSourceTrigger=PropertyChanged}" AcceptsReturn="True" AcceptsTab="True" TextWrapping="Wrap"
+                             MinHeight="90" MaxHeight="220" VerticalContentAlignment="Top" VerticalScrollBarVisibility="Auto"
+                             MaxLength="10000" AutomationProperties.Name="Text to type" />
+                    <TextBlock Text="{Binding CharacterCountText}" Style="{StaticResource MutedText}" FontSize="11" Margin="0,4,0,0" />
+                </StackPanel>
+            </Border>
 
-            <TextBlock Text="Delay between characters (ms)" Style="{StaticResource FieldLabel}" />
-            <TextBox Text="{Binding CharacterDelayMs, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}"
-                     AutomationProperties.Name="Delay between characters" />
-            <TextBlock Text="20 ms works in most apps and games. Even at 0, SmartMacro keeps a few ms between keys so characters aren't dropped. Spaces, Enter and Tab are sent as real key presses."
-                       Style="{StaticResource MutedText}" FontSize="11" TextWrapping="Wrap" Margin="0,4,0,0" />
+            <Border Style="{StaticResource SetupCard}">
+                <StackPanel>
+                    <TextBlock Text="2 · TYPING CADENCE (MS PER CHAR)" Style="{StaticResource SetupCardTitle}" />
+                    <TextBlock Text="Delay between characters (ms)" Style="{StaticResource FieldLabel}" Margin="0,8,0,4" />
+                    <TextBox Text="{Binding CharacterDelayMs, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}"
+                             AutomationProperties.Name="Delay between characters" />
+                    <TextBlock Text="20 ms works in most apps and games. Even at 0, SmartMacro keeps a few ms between keys so characters aren't dropped. Spaces, Enter and Tab are sent as real key presses."
+                               Style="{StaticResource MutedText}" FontSize="11" TextWrapping="Wrap" Margin="0,6,0,0" />
+                </StackPanel>
+            </Border>
 
             <ContentControl Content="{Binding}" ContentTemplate="{StaticResource StepFooterTemplate}" Focusable="False" Visibility="{Binding IsStandalone, Converter={StaticResource BoolToVisibility}}" />
         </StackPanel>
     </DataTemplate>
 
-
     <DataTemplate DataType="{x:Type steps:InputSequenceStepViewModel}">
         <StackPanel>
             <ContentControl Content="{Binding}" ContentTemplate="{StaticResource StepHeaderTemplate}" Focusable="False" Visibility="{Binding IsStandalone, Converter={StaticResource BoolToVisibility}}" />
 
-            <Border Margin="0,18,0,0" Padding="12,10" CornerRadius="6" Background="{DynamicResource SurfaceAltBrush}">
-                <Grid>
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="Auto" />
-                        <ColumnDefinition Width="12" />
-                        <ColumnDefinition Width="*" />
-                    </Grid.ColumnDefinitions>
-                    <Grid.RowDefinitions>
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="Auto" />
-                    </Grid.RowDefinitions>
-                    <TextBlock Grid.Row="0" Text="Length" Style="{StaticResource MutedText}" FontSize="12" />
-                    <TextBlock Grid.Row="0" Grid.Column="2" Text="{Binding DurationText}" FontSize="12" />
-                    <TextBlock Grid.Row="1" Text="Events" Style="{StaticResource MutedText}" FontSize="12" Margin="0,4,0,0" />
-                    <TextBlock Grid.Row="1" Grid.Column="2" Text="{Binding EventCountText}" FontSize="12" Margin="0,4,0,0" />
-                    <TextBlock Grid.Row="2" Text="Mouse" Style="{StaticResource MutedText}" FontSize="12" Margin="0,4,0,0" />
-                    <TextBlock Grid.Row="2" Grid.Column="2" Text="{Binding MouseText}" FontSize="12" TextWrapping="Wrap" Margin="0,4,0,0" />
-                    <TextBlock Grid.Row="3" Text="Keys" Style="{StaticResource MutedText}" FontSize="12" Margin="0,4,0,0" />
-                    <TextBlock Grid.Row="3" Grid.Column="2" Text="{Binding KeysText}" FontSize="12" TextWrapping="Wrap" Margin="0,4,0,0" />
-                    <TextBlock Grid.Row="4" Text="Buttons" Style="{StaticResource MutedText}" FontSize="12" Margin="0,4,0,0" />
-                    <TextBlock Grid.Row="4" Grid.Column="2" Text="{Binding ButtonsText}" FontSize="12" TextWrapping="Wrap" Margin="0,4,0,0" />
-                </Grid>
-            </Border>
-
-            <TextBlock Style="{StaticResource MutedText}" FontSize="11" Margin="0,8,0,0" TextWrapping="Wrap"
-                       Text="{Binding PlaybackExplanation}" />
-
-            <!-- ✂ Break into steps: cursor-position recordings become normal editable steps (click pictures kept). -->
-            <Button Command="{Binding DataContext.BreakIntoStepsCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
-                    CommandParameter="{Binding}" Style="{StaticResource TestActionButton}" Margin="0,12,0,0" HorizontalAlignment="Left"
-                    ToolTip="{Binding BreakIntoStepsHint}" ToolTipService.ShowOnDisabled="True"
-                    AutomationProperties.Name="Break recorded input into steps">
-                <TextBlock Text="✂ Break into steps" />
-            </Button>
-            <TextBlock Text="{Binding BreakIntoStepsHint}" Style="{StaticResource MutedText}" FontSize="11" Margin="0,4,0,0" TextWrapping="Wrap" />
-
-            <!-- Smart recordings: how each part plays the mouse (exactly one way per part). -->
-            <StackPanel Margin="0,16,0,0" Visibility="{Binding HasMouseParts, Converter={StaticResource BoolToVisibility}}">
-                <TextBlock Text="Mouse playback" Style="{StaticResource FieldLabel}" />
-                <WrapPanel Margin="0,4,0,8">
-                    <Button Content="All: cursor position" Command="{Binding UseCursorEverywhereCommand}" Padding="10,4" FontSize="12" Margin="0,0,6,6"
-                            ToolTip="Play every part by moving the cursor to the recorded screen positions." />
-                    <Button Content="All: relative" Command="{Binding UseRelativeEverywhereCommand}" Padding="10,4" FontSize="12" Margin="0,0,6,6"
-                            ToolTip="Play every part as relative mouse movement (like game mode)." />
-                    <Button Content="All: automatic" Command="{Binding UseAutomaticEverywhereCommand}" Padding="10,4" FontSize="12" Margin="0,0,6,6"
-                            ToolTip="Go back to what SmartMacro detected while recording." />
-                </WrapPanel>
-                <ItemsControl ItemsSource="{Binding MouseParts}" Focusable="False">
-                    <ItemsControl.ItemTemplate>
-                        <DataTemplate DataType="{x:Type steps:MouseSegmentViewModel}">
-                            <Border Margin="0,0,0,8" Padding="10,8" CornerRadius="6" Background="{DynamicResource SurfaceAltBrush}">
-                                <StackPanel>
-                                    <TextBlock FontSize="12">
-                                        <Run Text="{Binding Title, Mode=OneWay}" FontWeight="SemiBold" /><Run Text="   " /><Run Text="{Binding RangeText, Mode=OneWay}" />
-                                    </TextBlock>
-                                    <TextBlock Text="{Binding DetectedText}" Style="{StaticResource MutedText}" FontSize="11" TextWrapping="Wrap" Margin="0,2,0,6" />
-                                    <ComboBox ItemsSource="{x:Static steps:MouseSegmentViewModel.Choices}" DisplayMemberPath="Label" SelectedValuePath="Value"
-                                              SelectedValue="{Binding SelectedMode}" AutomationProperties.Name="Mouse playback for this part" />
-                                    <TextBlock Text="{Binding EffectiveText}" FontSize="11" Margin="0,4,0,0" />
-                                </StackPanel>
-                            </Border>
-                        </DataTemplate>
-                    </ItemsControl.ItemTemplate>
-                </ItemsControl>
-            </StackPanel>
-
-            <StackPanel Visibility="{Binding IsGameModeRecording, Converter={StaticResource BoolToVisibility}}">
-            <CheckBox Content="Move the cursor to where recording started, before playing" IsChecked="{Binding MoveCursorToStart}" Margin="0,16,0,0" />
-            <TextBlock Style="{StaticResource MutedText}" FontSize="11" Margin="0,4,0,0" TextWrapping="Wrap"
-                       Text="Useful when the game shows a free cursor (menus). Leave it off while the game locks the cursor for the camera." />
-            <ContentControl Content="{Binding}" Focusable="False" Margin="0,4,0,0" IsEnabled="{Binding MoveCursorToStart}">
-                <ContentControl.ContentTemplate>
-                    <DataTemplate>
+            <Border Style="{StaticResource SetupCard}">
+                <StackPanel>
+                    <TextBlock Text="1 · RECORDED TELEMETRY &amp; TIMELINE STRIP" Style="{StaticResource SetupCardTitle}" />
+                    <Border Margin="0,10,0,0" Padding="12,10" CornerRadius="6" Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1">
                         <Grid>
                             <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="10" />
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="12" />
                                 <ColumnDefinition Width="*" />
                             </Grid.ColumnDefinitions>
-                            <StackPanel Grid.Column="0">
-                                <TextBlock Text="Start X (pixels)" Style="{StaticResource FieldLabel}" />
-                                <TextBox Text="{Binding StartX, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}" AutomationProperties.Name="Start X position" />
-                            </StackPanel>
-                            <StackPanel Grid.Column="2">
-                                <TextBlock Text="Start Y (pixels)" Style="{StaticResource FieldLabel}" />
-                                <TextBox Text="{Binding StartY, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}" AutomationProperties.Name="Start Y position" />
-                            </StackPanel>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
+                            <TextBlock Grid.Row="0" Text="Length" Style="{StaticResource MutedText}" FontSize="12" />
+                            <TextBlock Grid.Row="0" Grid.Column="2" Text="{Binding DurationText}" FontSize="12" FontWeight="SemiBold" />
+                            <TextBlock Grid.Row="1" Text="Events" Style="{StaticResource MutedText}" FontSize="12" Margin="0,4,0,0" />
+                            <TextBlock Grid.Row="1" Grid.Column="2" Text="{Binding EventCountText}" FontSize="12" Margin="0,4,0,0" />
+                            <TextBlock Grid.Row="2" Text="Mouse" Style="{StaticResource MutedText}" FontSize="12" Margin="0,4,0,0" />
+                            <TextBlock Grid.Row="2" Grid.Column="2" Text="{Binding MouseText}" FontSize="12" TextWrapping="Wrap" Margin="0,4,0,0" />
+                            <TextBlock Grid.Row="3" Text="Keys" Style="{StaticResource MutedText}" FontSize="12" Margin="0,4,0,0" />
+                            <TextBlock Grid.Row="3" Grid.Column="2" Text="{Binding KeysText}" FontSize="12" TextWrapping="Wrap" Margin="0,4,0,0" />
+                            <TextBlock Grid.Row="4" Text="Buttons" Style="{StaticResource MutedText}" FontSize="12" Margin="0,4,0,0" />
+                            <TextBlock Grid.Row="4" Grid.Column="2" Text="{Binding ButtonsText}" FontSize="12" TextWrapping="Wrap" Margin="0,4,0,0" />
                         </Grid>
-                    </DataTemplate>
-                </ContentControl.ContentTemplate>
-            </ContentControl>
-            </StackPanel>
+                    </Border>
+
+                    <TextBlock Style="{StaticResource MutedText}" FontSize="11" Margin="0,8,0,0" TextWrapping="Wrap"
+                               Text="{Binding PlaybackExplanation}" />
+
+                    <!-- Multi-Track Recorded Event Density Timeline Strip -->
+                    <ctrl:SequenceTimelineStrip Events="{Binding Model.Events}" />
+
+                    <!-- ✂ Break into steps: cursor-position recordings become normal editable steps (click pictures kept). -->
+                    <Button Command="{Binding DataContext.BreakIntoStepsCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                            CommandParameter="{Binding}" Style="{StaticResource TestActionButton}" Margin="0,12,0,0" HorizontalAlignment="Left"
+                            ToolTip="{Binding BreakIntoStepsHint}" ToolTipService.ShowOnDisabled="True"
+                            AutomationProperties.Name="Break recorded input into steps">
+                        <TextBlock Text="✂ Break into steps" />
+                    </Button>
+                    <TextBlock Text="{Binding BreakIntoStepsHint}" Style="{StaticResource MutedText}" FontSize="11" Margin="0,4,0,0" TextWrapping="Wrap" />
+                </StackPanel>
+            </Border>
+
+            <!-- Smart recordings: how each part plays the mouse (exactly one way per part). -->
+            <Border Style="{StaticResource SetupCard}" Visibility="{Binding HasMouseParts, Converter={StaticResource BoolToVisibility}}">
+                <StackPanel>
+                    <TextBlock Text="2 · MOUSE PLAYBACK SEGMENTATION" Style="{StaticResource SetupCardTitle}" />
+                    <WrapPanel Margin="0,8,0,8">
+                        <Button Content="All: cursor position" Command="{Binding UseCursorEverywhereCommand}" Padding="10,4" FontSize="12" Margin="0,0,6,6"
+                                ToolTip="Play every part by moving the cursor to the recorded screen positions." />
+                        <Button Content="All: relative" Command="{Binding UseRelativeEverywhereCommand}" Padding="10,4" FontSize="12" Margin="0,0,6,6"
+                                ToolTip="Play every part as relative mouse movement (like game mode)." />
+                        <Button Content="All: automatic" Command="{Binding UseAutomaticEverywhereCommand}" Padding="10,4" FontSize="12" Margin="0,0,6,6"
+                                ToolTip="Go back to what SmartMacro detected while recording." />
+                    </WrapPanel>
+                    <ItemsControl ItemsSource="{Binding MouseParts}" Focusable="False">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate DataType="{x:Type steps:MouseSegmentViewModel}">
+                                <Border Margin="0,0,0,8" Padding="10,8" CornerRadius="6" Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1">
+                                    <StackPanel>
+                                        <TextBlock FontSize="12">
+                                            <Run Text="{Binding Title, Mode=OneWay}" FontWeight="SemiBold" /><Run Text="   " /><Run Text="{Binding RangeText, Mode=OneWay}" />
+                                        </TextBlock>
+                                        <TextBlock Text="{Binding DetectedText}" Style="{StaticResource MutedText}" FontSize="11" TextWrapping="Wrap" Margin="0,2,0,6" />
+                                        <ComboBox ItemsSource="{x:Static steps:MouseSegmentViewModel.Choices}" DisplayMemberPath="Label" SelectedValuePath="Value"
+                                                  SelectedValue="{Binding SelectedMode}" AutomationProperties.Name="Mouse playback for this part" />
+                                        <TextBlock Text="{Binding EffectiveText}" FontSize="11" Margin="0,4,0,0" />
+                                    </StackPanel>
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </StackPanel>
+            </Border>
+
+            <Border Style="{StaticResource SetupCard}" Visibility="{Binding IsGameModeRecording, Converter={StaticResource BoolToVisibility}}">
+                <StackPanel>
+                    <TextBlock Text="2 · CURSOR START ORIGIN" Style="{StaticResource SetupCardTitle}" />
+                    <CheckBox Content="Move the cursor to where recording started, before playing" IsChecked="{Binding MoveCursorToStart}" Margin="0,8,0,0" />
+                    <TextBlock Style="{StaticResource MutedText}" FontSize="11" Margin="0,4,0,0" TextWrapping="Wrap"
+                               Text="Useful when the game shows a free cursor (menus). Leave it off while the game locks the cursor for the camera." />
+                    <ContentControl Content="{Binding}" Focusable="False" Margin="0,6,0,0" IsEnabled="{Binding MoveCursorToStart}">
+                        <ContentControl.ContentTemplate>
+                            <DataTemplate>
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="10" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel Grid.Column="0">
+                                        <TextBlock Text="Start X (pixels)" Style="{StaticResource FieldLabel}" />
+                                        <TextBox Text="{Binding StartX, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}" AutomationProperties.Name="Start X position" />
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="2">
+                                        <TextBlock Text="Start Y (pixels)" Style="{StaticResource FieldLabel}" />
+                                        <TextBox Text="{Binding StartY, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}" AutomationProperties.Name="Start Y position" />
+                                    </StackPanel>
+                                </Grid>
+                            </DataTemplate>
+                        </ContentControl.ContentTemplate>
+                    </ContentControl>
+                </StackPanel>
+            </Border>
 
             <ContentControl Content="{Binding}" ContentTemplate="{StaticResource StepFooterTemplate}" Focusable="False" Visibility="{Binding IsStandalone, Converter={StaticResource BoolToVisibility}}" />
         </StackPanel>

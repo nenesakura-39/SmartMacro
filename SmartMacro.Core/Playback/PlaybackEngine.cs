@@ -935,6 +935,21 @@ public sealed partial class PlaybackEngine
 
         public bool IsEmpty => Keys.Count == 0 && Buttons.Count == 0;
 
+        public void PressKey(HeldKey key)
+        {
+            ReleaseKey(key);
+            Keys.Add(key);
+        }
+
+        public void ReleaseKey(HeldKey key)
+        {
+            Keys.RemoveWhere(k => (key.VirtualKey != 0 && k.VirtualKey == key.VirtualKey)
+                                  || (key.ScanCode != 0 && k.ScanCode == key.ScanCode && k.Extended == key.Extended));
+        }
+
+        public bool ContainsKey(int virtualKey) =>
+            virtualKey != 0 && Keys.Any(k => k.VirtualKey == virtualKey);
+
         /// <summary>Releases everything. Returns an error message if Windows refused, otherwise null.</summary>
         public string? ReleaseAll(IInputSimulator input)
         {

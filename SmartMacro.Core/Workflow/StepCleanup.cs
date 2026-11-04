@@ -188,10 +188,10 @@ public static class StepCleanup
                     raw.Add(new RawInputEvent(ms, e.Kind == InputEventKind.Wheel ? RawInputKind.Wheel : RawInputKind.HorizontalWheel, X: x, Y: y, Delta: e.Delta));
                     break;
                 case InputEventKind.KeyDown:
-                    raw.Add(new RawInputEvent(ms, RawInputKind.KeyDown, VirtualKey: SmartRecordingConverter.SpecificVirtualKey(e)));
+                    raw.Add(new RawInputEvent(ms, RawInputKind.KeyDown, VirtualKey: SmartRecordingConverter.SpecificVirtualKey(e), ScanCode: e.ScanCode, Extended: e.Extended));
                     break;
                 case InputEventKind.KeyUp:
-                    raw.Add(new RawInputEvent(ms, RawInputKind.KeyUp, VirtualKey: SmartRecordingConverter.SpecificVirtualKey(e)));
+                    raw.Add(new RawInputEvent(ms, RawInputKind.KeyUp, VirtualKey: SmartRecordingConverter.SpecificVirtualKey(e), ScanCode: e.ScanCode, Extended: e.Extended));
                     break;
             }
         }

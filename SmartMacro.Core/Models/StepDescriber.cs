@@ -159,9 +159,16 @@ public static class StepDescriber
         };
     }
 
+    public static string DescribeMouseButton(MacroMouseButton button) => button switch
+    {
+        MacroMouseButton.XButton1 => "mouse 4 (back) button",
+        MacroMouseButton.XButton2 => "mouse 5 (forward) button",
+        _ => $"{button.ToString().ToLowerInvariant()} button",
+    };
+
     private static string DescribeClick(MouseClickStep c)
     {
-        var button = $"{c.Button.ToString().ToLowerInvariant()} button";
+        var button = DescribeMouseButton(c.Button);
         var lastFound = $"the last found spot{OffsetText(c.OffsetX, c.OffsetY)}";
         var where = c.UseLastFoundText ? "at " + lastFound : Where(c.UseCurrentPosition, c.X, c.Y);
         var motion = c.UseCurrentPosition ? "" : MotionSuffix(c.MoveStyle, c.MoveDurationMs);
@@ -309,6 +316,16 @@ public static class StepDescriber
             StepFailureAction.RestartFromCheckpoint => $" If it misses: restarts from checkpoint \"{Preview(f.FailurePolicy?.CheckpointName)}\".",
             _ => f.Goal == WaitGoal.Appear ? " If it's not found in time: the macro stops." : " If it's still there: the macro stops.",
         };
+
+        var v2Notes = new List<string>();
+        if (f.TrackTarget) v2Notes.Add(f.PredictiveClick ? "tracks velocity + predictive lead click" : "tracks moving target");
+        if (f.ConfirmFrames > 1) v2Notes.Add($"confirms across {f.ConfirmFrames} frames");
+        if (f is FindImageStep { MinVisiblePercent: > 0 and < 100 } fi) v2Notes.Add($"occlusion-tolerant ({fi.MinVisiblePercent}% visible)");
+        if (f is FindImageStep { Detector: not ImageDetectorKind.Template } fd) v2Notes.Add($"{fd.Detector} detector");
+        if (f is FindTextStep { TrackTextAsImage: true }) v2Notes.Add("tracks found word as image");
+        if (f is FindColorStep { ColorSpace: not ColorSpaceKind.Rgb } fc) v2Notes.Add($"{fc.ColorSpace} color space");
+        if (v2Notes.Count > 0) text += $" [Vision 2.0: {string.Join(", ", v2Notes)}]";
+
         return text;
     }
 
@@ -327,7 +344,12 @@ public static class StepDescriber
         var before = horizontal ? "to the LEFT of" : "ABOVE";
         var after = horizontal ? "to the RIGHT of" : "BELOW";
         var input = f.InputKind == FeedbackInputKind.MouseButton
-            ? $"the {f.MouseButton.ToString().ToLowerInvariant()} mouse button"
+            ? f.MouseButton switch
+            {
+                MacroMouseButton.XButton1 => "the mouse 4 (back) button",
+                MacroMouseButton.XButton2 => "the mouse 5 (forward) button",
+                _ => $"the {f.MouseButton.ToString().ToLowerInvariant()} mouse button",
+            }
             : $"the {VirtualKeys.GetName(f.VirtualKey)} key";
 
         string Rule(FeedbackAction action) => action switch
@@ -440,7 +462,7 @@ public static class StepDescriber
             ? $"zone {f.ZoneStartPercent}–{f.ZoneEndPercent} %"
             : $"zone {f.ZoneColor}";
         var input = f.InputKind == FeedbackInputKind.MouseButton
-            ? $"{f.MouseButton.ToString().ToLowerInvariant()} button"
+            ? DescribeMouseButton(f.MouseButton)
             : VirtualKeys.GetName(f.VirtualKey);
 
         var rules = new List<string>();

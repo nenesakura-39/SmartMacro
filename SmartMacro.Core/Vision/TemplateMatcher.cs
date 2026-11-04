@@ -1,4 +1,5 @@
 using System.Numerics;
+using SmartMacro.Core.Models;
 using SmartMacro.Core.Ocr;
 
 namespace SmartMacro.Core.Vision;
@@ -72,6 +73,21 @@ public sealed record TemplateMatchOptions
 
     /// <summary>Largest template scale multiplier tried when <see cref="AllowMultiScale"/> is true.</summary>
     public double MaxScale { get; init; } = DefaultMaxScale;
+
+    /// <summary>Vision 2.0: detector algorithm (Template = default, EdgeShape, or Combined).</summary>
+    public ImageDetectorKind Detector { get; init; } = ImageDetectorKind.Template;
+
+    /// <summary>
+    /// Vision 2.0 Partial Visibility ("Occlusion tolerance"): minimum fraction of the template's cells that must match
+    /// (0 = compare the whole template as one unit; 0.40..0.95 = match even when particles cover up to <c>1 - MinVisibleFraction</c>).
+    /// </summary>
+    public double MinVisibleFraction { get; init; }
+
+    /// <summary>Vision 2.0: optional rotation range in degrees (0 = upright only; 1..45 = checks ±RotationRangeDeg).</summary>
+    public int RotationRangeDeg { get; init; }
+
+    /// <summary>Vision 2.0: optional additional template appearances (animation frames, glow states, learned samples).</summary>
+    public IReadOnlyList<BgraImage>? AdditionalTemplates { get; init; }
 }
 
 /// <summary>
@@ -153,10 +169,87 @@ public static class TemplateMatcher
         ArgumentNullException.ThrowIfNull(template);
         options ??= new TemplateMatchOptions();
 
-        if (options.AllowMultiScale)
-            return FindMultiScale(image, template, options, cancellationToken);
+        var primaryResult = FindOneTemplate(image, template, options, cancellationToken);
+        if (options.AdditionalTemplates is not { Count: > 0 } extras)
+            return primaryResult;
 
-        return FindSingleScale(image, template, options, cancellationToken);
+        if (primaryResult.Matches.Count > 0 && primaryResult.BestScore >= Math.Max(options.MinScore, 0.96))
+            return primaryResult;
+
+        var singleTemplateOptions = options with { AdditionalTemplates = null };
+        var mergedMatches = new List<VisualMatch>(primaryResult.Matches);
+        var bestScore = primaryResult.BestScore;
+        var bestBounds = primaryResult.BestBounds;
+        var bestScale = primaryResult.BestScale;
+        var rejectedColor = primaryResult.RejectedForColor;
+        var scale = primaryResult.Scale;
+
+        foreach (var extra in extras)
+        {
+            if (extra is null) continue;
+            cancellationToken.ThrowIfCancellationRequested();
+            var res = FindOneTemplate(image, extra, singleTemplateOptions, cancellationToken);
+            mergedMatches.AddRange(res.Matches);
+            if (res.BestScore > bestScore)
+            {
+                bestScore = res.BestScore;
+                bestBounds = res.BestBounds;
+                bestScale = res.BestScale;
+            }
+
+            rejectedColor += res.RejectedForColor;
+            if (res.Scale > scale) scale = res.Scale;
+            if (res.Matches.Count > 0 && res.BestScore >= Math.Max(options.MinScore, 0.96))
+                break;
+        }
+
+        var kept = KeepBest(mergedMatches, options.MaxResults);
+        return new TemplateMatchResult(kept, Math.Min(1.0, bestScore), kept.Count > 0 ? 0 : rejectedColor, scale)
+        {
+            BestBounds = kept.Count > 0 ? kept[0].Bounds : bestBounds,
+            BestScale = kept.Count > 0 ? kept[0].MatchedScale : bestScale,
+        };
+    }
+
+    private static TemplateMatchResult FindOneTemplate(BgraImage image, BgraImage template, TemplateMatchOptions options,
+        CancellationToken cancellationToken)
+    {
+        var baseOpts = options.RotationRangeDeg > 0 ? options with { RotationRangeDeg = 0 } : options;
+        var upright = baseOpts.AllowMultiScale
+            ? FindMultiScale(image, template, baseOpts, cancellationToken)
+            : FindSingleScale(image, template, baseOpts, cancellationToken);
+
+        if (options.RotationRangeDeg <= 0 || (upright.Matches.Count > 0 && upright.BestScore >= Math.Max(options.MinScore, 0.94)))
+            return upright;
+
+        int maxDeg = Math.Clamp(options.RotationRangeDeg, 1, 45);
+        int stepDeg = maxDeg <= 10 ? 5 : 8;
+        var allMatches = new List<VisualMatch>(upright.Matches);
+        double bestScore = upright.BestScore;
+        ScreenRect bestBounds = upright.BestBounds;
+
+        for (int deg = stepDeg; deg <= maxDeg; deg += stepDeg)
+        {
+            foreach (int sign in new[] { -1, 1 })
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var rotated = EdgeShapeMatcher.Rotate(template, sign * deg);
+                var res = FindSingleScale(image, rotated, baseOpts with { AllowMultiScale = false }, cancellationToken);
+                allMatches.AddRange(res.Matches);
+                if (res.BestScore > bestScore)
+                {
+                    bestScore = res.BestScore;
+                    bestBounds = res.BestBounds;
+                }
+            }
+        }
+
+        var kept = KeepBest(allMatches, options.MaxResults);
+        return new TemplateMatchResult(kept, Math.Min(1.0, bestScore), kept.Count > 0 ? 0 : upright.RejectedForColor, upright.Scale)
+        {
+            BestBounds = kept.Count > 0 ? kept[0].Bounds : bestBounds,
+            BestScale = upright.BestScale,
+        };
     }
 
     private static TemplateMatchResult FindSingleScale(BgraImage image, BgraImage template, TemplateMatchOptions options,
@@ -173,13 +266,49 @@ public static class TemplateMatcher
 
         if (tw > width || th > height) return TemplateMatchResult.None;
 
+        if (options.Detector == ImageDetectorKind.EdgeShape)
+            return EdgeShapeMatcher.FindByEdgeShape(image, template, options, cancellationToken);
+
         var fine = new FineTemplate(template);
         if (fine.Norm < 1e-6) return TemplateMatchResult.None; // flat template
 
         var result = options.MatchForeground
             ? FindWithForeground(image, template, fine, options, cancellationToken)
             : FindStandard(image, template, fine, options, cancellationToken);
-        return WithBackgroundMask(image, template, result, options, cancellationToken);
+        result = WithBackgroundMask(image, template, result, options, cancellationToken);
+
+        // Vision 2.0 Partial Visibility (occlusion tolerance): when particles or overlays cover part of the target so the
+        // whole-template score falls below MinScore, run the cell-grid partial-visibility matcher.
+        if (options.MinVisibleFraction is > 0.35 and < 0.995
+            && (result.Matches.Count == 0 || result.BestScore < Math.Max(options.MinScore, 0.92)))
+        {
+            var partial = EdgeShapeMatcher.FindWithPartialVisibility(image, template, options, options.MinVisibleFraction, cancellationToken);
+            result = MergeMatchResults(result, partial, options.MaxResults);
+        }
+
+        // Vision 2.0 Combined (Template + EdgeShape fusion): when Template alone didn't find a strong match, fuse with EdgeShape.
+        if (options.Detector == ImageDetectorKind.Combined
+            && (result.Matches.Count == 0 || result.BestScore < Math.Max(options.MinScore, 0.92)))
+        {
+            var edgeRes = EdgeShapeMatcher.FindByEdgeShape(image, template, options, cancellationToken);
+            result = MergeMatchResults(result, edgeRes, options.MaxResults);
+        }
+
+        return result;
+    }
+
+    private static TemplateMatchResult MergeMatchResults(TemplateMatchResult a, TemplateMatchResult b, int maxResults)
+    {
+        var merged = KeepBest(a.Matches.Concat(b.Matches), maxResults);
+        var bestScore = Math.Max(a.BestScore, b.BestScore);
+        var bestBounds = merged.Count > 0 ? merged[0].Bounds
+            : b.BestScore > a.BestScore && !b.BestBounds.IsEmpty ? b.BestBounds
+            : a.BestBounds;
+        return new TemplateMatchResult(merged, Math.Min(1.0, bestScore), merged.Count > 0 ? 0 : a.RejectedForColor, Math.Max(a.Scale, b.Scale))
+        {
+            BestBounds = bestBounds,
+            BestScale = merged.Count > 0 ? merged[0].MatchedScale : a.BestScale,
+        };
     }
 
     private static TemplateMatchResult FindMultiScale(BgraImage image, BgraImage template, TemplateMatchOptions options,

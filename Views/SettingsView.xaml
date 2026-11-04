@@ -63,50 +63,149 @@
         </DockPanel>
 
         <ScrollViewer VerticalScrollBarVisibility="Auto">
-            <StackPanel MaxWidth="760" HorizontalAlignment="Left">
+            <StackPanel x:Name="SettingsCardsStack" MaxWidth="780" HorizontalAlignment="Left">
 
-                <!-- ===== About: SmartMacro + the KuroLogic studio brand ===== -->
-                <Border Style="{StaticResource SettingsCard}">
+                <!-- ===== Hero Banner Showcase: KuroLogic Custom Banner + Studio Identity ===== -->
+                <Border x:Name="HeroBannerCard"
+                        Style="{StaticResource SettingsCard}"
+                        CornerRadius="14"
+                        ClipToBounds="True"
+                        BorderThickness="1">
+                    <Border.BorderBrush>
+                        <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+                            <GradientStop Color="#6622D3EE" Offset="0" />
+                            <GradientStop Color="#446366F1" Offset="0.5" />
+                            <GradientStop Color="#66A855F7" Offset="1" />
+                        </LinearGradientBrush>
+                    </Border.BorderBrush>
                     <StackPanel>
-                        <DockPanel Margin="16,16,16,14">
-                            <!-- Brand mark (same vector logo as the sidebar and the app icon, Views/BrandLogo.xaml) -->
-                            <views:BrandLogo DockPanel.Dock="Left" Width="60" Height="60" VerticalAlignment="Top" Margin="-4,-4,0,0" />
-                            <Button DockPanel.Dock="Right" Command="{Binding CopyDiagnosticsCommand}" VerticalAlignment="Top"
+                        <!-- Cinematic 16:9 Banner Stage with Zoom-Settle, Parallax & Neon Light Sweep -->
+                        <Border x:Name="BannerHeroStage"
+                                Height="208"
+                                CornerRadius="13,13,0,0"
+                                ClipToBounds="True"
+                                Background="#05070E"
+                                MouseMove="BannerHero_MouseMove"
+                                MouseLeave="BannerHero_MouseLeave"
+                                MouseLeftButtonDown="BannerHero_MouseLeftButtonDown"
+                                Cursor="Hand"
+                                ToolTip="Click to replay banner showcase effect">
+                            <Grid>
+                                <Image x:Name="BannerHeroImage"
+                                       Source="pack://application:,,,/Assets/KuroLogic-Banner-1920x1080.png"
+                                       Stretch="UniformToFill"
+                                       HorizontalAlignment="Center"
+                                       VerticalAlignment="Center"
+                                       RenderOptions.BitmapScalingMode="HighQuality"
+                                       RenderTransformOrigin="0.5,0.5"
+                                       AutomationProperties.Name="KuroLogic Studio Banner">
+                                    <Image.RenderTransform>
+                                        <TransformGroup>
+                                            <ScaleTransform x:Name="BannerScale" ScaleX="1.0" ScaleY="1.0" />
+                                            <TranslateTransform x:Name="BannerParallax" X="0" Y="0" />
+                                        </TransformGroup>
+                                    </Image.RenderTransform>
+                                </Image>
+
+                                <!-- Top & Bottom Cinematic Vignette -->
+                                <Border IsHitTestVisible="False">
+                                    <Border.Background>
+                                        <LinearGradientBrush StartPoint="0.5,0" EndPoint="0.5,1">
+                                            <GradientStop Color="#4405070E" Offset="0" />
+                                            <GradientStop Color="#0005070E" Offset="0.28" />
+                                            <GradientStop Color="#0005070E" Offset="0.62" />
+                                            <GradientStop Color="#EE0A0E1A" Offset="1" />
+                                        </LinearGradientBrush>
+                                    </Border.Background>
+                                </Border>
+
+                                <!-- Diagonal Holographic Light-Sweep Shimmer -->
+                                <Border x:Name="BannerLightSweep"
+                                        Width="220"
+                                        HorizontalAlignment="Left"
+                                        IsHitTestVisible="False"
+                                        Opacity="0.85">
+                                    <Border.Background>
+                                        <LinearGradientBrush StartPoint="0,0.5" EndPoint="1,0.5">
+                                            <GradientStop Color="#00FFFFFF" Offset="0" />
+                                            <GradientStop Color="#2222D3EE" Offset="0.35" />
+                                            <GradientStop Color="#55FFFFFF" Offset="0.5" />
+                                            <GradientStop Color="#22A855F7" Offset="0.65" />
+                                            <GradientStop Color="#00FFFFFF" Offset="1" />
+                                        </LinearGradientBrush>
+                                    </Border.Background>
+                                    <Border.RenderTransform>
+                                        <TransformGroup>
+                                            <SkewTransform AngleX="-24" AngleY="0" />
+                                            <TranslateTransform x:Name="BannerSweepTranslate" X="-360" />
+                                        </TransformGroup>
+                                    </Border.RenderTransform>
+                                </Border>
+
+                                <!-- Floating Corner Studio Pill Badge -->
+                                <Border HorizontalAlignment="Right"
+                                        VerticalAlignment="Top"
+                                        Margin="14,12"
+                                        Padding="10,4"
+                                        CornerRadius="999"
+                                        Background="#AA070A14"
+                                        BorderBrush="#5522D3EE"
+                                        BorderThickness="1"
+                                        IsHitTestVisible="False">
+                                    <StackPanel Orientation="Horizontal">
+                                        <Ellipse Width="6" Height="6" Fill="#22D3EE" VerticalAlignment="Center" Margin="0,0,6,0" />
+                                        <TextBlock Text="KUROLOGIC STUDIO · OFFICIAL EDITION"
+                                                   Foreground="#E2E8F0"
+                                                   FontSize="10"
+                                                   FontWeight="Bold" />
+                                    </StackPanel>
+                                </Border>
+                            </Grid>
+                        </Border>
+
+                        <!-- Bottom Neon Divider -->
+                        <Border Height="1.5">
+                            <Border.Background>
+                                <LinearGradientBrush StartPoint="0,0.5" EndPoint="1,0.5">
+                                    <GradientStop Color="#0022D3EE" Offset="0" />
+                                    <GradientStop Color="#AA22D3EE" Offset="0.25" />
+                                    <GradientStop Color="#AA818CF8" Offset="0.5" />
+                                    <GradientStop Color="#AAA855F7" Offset="0.75" />
+                                    <GradientStop Color="#00A855F7" Offset="1" />
+                                </LinearGradientBrush>
+                            </Border.Background>
+                        </Border>
+
+                        <!-- Studio Identity & Diagnostics Bar -->
+                        <DockPanel Margin="18,14,18,14">
+                            <views:BrandLogo DockPanel.Dock="Left" Width="52" Height="52" VerticalAlignment="Center" Margin="-2,0,0,0" />
+                            <Button DockPanel.Dock="Right" Command="{Binding CopyDiagnosticsCommand}" VerticalAlignment="Center"
                                     ToolTip="Copies version, Windows, screen and OCR info plus the recent log, for bug reports">
                                 <StackPanel Orientation="Horizontal">
                                     <TextBlock Text="&#xE8C8;" Style="{StaticResource IconText}" />
                                     <TextBlock Text="Copy diagnostics" Margin="8,0,0,0" />
                                 </StackPanel>
                             </Button>
-                            <StackPanel Margin="16,0,16,0">
-                                <TextBlock Text="ABOUT" Style="{StaticResource SetupCardTitle}" />
-                                <TextBlock Text="{Binding AppName}" FontSize="18" FontWeight="SemiBold" Margin="0,2,0,0" />
-                                <TextBlock Text="{Binding VersionText}" Style="{StaticResource MutedText}" Margin="0,2,0,0" />
-                                <TextBlock Text="{Binding OwnerText}" FontWeight="SemiBold" Margin="0,8,0,0" />
-                                <TextBlock Text="{Binding Tagline}" Style="{StaticResource MutedText}" FontSize="12" Margin="0,4,0,0" />
+                            <StackPanel Margin="14,0,16,0" VerticalAlignment="Center">
+                                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                    <TextBlock Text="{Binding AppName}" FontSize="17" FontWeight="Bold" />
+                                    <Border Background="{DynamicResource AccentSoftBrush}"
+                                            BorderBrush="{DynamicResource AccentBrush}"
+                                            BorderThickness="1"
+                                            CornerRadius="6"
+                                            Padding="7,2"
+                                            Margin="10,0,0,0"
+                                            VerticalAlignment="Center">
+                                        <TextBlock Text="{Binding VersionText}"
+                                                   Foreground="{DynamicResource AccentBrush}"
+                                                   FontSize="10.5"
+                                                   FontWeight="SemiBold" />
+                                    </Border>
+                                </StackPanel>
+                                <TextBlock Text="{Binding OwnerText}" FontWeight="SemiBold" FontSize="12" Margin="0,4,0,0" />
+                                <TextBlock Text="{Binding Tagline}" Style="{StaticResource MutedText}" FontSize="11.5" Margin="0,2,0,0" />
                             </StackPanel>
                         </DockPanel>
-
-                        <!-- KuroLogic brand band: obsidian studio surface with the KuroLogic logo (Assets/KuroLogic-Logo.png) -->
-                        <Border CornerRadius="0,0,10,10" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,1,0,0" ClipToBounds="True">
-                            <Border.Background>
-                                <RadialGradientBrush Center="0.3,0.5" GradientOrigin="0.3,0.5" RadiusX="0.75" RadiusY="1.6">
-                                    <GradientStop Color="#2A1B5E" Offset="0" />
-                                    <GradientStop Color="#0E1022" Offset="0.55" />
-                                    <GradientStop Color="#05070D" Offset="1" />
-                                </RadialGradientBrush>
-                            </Border.Background>
-                            <DockPanel Margin="14,10,18,10">
-                                <StackPanel DockPanel.Dock="Right" VerticalAlignment="Center" HorizontalAlignment="Right" MaxWidth="260">
-                                    <TextBlock Text="A KUROLOGIC PRODUCT" Style="{StaticResource SetupCardTitle}" HorizontalAlignment="Right" />
-                                    <TextBlock Text="Made by KuroLogic, the independent software studio of Riku (リク)."
-                                               Style="{StaticResource MutedText}" FontSize="11" TextAlignment="Right" TextWrapping="Wrap" Margin="0,4,0,0" />
-                                </StackPanel>
-                                <Image Source="pack://application:,,,/Assets/KuroLogic-Logo.png" Height="76" HorizontalAlignment="Left"
-                                       Stretch="Uniform" RenderOptions.BitmapScalingMode="HighQuality"
-                                       AutomationProperties.Name="KuroLogic logo" ToolTip="KuroLogic · Software Studio" />
-                            </DockPanel>
-                        </Border>
                     </StackPanel>
                 </Border>
 
@@ -194,6 +293,13 @@
                                       IsChecked="{Binding ReduceMotion}" />
                             <TextBlock Style="{StaticResource SettingHelp}"
                                        Text="SmartMacro also automatically honors Windows Accessibility → Animation effects." />
+
+                            <TextBlock Text="Editor experience mode" Style="{StaticResource FieldLabel}" Margin="0,12,0,4" />
+                            <ComboBox ItemsSource="{Binding ExperienceLevels}" SelectedValue="{Binding ExperienceLevel}"
+                                      SelectedValuePath="Value" DisplayMemberPath="Label"
+                                      AutomationProperties.Name="Editor experience mode" />
+                            <TextBlock Style="{StaticResource SettingHelp}"
+                                       Text="Beginner highlights 1-click Vision 2.0 scenario presets and Auto-Tune; Advanced exposes full partial-occlusion, Kalman tracking, predictive lead, and color-space controls." />
                         </StackPanel>
                     </StackPanel>
                 </Border>
@@ -358,7 +464,7 @@
                                 <TextBlock Text="{Binding OcrStatus}" TextWrapping="Wrap" MaxWidth="660" FontSize="12" />
                             </StackPanel>
                             <TextBlock Style="{StaticResource SettingHelp}" Margin="0,6,0,0"
-                                       Text="Uses the text recognition built into Windows. Screen captures are processed on this PC only and are never saved or uploaded." />
+                                       Text="Uses the text recognition built into Windows. Screen captures are processed on this PC only and are never uploaded (only the latest editor 'Test' capture is saved locally in the Logs folder)." />
                         </StackPanel>
                     </StackPanel>
                 </Border>

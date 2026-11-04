@@ -810,6 +810,7 @@
                                      PreviewKeyDown="StepList_PreviewKeyDown"
                                      VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling"
                                      VirtualizingPanel.ScrollUnit="Pixel" ScrollViewer.CanContentScroll="True"
+                                     ScrollViewer.ScrollChanged="StepList_ScrollChanged"
                                      VirtualizingPanel.CacheLengthUnit="Page" VirtualizingPanel.CacheLength="1,1"
                                      AutomationProperties.Name="Workflow steps"
                                      SelectionChanged="StepList_SelectionChanged"
@@ -872,173 +873,236 @@
                                                         Visibility="{Binding IsInsideBlock, Converter={StaticResource BoolToVisibility}}" />
                                             </Grid>
 
-                                            <!-- Step Card v2 -->
-                                            <Border x:Name="Card" Grid.Column="1" Background="{DynamicResource StepCardBrush}"
-                                                    BorderBrush="{DynamicResource StepCardBorderBrush}" BorderThickness="1.5" CornerRadius="9"
-                                                    SnapsToDevicePixels="True">
-                                                <Grid>
-                                                    <Grid.ColumnDefinitions>
-                                                        <ColumnDefinition Width="3.5" />
-                                                        <ColumnDefinition Width="*" />
-                                                    </Grid.ColumnDefinitions>
-
-                                                    <!-- Category / Block Depth Accent Strip -->
-                                                    <Border x:Name="AccentStrip" Grid.Column="0" CornerRadius="7.5,0,0,7.5"
-                                                            Background="{Binding Kind, Converter={StaticResource CategoryBrush}, ConverterParameter=Accent}" />
-
-                                                    <Grid x:Name="Row" Grid.Column="1" Margin="8,7,10,7">
+                                            <!-- Step Card v3 (Obsidian Glass + Specular Rim + Structured Pills + Hover '+' Insertion Rail) -->
+                                            <StackPanel Grid.Column="1">
+                                                <Border x:Name="Card" Background="{DynamicResource StepCardBrush}"
+                                                        BorderBrush="{DynamicResource StepCardBorderBrush}" BorderThickness="1.5" CornerRadius="10"
+                                                        SnapsToDevicePixels="True">
+                                                    <Grid>
                                                         <Grid.ColumnDefinitions>
-                                                            <ColumnDefinition Width="Auto" MinWidth="26" />
-                                                            <ColumnDefinition Width="Auto" />
+                                                            <ColumnDefinition Width="4" />
                                                             <ColumnDefinition Width="*" />
-                                                            <ColumnDefinition Width="Auto" />
-                                                            <ColumnDefinition Width="Auto" />
-                                                            <ColumnDefinition Width="Auto" />
                                                         </Grid.ColumnDefinitions>
 
-                                                        <!-- Step Number + Block Fold Chevron -->
-                                                        <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,4,0">
-                                                            <TextBlock x:Name="NumberText" Text="{Binding Number}" FontFamily="{StaticResource MonoFont}"
-                                                                       Foreground="{DynamicResource SubtleTextBrush}" FontSize="11"
-                                                                       MinWidth="15" VerticalAlignment="Center" />
-                                                            <Button x:Name="FoldButton" Visibility="Collapsed" Width="18" Height="20" Padding="0" Margin="1,0,0,0"
-                                                                    Style="{StaticResource GhostButton}" ToolTip="{Binding CollapseTooltip}" Focusable="False"
-                                                                    Command="{Binding DataContext.ToggleCollapseCommand, RelativeSource={RelativeSource AncestorType=ListBox}}"
-                                                                    CommandParameter="{Binding}">
-                                                                <Path Data="M0,0.5 L4,4.5 L8,0.5" Width="8" Height="5" RenderTransformOrigin="0.5,0.5"
-                                                                      Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
-                                                                      StrokeThickness="1.6" StrokeStartLineCap="Round" StrokeEndLineCap="Round" Stretch="None">
-                                                                    <Path.Style>
-                                                                        <Style TargetType="Path">
-                                                                            <Setter Property="RenderTransform">
-                                                                                <Setter.Value><RotateTransform Angle="0" /></Setter.Value>
-                                                                            </Setter>
-                                                                            <Style.Triggers>
-                                                                                <DataTrigger Binding="{Binding IsCollapsed}" Value="True">
-                                                                                    <Setter Property="RenderTransform">
-                                                                                        <Setter.Value><RotateTransform Angle="-90" /></Setter.Value>
-                                                                                    </Setter>
-                                                                                </DataTrigger>
-                                                                            </Style.Triggers>
-                                                                        </Style>
-                                                                    </Path.Style>
-                                                                </Path>
-                                                            </Button>
-                                                        </StackPanel>
-
-                                                        <!-- 32x32 Squircle Category Badge -->
-                                                        <Border x:Name="IconBadge" Grid.Column="1" Width="32" Height="32" CornerRadius="8"
-                                                                Background="{Binding Kind, Converter={StaticResource CategoryBrush}, ConverterParameter=Badge}">
-                                                            <TextBlock x:Name="IconGlyph" Text="{Binding Glyph}" Style="{StaticResource IconText}" HorizontalAlignment="Center"
-                                                                       Foreground="{Binding Kind, Converter={StaticResource CategoryBrush}, ConverterParameter=Accent}" />
+                                                        <!-- Top Specular Glass Rim -->
+                                                        <Border Grid.Column="1" Height="1" VerticalAlignment="Top" Margin="6,0,10,0" IsHitTestVisible="False" Opacity="0.22">
+                                                            <Border.Background>
+                                                                <LinearGradientBrush StartPoint="0,0.5" EndPoint="1,0.5">
+                                                                    <GradientStop Color="#00FFFFFF" Offset="0" />
+                                                                    <GradientStop Color="#FFFFFFFF" Offset="0.3" />
+                                                                    <GradientStop Color="#00FFFFFF" Offset="1" />
+                                                                </LinearGradientBrush>
+                                                            </Border.Background>
                                                         </Border>
 
-                                                        <!-- Title + Smart Metadata Chips + Summary -->
-                                                        <StackPanel Grid.Column="2" Margin="10,0,8,0" VerticalAlignment="Center">
-                                                            <DockPanel LastChildFill="True">
-                                                                <StackPanel Orientation="Horizontal" DockPanel.Dock="Left">
-                                                                    <TextBlock x:Name="TitleText" Text="{Binding Title}" FontWeight="SemiBold" FontSize="13" VerticalAlignment="Center" />
+                                                        <!-- Category / Block Depth Accent Strip -->
+                                                        <Border x:Name="AccentStrip" Grid.Column="0" CornerRadius="8.5,0,0,8.5"
+                                                                Background="{Binding Kind, Converter={StaticResource CategoryBrush}, ConverterParameter=Accent}" />
 
-                                                                    <Border x:Name="BlockPairBadge" CornerRadius="6" Padding="7,1,7,2" Margin="8,0,0,0"
-                                                                            Background="{Binding BlockBadgeBackgroundBrush}" BorderBrush="{Binding BlockAccentBrush}" BorderThickness="1"
-                                                                            VerticalAlignment="Center"
-                                                                            Visibility="{Binding HasBlockBadge, Converter={StaticResource BoolToVisibility}}">
-                                                                        <TextBlock Text="{Binding BlockFullBadgeText}" FontSize="10.5" FontWeight="Bold" Foreground="{Binding BlockAccentBrush}" />
-                                                                    </Border>
+                                                        <Grid x:Name="Row" Grid.Column="1" Margin="8,7,10,7">
+                                                            <Grid.ColumnDefinitions>
+                                                                <ColumnDefinition Width="Auto" MinWidth="62" />
+                                                                <ColumnDefinition Width="Auto" />
+                                                                <ColumnDefinition Width="*" />
+                                                                <ColumnDefinition Width="Auto" />
+                                                                <ColumnDefinition Width="Auto" />
+                                                                <ColumnDefinition Width="Auto" />
+                                                            </Grid.ColumnDefinitions>
 
-                                                                    <!-- Inline Smart Intent / Brain / Recovery Chip -->
-                                                                    <Border CornerRadius="6" Padding="6,1,6,1.5" Margin="7,0,0,0" VerticalAlignment="Center"
-                                                                            Background="{Binding Kind, Converter={StaticResource CategoryBrush}, ConverterParameter=Badge}"
-                                                                            Visibility="{Binding HasSmartChip, Converter={StaticResource BoolToVisibility}}">
-                                                                        <TextBlock Text="{Binding SmartChipText}" FontSize="10" FontWeight="SemiBold"
-                                                                                   Foreground="{Binding Kind, Converter={StaticResource CategoryBrush}, ConverterParameter=Accent}" />
-                                                                    </Border>
-
-                                                                    <Border x:Name="PartnerTag" Style="{StaticResource Pill}" Margin="6,0,0,0"
-                                                                            Background="{Binding BlockBadgeBackgroundBrush}"
-                                                                            Visibility="{Binding IsBlockPartnerHighlighted, Converter={StaticResource BoolToVisibility}}">
-                                                                        <TextBlock Text="⇄ PAIR" FontSize="9" FontWeight="SemiBold" Foreground="{Binding BlockAccentBrush}" />
-                                                                    </Border>
-
-                                                                    <Border x:Name="DisabledTag" Style="{StaticResource Pill}" Margin="8,0,0,0" Visibility="Collapsed">
-                                                                        <TextBlock Text="DISABLED" FontSize="9" FontWeight="SemiBold" Foreground="{DynamicResource MutedTextBrush}" />
-                                                                    </Border>
-
-                                                                    <Border x:Name="RunningTag" Style="{StaticResource Pill}" Margin="8,0,0,0" Background="{DynamicResource SuccessSoftBrush}"
-                                                                            Visibility="Collapsed">
-                                                                        <TextBlock Text="▶ RUNNING" FontSize="9" FontWeight="Bold" Foreground="{DynamicResource SuccessBrush}" />
-                                                                    </Border>
-
-                                                                    <Border Style="{StaticResource Pill}" Margin="8,0,0,0" Background="{DynamicResource ErrorSoftBrush}"
-                                                                            Visibility="{Binding HasBreakpoint, Converter={StaticResource BoolToVisibility}}"
-                                                                            ToolTip="Breakpoint active (F9 toggles, F10 steps over while paused)">
-                                                                        <TextBlock Text="🔴 BREAK" FontSize="9" FontWeight="Bold" Foreground="{DynamicResource ErrorBrush}" />
-                                                                    </Border>
-
-                                                                    <Border x:Name="HiddenTag" Style="{StaticResource Pill}" Margin="8,0,0,0" Visibility="Collapsed">
-                                                                        <TextBlock Text="{Binding HiddenBadgeText}" FontSize="9.5" FontWeight="SemiBold" Foreground="{DynamicResource MutedTextBrush}" />
-                                                                    </Border>
+                                                            <!-- Step Number + Cumulative Timeline Offset Gutter + Block Fold Chevron -->
+                                                            <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,6,0">
+                                                                <TextBlock x:Name="DragGrip" Text="⋮⋮" FontSize="10" Foreground="{DynamicResource SubtleTextBrush}"
+                                                                           Opacity="0.35" VerticalAlignment="Center" Margin="0,0,4,0" ToolTip="Drag to reorder step" />
+                                                                <StackPanel VerticalAlignment="Center" MinWidth="40">
+                                                                    <TextBlock x:Name="NumberText" Text="{Binding Number, StringFormat='#{0}'}" FontFamily="{StaticResource MonoFont}"
+                                                                               Foreground="{DynamicResource TextBrush}" FontWeight="SemiBold" FontSize="11" />
+                                                                    <TextBlock x:Name="TimelineText" Text="{Binding TimelineOffsetText}" FontFamily="{StaticResource MonoFont}"
+                                                                               Foreground="{DynamicResource SubtleTextBrush}" FontSize="9.5" Margin="0,1,0,0"
+                                                                               Visibility="{Binding HasTimelineOffset, Converter={StaticResource BoolToVisibility}}"
+                                                                               ToolTip="Cumulative virtual timeline offset from start of macro" />
                                                                 </StackPanel>
+                                                                <Button x:Name="FoldButton" Visibility="Collapsed" Width="18" Height="20" Padding="0" Margin="2,0,0,0"
+                                                                        Style="{StaticResource GhostButton}" ToolTip="{Binding CollapseTooltip}" Focusable="False"
+                                                                        Command="{Binding DataContext.ToggleCollapseCommand, RelativeSource={RelativeSource AncestorType=ListBox}}"
+                                                                        CommandParameter="{Binding}">
+                                                                    <Path Data="M0,0.5 L4,4.5 L8,0.5" Width="8" Height="5" RenderTransformOrigin="0.5,0.5"
+                                                                          Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                                                                          StrokeThickness="1.6" StrokeStartLineCap="Round" StrokeEndLineCap="Round" Stretch="None">
+                                                                        <Path.Style>
+                                                                            <Style TargetType="Path">
+                                                                                <Setter Property="RenderTransform">
+                                                                                    <Setter.Value><RotateTransform Angle="0" /></Setter.Value>
+                                                                                </Setter>
+                                                                                <Style.Triggers>
+                                                                                    <DataTrigger Binding="{Binding IsCollapsed}" Value="True">
+                                                                                        <Setter Property="RenderTransform">
+                                                                                            <Setter.Value><RotateTransform Angle="-90" /></Setter.Value>
+                                                                                        </Setter>
+                                                                                    </DataTrigger>
+                                                                                </Style.Triggers>
+                                                                            </Style>
+                                                                        </Path.Style>
+                                                                    </Path>
+                                                                </Button>
+                                                            </StackPanel>
 
-                                                                <TextBlock x:Name="InlineSummary" Text="{Binding Summary}" Foreground="{DynamicResource MutedTextBrush}" FontSize="11.5"
-                                                                           TextTrimming="CharacterEllipsis" Margin="10,0,0,0" VerticalAlignment="Center" Visibility="Collapsed" />
-                                                            </DockPanel>
+                                                            <!-- 32x32 Squircle Category Badge -->
+                                                            <Border x:Name="IconBadge" Grid.Column="1" Width="32" Height="32" CornerRadius="8"
+                                                                    Background="{Binding Kind, Converter={StaticResource CategoryBrush}, ConverterParameter=Badge}">
+                                                                <TextBlock x:Name="IconGlyph" Text="{Binding Glyph}" Style="{StaticResource IconText}" HorizontalAlignment="Center"
+                                                                           Foreground="{Binding Kind, Converter={StaticResource CategoryBrush}, ConverterParameter=Accent}" />
+                                                            </Border>
 
-                                                            <TextBlock x:Name="SummaryText" Text="{Binding Summary}" Foreground="{DynamicResource MutedTextBrush}" FontSize="12" TextTrimming="CharacterEllipsis" Margin="0,2,0,0" />
-                                                            <TextBlock x:Name="CommentText" Text="{Binding Comment}" FontStyle="Italic" Foreground="{DynamicResource SubtleTextBrush}" FontSize="11"
-                                                                       TextTrimming="CharacterEllipsis" Margin="0,2,0,0"
-                                                                       Visibility="{Binding HasComment, Converter={StaticResource BoolToVisibility}}" />
-                                                        </StackPanel>
+                                                            <!-- Title + Structured Keycap/Parameter Pills + Smart Metadata Chips + Summary -->
+                                                            <StackPanel Grid.Column="2" Margin="10,0,8,0" VerticalAlignment="Center">
+                                                                <DockPanel LastChildFill="True">
+                                                                    <StackPanel Orientation="Horizontal" DockPanel.Dock="Left">
+                                                                        <TextBlock x:Name="TitleText" Text="{Binding Title}" FontWeight="SemiBold" FontSize="13" VerticalAlignment="Center" />
 
-                                                        <!-- Hover-Reveal Quick Actions (Run · Test · Delete) -->
-                                                        <StackPanel x:Name="HoverActions" Grid.Column="3" Orientation="Horizontal" VerticalAlignment="Center"
-                                                                    Margin="0,0,6,0" Visibility="Collapsed">
-                                                            <Button Style="{StaticResource GhostButton}" Width="24" Height="24" Padding="0" Focusable="False"
-                                                                    Command="{Binding DataContext.RunGivenStepCommand, RelativeSource={RelativeSource AncestorType=ListBox}}"
-                                                                    CommandParameter="{Binding}" ToolTip="Run only this step (Ctrl+F5)">
-                                                                <ctrl:StudioIcon Kind="Play" Size="11" Foreground="{DynamicResource SuccessBrush}" />
-                                                            </Button>
-                                                            <Button Style="{StaticResource GhostButton}" Width="24" Height="24" Padding="0" Margin="2,0,0,0" Focusable="False"
-                                                                    Command="{Binding DataContext.TestGivenStepCommand, RelativeSource={RelativeSource AncestorType=ListBox}}"
-                                                                    CommandParameter="{Binding}" ToolTip="Test this step (Ctrl+T)">
-                                                                <ctrl:StudioIcon Kind="Flask" Size="11" Foreground="{DynamicResource VisionAccentBrush}" />
-                                                            </Button>
-                                                            <Button Style="{StaticResource GhostButton}" Width="24" Height="24" Padding="0" Margin="2,0,0,0" Focusable="False"
-                                                                    Command="{Binding DataContext.DeleteGivenStepCommand, RelativeSource={RelativeSource AncestorType=ListBox}}"
-                                                                    CommandParameter="{Binding}" ToolTip="Delete step">
-                                                                <ctrl:StudioIcon Kind="Trash" Size="11" Foreground="{DynamicResource ErrorBrush}" />
-                                                            </Button>
-                                                        </StackPanel>
+                                                                        <!-- 3D Hardware Keycap Badge (KeyPressStep) -->
+                                                                        <Border CornerRadius="5" Padding="7,1,7,2" Margin="8,0,0,0" VerticalAlignment="Center"
+                                                                                Background="{DynamicResource SurfaceAltBrush}"
+                                                                                BorderBrush="{DynamicResource InputBorderBrush}"
+                                                                                BorderThickness="1,1,1,2.5"
+                                                                                Visibility="{Binding HasKeycapBadge, Converter={StaticResource BoolToVisibility}}">
+                                                                            <TextBlock Text="{Binding KeycapBadge}" FontFamily="{StaticResource MonoFont}"
+                                                                                       FontSize="10.5" FontWeight="Bold" Foreground="{DynamicResource TextBrush}" />
+                                                                        </Border>
 
-                                                        <!-- Inline Preview (Snapshot / Template / Color Swatch) -->
-                                                        <ContentControl Grid.Column="4" Content="{Binding}" ContentTemplateSelector="{StaticResource StepPreviewSelector}"
-                                                                        Focusable="False" IsTabStop="False" VerticalAlignment="Center" Margin="0,0,6,0" />
+                                                                        <!-- Primary Parameter Pill (Coordinates / Duration / Match %) -->
+                                                                        <Border CornerRadius="5" Padding="6,1,6,1.5" Margin="6,0,0,0" VerticalAlignment="Center"
+                                                                                Background="{DynamicResource SurfaceAltBrush}"
+                                                                                BorderBrush="{DynamicResource BorderBrush}"
+                                                                                BorderThickness="1"
+                                                                                Visibility="{Binding HasPrimaryBadge, Converter={StaticResource BoolToVisibility}}">
+                                                                            <TextBlock Text="{Binding PrimaryBadge}" FontFamily="{StaticResource MonoFont}"
+                                                                                       FontSize="10" FontWeight="SemiBold" Foreground="{DynamicResource MutedTextBrush}" />
+                                                                        </Border>
 
-                                                        <!-- Validation Error / Warning Icon -->
-                                                        <Grid Grid.Column="5" VerticalAlignment="Center">
-                                                            <ctrl:StudioIcon Kind="ErrorCircle" Size="14" Foreground="{DynamicResource ErrorBrush}"
-                                                                             ToolTip="{Binding IssueText}" Visibility="{Binding HasError, Converter={StaticResource BoolToVisibility}}" />
-                                                            <ctrl:StudioIcon Kind="WarningTriangle" Size="14" Foreground="{DynamicResource WarningBrush}"
-                                                                             ToolTip="{Binding IssueText}" Visibility="{Binding HasWarning, Converter={StaticResource BoolToVisibility}}" />
+                                                                        <!-- Secondary Parameter Pill (Hold time / ScanCode / Curve) -->
+                                                                        <Border CornerRadius="5" Padding="6,1,6,1.5" Margin="5,0,0,0" VerticalAlignment="Center"
+                                                                                Background="{DynamicResource SurfaceAltBrush}"
+                                                                                Visibility="{Binding HasSecondaryBadge, Converter={StaticResource BoolToVisibility}}">
+                                                                            <TextBlock Text="{Binding SecondaryBadge}" FontFamily="{StaticResource MonoFont}"
+                                                                                       FontSize="9.5" Foreground="{DynamicResource SubtleTextBrush}" />
+                                                                        </Border>
+
+                                                                        <Border x:Name="BlockPairBadge" CornerRadius="6" Padding="7,1,7,2" Margin="8,0,0,0"
+                                                                                Background="{Binding BlockBadgeBackgroundBrush}" BorderBrush="{Binding BlockAccentBrush}" BorderThickness="1"
+                                                                                VerticalAlignment="Center"
+                                                                                Visibility="{Binding HasBlockBadge, Converter={StaticResource BoolToVisibility}}">
+                                                                            <TextBlock Text="{Binding BlockFullBadgeText}" FontSize="10.5" FontWeight="Bold" Foreground="{Binding BlockAccentBrush}" />
+                                                                        </Border>
+
+                                                                        <!-- Inline Smart Intent / Brain / Recovery Chip -->
+                                                                        <Border CornerRadius="6" Padding="6,1,6,1.5" Margin="7,0,0,0" VerticalAlignment="Center"
+                                                                                Background="{Binding Kind, Converter={StaticResource CategoryBrush}, ConverterParameter=Badge}"
+                                                                                Visibility="{Binding HasSmartChip, Converter={StaticResource BoolToVisibility}}">
+                                                                            <TextBlock Text="{Binding SmartChipText}" FontSize="10" FontWeight="SemiBold"
+                                                                                       Foreground="{Binding Kind, Converter={StaticResource CategoryBrush}, ConverterParameter=Accent}" />
+                                                                        </Border>
+
+                                                                        <Border x:Name="PartnerTag" Style="{StaticResource Pill}" Margin="6,0,0,0"
+                                                                                Background="{Binding BlockBadgeBackgroundBrush}"
+                                                                                Visibility="{Binding IsBlockPartnerHighlighted, Converter={StaticResource BoolToVisibility}}">
+                                                                            <TextBlock Text="⇄ PAIR" FontSize="9" FontWeight="SemiBold" Foreground="{Binding BlockAccentBrush}" />
+                                                                        </Border>
+
+                                                                        <Border x:Name="DisabledTag" Style="{StaticResource Pill}" Margin="8,0,0,0" Visibility="Collapsed">
+                                                                            <TextBlock Text="DISABLED" FontSize="9" FontWeight="SemiBold" Foreground="{DynamicResource MutedTextBrush}" />
+                                                                        </Border>
+
+                                                                        <Border x:Name="RunningTag" Style="{StaticResource Pill}" Margin="8,0,0,0" Background="{DynamicResource SuccessSoftBrush}"
+                                                                                Visibility="Collapsed">
+                                                                            <TextBlock Text="▶ RUNNING" FontSize="9" FontWeight="Bold" Foreground="{DynamicResource SuccessBrush}" />
+                                                                        </Border>
+
+                                                                        <Border Style="{StaticResource Pill}" Margin="8,0,0,0" Background="{DynamicResource ErrorSoftBrush}"
+                                                                                Visibility="{Binding HasBreakpoint, Converter={StaticResource BoolToVisibility}}"
+                                                                                ToolTip="Breakpoint active (F9 toggles, F10 steps over while paused)">
+                                                                            <TextBlock Text="🔴 BREAK" FontSize="9" FontWeight="Bold" Foreground="{DynamicResource ErrorBrush}" />
+                                                                        </Border>
+
+                                                                        <Border x:Name="HiddenTag" Style="{StaticResource Pill}" Margin="8,0,0,0" Visibility="Collapsed">
+                                                                            <TextBlock Text="{Binding HiddenBadgeText}" FontSize="9.5" FontWeight="SemiBold" Foreground="{DynamicResource MutedTextBrush}" />
+                                                                        </Border>
+                                                                    </StackPanel>
+
+                                                                    <TextBlock x:Name="InlineSummary" Text="{Binding Summary}" Foreground="{DynamicResource MutedTextBrush}" FontSize="11.5"
+                                                                               TextTrimming="CharacterEllipsis" Margin="10,0,0,0" VerticalAlignment="Center" Visibility="Collapsed" />
+                                                                </DockPanel>
+
+                                                                <TextBlock x:Name="SummaryText" Text="{Binding Summary}" Foreground="{DynamicResource MutedTextBrush}" FontSize="12" TextTrimming="CharacterEllipsis" Margin="0,2,0,0" />
+                                                                <TextBlock x:Name="CommentText" Text="{Binding Comment}" FontStyle="Italic" Foreground="{DynamicResource SubtleTextBrush}" FontSize="11"
+                                                                           TextTrimming="CharacterEllipsis" Margin="0,2,0,0"
+                                                                           Visibility="{Binding HasComment, Converter={StaticResource BoolToVisibility}}" />
+                                                            </StackPanel>
+
+                                                            <!-- Hover-Reveal Quick Actions (Run · Test · Delete) -->
+                                                            <StackPanel x:Name="HoverActions" Grid.Column="3" Orientation="Horizontal" VerticalAlignment="Center"
+                                                                        Margin="0,0,6,0" Visibility="Collapsed">
+                                                                <Button Style="{StaticResource GhostButton}" Width="24" Height="24" Padding="0" Focusable="False"
+                                                                        Command="{Binding DataContext.RunGivenStepCommand, RelativeSource={RelativeSource AncestorType=ListBox}}"
+                                                                        CommandParameter="{Binding}" ToolTip="Run only this step (Ctrl+F5)">
+                                                                    <ctrl:StudioIcon Kind="Play" Size="11" Foreground="{DynamicResource SuccessBrush}" />
+                                                                </Button>
+                                                                <Button Style="{StaticResource GhostButton}" Width="24" Height="24" Padding="0" Margin="2,0,0,0" Focusable="False"
+                                                                        Command="{Binding DataContext.TestGivenStepCommand, RelativeSource={RelativeSource AncestorType=ListBox}}"
+                                                                        CommandParameter="{Binding}" ToolTip="Test this step (Ctrl+T)">
+                                                                    <ctrl:StudioIcon Kind="Flask" Size="11" Foreground="{DynamicResource VisionAccentBrush}" />
+                                                                </Button>
+                                                                <Button Style="{StaticResource GhostButton}" Width="24" Height="24" Padding="0" Margin="2,0,0,0" Focusable="False"
+                                                                        Command="{Binding DataContext.DeleteGivenStepCommand, RelativeSource={RelativeSource AncestorType=ListBox}}"
+                                                                        CommandParameter="{Binding}" ToolTip="Delete step">
+                                                                    <ctrl:StudioIcon Kind="Trash" Size="11" Foreground="{DynamicResource ErrorBrush}" />
+                                                                </Button>
+                                                            </StackPanel>
+
+                                                            <!-- Inline Preview (Snapshot / Template / Color Swatch) -->
+                                                            <ContentControl Grid.Column="4" Content="{Binding}" ContentTemplateSelector="{StaticResource StepPreviewSelector}"
+                                                                            Focusable="False" IsTabStop="False" VerticalAlignment="Center" Margin="0,0,6,0" />
+
+                                                            <!-- Validation Error / Warning Icon -->
+                                                            <Grid Grid.Column="5" VerticalAlignment="Center">
+                                                                <ctrl:StudioIcon Kind="ErrorCircle" Size="14" Foreground="{DynamicResource ErrorBrush}"
+                                                                                 ToolTip="{Binding IssueText}" Visibility="{Binding HasError, Converter={StaticResource BoolToVisibility}}" />
+                                                                <ctrl:StudioIcon Kind="WarningTriangle" Size="14" Foreground="{DynamicResource WarningBrush}"
+                                                                                 ToolTip="{Binding IssueText}" Visibility="{Binding HasWarning, Converter={StaticResource BoolToVisibility}}" />
+                                                            </Grid>
+                                                        </Grid>
+
+                                                        <!-- Live 2px Neon Step Progress Bar -->
+                                                        <Grid Grid.Column="0" Grid.ColumnSpan="2" Height="2.5" VerticalAlignment="Bottom" Margin="6,0,6,1"
+                                                              IsHitTestVisible="False"
+                                                              Visibility="{Binding ShowExecutionProgress, Converter={StaticResource BoolToVisibility}}">
+                                                            <Border Background="#1F22D3EE" CornerRadius="1" />
+                                                            <Border Background="{DynamicResource NeonProgressBrush}" CornerRadius="1" RenderTransformOrigin="0,0.5">
+                                                                <Border.RenderTransform>
+                                                                    <ScaleTransform ScaleX="{Binding ExecutionProgress}" ScaleY="1" />
+                                                                </Border.RenderTransform>
+                                                                <Border.Effect>
+                                                                    <DropShadowEffect Color="#22D3EE" BlurRadius="6" ShadowDepth="0" Opacity="0.85" />
+                                                                </Border.Effect>
+                                                            </Border>
                                                         </Grid>
                                                     </Grid>
+                                                </Border>
 
-                                                    <!-- Live 2px Neon Step Progress Bar -->
-                                                    <Grid Grid.Column="0" Grid.ColumnSpan="2" Height="2.5" VerticalAlignment="Bottom" Margin="6,0,6,1"
-                                                          IsHitTestVisible="False"
-                                                          Visibility="{Binding ShowExecutionProgress, Converter={StaticResource BoolToVisibility}}">
-                                                        <Border Background="#1F22D3EE" CornerRadius="1" />
-                                                        <Border Background="{DynamicResource NeonProgressBrush}" CornerRadius="1" RenderTransformOrigin="0,0.5">
-                                                            <Border.RenderTransform>
-                                                                <ScaleTransform ScaleX="{Binding ExecutionProgress}" ScaleY="1" />
-                                                            </Border.RenderTransform>
-                                                            <Border.Effect>
-                                                                <DropShadowEffect Color="#22D3EE" BlurRadius="6" ShadowDepth="0" Opacity="0.85" />
-                                                            </Border.Effect>
-                                                        </Border>
-                                                    </Grid>
+                                                <!-- Between-Step Hover '+' Quick Insertion Rail -->
+                                                <Grid x:Name="InsertAfterRail" Height="10" Margin="20,-2,12,-3" Opacity="0" Background="Transparent">
+                                                    <Border Height="1.5" VerticalAlignment="Center" CornerRadius="1" Background="{DynamicResource AccentBrush}" Opacity="0.55" />
+                                                    <Button Width="18" Height="14" Padding="0" HorizontalAlignment="Center" VerticalAlignment="Center"
+                                                            Focusable="False" Style="{StaticResource GhostButton}"
+                                                            Background="{DynamicResource SurfaceBrush}"
+                                                            BorderBrush="{DynamicResource AccentBrush}" BorderThickness="1"
+                                                            Command="{Binding DataContext.InsertQuickAfterRowCommand, RelativeSource={RelativeSource AncestorType=ListBox}}"
+                                                            CommandParameter="{Binding}"
+                                                            ToolTip="Insert a step right below this one">
+                                                        <TextBlock Text="+" FontSize="11" FontWeight="Bold" Foreground="{DynamicResource AccentHoverBrush}"
+                                                                   HorizontalAlignment="Center" VerticalAlignment="Center" Margin="0,-2,0,0" />
+                                                    </Button>
                                                 </Grid>
-                                            </Border>
+                                            </StackPanel>
                                         </Grid>
 
                                         <DataTemplate.Triggers>
@@ -1054,6 +1118,11 @@
                                             <DataTrigger Binding="{Binding IsMouseOver, ElementName=Card}" Value="True">
                                                 <Setter TargetName="Card" Property="BorderBrush" Value="{DynamicResource InputBorderBrush}" />
                                                 <Setter TargetName="HoverActions" Property="Visibility" Value="Visible" />
+                                                <Setter TargetName="DragGrip" Property="Opacity" Value="0.85" />
+                                                <Setter TargetName="InsertAfterRail" Property="Opacity" Value="1" />
+                                            </DataTrigger>
+                                            <DataTrigger Binding="{Binding IsMouseOver, ElementName=InsertAfterRail}" Value="True">
+                                                <Setter TargetName="InsertAfterRail" Property="Opacity" Value="1" />
                                             </DataTrigger>
                                             <DataTrigger Binding="{Binding IsSelected, RelativeSource={RelativeSource AncestorType=ListBoxItem}}" Value="True">
                                                 <Setter TargetName="Card" Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
@@ -1086,9 +1155,11 @@
                                                 <Setter TargetName="IconBadge" Property="CornerRadius" Value="6" />
                                                 <Setter TargetName="IconGlyph" Property="FontSize" Value="11" />
                                                 <Setter TargetName="TitleText" Property="FontSize" Value="12" />
+                                                <Setter TargetName="TimelineText" Property="Visibility" Value="Collapsed" />
                                                 <Setter TargetName="SummaryText" Property="Visibility" Value="Collapsed" />
                                                 <Setter TargetName="CommentText" Property="Visibility" Value="Collapsed" />
                                                 <Setter TargetName="InlineSummary" Property="Visibility" Value="Visible" />
+                                                <Setter TargetName="InsertAfterRail" Property="Visibility" Value="Collapsed" />
                                             </DataTrigger>
                                             <DataTrigger Binding="{Binding IsRunning}" Value="True">
                                                 <Setter TargetName="Card" Property="BorderBrush" Value="{DynamicResource SuccessBrush}" />
@@ -1123,45 +1194,77 @@
                     </DockPanel>
                 </Border>
 
-                <!-- ===== C8: Sticky Inspector Panel ===== -->
-                <Border Grid.Column="4" Style="{StaticResource GlassCard}" Padding="0">
+                <!-- ===== C8: Sticky Inspector Panel v3 ("Precision Parameter Deck") ===== -->
+                <Border Grid.Column="4" Style="{StaticResource GlassCard}" Padding="0" ClipToBounds="True">
                     <DockPanel>
+                        <!-- Category-Tinted Neon Top Accent Strip -->
+                        <Border DockPanel.Dock="Top" Height="3"
+                                Background="{Binding SelectedStep.Kind, Converter={StaticResource CategoryBrush}, ConverterParameter=Accent}"
+                                Visibility="{Binding HasSelection, Converter={StaticResource BoolToVisibility}}" />
+
                         <Border DockPanel.Dock="Top" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,0,1" Padding="14,10">
                             <Grid>
                                 <TextBlock Text="Inspector" Style="{StaticResource SectionTitle}" FontSize="13" VerticalAlignment="Center"
                                            Visibility="{Binding HasSelection, Converter={StaticResource BoolToVisibility}, ConverterParameter=Invert}" />
-                                <Grid Visibility="{Binding HasSelection, Converter={StaticResource BoolToVisibility}}">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="Auto" />
-                                        <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="Auto" />
-                                        <ColumnDefinition Width="Auto" />
-                                    </Grid.ColumnDefinitions>
-                                    <Border Width="32" Height="32" CornerRadius="8"
-                                            Background="{Binding SelectedStep.Kind, Converter={StaticResource CategoryBrush}, ConverterParameter=Badge}">
-                                        <TextBlock Text="{Binding SelectedStep.Glyph}" Style="{StaticResource IconText}" HorizontalAlignment="Center"
-                                                   Foreground="{Binding SelectedStep.Kind, Converter={StaticResource CategoryBrush}, ConverterParameter=Accent}" />
-                                    </Border>
-                                    <StackPanel Grid.Column="1" Margin="10,0,8,0" VerticalAlignment="Center">
-                                        <TextBlock Text="{Binding SelectedStep.Title}" Style="{StaticResource SectionTitle}" FontSize="14" TextTrimming="CharacterEllipsis" />
-                                        <Border Style="{StaticResource Pill}" HorizontalAlignment="Left" Margin="0,3,0,0" Padding="6,0,6,1">
-                                            <TextBlock FontSize="10" FontFamily="{StaticResource MonoFont}" Foreground="{DynamicResource MutedTextBrush}">
-                                                <Run Text="Step #" /><Run Text="{Binding SelectedStep.Number, Mode=OneWay}" />
-                                            </TextBlock>
+                                <StackPanel Visibility="{Binding HasSelection, Converter={StaticResource BoolToVisibility}}">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <Border Width="36" Height="36" CornerRadius="9"
+                                                Background="{Binding SelectedStep.Kind, Converter={StaticResource CategoryBrush}, ConverterParameter=Badge}"
+                                                BorderBrush="{Binding SelectedStep.Kind, Converter={StaticResource CategoryBrush}, ConverterParameter=Accent}"
+                                                BorderThickness="1">
+                                            <TextBlock Text="{Binding SelectedStep.Glyph}" Style="{StaticResource IconText}" FontSize="15" HorizontalAlignment="Center"
+                                                       Foreground="{Binding SelectedStep.Kind, Converter={StaticResource CategoryBrush}, ConverterParameter=Accent}" />
                                         </Border>
-                                    </StackPanel>
-                                    <Button Grid.Column="2" Style="{StaticResource GhostButton}" Command="{Binding RunStepCommand}" Padding="8,4" FontSize="11"
-                                            Margin="0,0,8,0" VerticalAlignment="Center"
-                                            ToolTip="Run only this step right now (Ctrl+F5)">
-                                        <StackPanel Orientation="Horizontal">
-                                            <ctrl:StudioIcon Kind="Play" Size="11" Foreground="{DynamicResource SuccessBrush}" />
-                                            <TextBlock Text="Run" Margin="5,0,0,0" />
+                                        <StackPanel Grid.Column="1" Margin="10,0,8,0" VerticalAlignment="Center">
+                                            <TextBlock Text="{Binding SelectedStep.Title}" Style="{StaticResource SectionTitle}" FontSize="14.5" TextTrimming="CharacterEllipsis" />
+                                            <StackPanel Orientation="Horizontal" Margin="0,3,0,0">
+                                                <Border Style="{StaticResource Pill}" Padding="6,0,6,1">
+                                                    <TextBlock FontSize="10" FontFamily="{StaticResource MonoFont}" Foreground="{DynamicResource MutedTextBrush}">
+                                                        <Run Text="Step #" /><Run Text="{Binding SelectedStep.Number, Mode=OneWay}" />
+                                                    </TextBlock>
+                                                </Border>
+                                                <Border Style="{StaticResource Pill}" Margin="5,0,0,0" Padding="6,0,6,1"
+                                                        Visibility="{Binding SelectedStep.HasTimelineOffset, Converter={StaticResource BoolToVisibility}}">
+                                                    <TextBlock Text="{Binding SelectedStep.TimelineOffsetText}" FontSize="10"
+                                                               FontFamily="{StaticResource MonoFont}" Foreground="{DynamicResource AccentHoverBrush}" />
+                                                </Border>
+                                            </StackPanel>
                                         </StackPanel>
-                                    </Button>
-                                    <CheckBox Grid.Column="3" Style="{StaticResource ToggleSwitchCheckBoxStyle}" Content="On" VerticalAlignment="Center"
-                                              IsChecked="{Binding SelectedStep.Enabled}"
-                                              ToolTip="Turned-off steps are skipped during playback" />
-                                </Grid>
+                                        <CheckBox Grid.Column="2" Style="{StaticResource ToggleSwitchCheckBoxStyle}" Content="On" VerticalAlignment="Center"
+                                                  IsChecked="{Binding SelectedStep.Enabled}"
+                                                  ToolTip="Turned-off steps are skipped during playback" />
+                                    </Grid>
+
+                                    <!-- Quick-Action Deck (Run Step · Play From Here · Duplicate · Copy) -->
+                                    <UniformGrid Columns="3" Margin="0,9,0,0">
+                                        <Button Style="{StaticResource GhostButton}" Command="{Binding RunStepCommand}" Padding="6,4" FontSize="11" Margin="0,0,4,0"
+                                                ToolTip="Run only this step right now (Ctrl+F5)">
+                                            <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+                                                <ctrl:StudioIcon Kind="Play" Size="10" Foreground="{DynamicResource SuccessBrush}" />
+                                                <TextBlock Text="Run Step" Margin="5,0,0,0" />
+                                            </StackPanel>
+                                        </Button>
+                                        <Button Style="{StaticResource GhostButton}" Command="{Binding PlayFromHereCommand}" Padding="6,4" FontSize="11" Margin="2,0,2,0"
+                                                ToolTip="Play workflow starting from this step (Shift+F5)">
+                                            <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+                                                <ctrl:StudioIcon Kind="Play" Size="10" Foreground="{DynamicResource AccentHoverBrush}" />
+                                                <TextBlock Text="From Here" Margin="5,0,0,0" />
+                                            </StackPanel>
+                                        </Button>
+                                        <Button Style="{StaticResource GhostButton}" Command="{Binding DuplicateStepCommand}" Padding="6,4" FontSize="11" Margin="4,0,0,0"
+                                                ToolTip="Duplicate this step (Ctrl+D)">
+                                            <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+                                                <TextBlock Text="&#xE8C8;" Style="{StaticResource IconText}" FontSize="10.5" />
+                                                <TextBlock Text="Duplicate" Margin="5,0,0,0" />
+                                            </StackPanel>
+                                        </Button>
+                                    </UniformGrid>
+                                </StackPanel>
                             </Grid>
                         </Border>
 

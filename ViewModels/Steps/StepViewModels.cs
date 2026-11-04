@@ -445,6 +445,89 @@ public abstract class StepViewModel : ObservableObject
 
     public bool HasSmartChip => !string.IsNullOrEmpty(SmartChipText);
 
+    // ---------------- AAA Studio v3: Structured Parameter Pills & Cumulative Timeline Gutter ----------------
+
+    private string? _timelineOffsetText;
+
+    /// <summary>Cumulative virtual timeline offset shown in the left gutter (e.g. "+0.42s"), computed by EditorViewModel.</summary>
+    public string? TimelineOffsetText
+    {
+        get => _timelineOffsetText;
+        internal set
+        {
+            if (SetProperty(ref _timelineOffsetText, value))
+                OnPropertyChanged(nameof(HasTimelineOffset));
+        }
+    }
+
+    public bool HasTimelineOffset => !string.IsNullOrEmpty(_timelineOffsetText);
+
+    /// <summary>3D hardware keycap badge text for KeyPress steps (e.g. "Ctrl + Shift + S" or "W").</summary>
+    public string? KeycapBadge => Model switch
+    {
+        KeyPressStep k => FormatKeycap(k),
+        _ => null,
+    };
+
+    public bool HasKeycapBadge => !string.IsNullOrEmpty(KeycapBadge);
+
+    /// <summary>Primary structured parameter pill (coordinates, duration, match confidence, event count).</summary>
+    public string? PrimaryBadge => Model switch
+    {
+        DelayStep d => FormatMsShort(d.DurationMs),
+        MouseClickStep c => c.UseLastFoundText
+            ? $"🎯 +({c.OffsetX}, {c.OffsetY})"
+            : c.UseCurrentPosition
+                ? "📍 Cursor"
+                : $"({c.X}, {c.Y})",
+        MouseMoveStep m => m.UseRelativeDelta
+            ? $"Δ({m.DeltaX:+#;-#;0}, {m.DeltaY:+#;-#;0})"
+            : m.TargetMode == ClickTargetMode.Coordinates
+                ? $"({m.X}, {m.Y})"
+                : $"Δ({m.OffsetX:+#;-#;0}, {m.OffsetY:+#;-#;0})",
+        MouseScrollStep s => $"{(s.Horizontal ? "↔ " : "↕ ")}{s.Delta:+#;-#;0}",
+        InputSequenceStep q => $"{q.Events.Count:N0} ev · {(q.Events.Count == 0 ? 0.0 : Math.Max(0L, q.Events[^1].TimeUs) / 1_000_000.0):0.##}s",
+        FindImageStep img => $"{img.MinSimilarityPercent}% match",
+        FindColorStep col => col.Color,
+        RepeatStep { Mode: RepeatMode.Times } r => $"×{r.Count}",
+        _ => null,
+    };
+
+    public bool HasPrimaryBadge => !string.IsNullOrEmpty(PrimaryBadge);
+
+    /// <summary>Secondary structured parameter pill (hold duration, hardware scan code, motion curve).</summary>
+    public string? SecondaryBadge => Model switch
+    {
+        MouseClickStep { Action: MouseClickAction.Drag } c => $"Drag {c.DragDurationMs} ms",
+        MouseClickStep { HoldMs: > 0 } c => $"{c.HoldMs} ms hold",
+        MouseMoveStep { UseRelativeDelta: false, MoveStyle: MouseMoveStyle.SmoothGlide or MouseMoveStyle.HumanCurve } m =>
+            $"{(m.MoveStyle == MouseMoveStyle.HumanCurve ? "Curve" : "Glide")} {m.MoveDurationMs} ms",
+        KeyPressStep { Action: KeyAction.Press, HoldMs: > 0 } k => $"{k.HoldMs} ms hold",
+        KeyPressStep { ScanCode: > 0 } k => $"SC 0x{k.ScanCode:X2}{(k.Extended ? "·E0" : "")}",
+        TypeTextStep t when !string.IsNullOrEmpty(t.Text) => $"{t.Text.Length} chars",
+        _ => null,
+    };
+
+    public bool HasSecondaryBadge => !string.IsNullOrEmpty(SecondaryBadge);
+
+    private static string FormatMsShort(int ms) =>
+        ms >= 1000 ? $"{ms / 1000.0:0.##} s" : $"{ms} ms";
+
+    private static string FormatKeycap(KeyPressStep k)
+    {
+        var keyName = VirtualKeys.GetName(k.VirtualKey);
+        if (k.Action != KeyAction.Press || k.Modifiers == KeyModifiers.None)
+            return keyName;
+
+        var parts = new List<string>(5);
+        if (k.Modifiers.HasFlag(KeyModifiers.Control)) parts.Add("Ctrl");
+        if (k.Modifiers.HasFlag(KeyModifiers.Shift)) parts.Add("Shift");
+        if (k.Modifiers.HasFlag(KeyModifiers.Alt)) parts.Add("Alt");
+        if (k.Modifiers.HasFlag(KeyModifiers.Windows)) parts.Add("Win");
+        parts.Add(keyName);
+        return string.Join(" + ", parts);
+    }
+
     private static string? FormatPolicyOrChip(FailurePolicyViewModel policy, string? fallback) => policy.Action switch
     {
         StepFailureAction.Retry => $"🔁 Retry ×{policy.RetryCount}",
@@ -487,6 +570,12 @@ public abstract class StepViewModel : ObservableObject
         OnPropertyChanged(nameof(PlainSummary));
         OnPropertyChanged(nameof(SmartChipText));
         OnPropertyChanged(nameof(HasSmartChip));
+        OnPropertyChanged(nameof(KeycapBadge));
+        OnPropertyChanged(nameof(HasKeycapBadge));
+        OnPropertyChanged(nameof(PrimaryBadge));
+        OnPropertyChanged(nameof(HasPrimaryBadge));
+        OnPropertyChanged(nameof(SecondaryBadge));
+        OnPropertyChanged(nameof(HasSecondaryBadge));
         Modified?.Invoke(this, EventArgs.Empty);
     }
 

@@ -81,6 +81,8 @@ public sealed class ScreenProbes
     private readonly IScreenLayout? _layout;
     private readonly HotSpotMemory? _hotSpots;
     private readonly VariableStore? _variables;
+    private readonly FrameBus _frameBus = new();
+    private readonly TargetTracker _tracker = new();
 
     /// <summary>
     /// Hot-Spot fast path: how far (px, every side) around the spot where an image was found last time the quick
@@ -115,6 +117,12 @@ public sealed class ScreenProbes
 
     /// <summary>The Hot-Spot memory these probes use (null when the fast path is off).</summary>
     public HotSpotMemory? HotSpots => _hotSpots;
+
+    /// <summary>Vision 2.0 shared Frame Bus ring buffer.</summary>
+    public FrameBus FrameBus => _frameBus;
+
+    /// <summary>Vision 2.0 2D Kalman/Alpha-Beta target tracker.</summary>
+    public TargetTracker Tracker => _tracker;
 
     /// <summary>Looks for a Find image step's picture once (a shortcut for <c>Prepare(step).LookAsync(...)</c>).</summary>
     public Task<ScreenProbe> ProbeImageAsync(FindImageStep step, DetectionTimer? timer = null, CancellationToken cancellationToken = default) =>
@@ -164,21 +172,91 @@ public sealed class ScreenProbes
         return new PreparedSearch($"\"{whatText}\"", isTimed: false, async (_, t) =>
         {
             var started = Stopwatch.GetTimestamp();
+            var nowMs = _clock.Elapsed.TotalMilliseconds;
             var (region, problem) = ResolveArea(step, ocr.GetVirtualScreen());
             if (problem is not null) return ScreenProbe.Miss(problem);
+
+            // Vision 2.0 "Find-Once-Then-Track" fast path: if OCR already found this word and cropped its visual template,
+            // follow the moving word at image-matcher speed (~1–3 ms) before falling back to a full OCR read.
+            if (step.TrackTextAsImage && _capture is not null
+                && _tracker.TryGet(step.Id, out var prevTrack)
+                && prevTrack.LearnedTemplate is { } wordTemplate
+                && prevTrack.MissedFrames <= 2)
+            {
+                var roi = _tracker.PredictSearchArea(step.Id, nowMs, region, baseMarginPx: 96);
+                var searchBox = roi.Width >= wordTemplate.Width && roi.Height >= wordTemplate.Height ? roi : region;
+                if (searchBox.Width >= wordTemplate.Width && searchBox.Height >= wordTemplate.Height)
+                {
+                    var frame = await _capture.CaptureAsync(searchBox, t).ConfigureAwait(false);
+                    var tplOpts = new TemplateMatchOptions
+                    {
+                        MinScore = Math.Max(0.78, step.MinSimilarityPercent / 100.0 - 0.05),
+                        AdaptToLighting = true,
+                        MaxResults = 1,
+                    };
+                    if (TemplateMatcher.Find(frame.Image, wordTemplate, tplOpts, t).Best is { } trackedHit)
+                    {
+                        var screenBounds = frame.ToScreen(trackedHit.Bounds);
+                        var updated = _tracker.RecordHit(step.Id, screenBounds, nowMs, wordTemplate);
+                        var (tx, ty) = step.EffectivePredictiveLeadMs > 0
+                            ? updated.PredictClickPoint(screenBounds.CenterX, screenBounds.CenterY, step.EffectivePredictiveLeadMs, region)
+                            : (screenBounds.CenterX, screenBounds.CenterY);
+                        var ms = MsSince(started);
+                        return new ScreenProbe(true, tx, ty,
+                            $"Found \"{whatText}\" at ({tx}, {ty}), {trackedHit.Score:P0} match (⚡ tracked as image, {ms:0.0} ms).",
+                            string.Empty, region, screenBounds, trackedHit.Score, ms, FromHotSpot: true)
+                        {
+                            BestConfidence = trackedHit.Score,
+                            BestMatch = screenBounds,
+                            RequiredConfidence = step.MinSimilarityPercent / 100.0,
+                        };
+                    }
+                }
+            }
+
             var read = await ocr.ReadAsync(region, t).ConfigureAwait(false);
             var query = _variables is not null ? _variables.Interpolate(step.Text) : step.Text;
             var match = ProbeText(read, step, query);
-            return match is null
-                ? ScreenProbe.Miss(DescribeLastRead(read.FullText), region)
-                : new ScreenProbe(true, match.Bounds.CenterX, match.Bounds.CenterY,
-                    $"Found \"{match.Text}\" at ({match.Bounds.CenterX}, {match.Bounds.CenterY}), {match.Similarity:P0} match.", string.Empty, region, match.Bounds,
-                    match.Similarity, MsSince(started))
+            if (match is null)
+            {
+                _tracker.RecordMiss(step.Id);
+                return ScreenProbe.Miss(DescribeLastRead(read.FullText), region);
+            }
+
+            BgraImage? learnedWordTemplate = null;
+            if (step.TrackTextAsImage && _capture is not null
+                && match.Bounds.Width >= TemplateMatcher.MinInnerSize
+                && match.Bounds.Height >= TemplateMatcher.MinInnerSize)
+            {
+                try
                 {
-                    BestConfidence = match.Similarity,
-                    BestMatch = match.Bounds,
-                    RequiredConfidence = step.MinSimilarityPercent / 100.0,
-                };
+                    var wordCap = await _capture.CaptureAsync(match.Bounds, t).ConfigureAwait(false);
+                    if (wordCap.Image.Width >= TemplateMatcher.MinInnerSize
+                        && wordCap.Image.Height >= TemplateMatcher.MinInnerSize
+                        && !TemplateMatcher.IsFlat(wordCap.Image))
+                    {
+                        learnedWordTemplate = wordCap.Image;
+                    }
+                }
+                catch
+                {
+                    // Non-fatal if the word sits partly off-screen.
+                }
+            }
+
+            var trackState = _tracker.RecordHit(step.Id, match.Bounds, nowMs, learnedWordTemplate);
+            var (clickX, clickY) = step.EffectivePredictiveLeadMs > 0
+                ? trackState.PredictClickPoint(match.Bounds.CenterX, match.Bounds.CenterY, step.EffectivePredictiveLeadMs, region)
+                : (match.Bounds.CenterX, match.Bounds.CenterY);
+
+            return new ScreenProbe(true, clickX, clickY,
+                $"Found \"{match.Text}\" at ({clickX}, {clickY}), {match.Similarity:P0} match.", string.Empty, region, match.Bounds,
+                match.Similarity, MsSince(started))
+            {
+                BestConfidence = match.Similarity,
+                BestMatch = match.Bounds,
+                RequiredConfidence = step.MinSimilarityPercent / 100.0,
+            };
         });
     }
 
@@ -194,7 +272,14 @@ public sealed class ScreenProbes
         ArgumentNullException.ThrowIfNull(read);
         ArgumentNullException.ThrowIfNull(step);
         var mode = step.MatchWholeWord ? TextMatchMode.WholeWords : TextMatchMode.Contains;
-        return OcrTextMatcher.Find(read, queryOverride ?? step.Text, mode, step.MatchCase, step.MinSimilarityPercent / 100.0, step.NormalizeLookAlikes)
+        return OcrTextMatcher.Find(
+                read,
+                queryOverride ?? step.Text,
+                mode,
+                step.MatchCase,
+                step.MinSimilarityPercent / 100.0,
+                step.NormalizeLookAlikes,
+                step.UseRegexPattern)
             .FirstOrDefault();
     }
 
@@ -215,6 +300,7 @@ public sealed class ScreenProbes
         return new PreparedSearch("The image", isTimed: true, async (timer, t) =>
         {
             var started = Stopwatch.GetTimestamp();
+            var nowMs = _clock.Elapsed.TotalMilliseconds;
             var (region, problem) = ResolveArea(step, capture.GetVirtualScreen());
             if (problem is not null) return ScreenProbe.Miss(problem);
 
@@ -222,29 +308,34 @@ public sealed class ScreenProbes
             var searchTime = TimeSpan.Zero;
             ScreenFrame? frame = null;
 
-            // 1. Hot-Spot fast path: the picture was found before; is it still there (or a few px away)?
-            if (hotSpots is not null && hotSpots.TryGet(hotKey, out var last))
+            // 1. Hot-Spot & Kalman Velocity-Predicted ROI fast path:
+            ScreenRect? candidateSpot = null;
+            if ((step.TrackTarget || step.PredictiveClick) && _tracker.PredictSearchArea(step.Id, nowMs, region) is { IsEmpty: false } trackedRoi)
+                candidateSpot = trackedRoi;
+            else if (hotSpots is not null && hotSpots.TryGet(hotKey, out var lastSpot))
+                candidateSpot = HotSpotArea(lastSpot, region);
+
+            if (candidateSpot is { } spotArea)
             {
+                var last = hotSpots is not null && hotSpots.TryGet(hotKey, out var hLast) ? hLast : spotArea;
                 var hotTemplate = options.AllowMultiScale
                     && (last.Width != template.Width || last.Height != template.Height)
                     && last.Width >= TemplateMatcher.MinInnerSize
                     && last.Height >= TemplateMatcher.MinInnerSize
+                    && last.Width <= spotArea.Width && last.Height <= spotArea.Height
                     ? template.Resize(last.Width, last.Height)
                     : template;
-                var hotSpotOptions = hotOptions with { AllowMultiScale = false };
-                var spotArea = HotSpotArea(last, region);
+                var hotSpotOptions = (step.TrackTarget ? options : hotOptions) with { AllowMultiScale = false };
                 if (spotArea.Width >= hotTemplate.Width && spotArea.Height >= hotTemplate.Height)
                 {
                     ScreenFrame? spot;
                     var c0 = _clock.Elapsed;
                     if (capture.PrefersSmallCaptures)
                     {
-                        // Real screen capture: copy only the ~100×100 px around the last spot.
                         spot = await capture.CaptureAsync(spotArea, t).ConfigureAwait(false);
                     }
                     else
                     {
-                        // One capture per look (fakes): take the whole area once and check the spot inside it.
                         frame = await capture.CaptureAsync(region, t).ConfigureAwait(false);
                         spot = frame.CropFromScreen(spotArea);
                     }
@@ -254,19 +345,19 @@ public sealed class ScreenProbes
                     var hit = spot is null ? null : FindNearLastSpot(spot, last, hotTemplate, hotSpotOptions, t);
                     searchTime += _clock.Elapsed - s0;
 
-                    // Coordinate guard: FindNearLastSpot already returns GLOBAL virtual-screen pixels (the spot frame's
-                    // Bounds are where the capture was taken, translated exactly once). A hit that isn't inside the
-                    // area we asked for can only be a translation mistake (e.g. a capture that reports (0, 0) as its
-                    // origin): never click there – fall back to the normal full search instead.
                     if (hit is not null && !Contains(spotArea, hit.Bounds)) hit = null;
 
                     if (hit is not null)
                     {
                         timer?.Add(captureTime, searchTime);
-                        hotSpots.Remember(hotKey, hit.Bounds);
+                        hotSpots?.Remember(hotKey, hit.Bounds);
+                        var track = _tracker.RecordHit(step.Id, hit.Bounds, nowMs);
+                        var (hx, hy) = step.EffectivePredictiveLeadMs > 0
+                            ? track.PredictClickPoint(hit.Bounds.CenterX, hit.Bounds.CenterY, step.EffectivePredictiveLeadMs, region)
+                            : (hit.Bounds.CenterX, hit.Bounds.CenterY);
                         var ms = MsSince(started);
-                        return new ScreenProbe(true, hit.Bounds.CenterX, hit.Bounds.CenterY,
-                            $"Found the image at ({hit.Bounds.CenterX}, {hit.Bounds.CenterY}), {hit.Score:P0} match (⚡ at its last spot, {ms:0.0} ms).",
+                        return new ScreenProbe(true, hx, hy,
+                            $"Found the image at ({hx}, {hy}), {hit.Score:P0} match (⚡ at its last spot, {ms:0.0} ms).",
                             string.Empty, region, hit.Bounds, hit.Score, ms, FromHotSpot: true)
                         {
                             BestConfidence = hit.Score,
@@ -285,8 +376,38 @@ public sealed class ScreenProbes
                 captureTime += _clock.Elapsed - c1;
             }
 
+            _frameBus.Publish(frame, nowMs);
+
             var s1 = _clock.Elapsed;
-            var result = TemplateMatcher.Find(frame.Image, template, options, t);
+            TemplateMatchResult? result = null;
+
+            // Motion-aware priority: if OnlyWhereMoved is enabled and recent frames show motion inside a sub-rectangle,
+            // search the moving sub-rectangle first before scanning static background.
+            if (step.OnlyWhereMoved)
+            {
+                var motion = _frameBus.AnalyzeRecentMotion(region);
+                if (motion.HasMotion)
+                {
+                    var motionScreenRect = Grow(frame.ToScreen(motion.MotionBounds), Math.Max(template.Width, template.Height)).Intersect(region);
+                    if (frame.CropFromScreen(motionScreenRect) is { } motionCrop
+                        && motionCrop.Image.Width >= template.Width && motionCrop.Image.Height >= template.Height)
+                    {
+                        var motionRes = TemplateMatcher.Find(motionCrop.Image, template, options, t);
+                        if (motionRes.Best is { } mBest)
+                        {
+                            var translatedMatches = motionRes.Matches.Select(m => m with { Bounds = motionCrop.ToScreen(m.Bounds) }).ToList();
+                            // Convert back to frame-local coordinates so downstream frame.ToScreen works uniformly.
+                            var localMatches = translatedMatches.Select(m => m with
+                            {
+                                Bounds = new ScreenRect(m.Bounds.X - frame.Bounds.X, m.Bounds.Y - frame.Bounds.Y, m.Bounds.Width, m.Bounds.Height),
+                            }).ToList();
+                            result = motionRes with { Matches = localMatches, BestBounds = localMatches[0].Bounds };
+                        }
+                    }
+                }
+            }
+
+            result ??= TemplateMatcher.Find(frame.Image, template, options, t);
             searchTime += _clock.Elapsed - s1;
             timer?.Add(captureTime, searchTime);
 
@@ -301,12 +422,15 @@ public sealed class ScreenProbes
 
             if (result.Best is not { } best)
             {
+                _tracker.RecordMiss(step.Id);
                 var miss = $" The best similarity was {result.BestScore:P0} (needs {step.MinSimilarityPercent}%).";
                 if (result.RejectedForColor > 0)
                     miss += $" {result.RejectedForColor} spot(s) had the right shape but a different color (turn on \"Ignore color\" if the color changes).";
                 if (result.BestScore >= 0.5 && !step.MatchForeground)
                     miss += " If you can see the game through the button (or the background around it changes), turn on \"Ignore background\""
                             + (step.IgnoreEdgesPercent == 0 ? $" or \"Ignore the edges\" ({FindImageStep.RecommendedIgnoreEdgesPercent} %)." : ".");
+                if (result.BestScore >= 0.45 && step.MinVisiblePercent == 0)
+                    miss += " If particles or effects cover part of the target, choose the \"Busy Scene / Particles\" scenario or lower \"Required visible (%)\" to 65 %.";
                 // Near miss: the best spot anywhere in the area, even though it wasn't good enough.
                 return ScreenProbe.Miss(miss, region) with
                 {
@@ -319,10 +443,16 @@ public sealed class ScreenProbes
 
             var bounds = frame.ToScreen(best.Bounds);
             hotSpots?.Remember(hotKey, bounds);
+            var fullTrack = _tracker.RecordHit(step.Id, bounds, nowMs);
+            var (cx, cy) = step.EffectivePredictiveLeadMs > 0
+                ? fullTrack.PredictClickPoint(bounds.CenterX, bounds.CenterY, step.EffectivePredictiveLeadMs, region)
+                : (bounds.CenterX, bounds.CenterY);
             var scaleNote = Math.Abs(best.MatchedScale - 1.0) >= 0.02 ? $" at {best.MatchedScale * 100:0}% scale" : "";
+            var visNote = best.VisibleFraction < 0.99 ? $" ({best.VisibleFraction:P0} visible)" : "";
+            var leadNote = (cx != bounds.CenterX || cy != bounds.CenterY) ? $" (⚡ lead click)" : "";
             var more = result.Matches.Count > 1 ? $" ({result.Matches.Count} matches; the best one is used)" : "";
-            return new ScreenProbe(true, bounds.CenterX, bounds.CenterY,
-                $"Found the image at ({bounds.CenterX}, {bounds.CenterY}), {best.Score:P0} match{scaleNote}{more}.", string.Empty, region, bounds, best.Score,
+            return new ScreenProbe(true, cx, cy,
+                $"Found the image at ({cx}, {cy}), {best.Score:P0} match{scaleNote}{visNote}{leadNote}{more}.", string.Empty, region, bounds, best.Score,
                 MsSince(started))
             {
                 BestConfidence = best.Score,
@@ -387,6 +517,17 @@ public sealed class ScreenProbes
     public static TemplateMatchOptions ImageMatchOptions(FindImageStep step)
     {
         ArgumentNullException.ThrowIfNull(step);
+        List<BgraImage>? extras = null;
+        if (step.AdditionalTemplates is { Count: > 0 } variants)
+        {
+            extras = new List<BgraImage>(variants.Count);
+            foreach (var v in variants)
+            {
+                if (v is not null && TemplateCache.TryGetOrDecode(v.Data, v.Width, v.Height, out var img, out _) && img is not null)
+                    extras.Add(SearchTemplate(img));
+            }
+        }
+
         return new TemplateMatchOptions
         {
             MinScore = step.MinSimilarityPercent / 100.0,
@@ -395,6 +536,10 @@ public sealed class ScreenProbes
             MatchForeground = step.MatchForeground,
             AdaptToLighting = step.AdaptToLighting,
             AllowMultiScale = step.AllowMultiScale,
+            Detector = step.Detector,
+            MinVisibleFraction = step.MinVisiblePercent > 0 ? Math.Clamp(step.MinVisiblePercent / 100.0, 0.35, 1.0) : 0,
+            RotationRangeDeg = step.RotationRangeDeg,
+            AdditionalTemplates = extras,
             MaxResults = 10,
         };
     }
@@ -417,20 +562,50 @@ public sealed class ScreenProbes
         return new PreparedSearch(what, isTimed: true, async (timer, t) =>
         {
             var started = Stopwatch.GetTimestamp();
+            var nowMs = _clock.Elapsed.TotalMilliseconds;
             var (region, problem) = ResolveArea(step, capture.GetVirtualScreen());
             if (problem is not null) return ScreenProbe.Miss(problem);
             var t0 = _clock.Elapsed;
             var frame = await capture.CaptureAsync(region, t).ConfigureAwait(false);
             var t1 = _clock.Elapsed;
-            // The biggest colour OBJECT: nearby matching pixels are grouped (8×8 px cells), so a shaded ball is one object and
+
+            (int X, int Y)? refPoint = null;
+            if (step.SelectRule == ColorSelectRule.NearestToLastSpot && _tracker.TryGet(step.Id, out var prevTrack))
+            {
+                var pred = prevTrack.PredictBounds(nowMs);
+                refPoint = (pred.CenterX - frame.Bounds.X, pred.CenterY - frame.Bounds.Y);
+            }
+            else if (step.SelectRule == ColorSelectRule.NearestToCenter)
+            {
+                refPoint = (frame.Image.Width / 2, frame.Image.Height / 2);
+            }
+
+            var colorOpts = new ColorSearchOptions
+            {
+                MinPixels = step.MinPixels,
+                MaxPixels = step.MaxPixels,
+                MaxResults = 20,
+                MatchShades = step.MatchShades,
+                ColorSpace = step.ColorSpace,
+                SelectRule = step.SelectRule,
+                MinCircularityPercent = step.MinCircularityPercent,
+                MinFillPercent = step.MinFillPercent,
+                ReferencePoint = refPoint,
+            };
+
+            // The selected colour OBJECT: nearby matching pixels are grouped (8×8 px cells), so a shaded ball is one object and
             // the click goes to its centre of mass, never to a stray pixel or the top edge.
-            var result = ColorFinder.FindObjects(frame.Image, color, secondaryColor, step.Tolerance, step.MinPixels, maxResults: 20, t, step.MatchShades);
+            var result = ColorFinder.FindObjects(frame.Image, color, secondaryColor, step.Tolerance, colorOpts, t);
             timer?.Add(t1 - t0, _clock.Elapsed - t1);
 
             if (result.Largest is not { } blob)
             {
+                _tracker.RecordMiss(step.Id);
+                var filterReason = (step.MaxPixels > 0 || step.MinCircularityPercent > 0 || step.MinFillPercent > 0)
+                    ? $"no patch had at least {step.MinPixels} pixels and matched the shape/size filter"
+                    : $"no patch had at least {step.MinPixels} pixels";
                 var missProbe = ScreenProbe.Miss(result.MatchingPixels > 0
-                    ? $" {result.MatchingPixels:N0} pixel(s) of that color were found, but no patch had at least {step.MinPixels} pixels."
+                    ? $" {result.MatchingPixels:N0} pixel(s) of that color were found, but {filterReason}."
                     : " No pixels of that color were found in the search area.", region) with { ElapsedMs = MsSince(started), RequiredConfidence = 1.0 };
 
                 // Near miss: the biggest patch that was too small ("4 px of the 10 needed" = 40 %).
@@ -448,10 +623,14 @@ public sealed class ScreenProbes
                 return missProbe;
             }
 
-            var x = frame.Bounds.X + (int)Math.Round(blob.CenterX);
-            var y = frame.Bounds.Y + (int)Math.Round(blob.CenterY);
-            var more = result.Blobs.Count > 1 ? $", {result.Blobs.Count} objects; the biggest is used" : "";
+            var rawX = frame.Bounds.X + (int)Math.Round(blob.CenterX);
+            var rawY = frame.Bounds.Y + (int)Math.Round(blob.CenterY);
             var patch = new ScreenRect(frame.Bounds.X + blob.Bounds.X, frame.Bounds.Y + blob.Bounds.Y, blob.Bounds.Width, blob.Bounds.Height);
+            var track = _tracker.RecordHit(step.Id, patch, nowMs);
+            var (x, y) = step.EffectivePredictiveLeadMs > 0
+                ? track.PredictClickPoint(rawX, rawY, step.EffectivePredictiveLeadMs, region)
+                : (rawX, rawY);
+            var more = result.Blobs.Count > 1 ? $", {result.Blobs.Count} objects; the best is used" : "";
             return new ScreenProbe(true, x, y, $"Found {what.ToLowerInvariant()} at ({x}, {y}): {blob.PixelCount:N0} pixels{more}.", string.Empty, region, patch,
                 1.0, MsSince(started))
             {

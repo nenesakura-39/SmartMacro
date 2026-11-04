@@ -77,7 +77,7 @@ public sealed partial class PlaybackEngine
 
         bool IsDown() => step.InputKind == FeedbackInputKind.MouseButton
             ? held.Buttons.Contains(step.MouseButton)
-            : held.Keys.Contains(key);
+            : held.ContainsKey(step.VirtualKey);
 
         void SetInput(bool down)
         {
@@ -90,8 +90,8 @@ public sealed partial class PlaybackEngine
             else
             {
                 _input.Key(step.VirtualKey, down);
-                if (down) held.Keys.Add(key);
-                else held.Keys.Remove(key);
+                if (down) held.PressKey(key);
+                else held.ReleaseKey(key);
             }
         }
 
@@ -260,7 +260,7 @@ public sealed partial class PlaybackEngine
 
         bool IsDown() => step.InputKind == FeedbackInputKind.MouseButton
             ? held.Buttons.Contains(step.MouseButton)
-            : held.Keys.Contains(key);
+            : held.ContainsKey(step.VirtualKey);
 
         // All input goes through here, so the engine always knows what is held (Stop / pause / errors release it).
         void SetInput(bool down)
@@ -274,8 +274,8 @@ public sealed partial class PlaybackEngine
             else
             {
                 _input.Key(step.VirtualKey, down);
-                if (down) held.Keys.Add(key);
-                else held.Keys.Remove(key);
+                if (down) held.PressKey(key);
+                else held.ReleaseKey(key);
             }
         }
 

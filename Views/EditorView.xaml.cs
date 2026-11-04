@@ -114,9 +114,51 @@ public partial class EditorView : UserControl
         StepList.ScrollIntoView(step);
     }
 
-    /// <summary>Ctrl+F anywhere in the editor: jump to the step search box.</summary>
+    /// <summary>Ctrl+F anywhere in the editor: jump to the step search box. Also handles live 3D Keycap binding.</summary>
     private void Editor_PreviewKeyDown(object sender, KeyEventArgs e)
     {
+        if (_editor?.SelectedStep is KeyPressStepViewModel { IsRecordingKey: true } keyRecorder)
+        {
+            if (Keyboard.FocusedElement is System.Windows.Controls.Primitives.TextBoxBase or PasswordBox)
+            {
+                keyRecorder.IsRecordingKey = false;
+            }
+            else
+            {
+                var pressedKey = e.Key == Key.System ? e.SystemKey : e.Key;
+                if (pressedKey is Key.LeftCtrl or Key.RightCtrl or Key.LeftShift or Key.RightShift
+                    or Key.LeftAlt or Key.RightAlt or Key.LWin or Key.RWin
+                    or Key.ImeProcessed or Key.DeadCharProcessed or Key.None)
+                {
+                    e.Handled = true;
+                    return;
+                }
+
+                if (pressedKey == Key.Escape && Keyboard.Modifiers == ModifierKeys.None)
+                {
+                    keyRecorder.IsRecordingKey = false;
+                    e.Handled = true;
+                    return;
+                }
+
+                var vk = KeyInterop.VirtualKeyFromKey(pressedKey);
+                var scanCode = (int)Services.Input.NativeMethods.MapVirtualKey((uint)vk, 0);
+                var isExtended = pressedKey is Key.Up or Key.Down or Key.Left or Key.Right
+                    or Key.Insert or Key.Delete or Key.Home or Key.End or Key.PageUp or Key.PageDown
+                    or Key.RightCtrl or Key.RightAlt or Key.LWin or Key.RWin or Key.Divide or Key.NumLock;
+
+                var mods = Core.Models.KeyModifiers.None;
+                if (Keyboard.Modifiers.HasFlag(ModifierKeys.Control)) mods |= Core.Models.KeyModifiers.Control;
+                if (Keyboard.Modifiers.HasFlag(ModifierKeys.Shift)) mods |= Core.Models.KeyModifiers.Shift;
+                if (Keyboard.Modifiers.HasFlag(ModifierKeys.Alt)) mods |= Core.Models.KeyModifiers.Alt;
+                if (Keyboard.Modifiers.HasFlag(ModifierKeys.Windows)) mods |= Core.Models.KeyModifiers.Windows;
+
+                keyRecorder.ApplyRecordedKey(vk, scanCode, isExtended, mods);
+                e.Handled = true;
+                return;
+            }
+        }
+
         if (Keyboard.FocusedElement is TextBox { DataContext: TriggerItemViewModel }) return;
         if (e.Key == Key.F && Keyboard.Modifiers == ModifierKeys.Control && SearchBox.IsVisible)
         {
@@ -294,6 +336,22 @@ public partial class EditorView : UserControl
         if (_editor is null) return;
         _editor.SelectedStep = step;
         StepList.ScrollIntoView(step);
+    }
+
+    private void StepList_ScrollChanged(object sender, ScrollChangedEventArgs e)
+    {
+        if (StepMinimap is null) return;
+        if (e.ExtentHeight <= 0 || e.ViewportHeight >= e.ExtentHeight)
+        {
+            StepMinimap.ViewportStartRatio = 0.0;
+            StepMinimap.ViewportHeightRatio = 1.0;
+            return;
+        }
+
+        var ratioH = Math.Clamp(e.ViewportHeight / e.ExtentHeight, 0.04, 1.0);
+        var ratioY = Math.Clamp(e.VerticalOffset / e.ExtentHeight, 0.0, 1.0 - ratioH);
+        StepMinimap.ViewportHeightRatio = ratioH;
+        StepMinimap.ViewportStartRatio = ratioY;
     }
 
     /// <summary>

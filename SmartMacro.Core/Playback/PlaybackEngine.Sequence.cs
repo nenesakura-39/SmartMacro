@@ -135,14 +135,14 @@ public sealed partial class PlaybackEngine
                     {
                         var key = new HeldKey(e.VirtualKey, e.ScanCode, e.Extended);
                         SendKey(key, down: true);
-                        held.Keys.Add(key);
+                        held.PressKey(key);
                         break;
                     }
                     case InputEventKind.KeyUp:
                     {
                         var key = new HeldKey(e.VirtualKey, e.ScanCode, e.Extended);
                         SendKey(key, down: false);
-                        held.Keys.Remove(key);
+                        held.ReleaseKey(key);
                         break;
                     }
                 }

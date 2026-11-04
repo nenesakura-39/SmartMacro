@@ -389,12 +389,19 @@ public static partial class MacroValidator
             issues.Add(Error($"Check every must be {minInterval} to {MaxCheckIntervalMs:N0} ms.", nameof(ScreenSearchStep.CheckIntervalMs)));
         if (Math.Abs((long)f.OffsetX) > MaxOffset || Math.Abs((long)f.OffsetY) > MaxOffset)
             issues.Add(Error($"Offsets must be between -{MaxOffset} and {MaxOffset} pixels.", "Offset"));
-        if (!Enum.IsDefined(f.Action) || !Enum.IsDefined(f.WhenNotFound) || !Enum.IsDefined(f.Goal))
+        if (!Enum.IsDefined(f.Action) || !Enum.IsDefined(f.WhenNotFound) || !Enum.IsDefined(f.Goal)
+            || !Enum.IsDefined(f.Scenario) || !Enum.IsDefined(f.Strategy))
             issues.Add(Error("This step has an unknown option value."));
         else if (f.Goal == WaitGoal.Disappear && f.Action != FoundTextAction.None)
             issues.Add(Warning("The \"when found\" action isn't used while waiting for something to disappear.", nameof(ScreenSearchStep.Action)));
         else if (f.Action == FoundTextAction.Hold && (f.ActionHoldMs < 1 || f.ActionHoldMs > MaxHoldMs))
             issues.Add(Error($"The hold time must be 1 to {MaxHoldMs:N0} ms.", nameof(ScreenSearchStep.ActionHoldMs)));
+        if (f.TimeBudgetMs is < 0 or > 60_000)
+            issues.Add(Error("The per-check time budget must be 0 to 60,000 ms.", nameof(ScreenSearchStep.TimeBudgetMs)));
+        if (f.PredictiveLeadMs is < 0 or > 1_000)
+            issues.Add(Error("The predictive click lead time must be 0 to 1,000 ms.", nameof(ScreenSearchStep.PredictiveLeadMs)));
+        if (f.ConfirmFrames is < 0 or > 10)
+            issues.Add(Error("Confirm frames must be 0 (single check) to 10.", nameof(ScreenSearchStep.ConfirmFrames)));
         ValidateFailurePolicy(issues, f.FailurePolicy);
     }
 

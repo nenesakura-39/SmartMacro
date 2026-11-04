@@ -1,7 +1,88 @@
 using System.Text;
+using System.Text.RegularExpressions;
 using SmartMacro.Core.Models;
 
 namespace SmartMacro.Core.Ocr;
+
+/// <summary>
+/// Pre-indexed O(1) word lookup table for an <see cref="OcrReadResult"/>. Turns 1,000-word screen searches into instant
+/// hash lookups for exact and look-alike matches before falling back to length-pruned fuzzy edit distance.
+/// </summary>
+public sealed class OcrWordIndex
+{
+    private readonly Dictionary<string, List<OcrWordBox>> _exactInsensitive = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, List<OcrWordBox>> _foldedInsensitive = new(StringComparer.OrdinalIgnoreCase);
+
+    public OcrWordIndex(OcrReadResult result)
+    {
+        ArgumentNullException.ThrowIfNull(result);
+        foreach (var line in result.Lines)
+        {
+            foreach (var word in line.Words)
+            {
+                if (string.IsNullOrWhiteSpace(word.Text)) continue;
+                var trimmed = OcrTextMatcher.TrimPunctuation(word.Text);
+                if (trimmed.Length == 0) continue;
+
+                if (!_exactInsensitive.TryGetValue(trimmed, out var list))
+                {
+                    list = new List<OcrWordBox>(2);
+                    _exactInsensitive[trimmed] = list;
+                }
+                list.Add(word);
+
+                var folded = OcrTextMatcher.FoldLookAlikes(trimmed);
+                if (!_foldedInsensitive.TryGetValue(folded, out var fList))
+                {
+                    fList = new List<OcrWordBox>(2);
+                    _foldedInsensitive[folded] = fList;
+                }
+                fList.Add(word);
+            }
+        }
+    }
+
+    public int DistinctWordCount => _exactInsensitive.Count;
+
+    /// <summary>Returns all indexed word occurrences matching <paramref name="wordQuery"/> in O(1) time.</summary>
+    public IReadOnlyList<TextMatch> LookupSingleWord(string wordQuery, bool caseSensitive, bool normalizeLookAlikes)
+    {
+        var clean = OcrTextMatcher.TrimPunctuation(wordQuery.Trim());
+        if (clean.Length == 0) return Array.Empty<TextMatch>();
+
+        var matches = new List<TextMatch>();
+        if (_exactInsensitive.TryGetValue(clean, out var exactHits))
+        {
+            foreach (var w in exactHits)
+            {
+                var wClean = OcrTextMatcher.TrimPunctuation(w.Text);
+                if (caseSensitive && !string.Equals(wClean, clean, StringComparison.Ordinal))
+                    continue;
+                matches.Add(new TextMatch(w.Text, w.Bounds, 1.0));
+            }
+        }
+
+        if (matches.Count == 0 && normalizeLookAlikes)
+        {
+            var foldedClean = OcrTextMatcher.FoldLookAlikes(clean);
+            if (_foldedInsensitive.TryGetValue(foldedClean, out var foldedHits))
+            {
+                foreach (var w in foldedHits)
+                {
+                    var wFolded = OcrTextMatcher.FoldLookAlikes(OcrTextMatcher.TrimPunctuation(w.Text));
+                    if (caseSensitive && !string.Equals(wFolded, foldedClean, StringComparison.Ordinal))
+                        continue;
+                    matches.Add(new TextMatch(w.Text, w.Bounds, 1.0));
+                }
+            }
+        }
+
+        return matches
+            .OrderBy(m => m.Bounds.Y)
+            .ThenBy(m => m.Bounds.X)
+            .ToList();
+    }
+}
 
 /// <summary>
 /// Finds a piece of text in OCR results. Windows OCR doesn't give a confidence value, so instead
@@ -12,21 +93,42 @@ namespace SmartMacro.Core.Ocr;
 /// </summary>
 public static class OcrTextMatcher
 {
+    private static readonly TimeSpan RegexTimeout = TimeSpan.FromMilliseconds(150);
+
     /// <summary>Returns matches, best first (then top-to-bottom, left-to-right).</summary>
     /// <param name="normalizeLookAlikes">
     /// When the plain comparison isn't good enough, compare again with look-alike characters folded together
     /// (0 → O, 1 / l / | → I). The better of the two scores is used.
     /// </param>
+    /// <param name="useRegexPattern">
+    /// When true, interprets <paramref name="query"/> as a regular expression or pipe-separated pattern (e.g. <c>nice|great</c>
+    /// or <c>\d+\s*gold</c>).
+    /// </param>
     public static IReadOnlyList<TextMatch> Find(OcrReadResult result, string query, TextMatchMode mode, bool caseSensitive, double minSimilarity,
-        bool normalizeLookAlikes = false)
+        bool normalizeLookAlikes = false, bool useRegexPattern = false)
     {
         ArgumentNullException.ThrowIfNull(result);
+        if (useRegexPattern)
+            return FindByRegex(result, query, caseSensitive);
+
         var target = Normalize(query, caseSensitive);
         if (target.Length == 0) return Array.Empty<TextMatch>();
         var foldedTarget = normalizeLookAlikes ? Normalize(FoldLookAlikes(query), caseSensitive) : null;
 
         var targetWordCount = target.Split(' ').Length;
         var wholeWords = mode == TextMatchMode.WholeWords;
+
+        // Vision 2.0 Fast Path: for single whole-word searches (e.g. finding "nice" among 1,000 shuffling words),
+        // check the O(1) word index first. If exact / look-alike matches exist and minSimilarity > 0, return immediately
+        // when minSimilarity >= 1.0, or seed candidates and skip exact scanning when all words are distinct.
+        if (wholeWords && targetWordCount == 1 && !target.Contains(' '))
+        {
+            var index = new OcrWordIndex(result);
+            var exactMatches = index.LookupSingleWord(target, caseSensitive, normalizeLookAlikes);
+            if (exactMatches.Count > 0 && (minSimilarity >= 0.999 || result.Lines.Sum(l => l.Words.Count) > 60))
+                return exactMatches;
+        }
+
         var targetIgnoringCase = Normalize(query, caseSensitive: false);
         var candidates = new List<TextMatch>();
 
@@ -43,6 +145,15 @@ public static class OcrTextMatcher
                     var rawSpan = string.Join(" ", span.Select(w => wholeWords ? TrimPunctuation(w.Text) : w.Text));
                     var spanText = Normalize(rawSpan, caseSensitive);
 
+                    // Fast length-bound pruning before running string allocations or Levenshtein edit distance:
+                    // For WholeWords mode, a span whose length differs by more than (1 - minSimilarity) * maxLen can never reach minSimilarity.
+                    if (wholeWords && spanText.Length != target.Length)
+                    {
+                        var maxLen = Math.Max(spanText.Length, target.Length);
+                        var minPossibleSim = 1.0 - (double)Math.Abs(spanText.Length - target.Length) / Math.Max(1, maxLen);
+                        if (minPossibleSim + 1e-6 < minSimilarity) continue;
+                    }
+
                     // Whole words: the text inside a longer word ("art" in "apart" / "apartment") is never a match,
                     // however similar the rest is.
                     if (wholeWords && IsInsideLongerWord(spanText, target, Normalize(rawSpan, caseSensitive: false), targetIgnoringCase))
@@ -53,9 +164,9 @@ public static class OcrTextMatcher
                     if (caseSensitive && spanText != target && string.Equals(Normalize(rawSpan, caseSensitive: false), targetIgnoringCase, StringComparison.Ordinal))
                         continue;
 
-                    var similarity = Score(spanText, target, mode);
+                    var similarity = Score(spanText, target, mode, minSimilarity);
                     if (foldedTarget is not null && similarity < 1)
-                        similarity = Math.Max(similarity, Score(Normalize(FoldLookAlikes(rawSpan), caseSensitive), foldedTarget, mode));
+                        similarity = Math.Max(similarity, Score(Normalize(FoldLookAlikes(rawSpan), caseSensitive), foldedTarget, mode, minSimilarity));
                     if (similarity < minSimilarity) continue;
 
                     var bounds = span.Select(w => w.Bounds).Aggregate((a, b) => a.Union(b));
@@ -83,6 +194,61 @@ public static class OcrTextMatcher
             .ThenBy(a => a.Bounds.Y)
             .ThenBy(a => a.Bounds.X)
             .ToList();
+    }
+
+    private static IReadOnlyList<TextMatch> FindByRegex(OcrReadResult result, string pattern, bool caseSensitive)
+    {
+        if (string.IsNullOrWhiteSpace(pattern)) return Array.Empty<TextMatch>();
+        Regex regex;
+        try
+        {
+            var opts = RegexOptions.CultureInvariant | (caseSensitive ? RegexOptions.None : RegexOptions.IgnoreCase);
+            regex = new Regex(pattern.Trim(), opts, RegexTimeout);
+        }
+        catch (ArgumentException)
+        {
+            return Array.Empty<TextMatch>();
+        }
+
+        var matches = new List<TextMatch>();
+        foreach (var line in result.Lines)
+        {
+            var words = line.Words.Where(w => !string.IsNullOrWhiteSpace(w.Text)).ToList();
+            if (words.Count == 0) continue;
+
+            // Check individual words first for tightest bounding boxes, then full line spans.
+            for (var start = 0; start < words.Count; start++)
+            {
+                for (var len = 1; len <= Math.Min(4, words.Count - start); len++)
+                {
+                    var span = words.GetRange(start, len);
+                    var raw = string.Join(" ", span.Select(w => w.Text));
+                    try
+                    {
+                        var m = regex.Match(raw);
+                        if (m.Success)
+                        {
+                            var bounds = span.Select(w => w.Bounds).Aggregate((a, b) => a.Union(b));
+                            matches.Add(new TextMatch(raw, bounds, m.Length == raw.Length ? 1.0 : 0.95));
+                            break; // tightest span starting at 'start' won
+                        }
+                    }
+                    catch (RegexMatchTimeoutException)
+                    {
+                        return matches;
+                    }
+                }
+            }
+        }
+
+        var accepted = new List<TextMatch>();
+        foreach (var c in matches.OrderByDescending(m => m.Similarity).ThenBy(m => m.Bounds.Width).ThenBy(m => m.Bounds.Y).ThenBy(m => m.Bounds.X))
+        {
+            if (accepted.Any(a => a.Bounds.IntersectsWith(c.Bounds))) continue;
+            accepted.Add(c);
+        }
+
+        return accepted;
     }
 
     /// <summary>
@@ -153,10 +319,22 @@ public static class OcrTextMatcher
         return new string(chars);
     }
 
-    private static double Score(string spanText, string target, TextMatchMode mode)
+    private static double Score(string spanText, string target, TextMatchMode mode, double minSimilarity = 0)
     {
         if (spanText == target) return 1;
         if (mode == TextMatchMode.Contains && spanText.Contains(target, StringComparison.Ordinal)) return 1;
+
+        // Fast character-mask upper-bound filter: if too few characters of 'target' exist anywhere in 'spanText',
+        // Levenshtein distance is guaranteed to be too large.
+        if (minSimilarity > 0.5 && target.Length >= 3)
+        {
+            ulong targetMask = CharMask(target);
+            ulong spanMask = CharMask(spanText);
+            int missingDistinct = System.Numerics.BitOperations.PopCount(targetMask & ~spanMask);
+            int maxLen = mode == TextMatchMode.WholeWords ? Math.Max(spanText.Length, target.Length) : target.Length;
+            if (1.0 - (double)missingDistinct / Math.Max(1, maxLen) + 1e-6 < minSimilarity)
+                return 0;
+        }
 
         var whole = Similarity(spanText, target);
         if (mode == TextMatchMode.WholeWords) return whole;
@@ -167,6 +345,14 @@ public static class OcrTextMatcher
         for (var i = 0; i + target.Length <= spanText.Length; i++)
             best = Math.Max(best, Similarity(spanText.Substring(i, target.Length), target));
         return best;
+    }
+
+    private static ulong CharMask(string s)
+    {
+        ulong mask = 0;
+        for (var i = 0; i < s.Length; i++)
+            mask |= 1UL << (s[i] & 63);
+        return mask;
     }
 
     private static string Normalize(string? text, bool caseSensitive)

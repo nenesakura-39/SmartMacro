@@ -40,17 +40,113 @@ public abstract class ScreenSearchStepViewModel : StepViewModel
         AddDurationCommand = new RelayCommand(p =>
         {
             if (TryParseAdditiveMs(p, out var ms))
-                TimeoutMs = ms == 0 ? 0 : Math.Max(0, TimeoutMs) + ms;
+                TimeoutMs = ms == 0 ? 0 : Math.Max(0, Math.Max(0, TimeoutMs) + ms);
         });
         ResetDurationCommand = new RelayCommand(_ => TimeoutMs = 0);
         SetDurationCommand = AddDurationCommand;
+        ApplyScenarioCommand = new RelayCommand(p =>
+        {
+            if (p is VisionScenario s) Scenario = s;
+            else if (p is string text && Enum.TryParse<VisionScenario>(text, ignoreCase: true, out var parsed)) Scenario = parsed;
+        });
         RefreshMonitors();
     }
 
     public RelayCommand SetDurationCommand { get; }
     public RelayCommand AddDurationCommand { get; }
     public RelayCommand ResetDurationCommand { get; }
+    public RelayCommand ApplyScenarioCommand { get; }
     public FailurePolicyViewModel FailurePolicy { get; }
+
+    // ---------------- Vision 2.0 Scenario Presets & Tracking ----------------
+
+    public static IReadOnlyList<Choice<VisionScenario>> Scenarios { get; } = new[]
+    {
+        new Choice<VisionScenario>(VisionScenario.Custom, "⚙ Custom (Manual Tuning)"),
+        new Choice<VisionScenario>(VisionScenario.StaticUi, "🖥 Static Desktop / App UI"),
+        new Choice<VisionScenario>(VisionScenario.GameHud, "🎮 Game HUD / Menu Button (Lighting & Edge Tolerant)"),
+        new Choice<VisionScenario>(VisionScenario.MovingTarget, "🏃 Moving Object (Kalman Velocity Tracking + Lead Click)"),
+        new Choice<VisionScenario>(VisionScenario.BusyParticles, "💥 Busy Combat / Heavy Particles (60% Partial Visibility + 2-Frame Confirm)"),
+        new Choice<VisionScenario>(VisionScenario.ScrollingText, "📜 Fast / Moving Text (Find Once via OCR, Track as Image at 60 FPS)"),
+        new Choice<VisionScenario>(VisionScenario.FastReaction, "⚡ Fast Reaction / QTE (16 ms Polling + Instant Click)"),
+    };
+
+    public static IReadOnlyList<Choice<VisionSearchStrategy>> Strategies { get; } = new[]
+    {
+        new Choice<VisionSearchStrategy>(VisionSearchStrategy.Balanced, "Balanced (Default)"),
+        new Choice<VisionSearchStrategy>(VisionSearchStrategy.Fastest, "Fastest (16 ms Game-Frame Polling)"),
+        new Choice<VisionSearchStrategy>(VisionSearchStrategy.MostAccurate, "Most Accurate (Full Pyramid + Multi-Cue)"),
+        new Choice<VisionSearchStrategy>(VisionSearchStrategy.Deadline, "Strict Time Budget"),
+    };
+
+    public VisionScenario Scenario
+    {
+        get => _search.Scenario;
+        set
+        {
+            if (_search.Scenario == value && value == VisionScenario.Custom) return;
+            TemplateAutoTuner.ApplyScenario(_search, value);
+            OnPropertyChanged(string.Empty);
+            NotifyChanged();
+        }
+    }
+
+    public VisionSearchStrategy Strategy
+    {
+        get => _search.Strategy;
+        set { if (_search.Strategy == value) return; _search.Strategy = value; NotifyChanged(); }
+    }
+
+    public int TimeBudgetMs
+    {
+        get => _search.TimeBudgetMs;
+        set { if (_search.TimeBudgetMs == value) return; _search.TimeBudgetMs = value; NotifyChanged(); }
+    }
+
+    public bool TrackTarget
+    {
+        get => _search.TrackTarget;
+        set
+        {
+            if (_search.TrackTarget == value) return;
+            _search.TrackTarget = value;
+            NotifyChanged();
+        }
+    }
+
+    public bool PredictiveClick
+    {
+        get => _search.PredictiveClick;
+        set
+        {
+            if (_search.PredictiveClick == value) return;
+            _search.PredictiveClick = value;
+            if (value && !_search.TrackTarget)
+            {
+                _search.TrackTarget = true;
+                OnPropertyChanged(nameof(TrackTarget));
+            }
+            NotifyChanged();
+        }
+    }
+
+    public int PredictiveLeadMs
+    {
+        get => _search.PredictiveLeadMs;
+        set { if (_search.PredictiveLeadMs == value) return; _search.PredictiveLeadMs = value; NotifyChanged(); }
+    }
+
+    public int ConfirmFrames
+    {
+        get => _search.ConfirmFrames;
+        set { if (_search.ConfirmFrames == value) return; _search.ConfirmFrames = Math.Clamp(value, 1, 10); NotifyChanged(); }
+    }
+
+    public bool OnlyWhereMoved
+    {
+        get => _search.OnlyWhereMoved;
+        set { if (_search.OnlyWhereMoved == value) return; _search.OnlyWhereMoved = value; NotifyChanged(); }
+    }
 
     /// <summary>"🎯 Show search area on screen": outlines where this step looks right now, for a moment.</summary>
     public RelayCommand ShowSearchAreaCommand { get; }
@@ -513,6 +609,14 @@ public sealed class FindTextStepViewModel : ScreenSearchStepViewModel
         new Choice<TextMatchMode>(TextMatchMode.WholeWords, "Whole word(s) only"),
     };
 
+    public static IReadOnlyList<Choice<OcrPreprocessMode>> PreprocessModes { get; } = new[]
+    {
+        new Choice<OcrPreprocessMode>(OcrPreprocessMode.Auto, "Auto (Standard Desktop & Clear Text)"),
+        new Choice<OcrPreprocessMode>(OcrPreprocessMode.HighContrast, "High Contrast (Faint or Low-Contrast Text)"),
+        new Choice<OcrPreprocessMode>(OcrPreprocessMode.InvertLightOnDark, "Invert Light-on-Dark (Bright Game HUD Text)"),
+        new Choice<OcrPreprocessMode>(OcrPreprocessMode.BinarizeOtsu, "Adaptive Binarize (Stylized / Noisy Background)"),
+    };
+
     public AsyncRelayCommand TestCommand { get; }
 
     /// <summary>Screen tools from the editor (set right after creation).</summary>
@@ -605,6 +709,34 @@ public sealed class FindTextStepViewModel : ScreenSearchStepViewModel
         set { if (_step.MinSimilarityPercent == value) return; _step.MinSimilarityPercent = value; NotifyChanged(); }
     }
 
+    public bool UseRegexPattern
+    {
+        get => _step.UseRegexPattern;
+        set { if (_step.UseRegexPattern == value) return; _step.UseRegexPattern = value; NotifyChanged(); }
+    }
+
+    public OcrPreprocessMode Preprocess
+    {
+        get => _step.Preprocess;
+        set { if (_step.Preprocess == value) return; _step.Preprocess = value; NotifyChanged(); }
+    }
+
+    public bool TrackTextAsImage
+    {
+        get => _step.TrackTextAsImage;
+        set
+        {
+            if (_step.TrackTextAsImage == value) return;
+            _step.TrackTextAsImage = value;
+            if (value && !_step.TrackTarget)
+            {
+                _step.TrackTarget = true;
+                OnPropertyChanged(nameof(TrackTarget));
+            }
+            NotifyChanged();
+        }
+    }
+
     protected override Task<ScreenRect?> PickRegionCoreAsync() =>
         _tools?.PickRegionAsync() ?? Task.FromResult<ScreenRect?>(null);
 
@@ -631,10 +763,67 @@ public sealed class FindImageStepViewModel : ScreenSearchStepViewModel
         _step = step;
         CaptureTemplateCommand = new AsyncRelayCommand(CaptureTemplateAsync, ex => TestResult = ex.Message, () => _tools is not null && !IsBusy);
         TestCommand = new AsyncRelayCommand(TestAsync, ex => TestResult = ex.Message, () => _tools is not null && !IsBusy);
+        AutoTuneCommand = new RelayCommand(AutoTuneFromTemplate, () => HasTemplate && !IsBusy);
     }
 
     public AsyncRelayCommand CaptureTemplateCommand { get; }
     public AsyncRelayCommand TestCommand { get; }
+    public RelayCommand AutoTuneCommand { get; }
+
+    public static IReadOnlyList<Choice<ImageDetectorKind>> Detectors { get; } = new[]
+    {
+        new Choice<ImageDetectorKind>(ImageDetectorKind.Template, "Template ZNCC (Standard + Partial Visibility)"),
+        new Choice<ImageDetectorKind>(ImageDetectorKind.EdgeShape, "Edge / Shape Contours (Severe Lighting & Tint Invariant)"),
+        new Choice<ImageDetectorKind>(ImageDetectorKind.Combined, "Combined Ensemble (Template + Edge Shape)"),
+    };
+
+    public ImageDetectorKind Detector
+    {
+        get => _step.Detector;
+        set { if (_step.Detector == value) return; _step.Detector = value; NotifyChanged(); }
+    }
+
+    public int MinVisiblePercent
+    {
+        get => _step.MinVisiblePercent;
+        set { if (_step.MinVisiblePercent == value) return; _step.MinVisiblePercent = value; NotifyChanged(); }
+    }
+
+    public int RotationRangeDeg
+    {
+        get => _step.RotationRangeDeg;
+        set { if (_step.RotationRangeDeg == value) return; _step.RotationRangeDeg = Math.Clamp(value, 0, 45); NotifyChanged(); }
+    }
+
+    private void AutoTuneFromTemplate()
+    {
+        if (!TemplateCache.TryGetOrDecode(_step.TemplateData, _step.TemplateWidth, _step.TemplateHeight, out var image, out var err) || image is null)
+        {
+            TestResult = err ?? "Capture an image first before running Auto-Tune.";
+            return;
+        }
+
+        var samples = new List<BgraImage> { image };
+        if (_step.AdditionalTemplates is { Count: > 0 } extras)
+        {
+            foreach (var extra in extras)
+            {
+                if (TemplateCache.TryGetOrDecode(extra.Data, extra.Width, extra.Height, out var decoded, out _) && decoded is not null)
+                    samples.Add(decoded);
+            }
+        }
+
+        var rec = TemplateAutoTuner.AnalyzeSamples(samples);
+        _step.MinSimilarityPercent = rec.MinSimilarityPercent;
+        _step.MinVisiblePercent = rec.MinVisiblePercent;
+        _step.IgnoreEdgesPercent = rec.IgnoreEdgesPercent;
+        _step.MatchForeground = rec.MatchForeground;
+        _step.AdaptToLighting = true;
+        _step.Detector = rec.Detector;
+        OnPropertyChanged(string.Empty);
+        NotifyChanged();
+        TestResult = $"✨ Auto-Tune: {rec.Summary}";
+    }
 
     /// <summary>Screen tools from the editor (set right after creation).</summary>
     public IVisionTools? Tools
@@ -943,6 +1132,51 @@ public sealed class FindColorStepViewModel : ScreenSearchStepViewModel
     {
         get => _step.MinPixels;
         set { if (_step.MinPixels == value) return; _step.MinPixels = value; NotifyChanged(); }
+    }
+
+    public static IReadOnlyList<Choice<ColorSpaceKind>> ColorSpaces { get; } = new[]
+    {
+        new Choice<ColorSpaceKind>(ColorSpaceKind.Rgb, "RGB Box + Shade Variation (Default)"),
+        new Choice<ColorSpaceKind>(ColorSpaceKind.Hsv, "HSV Hue / Saturation / Value (3D Lit Game Objects)"),
+        new Choice<ColorSpaceKind>(ColorSpaceKind.LabDeltaE, "CIE Lab Perceptual ΔE (Human-Eye Color Distance)"),
+    };
+
+    public static IReadOnlyList<Choice<ColorSelectRule>> SelectRules { get; } = new[]
+    {
+        new Choice<ColorSelectRule>(ColorSelectRule.Largest, "Largest Connected Patch (Default)"),
+        new Choice<ColorSelectRule>(ColorSelectRule.NearestToCenter, "Closest to Search Area Center"),
+        new Choice<ColorSelectRule>(ColorSelectRule.NearestToLastSpot, "Closest to Last Found / Tracked Spot"),
+        new Choice<ColorSelectRule>(ColorSelectRule.TopMost, "Top-Most on Screen"),
+    };
+
+    public ColorSpaceKind ColorSpace
+    {
+        get => _step.ColorSpace;
+        set { if (_step.ColorSpace == value) return; _step.ColorSpace = value; NotifyChanged(); }
+    }
+
+    public ColorSelectRule SelectRule
+    {
+        get => _step.SelectRule;
+        set { if (_step.SelectRule == value) return; _step.SelectRule = value; NotifyChanged(); }
+    }
+
+    public int MaxPixels
+    {
+        get => _step.MaxPixels;
+        set { if (_step.MaxPixels == value) return; _step.MaxPixels = Math.Max(0, value); NotifyChanged(); }
+    }
+
+    public int MinCircularityPercent
+    {
+        get => _step.MinCircularityPercent;
+        set { if (_step.MinCircularityPercent == value) return; _step.MinCircularityPercent = Math.Clamp(value, 0, 100); NotifyChanged(); }
+    }
+
+    public int MinFillPercent
+    {
+        get => _step.MinFillPercent;
+        set { if (_step.MinFillPercent == value) return; _step.MinFillPercent = Math.Clamp(value, 0, 100); NotifyChanged(); }
     }
 
     protected override Task<ScreenRect?> PickRegionCoreAsync() =>

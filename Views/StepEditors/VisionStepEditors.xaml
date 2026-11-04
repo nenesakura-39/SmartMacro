@@ -51,6 +51,15 @@
                     <CheckBox Content="Normalize similar characters (0/O, 1/I/l)" IsChecked="{Binding NormalizeLookAlikes}" Margin="0,10,0,0"
                               ToolTip="Windows OCR often reads a capital O as zero or a capital I as 1 or l on short words like OK. With this on, those count as the same letter."
                               AutomationProperties.Name="Normalize similar characters" />
+                    <CheckBox Content="Use Regular Expression (Regex) pattern" IsChecked="{Binding UseRegexPattern}" Margin="0,8,0,0"
+                              ToolTip="Treat 'Text to find' as a .NET Regular Expression (e.g. \bLv\.?\s*\d+ or nice|great)."
+                              AutomationProperties.Name="Use regex pattern" />
+                    <CheckBox Content="🚀 Find-Once-Then-Track: lock onto found word as a moving image (60 FPS)" IsChecked="{Binding TrackTextAsImage}" Margin="0,8,0,0"
+                              ToolTip="Once OCR finds the word among hundreds of shuffling words, SmartMacro crops its visual appearance and tracks it at frame rate (1–3 ms) as it moves—without waiting for slow OCR again."
+                              AutomationProperties.Name="Track found text as image" />
+                    <TextBlock Text="Image pre-processing before OCR" Style="{StaticResource FieldLabel}" Margin="0,10,0,4" />
+                    <ComboBox ItemsSource="{x:Static steps:FindTextStepViewModel.PreprocessModes}" DisplayMemberPath="Label" SelectedValuePath="Value"
+                              SelectedValue="{Binding Preprocess}" AutomationProperties.Name="OCR image preprocessing" />
                     <ContentControl Content="{Binding}" ContentTemplate="{StaticResource SearchMovementTemplate}" Focusable="False"
                                     Visibility="{Binding IsStandalone, Converter={StaticResource BoolToVisibility}}" />
                 </StackPanel>
@@ -97,6 +106,14 @@
                                 <TextBlock Text="Capture image" Margin="8,0,0,0" />
                             </StackPanel>
                         </Button>
+                        <Button Command="{Binding AutoTuneCommand}" Margin="0,0,8,6"
+                                ToolTip="Analyzes your captured image (border variation, stroke contrast, and detail) and automatically sets the best detector, similarity, and partial-occlusion settings."
+                                AutomationProperties.Name="Auto-Tune image settings">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="✨" />
+                                <TextBlock Text="Auto-Tune" Margin="6,0,0,0" />
+                            </StackPanel>
+                        </Button>
                         <ComboBox Style="{StaticResource FreezeComboBox}" Margin="0,0,0,6" />
                     </WrapPanel>
                     <TextBlock Style="{StaticResource MutedText}" FontSize="11" Margin="0,2,0,0" TextWrapping="Wrap"
@@ -136,6 +153,28 @@
                     <CheckBox Content="Transparent Game UI: ignore background / match bright text and edges" IsChecked="{Binding MatchForeground}" Margin="0,8,0,0"
                               ToolTip="For buttons you can partly see through, like a white &quot;SHAKE&quot; ring over the game world: only the strokes that stand out (the white text and ring) are compared, so it still matches when water, wood or rocks show through it."
                               AutomationProperties.Name="Ignore background and match bright text and edges" />
+                    <TextBlock Text="Vision 2.0 detector mode" Style="{StaticResource FieldLabel}" Margin="0,12,0,4" />
+                    <ComboBox ItemsSource="{x:Static steps:FindImageStepViewModel.Detectors}" DisplayMemberPath="Label" SelectedValuePath="Value"
+                              SelectedValue="{Binding Detector}" AutomationProperties.Name="Image detector mode" />
+                    <Grid Margin="0,8,0,0">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="10" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <StackPanel Grid.Column="0">
+                            <TextBlock Text="Min visible part (%) (0 = full, 60 = 40% covered by particles)" Style="{StaticResource FieldLabel}"
+                                       ToolTip="Splits the image into a 4×4 sub-patch grid and matches the unoccluded parts so targets covered by particles or explosions still match." />
+                            <TextBox Text="{Binding MinVisiblePercent, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}"
+                                     AutomationProperties.Name="Minimum visible percent" />
+                        </StackPanel>
+                        <StackPanel Grid.Column="2">
+                            <TextBlock Text="Rotation tolerance (±° 0–45)" Style="{StaticResource FieldLabel}"
+                                       ToolTip="Also checks rotated copies up to ±N degrees for Tilted or spinning targets." />
+                            <TextBox Text="{Binding RotationRangeDeg, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}"
+                                     AutomationProperties.Name="Rotation tolerance in degrees" />
+                        </StackPanel>
+                    </Grid>
                     <ContentControl Content="{Binding}" ContentTemplate="{StaticResource SearchMovementTemplate}" Focusable="False"
                                     Visibility="{Binding IsStandalone, Converter={StaticResource BoolToVisibility}}" />
                 </StackPanel>
@@ -272,6 +311,37 @@
                                ToolTip="The patch of color must have at least this many pixels (ignores stray single pixels)." />
                     <TextBox Text="{Binding MinPixels, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}" Width="100" HorizontalAlignment="Left"
                              AutomationProperties.Name="Minimum size in pixels" ToolTip="The patch of color must have at least this many pixels (ignores stray single pixels)." />
+                    <TextBlock Text="Color space" Style="{StaticResource FieldLabel}" Margin="0,10,0,4" />
+                    <ComboBox ItemsSource="{x:Static steps:FindColorStepViewModel.ColorSpaces}" DisplayMemberPath="Label" SelectedValuePath="Value"
+                              SelectedValue="{Binding ColorSpace}" AutomationProperties.Name="Color space" />
+                    <TextBlock Text="Which matching blob to pick" Style="{StaticResource FieldLabel}" Margin="0,10,0,4" />
+                    <ComboBox ItemsSource="{x:Static steps:FindColorStepViewModel.SelectRules}" DisplayMemberPath="Label" SelectedValuePath="Value"
+                              SelectedValue="{Binding SelectRule}" AutomationProperties.Name="Color blob selection rule" />
+                    <Grid Margin="0,8,0,0">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="10" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="10" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <StackPanel Grid.Column="0">
+                            <TextBlock Text="Max size (px, 0=any)" Style="{StaticResource FieldLabel}" />
+                            <TextBox Text="{Binding MaxPixels, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}"
+                                     AutomationProperties.Name="Maximum size in pixels" />
+                        </StackPanel>
+                        <StackPanel Grid.Column="2">
+                            <TextBlock Text="Min roundness (%)" Style="{StaticResource FieldLabel}"
+                                       ToolTip="0 = any shape. 50+ = round orbs/dots only (rejects long thin particle streaks)." />
+                            <TextBox Text="{Binding MinCircularityPercent, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}"
+                                     AutomationProperties.Name="Minimum roundness percent" />
+                        </StackPanel>
+                        <StackPanel Grid.Column="4">
+                            <TextBlock Text="Min fill density (%)" Style="{StaticResource FieldLabel}" />
+                            <TextBox Text="{Binding MinFillPercent, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}"
+                                     AutomationProperties.Name="Minimum fill density percent" />
+                        </StackPanel>
+                    </Grid>
                     <TextBlock Style="{StaticResource MutedText}" FontSize="11" Margin="0,4,0,0" TextWrapping="Wrap"
                                Text="This only matches colors, it doesn't recognize objects: anything else with a similar color in the search place also counts, so keep it small (a custom area or an app window)." />
                     <ContentControl Content="{Binding}" ContentTemplate="{StaticResource SearchMovementTemplate}" Focusable="False"

@@ -39,6 +39,7 @@ public sealed class SettingsViewModel : ObservableObject
     private StudioTheme _theme = StudioTheme.ObsidianNeon;
     private StudioAccent _accent = StudioAccent.NeonBrand;
     private StudioDensity _density = StudioDensity.Comfortable;
+    private ExperienceLevel _experienceLevel = ExperienceLevel.Beginner;
     private bool _reduceMotion;
     private HotkeyBinding _recordHotkey = HotkeyBinding.DefaultRecord;
     private HotkeyBinding _playHotkey = HotkeyBinding.DefaultPlay;
@@ -102,9 +103,26 @@ public sealed class SettingsViewModel : ObservableObject
         new Choice<StudioDensity>(StudioDensity.Compact, "Compact (High-Density Pro)"),
     };
 
+    public static IReadOnlyList<Choice<ExperienceLevel>> ExperienceLevelChoices { get; } = new[]
+    {
+        new Choice<ExperienceLevel>(ExperienceLevel.Beginner, "✨ Beginner (Guided Scenarios & 1-Click Auto-Tune)"),
+        new Choice<ExperienceLevel>(ExperienceLevel.Advanced, "🔬 Advanced (All Vision 2.0 & Engine Controls)"),
+    };
+
     public IReadOnlyList<Choice<StudioTheme>> Themes => ThemeChoices;
     public IReadOnlyList<Choice<StudioAccent>> Accents => AccentChoices;
     public IReadOnlyList<Choice<StudioDensity>> Densities => DensityChoices;
+    public IReadOnlyList<Choice<ExperienceLevel>> ExperienceLevels => ExperienceLevelChoices;
+
+    public ExperienceLevel ExperienceLevel
+    {
+        get => _experienceLevel;
+        set
+        {
+            if (!SetProperty(ref _experienceLevel, value)) return;
+            IsDirty = true;
+        }
+    }
 
     public StudioTheme Theme
     {
@@ -467,6 +485,7 @@ public sealed class SettingsViewModel : ObservableObject
         _theme = settings.Theme;
         _accent = settings.Accent;
         _density = settings.Density;
+        _experienceLevel = settings.ExperienceLevel;
         _reduceMotion = settings.ReduceMotion;
         _recordHotkey = settings.RecordHotkey;
         _playHotkey = settings.PlayHotkey;
@@ -504,6 +523,7 @@ public sealed class SettingsViewModel : ObservableObject
             Theme = Theme,
             Accent = Accent,
             Density = Density,
+            ExperienceLevel = ExperienceLevel,
             ReduceMotion = ReduceMotion,
             SidebarPinned = _saved.SidebarPinned,
             RecordHotkey = RecordHotkey,

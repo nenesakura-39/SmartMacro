@@ -29,6 +29,16 @@ public enum StudioDensity
     Compact = 1,
 }
 
+/// <summary>
+/// Controls whether step editors emphasize guided scenario cards and 1-click Auto-Tune (Beginner)
+/// or also auto-expand the full Vision 2.0 &amp; engine parameter panels (Advanced).
+/// </summary>
+public enum ExperienceLevel
+{
+    Beginner = 0,
+    Advanced = 1,
+}
+
 /// <summary>User preferences, stored in settings.json.</summary>
 public sealed class AppSettings
 {
@@ -156,6 +166,9 @@ public sealed class AppSettings
     /// <summary>Studio X global row/spacing density.</summary>
     public StudioDensity Density { get; set; } = StudioDensity.Comfortable;
 
+    /// <summary>Beginner (guided scenario presets &amp; Auto-Tune) vs Advanced (all Vision 2.0 &amp; engine controls).</summary>
+    public ExperienceLevel ExperienceLevel { get; set; } = ExperienceLevel.Beginner;
+
     /// <summary>Turn off UI transitions and decorative glow animations (also respects Windows Reduce Motion).</summary>
     public bool ReduceMotion { get; set; }
 
@@ -196,6 +209,7 @@ public sealed class AppSettings
         if (!Enum.IsDefined(Theme)) Theme = StudioTheme.ObsidianNeon;
         if (!Enum.IsDefined(Accent)) Accent = StudioAccent.NeonBrand;
         if (!Enum.IsDefined(Density)) Density = StudioDensity.Comfortable;
+        if (!Enum.IsDefined(ExperienceLevel)) ExperienceLevel = ExperienceLevel.Beginner;
 
         // Settings saved before the fidelity selector: "don't record mouse movement" becomes Clicks & Keys Only once.
         if (SchemaVersion < 4 && !RecordMouseMovement) RecordingFidelity = RecordingFidelity.ClicksAndKeysOnly;

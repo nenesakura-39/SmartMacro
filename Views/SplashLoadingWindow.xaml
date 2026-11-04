@@ -1,0 +1,241 @@
+<Window x:Class="SmartMacro.Views.SplashLoadingWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Width="460"
+        Height="300"
+        WindowStyle="None"
+        AllowsTransparency="True"
+        Background="Transparent"
+        ResizeMode="NoResize"
+        ShowInTaskbar="False"
+        Topmost="True"
+        WindowStartupLocation="CenterScreen">
+    <Window.Resources>
+        <Storyboard x:Key="ReactorSpinStoryboard" RepeatBehavior="Forever">
+            <DoubleAnimation Storyboard.TargetName="OuterRingRotate"
+                             Storyboard.TargetProperty="Angle"
+                             From="0" To="360" Duration="0:0:9" />
+            <DoubleAnimation Storyboard.TargetName="MiddleRingRotate"
+                             Storyboard.TargetProperty="Angle"
+                             From="360" To="0" Duration="0:0:5.5" />
+            <DoubleAnimation Storyboard.TargetName="InnerRingRotate"
+                             Storyboard.TargetProperty="Angle"
+                             From="0" To="360" Duration="0:0:3.2" />
+            <DoubleAnimation Storyboard.TargetName="CoreScaleX"
+                             Storyboard.TargetProperty="ScaleX"
+                             From="0.88" To="1.14" Duration="0:0:1.1"
+                             AutoReverse="True">
+                <DoubleAnimation.EasingFunction>
+                    <SineEase EasingMode="EaseInOut" />
+                </DoubleAnimation.EasingFunction>
+            </DoubleAnimation>
+            <DoubleAnimation Storyboard.TargetName="CoreScaleX"
+                             Storyboard.TargetProperty="ScaleY"
+                             From="0.88" To="1.14" Duration="0:0:1.1"
+                             AutoReverse="True">
+                <DoubleAnimation.EasingFunction>
+                    <SineEase EasingMode="EaseInOut" />
+                </DoubleAnimation.EasingFunction>
+            </DoubleAnimation>
+            <DoubleAnimation Storyboard.TargetName="ScanlineTranslate"
+                             Storyboard.TargetProperty="Y"
+                             From="-72" To="72" Duration="0:0:1.8"
+                             AutoReverse="True">
+                <DoubleAnimation.EasingFunction>
+                    <SineEase EasingMode="EaseInOut" />
+                </DoubleAnimation.EasingFunction>
+            </DoubleAnimation>
+        </Storyboard>
+    </Window.Resources>
+
+    <Grid x:Name="RootContainer" Margin="18" RenderTransformOrigin="0.5,0.5">
+        <Grid.RenderTransform>
+            <ScaleTransform x:Name="RootScale" ScaleX="0.95" ScaleY="0.95" />
+        </Grid.RenderTransform>
+
+        <!-- Ambient outer drop shadow -->
+        <Border CornerRadius="20" Background="#070910">
+            <Border.Effect>
+                <DropShadowEffect BlurRadius="28" ShadowDepth="0" Opacity="0.85" Color="#000000" />
+            </Border.Effect>
+        </Border>
+
+        <!-- Main Obsidian Glass Surface -->
+        <Border CornerRadius="20" ClipToBounds="True" BorderThickness="1">
+            <Border.Background>
+                <RadialGradientBrush Center="0.5,0.42" GradientOrigin="0.5,0.42" RadiusX="0.75" RadiusY="0.75">
+                    <GradientStop Color="#121829" Offset="0" />
+                    <GradientStop Color="#090C15" Offset="0.65" />
+                    <GradientStop Color="#06080E" Offset="1" />
+                </RadialGradientBrush>
+            </Border.Background>
+            <Border.BorderBrush>
+                <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+                    <GradientStop Color="#5522D3EE" Offset="0" />
+                    <GradientStop Color="#226366F1" Offset="0.5" />
+                    <GradientStop Color="#55A855F7" Offset="1" />
+                </LinearGradientBrush>
+            </Border.BorderBrush>
+
+            <Grid>
+                <!-- Subtle cybernetic grid lines -->
+                <Canvas IsHitTestVisible="False" Opacity="0.16">
+                    <Line X1="0" Y1="66" X2="424" Y2="66" Stroke="#22D3EE" StrokeThickness="0.5" StrokeDashArray="4 6" />
+                    <Line X1="0" Y1="198" X2="424" Y2="198" Stroke="#6366F1" StrokeThickness="0.5" StrokeDashArray="4 6" />
+                    <Line X1="212" Y1="0" X2="212" Y2="264" Stroke="#22D3EE" StrokeThickness="0.5" StrokeDashArray="3 7" />
+                </Canvas>
+
+                <!-- Precision HUD Corner Brackets (Zero text/logo) -->
+                <Path Data="M 16,32 L 16,16 L 32,16" Stroke="#6622D3EE" StrokeThickness="1.5" />
+                <Path Data="M 408,32 L 408,16 L 392,16" Stroke="#6622D3EE" StrokeThickness="1.5" />
+                <Path Data="M 16,232 L 16,248 L 32,248" Stroke="#66A855F7" StrokeThickness="1.5" />
+                <Path Data="M 408,232 L 408,248 L 392,248" Stroke="#66A855F7" StrokeThickness="1.5" />
+
+                <!-- Center Pure Geometric Telemetry Reactor -->
+                <Grid Width="156" Height="156" VerticalAlignment="Top" Margin="0,30,0,0">
+                    <!-- Ambient Reactor Glow -->
+                    <Ellipse Width="132" Height="132" Opacity="0.24">
+                        <Ellipse.Fill>
+                            <RadialGradientBrush>
+                                <GradientStop Color="#22D3EE" Offset="0" />
+                                <GradientStop Color="#6366F1" Offset="0.55" />
+                                <GradientStop Color="#0006080E" Offset="1" />
+                            </RadialGradientBrush>
+                        </Ellipse.Fill>
+                    </Ellipse>
+
+                    <!-- Outer Segmented Telemetry Ring -->
+                    <Ellipse Width="142" Height="142"
+                             Stroke="#4422D3EE"
+                             StrokeThickness="1.5"
+                             StrokeDashArray="8 5 2 5"
+                             RenderTransformOrigin="0.5,0.5">
+                        <Ellipse.RenderTransform>
+                            <RotateTransform x:Name="OuterRingRotate" Angle="0" />
+                        </Ellipse.RenderTransform>
+                    </Ellipse>
+
+                    <!-- Middle Counter-Rotating Dual Arc Ring -->
+                    <Ellipse Width="108" Height="108"
+                             StrokeThickness="2.2"
+                             StrokeDashArray="16 10"
+                             StrokeDashCap="Round"
+                             RenderTransformOrigin="0.5,0.5">
+                        <Ellipse.Stroke>
+                            <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+                                <GradientStop Color="#22D3EE" Offset="0" />
+                                <GradientStop Color="#818CF8" Offset="0.5" />
+                                <GradientStop Color="#C084FC" Offset="1" />
+                            </LinearGradientBrush>
+                        </Ellipse.Stroke>
+                        <Ellipse.RenderTransform>
+                            <RotateTransform x:Name="MiddleRingRotate" Angle="0" />
+                        </Ellipse.RenderTransform>
+                    </Ellipse>
+
+                    <!-- Inner High-Speed Orbital Ring -->
+                    <Ellipse Width="74" Height="74"
+                             Stroke="#AA38BDF8"
+                             StrokeThickness="1.8"
+                             StrokeDashArray="6 8"
+                             StrokeDashCap="Round"
+                             RenderTransformOrigin="0.5,0.5">
+                        <Ellipse.RenderTransform>
+                            <RotateTransform x:Name="InnerRingRotate" Angle="0" />
+                        </Ellipse.RenderTransform>
+                    </Ellipse>
+
+                    <!-- Precision Crosshair Ticks -->
+                    <Path Data="M 78,4 L 78,16 M 78,140 L 78,152 M 4,78 L 16,78 M 140,78 L 152,78"
+                          Stroke="#5594A3B8" StrokeThickness="1.2" />
+
+                    <!-- Pulsing Geometric Diamond / Energy Core -->
+                    <Grid Width="34" Height="34" RenderTransformOrigin="0.5,0.5">
+                        <Grid.RenderTransform>
+                            <ScaleTransform x:Name="CoreScaleX" ScaleX="1" ScaleY="1" />
+                        </Grid.RenderTransform>
+                        <Polygon Points="17,2 32,17 17,32 2,17"
+                                 Stroke="#E0F2FE"
+                                 StrokeThickness="1.4">
+                            <Polygon.Fill>
+                                <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+                                    <GradientStop Color="#CC22D3EE" Offset="0" />
+                                    <GradientStop Color="#CC6366F1" Offset="1" />
+                                </LinearGradientBrush>
+                            </Polygon.Fill>
+                        </Polygon>
+                        <Ellipse Width="8" Height="8" Fill="#FFFFFF" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                    </Grid>
+
+                    <!-- Oscillating Laser Scanline -->
+                    <Border Height="2" Width="136" VerticalAlignment="Center" HorizontalAlignment="Center" IsHitTestVisible="False" Opacity="0.75">
+                        <Border.Background>
+                            <LinearGradientBrush StartPoint="0,0.5" EndPoint="1,0.5">
+                                <GradientStop Color="#0022D3EE" Offset="0" />
+                                <GradientStop Color="#FF22D3EE" Offset="0.5" />
+                                <GradientStop Color="#0022D3EE" Offset="1" />
+                            </LinearGradientBrush>
+                        </Border.Background>
+                        <Border.RenderTransform>
+                            <TranslateTransform x:Name="ScanlineTranslate" Y="0" />
+                        </Border.RenderTransform>
+                    </Border>
+                </Grid>
+
+                <!-- Bottom Telemetry & Progress Rail (Pure Technical Readout, No Brand/Software Name) -->
+                <StackPanel VerticalAlignment="Bottom" Margin="34,0,34,26">
+                    <Grid Margin="0,0,0,8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+
+                        <!-- Blinking status indicator dot -->
+                        <Ellipse Width="6" Height="6" Fill="#22D3EE" VerticalAlignment="Center" Margin="0,0,8,0" />
+
+                        <TextBlock x:Name="StageText"
+                                   Grid.Column="1"
+                                   Text="INITIALIZING CORE SUBSYSTEMS"
+                                   Foreground="#94A3B8"
+                                   FontFamily="Consolas, Segoe UI"
+                                   FontSize="10.5"
+                                   FontWeight="SemiBold"
+                                   VerticalAlignment="Center" />
+
+                        <TextBlock x:Name="PercentText"
+                                   Grid.Column="2"
+                                   Text="0%"
+                                   Foreground="#E2E8F0"
+                                   FontFamily="Consolas, Segoe UI"
+                                   FontSize="11"
+                                   FontWeight="Bold"
+                                   VerticalAlignment="Center" />
+                    </Grid>
+
+                    <!-- Sleek Neon Progress Track -->
+                    <Border x:Name="ProgressTrack"
+                            Height="5"
+                            CornerRadius="2.5"
+                            Background="#192236"
+                            BorderBrush="#26334D"
+                            BorderThickness="1"
+                            ClipToBounds="True">
+                        <Border x:Name="ProgressFill"
+                                HorizontalAlignment="Left"
+                                Width="0"
+                                CornerRadius="2.5">
+                            <Border.Background>
+                                <LinearGradientBrush StartPoint="0,0.5" EndPoint="1,0.5">
+                                    <GradientStop Color="#22D3EE" Offset="0" />
+                                    <GradientStop Color="#6366F1" Offset="0.55" />
+                                    <GradientStop Color="#C084FC" Offset="1" />
+                                </LinearGradientBrush>
+                            </Border.Background>
+                        </Border>
+                    </Border>
+                </StackPanel>
+            </Grid>
+        </Border>
+    </Grid>
+</Window>

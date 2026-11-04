@@ -313,6 +313,7 @@
             </Grid>
             <!-- Quick presets wrap onto a second line on narrow panels instead of being squeezed / cut off. -->
             <WrapPanel Margin="0,6,0,0">
+                <Button Content="-500ms" Command="{Binding AddDurationCommand}" CommandParameter="-500" Padding="10,5" Margin="0,0,6,6" />
                 <Button Content="+100ms" Command="{Binding AddDurationCommand}" CommandParameter="+100" Padding="10,5" Margin="0,0,6,6" />
                 <Button Content="+500ms" Command="{Binding AddDurationCommand}" CommandParameter="+500" Padding="10,5" Margin="0,0,6,6" />
                 <Button Content="+1s" Command="{Binding AddDurationCommand}" CommandParameter="+1000" Padding="10,5" Margin="0,0,6,6" />
@@ -468,6 +469,35 @@
                              ToolTip="Click this many pixels below (+) or above (−) the center of what was found." />
                 </StackPanel>
             </Grid>
+
+            <!-- Vision 2.0 Motion Tracking, Predictive Lead & Temporal Confirmation -->
+            <TextBlock Text="VISION 2.0 · MOTION &amp; PARTICLE FILTERING" Style="{StaticResource SetupCardTitle}" Margin="0,14,0,4" />
+            <CheckBox Content="🏃 Track moving target across frames (2D Kalman velocity filter)" IsChecked="{Binding TrackTarget}" Margin="0,4,0,0"
+                      ToolTip="Tracks the target's position and velocity (vx, vy) across frames so the search box automatically follows fast-moving objects."
+                      AutomationProperties.Name="Track moving target across frames" />
+            <CheckBox Content="🎯 Predictive lead click (aim where the moving target will be)" IsChecked="{Binding PredictiveClick}" Margin="0,6,0,0"
+                      ToolTip="Adds velocity × lead time to the click coordinates so clicks land squarely on fast-moving targets instead of behind them."
+                      AutomationProperties.Name="Predictive lead click" />
+            <Grid Margin="0,6,0,0">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="10" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <StackPanel Grid.Column="0">
+                    <TextBlock Text="Predictive lead (ms)" Style="{StaticResource FieldLabel}" ToolTip="How far ahead in milliseconds to lead a moving target (e.g. 45 ms)." />
+                    <TextBox Text="{Binding PredictiveLeadMs, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}"
+                             AutomationProperties.Name="Predictive lead in milliseconds" />
+                </StackPanel>
+                <StackPanel Grid.Column="2">
+                    <TextBlock Text="Confirm across N frames (1–10)" Style="{StaticResource FieldLabel}" ToolTip="Require the target to appear in N consecutive checks before acting (2 rejects 1-frame particle flashes)." />
+                    <TextBox Text="{Binding ConfirmFrames, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}"
+                             AutomationProperties.Name="Confirm frames" />
+                </StackPanel>
+            </Grid>
+            <CheckBox Content="⚡ Only search where the screen moved (FrameBus motion mask)" IsChecked="{Binding OnlyWhereMoved}" Margin="0,8,0,0"
+                      ToolTip="Crops the search area to the 16×16 screen cells that changed since the previous frame—ideal when hunting a moving object on a static background."
+                      AutomationProperties.Name="Only search where the screen moved" />
         </StackPanel>
     </DataTemplate>
 
@@ -492,6 +522,15 @@
     <!-- The numbered cards every Find step shows (2, 3, 4) around its own "1. What to find" card. -->
     <DataTemplate x:Key="SearchCardsTemplate" DataType="{x:Type steps:ScreenSearchStepViewModel}">
         <StackPanel>
+            <Border Style="{StaticResource SetupCard}">
+                <StackPanel>
+                    <TextBlock Text="✨ SMART SCENARIO PRESET (BEGINNER 1-CLICK SETUP)" Style="{StaticResource SetupCardTitle}"
+                               ToolTip="Pick what kind of scene you are automating. SmartMacro automatically tunes accuracy, partial-occlusion tolerance, velocity tracking, and polling speed." />
+                    <ComboBox ItemsSource="{x:Static steps:ScreenSearchStepViewModel.Scenarios}" DisplayMemberPath="Label" SelectedValuePath="Value"
+                              SelectedValue="{Binding Scenario}" Margin="0,8,0,0" AutomationProperties.Name="Vision scenario preset"
+                              ToolTip="1-click setup for Static UI, Game HUD, Moving Objects, Busy Particles, or Fast Scrolling Text." />
+                </StackPanel>
+            </Border>
             <Border Style="{StaticResource SetupCard}">
                 <StackPanel>
                     <TextBlock Text="2. WHERE TO LOOK" Style="{StaticResource SetupCardTitle}"

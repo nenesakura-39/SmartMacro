@@ -27,7 +27,9 @@ public readonly record struct RawInputEvent(
     MacroMouseButton Button = MacroMouseButton.Left,
     int Delta = 0,
     int VirtualKey = 0,
-    ClickTargetSnapshot? ClickedTarget = null);
+    ClickTargetSnapshot? ClickedTarget = null,
+    int ScanCode = 0,
+    bool Extended = false);
 
 /// <summary>Captures raw desktop input. The real version uses Windows low-level hooks.</summary>
 public interface IInputRecorder
@@ -193,6 +195,7 @@ public static class RecordingConverter
         var consumed = new bool[events.Count];
         var isRepeat = MarkAutoRepeats(events);
         var keysDown = new List<int>();
+        var keyScans = new Dictionary<int, (int ScanCode, bool Extended)>();
         var buttonsDown = new List<MacroMouseButton>();
 
         // How far into the recording playback has got so far (recording time, ms). Gaps are measured from here,
@@ -422,7 +425,10 @@ public static class RecordingConverter
                         {
                             Emit(new KeyPressStep
                                 {
-                                    VirtualKey = e.VirtualKey, Action = KeyAction.Press,
+                                    VirtualKey = e.VirtualKey,
+                                    Action = KeyAction.Press,
+                                    ScanCode = e.ScanCode,
+                                    Extended = e.Extended,
                                     HoldMs = HoldFor(e.TimeMs, events[up].TimeMs),
                                 },
                                 e.TimeMs, events[up].TimeMs);
@@ -436,9 +442,16 @@ public static class RecordingConverter
                         }
 
                         keysDown.Add(e.VirtualKey);
+                        keyScans[e.VirtualKey] = (e.ScanCode, e.Extended);
                     }
 
-                    Emit(new KeyPressStep { VirtualKey = e.VirtualKey, Action = KeyAction.Down }, e.TimeMs, e.TimeMs);
+                    Emit(new KeyPressStep
+                    {
+                        VirtualKey = e.VirtualKey,
+                        Action = KeyAction.Down,
+                        ScanCode = e.ScanCode,
+                        Extended = e.Extended,
+                    }, e.TimeMs, e.TimeMs);
                     break;
                 }
 
@@ -446,7 +459,16 @@ public static class RecordingConverter
                 {
                     // Ignore releases of keys pressed before recording started (e.g. the start hotkey).
                     if (!keysDown.Remove(e.VirtualKey)) break;
-                    Emit(new KeyPressStep { VirtualKey = e.VirtualKey, Action = KeyAction.Up }, e.TimeMs, e.TimeMs);
+                    keyScans.Remove(e.VirtualKey, out var downScan);
+                    var scanCode = e.ScanCode != 0 ? e.ScanCode : downScan.ScanCode;
+                    var extended = e.ScanCode != 0 ? e.Extended : downScan.Extended;
+                    Emit(new KeyPressStep
+                    {
+                        VirtualKey = e.VirtualKey,
+                        Action = KeyAction.Up,
+                        ScanCode = scanCode,
+                        Extended = extended,
+                    }, e.TimeMs, e.TimeMs);
                     break;
                 }
             }
@@ -456,7 +478,17 @@ public static class RecordingConverter
 
         // Anything still held at the end gets released, so the macro never leaves keys stuck down.
         for (var k = keysDown.Count - 1; k >= 0; k--)
-            steps.Add(new KeyPressStep { VirtualKey = keysDown[k], Action = KeyAction.Up });
+        {
+            var vk = keysDown[k];
+            keyScans.TryGetValue(vk, out var scan);
+            steps.Add(new KeyPressStep
+            {
+                VirtualKey = vk,
+                Action = KeyAction.Up,
+                ScanCode = scan.ScanCode,
+                Extended = scan.Extended,
+            });
+        }
         foreach (var button in buttonsDown)
             steps.Add(new MouseClickStep { Button = button, Action = MouseClickAction.Up, UseCurrentPosition = true });
 

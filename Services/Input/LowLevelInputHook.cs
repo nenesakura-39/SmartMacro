@@ -24,7 +24,9 @@ internal readonly record struct HookEvent(
     int VirtualKey,
     bool Injected,
     bool FromSmartMacro,
-    bool OverOwnWindow);
+    bool OverOwnWindow,
+    int ScanCode = 0,
+    bool Extended = false);
 
 /// <summary>
 /// Wraps Windows low-level mouse/keyboard hooks (WH_MOUSE_LL / WH_KEYBOARD_LL). These only observe
@@ -126,6 +128,14 @@ internal sealed class LowLevelInputHook : IDisposable
                     case WM_RBUTTONUP: kind = RawInputKind.MouseUp; button = MacroMouseButton.Right; break;
                     case WM_MBUTTONDOWN: kind = RawInputKind.MouseDown; button = MacroMouseButton.Middle; break;
                     case WM_MBUTTONUP: kind = RawInputKind.MouseUp; button = MacroMouseButton.Middle; break;
+                    case WM_XBUTTONDOWN:
+                        kind = RawInputKind.MouseDown;
+                        button = ((data.mouseData >> 16) & 0xFFFF) == XBUTTON2 ? MacroMouseButton.XButton2 : MacroMouseButton.XButton1;
+                        break;
+                    case WM_XBUTTONUP:
+                        kind = RawInputKind.MouseUp;
+                        button = ((data.mouseData >> 16) & 0xFFFF) == XBUTTON2 ? MacroMouseButton.XButton2 : MacroMouseButton.XButton1;
+                        break;
                     case WM_MOUSEWHEEL: kind = RawInputKind.Wheel; delta = (short)((data.mouseData >> 16) & 0xFFFF); break;
                     case WM_MOUSEHWHEEL: kind = RawInputKind.HorizontalWheel; delta = (short)((data.mouseData >> 16) & 0xFFFF); break;
                 }
@@ -171,9 +181,11 @@ internal sealed class LowLevelInputHook : IDisposable
 
                 if (kind is RawInputKind k)
                 {
+                    var scanCode = data.scanCode is > 0 and <= 0xFF ? (int)data.scanCode : 0;
+                    var extended = (data.flags & LLKHF_EXTENDED) != 0;
                     Raise(new HookEvent(k, data.time, timestamp, 0, 0, MacroMouseButton.Left, 0, (int)data.vkCode,
                         (data.flags & LLKHF_INJECTED) != 0, data.dwExtraInfo == SmartMacroInputTag,
-                        IsOwnWindow(GetForegroundWindow())));
+                        IsOwnWindow(GetForegroundWindow()), scanCode, extended));
                 }
             }
             catch (Exception ex)
@@ -397,7 +409,7 @@ public sealed class WindowsInputRecorder : IInputRecorder, IDisposable
 
         // Smart Click Snapshot: the hook runs before the clicked app sees the press, so this is the button as clicked.
         var target = e.Kind == RawInputKind.MouseDown ? _snapshots.TryCapture(e.X, e.Y) : null;
-        _events.Add(new RawInputEvent(time, e.Kind, e.X, e.Y, e.Button, e.Delta, e.VirtualKey, target));
+        _events.Add(new RawInputEvent(time, e.Kind, e.X, e.Y, e.Button, e.Delta, e.VirtualKey, target, e.ScanCode, e.Extended));
     }
 }
 

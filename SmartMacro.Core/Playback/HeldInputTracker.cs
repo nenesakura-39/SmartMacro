@@ -92,7 +92,7 @@ public sealed class HeldInputTracker
         foreach (var button in buttons)
         {
             try { releaseButton(button); }
-            catch (Exception ex) { error ??= $"Could not release the {button.ToString().ToLowerInvariant()} mouse button: {ex.Message}"; }
+            catch (Exception ex) { error ??= $"Could not release the {StepDescriber.DescribeMouseButton(button)}: {ex.Message}"; }
         }
 
         for (var i = keys.Count - 1; i >= 0; i--)

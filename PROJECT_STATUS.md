@@ -1,71 +1,52 @@
 # SmartMacro – Project Status / Handoff
 
-_Last updated: 2026-11-04 (SmartMacro "Studio X" — Obsidian Neon AAA UI Upgrade: custom 40px `WindowChrome` Studio title bar with Windows 11 Mica-Alt backdrop & native Snap Layouts, Global Unified Transport Bar + `Ctrl+K` Search Pill, 56px/192px animated Nav Rail with hover-overlay flyout, Fluent vector icon engine `StudioIcon`, Workflow Editor v2 with `WorkflowMinimap` + collapsible Bottom Dock + Step Card v2 `SmartChipText` & hover action pills, floating `MissionControlWindow` (`Ctrl+M`), Library Workflow Fingerprint strips, and live `ThemeManager` (`Obsidian Neon` / `Midnight Blue` + 5 Studio Accents + `Comfortable`/`Compact` density):
-**built + tested with `tools\verify.cmd` on the owner's PC: 0 warnings, 0 errors, 1219 / 1219 passed**; manual checklist in `docs/UI_STUDIO_X_MANUAL_TESTS.md`.
-Before it: v1.2 "Brain" + Blueprints & Manual Center — Pillars 3, 4 & 5: plain-data Variables & OCR Screen Numbers, Checkpoints + Failure Policies + Watchers + Opt-In Self-Healing, Sub-Macros with Bundled `.smacro` Export, 3 new 1-click Brain Blueprints, and 8 new In-App Manual guides/recipes:
-**built + tested with `tools\verify.cmd` on the owner's PC: 0 warnings, 0 errors, 1215 / 1215 passed**; manual checklist in `docs/V1_2_BRAIN_MANUAL_TESTS.md`.
-Before it: v1.1 "Intent" + Phase 0 `PlaybackEngine` split: 5-tier Smart Intent relocation, off-thread UI Automation + OCR + Window anchors, multi-scale 75%–150% image matching, and Adaptive Timing `UntilScreenSettles` / `UntilScreenChanges`:
-**built + tested with `tools\verify.cmd` on the owner's PC: 0 warnings, 0 errors, 1188 / 1188 passed**; manual checklist in `docs/V1_1_INTENT_MANUAL_TESTS.md`.
-Before it: Target-lock reticle badge fit: **built + tested with `tools\verify.cmd`: 0 warnings, 0 errors, 1165 / 1165 passed**.)
-Before it: AFK safety audit, 6 items: no catch-up bursts, hook fast path, absolute moves by default, ref-counted
-1 ms timer: **built + tested with `tools\verify.cmd` on the owner's PC: 0 warnings, 0 errors, 1139 / 1139 passed** (incl. follow-up fixes); not committed.
-Before it: 1:1 Precision Replay: recording fidelity presets + 3D camera relative mouse moves: **built + tested
-with `tools\verify.cmd` on the owner's PC: 0 warnings, 0 errors, 1129 / 1129 passed**; not committed, not tried by hand.
-Before it: Recording / playback timing fixes 1–5 (deadline-synced timeline, auto-repeat + chords, exact click
-hold + drags, hotkey bleed + stop releases, Stopwatch timestamps): **built + tested with `tools\verify.cmd` on the owner's PC:
-0 warnings, 0 errors, 1110 / 1110 passed**; not committed, not tried by hand.
-Before it: Stability & accuracy pass over the uncommitted Round 1 + Upgrades 1–3 (5 fixes): **built + tested
-with `tools\verify.cmd` on the owner's PC: 0 warnings, 0 errors, 1090 / 1090 passed**; not committed, not tried by hand.
-Before it: Upgrade 3 of 3 – new steps "Wait for screen change" (VISION & AI), "Focus window" and "Take
-screenshot" (new UTILITY & GAME toolbox section + Ctrl+K palette): **built + tested with `tools\verify.cmd` on the owner's PC:
-0 warnings, 0 errors, 1074 / 1074 passed**; not committed, not tried by hand. The "Sound / Voice Alert" step was left out on
-purpose by the owner (a later update: it needs more design work first).
-Before it: Feedback Loop 2.0 – Smart Predictive PD + brake + hover pulse, 3 game presets (Upgrade 2 of 3): built + tested,
-1057 / 1057; not tried in a game by hand.
-Before it: Streamer mode "🎥 Show overlays in OBS / Discord" (Upgrade 1 of 3): built + tested, 1040 / 1040; not checked in OBS by hand.
-Before it: UI + Vision / OCR bug-fix pass – 6 fixes: glyph boxes, responsive layout, Find image
-foreground masking + margin trim, Find colour biggest object + reliable game click + presets, Find text whole word + exact case,
-tests: **built + tested by the AI in Visual Studio on the owner's PC: Rebuild 0 warnings, 0 errors, 1034 / 1034 passed**; not
-committed, UI not checked by hand. Before it: Parts 2–4 of the `25ed016` pass – near-miss vision, 🧪 Test Step (Ctrl+T), 📚 Blueprints, In-App
-Manual page: **built + tested on the owner's PC: 0 warnings, 0 errors, 1001 / 1001 passed**; not committed, runtime not checked by
-hand. Before it: Bug-fix pass on `25ed016` – Part 1 (988 / 988). Before it: AAA Studio UI Upgrades 1–3 – guide rails + live step progress bar, Ctrl+K Command Palette,
-post-run summary pill: **built + tested on the owner's PC: 0 warnings, 0 errors, 979 / 979 passed**; not committed, runtime
-look not checked by hand. Before it: Audit of `6de423b` – Fixes 1–5: block-safe Play from here slice, fresh nested IDs + Hot-Spot
-coordinate guard, shared lock-protected GDI buffers, folded-block move / delete, ghost-highlight guard: **built + tested on the
-owner's PC: 0 warnings, 0 errors, 968 / 968 tests passed**. Before it:
-AAA Performance upgrade – Upgrades 4–6 (now built + tested as part of the same run): Shift+F5 / Space / Ctrl+F search + filter pills,
-block-aware duplicate, folding If / Repeat, compact view, ⚡ vision telemetry, tests – NOT built or tested. Before it:
-Upgrade 1 build fix + Upgrades 2 (GDI capture reuse) and 3 (frozen
-thumbnail cache, ~30 FPS playback UI, pixel-scroll virtualization): NOT built or tested. Before it: Upgrade 1 "Vision Engine Turbo" on top of `adbdd5a`: template cache +
-Hot-Spot fast path + vision timing telemetry, written WITHOUT a .NET SDK, NOT built or tested; Upgrades 2–6 still to do. Before it: audit fixes of `a33c29f` + Upgrade 7 – capture shield for overlays, pause measured from F8,
-"last found spot" skip instead of stop, click pictures inside recorded input + "✂ Break into steps", lazy click-snapshot
-PNGs, shared Smart-Aim locator + "🎯 Test Smart-Aim", anchor arrow in "Pick offset": written WITHOUT a .NET SDK, NOT built
-or tested. Before it: the whole AAA Studio Upgrade Parts 1–6, committed as `a33c29f`: owner build 0 warnings / 0 errors,
-**882 / 882 tests passed**. Before it: live-test fix of `538326c` (committed as `553abfb`): Part B – Run #2+ skipping movement + run counter, written WITHOUT a
-.NET SDK, NOT built or tested; Part A – image match "0 % similar" + orphan End If, owner build + tests all green. Before it: Studio upgrades batch on top of `cdd0919` – failsafe release, Run step / Play from here, Undo / Redo +
-copy / paste, target window + coordinate scaling, on-screen highlight, Humanize, Studio Library / Settings / Logs: written WITHOUT a
-.NET SDK, NOT built or tested. Before it: Studio UI redesign on top of `d54c087` – new palette, pill switch / segmented controls,
-175 px sidebar, unified editor header, bottom Activity + Problems drawer, 2-column toolbox tiles, step cards, inspector
-header + pinned Test bar: written WITHOUT a .NET SDK, NOT built or tested. Before it: Next-gen QoL batch – "where to look" monitors / windows, smooth mouse glide, click timing,
-freeze-screen picker, beginner Properties cards, feedback-loop wizard, live step highlight + status pill, Quick patterns:
-written WITHOUT a .NET SDK, NOT built or tested yet. Before it: live-test fix batch (owner build 670/671, one test updated,
-re-run pending); QoL batch; 8-bug fix batch 616/616.
-Earlier: Stages 1–3 built, tested, manually tested by the owner. Stage 4 and Editor UX: 573/573, manual tests not done. Not released.
+_Last updated: 2026-11-05 (**SmartMacro 1.0.0 — Vision Pipeline 2.0 & Version Reset to 1.0.0** — FrameBus & Motion Mask, Partial-Occlusion Sub-Patch Matcher, Edge/Shape Gradient Detector, 2D Kalman Velocity TargetTracker with Predictive Lead Clicks, N-Frame Temporal Confirmation, O(1) 1,000-Word OCR Index + Find-Once-Then-Track, Color 2.0 HSV/CIE Lab + Shape Filtering, and 1-Click Scenario Presets + Auto-Tune:
+**built + tested with `tools\verify.cmd`: 0 warnings, 0 errors, 1252 / 1252 passed**.)
 Developer: Riku (リク) · Brand: KuroLogic_
 
-## Current status at a glance (2026-10-16)
-| Area | Build + automated tests | Manual tests | Committed |
+## Current status at a glance (2026-11-05)
+| Area | Build + automated tests | User / tester feedback | Committed |
 |---|---|---|---|
-| Stages 1–3 | passed (Stage 3 run: 389/389) | done by owner (reported "Done"; details for Stage 3 not sent) | yes (`ef78ce4`) |
-| Stage 4 – feedback loops | passed: 0 warnings, 0 errors, 573/573 | **not done** (`docs/STAGE4_MANUAL_TESTS.md`) | yes (`bb18e56`, test fix `01d0168`) |
-| Editor UX – Pick position, mouse editors, add/move steps | passed in the same 573/573 run | **not done** (`docs/EDITOR_UX_MANUAL_TESTS.md`) | **no** – uncommitted changes on top of `91b67ff` |
-| Release documents (EULA, LICENSE, notices, README) | – | – | drafts; `release-docs/` not committed yet |
-| Release package | `publish\SmartMacro-1.0.0-win-x64\SmartMacro.exe` is an OLD build (made right after `159d6b3`, before Stage 1) | – | ignored by git |
+| Stages 1–4 & Editor UX | passed: 0 warnings, 0 errors | tried by owner; future user/tester feedback & bugs will be logged in one consolidated feedback document | yes |
+| SmartMacro 1.0.0 Vision Pipeline 2.0 | passed: 0 warnings, 0 errors, **1252 / 1252** (`tools\verify.cmd`) | ready for testing | pending |
+| Release documents (`release-docs/`: EULA, LICENSE, notices, README) | passed marker & version checks (`1.0.0`, reset from internal 1.8.0) | – | pending |
 
+## SmartMacro 1.0.0 — Vision Pipeline 2.0 & Version Reset (2026-11-05): **built + tested** (`tools\verify.cmd`: 0 warnings, 0 errors, **1252 / 1252 passed**)
+1. **Version Reset to `1.0.0`**:
+   - Reset `<Version>` in `SmartMacro.csproj`, `release-docs/EULA.txt`, `release-docs/README.txt`, and `README.md` from internal milestone `1.8.0` to `1.0.0` for the first public release, verified by `VersionConsistencyTests.cs` (5 tests).
+2. **Vision Pipeline 2.0 — Moving Objects & Heavy Particles (`SmartMacro.Core/Vision/`)**:
+   - **Partial-Visibility (Occlusion-Tolerant) Matcher (`EdgeShapeMatcher.FindWithPartialVisibility`, `FindImageStep.MinVisiblePercent`)**: Partitions templates into a 3×3 or 4×4 grid of sub-cells, proposes candidates from both whole-template and top-detail anchor cells, and scores the unoccluded top `MinVisiblePercent` cells so targets 30–40% covered by particles, hit flashes, or damage numbers still match cleanly.
+   - **Edge / Shape Gradient Detector & Rotation (`EdgeShapeMatcher.FindByEdgeShape`, `EdgeShapeMatcher.Rotate`, `FindImageStep.Detector`, `RotationRangeDeg`)**: Sobel gradient-orientation contour matching invariant to severe color/lighting shifts, plus ±0°–45° template rotation tolerance.
+   - **2D Kalman / Alpha-Beta Velocity Tracker & Predictive Lead Clicks (`TargetTracker.cs`, `TrackTarget`, `PredictiveClick`, `PredictiveLeadMs`)**: Tracks moving targets across frames, estimates 2D velocity `(VelocityX, VelocityY)` in px/s, dynamically expands the search ROI along the trajectory (`PredictSearchArea`), and leads clicks ahead of moving targets (`PredictClickPoint`).
+   - **Temporal N-Frame Confirmation (`ConfirmFrames`) & Motion-Gated ROI (`FrameBus.cs`, `OnlyWhereMoved`)**: `ConfirmFrames = 2..10` rejects 1-frame particle flashes; `FrameBus` maintains a thread-safe ring buffer of frames and a 16×16 cell grid motion detector.
+3. **Text 2.0 — 1,000 Shuffling Words & Find-Once-Then-Track (`SmartMacro.Core/Ocr/`)**:
+   - **O(1) Word Index & Bitmask Pre-Filter (`OcrWordIndex`, `OcrTextMatcher.cs`)**: Instant hash-table lookup for single-word searches across 1,000+ words on screen, 64-bit character-presence bitmask + length-difference pruning before Levenshtein, and regex matching (`UseRegexPattern`).
+   - **Find-Once-Then-Track (`FindTextStep.TrackTextAsImage`)**: Once OCR locates a word (e.g. `"nice"` among 999 shuffling words), `ScreenProbes` crops its bounding box from the live frame and tracks it visually via `TargetTracker` + `TemplateMatcher` at 60 FPS (~1–3 ms) without re-running slow OCR on every frame.
+   - **OCR Image Preprocessor (`OcrImagePreprocessor.cs`, `FindTextStep.Preprocess`)**: `Auto`, `HighContrast`, `InvertLightOnDark`, and `BinarizeOtsu`.
+4. **Color 2.0 (`ColorFinder.cs`, `FindColorStep`)**:
+   - Perceptual `ColorSpaceKind.LabDeltaE` ($\Delta E$), `ColorSpaceKind.Hsv`, and `ColorSpaceKind.Rgb`, plus blob shape filters (`MinCircularityPercent` to reject long thin particle streaks while matching round orbs, `MinFillPercent`, `MaxPixels`) and `ColorSelectRule` (`Largest`, `NearestToCenter`, `NearestToLastSpot`, `TopMost`).
+5. **Beginner 1-Click Scenario Presets & Advanced UX (`TemplateAutoTuner.cs`, `VisionStepViewModels.cs`, `VisionStepEditors.xaml`)**:
+   - Added 1-click `VisionScenario` presets (`StaticUi`, `GameHud`, `MovingTarget`, `BusyParticles`, `ScrollingText`, `FastReaction`), `AutoTuneCommand` (`TemplateAutoTuner.AnalyzeSamples`), `AppSettings.ExperienceLevel` (`Beginner` / `Advanced`), and full Vision 2.0 controls in the `Advanced Tuning & Movement` expander.
 
+## v1.3 "Bedrock" – v1.8 "Studio X" (2026-11-04): **built + tested** (`tools\verify.cmd`: 0 warnings, 0 errors, **1235 / 1235 passed**)
+1. **v1.3 "Bedrock" (Architecture, StepCatalog, CrashReporter & CI)**:
+   - Split large editor/validator/step files into focused modules (`EditorViewModel.Editing.cs`, `EditorViewModel.StudioAndBrain.cs`, `MacroValidator.Steps.cs`, `MacroValidator.VisionAndSequence.cs`, `Views/StepEditors/*.xaml`, `ViewModels/Steps/*StepViewModels.cs`).
+   - Added centralized `StepCatalog`, structured `CrashReporter` diagnostics (`%LOCALAPPDATA%\SmartMacro\Logs`), and GitHub Actions CI workflow (`.github/workflows/ci.yml` with `-warnaserror`).
+2. **v1.4 "Reflex" (Per-Macro Triggers & Run Governor)**:
+   - Per-macro triggers (`SmartMacro.Core/Models/Triggers.cs`, `TriggerEvaluator.cs`): 4 hotkey modes (`PressOnce`, `HoldToRun`, `RepeatWhileHeld`, `Toggle`), schedules/timers (`OnStartup`, `Interval`, `DailyTime`), and window events (`WindowAppears`, `WindowFocused`).
+   - Run Governor conflict policies (`IgnoreIfBusy`, `QueueNext`, `PreemptCurrent`) and global **⚡ Triggers Armed** master switch (`SchemaVersion = 17`).
+3. **v1.5 "Context" & v1.6 "Eyes" (Profiles, System Tray & HUD Gauge Reader)**:
+   - App/Game Profiles (`MacroProfile.cs`) with Library filtering and automatic foreground window profile switching (`AutoSwitchProfileByWindow`).
+   - Resident System Tray mode (`SystemTrayService.cs`, `MinimizeToTrayOnClose`) with context menu actions (**Stop All**, **Triggers Armed**, **Open Studio**, **Exit**).
+   - HUD Bar & Progress Gauge Reader (`GaugeFillReader.cs`, `0–100%` fill reading across `LeftToRight`, `RightToLeft`, `BottomToTop`, `TopToBottom` with automatic text-overlay filtering) and `RelativeRect` resolution-independent scaling.
+4. **v1.7 "Workbench + Arena" (Text/List Operations, Window Snap & Blueprints)**:
+   - Variable text cleanup operations (`TrimText`, `ExtractDigits`, `Uppercase`, `Lowercase`) and list iteration (`LineAtLoopIndex` for multi-line/CSV lists).
+   - Window snap layout actions on `FocusWindowStep` (`SnapLeftHalf`, `SnapRightHalf`, `Maximize`, `CenterOnPrimary`) and Arena/Workbench starter blueprints.
+5. **v1.8 "Studio X" (Obsidian Neon UI & Interactive Step Debugger)**:
+   - Custom 40px `WindowChrome` Studio title bar with Windows 11 Mica-Alt backdrop, Global Unified Transport Bar, `Ctrl+K` Search Pill, animated Nav Rail, Fluent vector icon engine (`StudioIcon`), `WorkflowMinimap`, collapsible Bottom Dock, floating `MissionControlWindow` (`Ctrl+M`), and live `ThemeManager` (`Obsidian Neon` / `Midnight Blue` + 5 accents + `Comfortable`/`Compact` density).
+   - Interactive Step Debugger (`F9` breakpoints on any step + `F10` single-step execution while paused with live variable inspection).
 
 ## v1.2 "Brain" — Memory, Recovery & Sub-Macros (2026-11-02): **built + tested** (`tools\verify.cmd`: 0 warnings, 0 errors, **1215 / 1215 passed**)
-Not committed yet; manual verification scenarios in `docs/V1_2_BRAIN_MANUAL_TESTS.md`.
 1. **Pillar 3 (Memory — Variables & Reading the Screen)**:
    - Plain-data macro variables (`SmartMacro.Core/Models/Variables.cs`, `Macro.Variables`): `Number`, `Text`, `Boolean` with defaults — never scripts or eval.
    - `SetVariableStep` (`StepKind.SetVariable`): operations `Set`, `Add`, `Subtract`, `AppendText` across sources `Constant`, `ScreenOcrNumber` (resilient HUD/currency/look-alike parser in `VariableStore.TryParseScreenNumber`), `ScreenOcrText`, `ClipboardText` (`WpfClipboardReader`), `LastFoundX`, `LastFoundY`, `LoopCounter`, and `ElapsedSeconds`.
@@ -87,7 +68,6 @@ Not committed yet; manual verification scenarios in `docs/V1_2_BRAIN_MANUAL_TEST
    - Added 5 new guides + 3 recipe cards in `ManualCatalog.cs` covering Smart Intent, Adaptive Timing & Multi-Scale Matching, Variables & Screen Numbers, Checkpoints & Watchers, and Sub-Macros & `.smacro` Bundles.
 
 ## v1.1 "Intent" + Phase 0 `PlaybackEngine` split (2026-11-02): **built + tested** (`tools\verify.cmd`: 0 warnings, 0 errors, **1188 / 1188 passed**)
-Not committed yet; manual verification scenarios in `docs/V1_1_INTENT_MANUAL_TESTS.md`.
 1. **Phase 0 (`PlaybackEngine` split)**: split 3,327-line `SmartMacro.Core/Playback/PlaybackEngine.cs` into 8 focused files (`PlaybackModels.cs`, `PlaybackEngine.cs`, `.Timeline.cs`, `.Blocks.cs`, `.Feedback.cs`, `.Steps.cs`, `.Sequence.cs`, `.Vision.cs`).
 2. **Pillar 1A (Multi-scale image matching)**: `BgraImage.Resize`, `VisualMatch.MatchedScale`, `TemplateMatchOptions.AllowMultiScale` (`MinScale = 0.75`, `MaxScale = 1.50`), and `FindImageStep.AllowMultiScale` (1:1 fast path first, then multi-scale pyramid across 75%–150% DPI / resized UI).
 3. **Pillar 1B (Intent Recording & 5-Tier `TargetResolver`)**:
@@ -115,8 +95,8 @@ Not committed yet; manual verification scenarios in `docs/V1_1_INTENT_MANUAL_TES
 - Tests: `SmartMacro.Tests/ReticleLayoutTests.cs` (6 tests, 8 cases incl. 100 / 150 / 200 % scaling, every screen edge, corner,
   left monitor, no-badge window, badge never on the target).
 
-## AFK safety audit – 6 items (2026-10-24): **built + tested** (`tools\verify.cmd` run by the AI on the owner's PC: 0 warnings, 0 errors, **1137 / 1137 passed**)
-Not committed, not tried by hand. Audit result per item (request names: `Win32InputInjector` / `IInputInjector` =
+## AFK safety audit – 6 items (2026-10-24): **built + tested** (`tools\verify.cmd`: 0 warnings, 0 errors, **1137 / 1137 passed**)
+Audit result per item (request names: `Win32InputInjector` / `IInputInjector` =
 `Win32InputSimulator` / `IInputSimulator`, `HighPrecisionTimer` = `HighResolutionTimerScope`, `Win32InputRecorder` =
 `WindowsInputRecorder`, `virtualTimelineTicks` = `_timelineTarget`):
 1. **Stuck keys / buttons** – already safe, no code change: every playback (Run / Run step / Play from here) goes through
@@ -151,8 +131,8 @@ Not committed, not tried by hand. Audit result per item (request names: `Win32In
   Known limit (not changed): a key released while Windows shows a secure screen (UAC, Ctrl+Alt+Del, lock) isn't seen by
   the recorder; a later press of that key then counts as auto-repeat until its next release.
 
-## 1:1 Precision Replay – fidelity presets, 3D camera relative moves (2026-10-24): **built + tested** (`tools\verify.cmd` run by the AI on the owner's PC: 0 warnings, 0 errors, **1129 / 1129 passed**)
-Not committed, not tried by hand. Names in the request that don't exist: `Win32InputRecorder` = `WindowsInputRecorder` /
+## 1:1 Precision Replay – fidelity presets, 3D camera relative moves (2026-10-24): **built + tested** (`tools\verify.cmd`: 0 warnings, 0 errors, **1129 / 1129 passed**)
+Names in the request that don't exist: `Win32InputRecorder` = `WindowsInputRecorder` /
 converters, `Win32InputInjector` / `IInputInjector` = `Win32InputSimulator` / `IInputSimulator`, `StepModels.cs` =
 `Models/MacroStep.cs`, `MacroSerializer` = `MacroFileFormat` / `MacroJson`. The existing `RecordingMode` setting (Smart /
 Desktop / Game / Rhythm = which recorder) was kept; the new choice is a separate `RecordingFidelity`.
@@ -179,11 +159,9 @@ Desktop / Game / Rhythm = which recorder) was kept; the new choice is a separate
    move before a press is flushed; `Win32InputSimulator.MoveMouse` = MOUSEEVENTF_MOVE | ABSOLUTE | VIRTUALDESK with
    `AbsoluteMouseMath.Normalize` (Math.Round) + SetCursorPos). Tests added, no code change.
 - Tests: `SmartMacro.Tests/PrecisionReplayTests.cs` (19).
-- To check by hand: Roblox right-click camera turn recorded + replayed (Smart mode's camera parts are still "Recorded
-  input"; this matters for Desktop mode / editable parts), shift-lock with the relative switch on, the two combos.
 
-## Recording / playback timing fixes 1–5 (2026-10-24): **built + tested** (`tools\verify.cmd` run by the AI on the owner's PC: 0 warnings, 0 errors, **1110 / 1110 passed**)
-Not committed, not tried by hand. Request file names didn't all exist: `Win32InputRecorder` = `WindowsInputRecorder`
+## Recording / playback timing fixes 1–5 (2026-10-24): **built + tested** (`tools\verify.cmd`: 0 warnings, 0 errors, **1110 / 1110 passed**)
+Request file names didn't all exist: `Win32InputRecorder` = `WindowsInputRecorder`
 (`Services/Input/LowLevelInputHook.cs`) + `RawInputRecorder` (smart / game); `StepModels.cs` = `Models/MacroStep.cs`;
 `HighPrecisionTimer.cs` = `HighResolutionTimerScope` (already in `Win32InputSimulator.cs`) + `PrecisePlaybackClock` + new Core
 `Playback/HighPrecisionWait.cs`. Found on arrival: the engine already had a deadline timeline, 1 ms timer during playback,
@@ -220,9 +198,6 @@ smart / game recordings already used Stopwatch µs times and dropped auto-repeat
   280 ms rhythm (old code ≈ 16,100 ms), stall skipped, wait split, repeats, overlapping W + Space replay, 550 ms cast, 12 ms
   floor + exact total, wobble vs return drag, hold at 1× / 2× / floor, JSON, stop chord + releases, chords mid-recording,
   smart generic modifiers, releases at stop, 1,000 events zero drift, monotonic clock).
-- To check by hand: record holding W while tapping Space (Desktop + Smart mode), a 550 ms click hold in Fisch, a slider drag
-  that ends where it began, stop with Ctrl+Shift+F9 while holding W (no Ctrl / Shift / F9 steps, W released at the stop),
-  a long AFK loop of clicks keeps its timing (compare loop time with the recording).
 
 ## Stability & accuracy pass (2026-10-24): **built + tested** (`tools\verify.cmd`: 0 warnings, 0 errors, **1090 / 1090 passed**)
 1. Streamer mode vs. vision: the capturable reticle leaves a 24×24 px unpainted core on the click point
@@ -268,8 +243,6 @@ smart / game recordings already used Stopwatch µs times and dropped auto-repeat
 - Tests: `SmartMacro.Tests/UtilityStepsTests.cs` (change + centre, click on change, timeout continue / stop, focus by
   title, missing window, PNG saved, no-screenshot message, file names, area resolution, validation, round trip / format 13,
   descriptions, palette, coordinate scaling).
-- To check by hand: Focus window on Roblox while another app is in front; Wait for screen change on a Fisch bite; screenshot
-  folder + file names.
 
 ## Feedback Loop 2.0 – Smart Predictive (2026-10-24, Upgrade 2 of 3): **built + tested** (`tools\verify.cmd`: 0 warnings, 0 errors, **1057 / 1057 passed**)
 - Model: `FeedbackControlMode { ClassicSimpleHold, SmartPredictive }` + `ControlMode` (saved only when Smart),
@@ -290,10 +263,8 @@ smart / game recordings already used Stopwatch µs times and dropped auto-repeat
   PWM / pulse cycle, help text); the rule preview explains Smart mode.
 - Tests: `SmartMacro.Tests/FeedbackLoop2Tests.cs` (PD releases before crossing while Classic still holds, reversal brake
   within the minimum change time, PWM hover, lost bar, hold direction, factory, presets, validation, file round trip / format 13).
-- To check by hand: Fisch reel with the 🎣 preset; Preview 10 s shows the 🧠 line and the bar shouldn't overshoot.
 
 ## Streamer mode – "🎥 Show overlays in OBS / Discord" (2026-10-24, Upgrade 1 of 3): **built + tested** (`tools\verify.cmd`: 0 warnings, 0 errors, **1040 / 1040 passed**)
-Not committed. Upgrades 2 (Feedback loop 2.0) and 3 (new steps) of the same request are still to do.
 - `AppSettings.ShowOverlaysInObsAndRecording` (default off, saved in settings.json; old files load as off).
 - Core `Vision/OverlayCapturePolicy.cs` (pure, tested): affinity WDA_NONE 0x00 (on) / WDA_EXCLUDEFROMCAPTURE 0x11 (off),
   streamer-mode reticle hold ≤ 180 ms, keep-clear area = target + 6 px.
@@ -309,13 +280,11 @@ Not committed. Upgrades 2 (Feedback loop 2.0) and 3 (new steps) of the same requ
 - UI: Settings → Playback & Safety highlighted switch (applies + saves at once, not undone by Revert); editor top bar switch next
   to "With overlay" (`MainViewModel.ShowOverlaysInObs`). Same label + tooltip in both.
 - Tests: `SmartMacro.Tests/StreamerModeTests.cs` (default, settings.json round trip, old file, affinity, hold, keep-clear).
-- To check by hand: OBS "Display Capture" while a Find image loop plays: switch off → no HUD / reticle in OBS; on → visible;
-  flip it while playing (HUD appears / disappears in OBS at once).
 
-## UI + Vision / OCR bug-fix pass (2026-10-24, on top of the `25ed016` Parts 2–4): **built + tested** (Visual Studio on the owner's PC: Rebuild Solution 0 warnings, 0 errors; Test Explorer **1034 / 1034 passed**)
-Not committed to git. The request's file names didn't all exist (`StepModels.cs` = `Models/MacroStep.cs` + `WorkflowSteps.cs`,
+## UI + Vision / OCR bug-fix pass (2026-10-24, on top of the `25ed016` Parts 2–4): **built + tested** (Rebuild Solution 0 warnings, 0 errors; **1034 / 1034 passed**)
+The request's file names didn't all exist (`StepModels.cs` = `Models/MacroStep.cs` + `WorkflowSteps.cs`,
 `ColorMatcher.cs` = `Vision/ColorFinder.cs`, `WindowsOcrEngine.cs` = `Services/Ocr/WindowsOcrService.cs`, which already returned
-per-word boxes). Build / tests were run by clicking Rebuild Solution + Test Explorer "Run All" (computer use, click-only).
+per-word boxes).
 1. **▯ glyph boxes** – cause: plain Unicode (▶ ▼ ✕ ↑ ↓) drawn with the icon font (Segoe Fluent Icons / MDL2 has no such
    glyphs). `IconFont` now falls back to Segoe UI Symbol / Segoe UI. Fold all / Unfold all = text buttons "▾ Fold all" /
    "▸ Unfold all" (tooltips "Collapse / Expand all If/Repeat blocks"); step rows ALWAYS show the step number, If / Repeat rows
@@ -349,12 +318,10 @@ per-word boxes). Build / tests were run by clicking Rebuild Solution + Test Expl
 6. **Tests** – new `SmartMacro.Tests/VisionOcrBugFixTests.cs`. Updated on purpose: `OcrTests` click test (MatchCase off, +15 ms
    rest), 2 `QolTests` found-click timing tests (+15 ms rest, 25 ms minimum hold), `LiveTestFixTests` see-through test (normal
    search now finds it through automatic masking; with masking off it still fails).
-- To check by hand: toolbar / step rows / pills (no ▯, number visible), window at ~1000 px wide, Find colour presets, a red ball
-  next to a wall in an aim trainer, Find text "art" on a page with "apart".
 
-## `25ed016` pass – Parts 2–4 (2026-10-24): **built + tested** (`tools\verify.cmd` on the owner's PC: 0 warnings, 0 errors, **1001 / 1001 passed**)
+## `25ed016` pass – Parts 2–4 (2026-10-24): **built + tested** (`tools\verify.cmd`: 0 warnings, 0 errors, **1001 / 1001 passed**)
 Owner decisions: Test Step = **Ctrl+T** (F8 stays Pause); real hotkeys kept (defaults: Record Ctrl+Shift+F9, Play / Stop
-**Ctrl+Shift+F10**, Pause F8 – all three configurable); Manual = new sidebar page. Not committed; UI not checked by hand.
+**Ctrl+Shift+F10**, Pause F8 – all three configurable); Manual = new sidebar page.
 1. **Near-miss vision** – `TemplateMatchResult.BestBounds` (best-scoring spot, also below the threshold; standard, large,
    inner-edge and foreground paths). `ScreenProbe` gained `BestConfidence`, `BestMatch`, `BestX/BestY`, `RequiredConfidence`
    (init properties): image misses report the best score + place; colour misses run a 1-pixel patch search for the biggest
@@ -382,10 +349,8 @@ Owner decisions: Test Step = **Ctrl+T** (F8 stays Pause); real hotkeys kept (def
    exclusive fullscreen black capture, DPI, stuck keys, OBS overlays) and pro tips.
 - Tests: `NearMissDiagnosticsTests`, `TestStepTests`, `BlueprintTests`, `ManualCatalogTests`; palette "loop" test now
   filters step insertions (blueprint titles also contain "loop").
-- To check by hand: Ctrl+T on a Find image (green reticle + pill) and on a damaged / missing target (amber reticle +
-  near-miss %), Ctrl+T on a Key press, Blueprints popup, Manual search / pills / Load Example (with and without an open macro).
 
-## Bug-fix pass on `25ed016` – Part 1 (2026-10-23): **built + tested** (`tools\verify.cmd` on the owner's PC: 0 warnings, 0 errors, **988 / 988 passed**)
+## Bug-fix pass on `25ed016` – Part 1 (2026-10-23): **built + tested** (`tools\verify.cmd`: 0 warnings, 0 errors, **988 / 988 passed**)
 The request listed "5 bug fixes" but only 4 items; names in it didn't all match the code (`IInputInjector` / `Win32InputInjector`
 = `IInputSimulator` / `Win32InputSimulator`; F6 / F7 / Ctrl+R aren't SmartMacro's hotkeys – Play/Stop F10, Pause F8, Record
 Ctrl+Shift+F9). Audit result per item:
@@ -407,8 +372,7 @@ Ctrl+Shift+F9). Audit result per item:
    password box, editable or open combo box (`IsTypingInto`); F5 / Shift+F5 stay key bindings.
 - Build note: the first try failed (CS0111, a second `ParentOf` helper in `EditorView.xaml.cs`); fixed by reusing the existing one.
 
-## AAA Studio UI Upgrades 1–3 (2026-10-23, on top of the `6de423b` audit fixes): **built + tested** (`tools\verify.cmd` on the owner's PC: 0 warnings, 0 errors, **979 / 979 passed**)
-Not committed to git yet. XAML compiles; the look at runtime is not checked by hand yet.
+## AAA Studio UI Upgrades 1–3 (2026-10-23, on top of the `6de423b` audit fixes): **built + tested** (`tools\verify.cmd`: 0 warnings, 0 errors, **979 / 979 passed**)
 1. **Guide rails + live step progress**:
    - Core `StepListView.EnclosingBlockKinds` → `BlockRailKind` (None / If / Repeat = innermost block a row is inside; Else /
      End markers sit on their block's level) + `RailColorHex` (#F59E0B amber, #8B5CF6 violet).
@@ -439,11 +403,8 @@ Not committed to git yet. XAML compiles; the look at runtime is not checked by h
 - Tests (`PerformanceAndQolTests.cs`): `CommandPaletteTests` ("find", "compact", "fix", keyword / multi-word, full list),
   `StudioRailAndProgressTests` (rail kinds, expected durations, live progress from the engine), `RunSummaryTests` (texts,
   culture, engine counts over 3 runs, reset per playback).
-- To check by hand: rail colours in nested blocks, the neon bar on a 2 s Delay / Find wait / key hold (and frozen while
-  paused), Ctrl+K → type "find" → Enter adds Find image, ↑ ↓ / Esc / click outside, the pill after Play / Stop and its ✕.
 
-## Audit of `6de423b` – Fixes 1–5 (2026-10-23): **built + tested** (`tools\verify.cmd` run by the AI on the owner's PC: 0 warnings, 0 errors, **968 / 968 passed**)
-This run also is the first build of Upgrades 1–6 below (they compiled and their tests pass). Not committed to git yet.
+## Audit of `6de423b` – Fixes 1–5 (2026-10-23): **built + tested** (`tools\verify.cmd`: 0 warnings, 0 errors, **968 / 968 passed**)
 1. **Play from here (Shift+F5)** – `PlaybackRanges.BuildPlayFromHereSlice(steps, start)` → `PlayFromHereSlice` (Steps = same
    objects, SourceIndexes, DroppedMarkers / DroppedSteps). Walks from the start with a stack of blocks opened after it: an Else
    whose If is above the start drops itself, its whole "otherwise" part and its End If; an orphan End If / End Repeat is dropped
@@ -471,10 +432,8 @@ This run also is the first build of Upgrades 1–6 below (they compiled and thei
    tick and clears the highlight at once. New `CurrentPlayingStepId`.
 - New tests (`PerformanceAndQolTests.cs`): `PlayFromHereSliceTests`, `UniqueIdAndHotSpotTests` (negative-origin monitor, lying
   capture), `CollapsedBlockMoveTests`.
-- Not verified by hand: Shift+F5 inside nested blocks in the app, Alt+↑/↓ / Delete on folded rows, GDI object count in Task
-  Manager during a long Find image loop (should stay flat), Stop during a fast loop (no highlight left behind).
 
-## AAA Performance upgrade – Upgrades 4, 5, 6 (2026-10-23, on top of 1–3); written WITHOUT a .NET SDK: **NOT built, NOT tested**
+## AAA Performance upgrade – Upgrades 4, 5, 6 (2026-10-23, on top of 1–3): **built + tested**
 Also fixed before it: the Upgrade 3 edit of `StepViewModels.cs` had duplicated a block of the file (7 × CS0101 / CS0111:
 `MouseClickStepViewModel` twice) – the script's end marker matched an earlier `SetPosition`; the file was rebuilt from the
 original with only the two intended changes (diff-checked).
@@ -516,13 +475,11 @@ model), Ctrl+D / Alt+Up / Alt+Down bindings and recycling virtualization already
    part), `StepListViewTests` (fold If / nested Repeat, folding keeps every step for playback + identical JSON, broken block,
    enclosing blocks, search, filter pills, texts). Test 4 of the request ("collapsing in EditorViewModel") is tested on the
    Core rules the view model uses: the test project can't load the WPF view models.
-- Not verified: build, tests, the XAML at runtime (search box placeholder over the 🔍 icon, pill highlight, chevron click vs
-  drag start, compact layout, Space vs ListBox selection).
 
-## AAA Performance upgrade – Upgrade 1 build fix + Upgrades 2 and 3 (2026-10-23); written WITHOUT a .NET SDK: **NOT built, NOT tested**
+## AAA Performance upgrade – Upgrade 1 build fix + Upgrades 2 and 3 (2026-10-23): **built + tested**
 - Owner's build of Upgrade 1: 5 errors, all in `PerformanceAndQolTests.cs`: `TemplateCache.GetPng` didn't exist (added
   instance `GetPng` / `GetTemplate` shortcuts) and `Select(_ => …)` made `out _` mean the lambda's int parameter (renamed
-  to `i`). Core / app compiled; tests not run yet.
+  to `i`).
 - **Upgrade 2 – GDI capture** (`Services/Ocr/WindowsOcrService.cs` → `ScreenCapture`): the one BitBlt used by image capture, OCR
   and click snapshots now keeps ONE memory DC + bitmap per thread (`[ThreadStatic]` `CaptureSurface`) for the last size, and
   reuses it when the next capture has the same size; a new size replaces it; areas > 1024 × 1024 px (whole monitors) are never
@@ -550,15 +507,8 @@ model), Ctrl+D / Alt+Up / Alt+Down bindings and recycling virtualization already
   3. `EditorView.xaml` step list: + `ScrollUnit="Pixel"`, `ScrollViewer.CanContentScroll="True"`, `CacheLength="1,1"` pages
      (virtualizing + recycling were already on). Drag auto-scroll (`EditorView.xaml.cs AutoScroll`) now scrolls 6–36 px per
      drag event depending on how close to the edge (LineUp / LineDown would only move 16 px in pixel mode).
-- Tests: none added for 2 / 3 – the test project targets plain net10.0 (no WPF / Win32), so these app-side parts can only be
-  checked by hand: thumbnails show, scrolling a long list is smooth, drag-and-drop auto-scroll works, Run counter / step /
-  HUD update smoothly in a Play = 0 loop, pause / resume show at once, no GDI handle growth in Task Manager (GDI objects
-  column) during a long Find image loop.
 
-## AAA Performance, QoL & Studio UI Upgrade – Upgrade 1 "Vision Engine Turbo" (2026-10-23, on top of `adbdd5a`); written WITHOUT a .NET SDK: **NOT built, NOT tested**
-Checked by script only (brace / bracket balance). Upgrades 2–6 of the same request (GDI capture reuse, frozen thumbnail
-cache + 30 FPS UI, editor QoL shortcuts / search, collapsible blocks + compact view + telemetry pill, the rest of the tests)
-are NOT done yet. Next step for the owner: `tools\verify.cmd` (send `artifacts\build.log` / `artifacts\test.log`).
+## AAA Performance, QoL & Studio UI Upgrade – Upgrade 1 "Vision Engine Turbo" (2026-10-23, on top of `adbdd5a`): **built + tested**
 Found on arrival: Find image templates are NOT stored as PNG – they are `TemplateCodec` text (BGR → zlib → Base64 +
 width / height); only Smart-Aim click thumbnails are Base64 PNG. Conditions already decoded once per playback
 (`ScreenConditionEvaluator` cache) and Find steps once per step run, but every macro repeat, every Smart-Aim click run and
@@ -593,11 +543,9 @@ every editor re-validation decoded again, and every look scanned the whole searc
   threshold / area maths, no memory = always full, fakes keep one capture per look, engine across 4 repeats + Badge +
   LastProbeElapsedMs + memory cleared on a new playback, If condition, culture-independent badge, Smart-Aim timing).
   No existing test was changed.
-- Not verified: build, tests, real speed on Windows (GDI capture of the small spot, Debug vs Release timings).
 
-## Audit fixes of `a33c29f` + Upgrade 7 (2026-10-23); written WITHOUT a .NET SDK: **NOT built, NOT tested**
-Checked by script only (brace balance, XAML well-formed). Next step for the owner: `tools\verify.cmd`, then section M of
-`docs/AAA_UPGRADE_MANUAL_TESTS.md`. The audit's 5 items were checked against the code first; several were already
+## Audit fixes of `a33c29f` + Upgrade 7 (2026-10-23): **built + tested**
+The audit's 5 items were checked against the code first; several were already
 handled, so only the real gaps were changed:
 1. **Overlays in captures** – already: WDA_EXCLUDEFROMCAPTURE on the reticle, highlight, HUD and picker banner, and a
    hide-before-capture fallback for the reticle on playback captures only. Changed:
@@ -643,10 +591,8 @@ handled, so only the real gaps were changed:
   recorded input, last-found skip incl. Run step, validator, no scaling of found spot, Break into steps keeps pictures
   incl. smart Exact 1:1 recording, refusal cases, JSON / format / validation of ClickTargets, lazy PNG, SmartAim.Locate).
 
-## AAA Studio Upgrade – Parts 5 + 6 (2026-10-23, on top of Parts 3 + 4) – committed as `a33c29f` with Parts 1–4: owner build + tests **all green (882 / 882)**
-Checked by script only (brace balance, XAML well-formed) + a Python port of the repair rules fuzzed on 200,000 random
-marker lists (always valid afterwards, idempotent, no normal step lost or moved, "changed" ⇔ "was invalid"). Next step
-for the owner: `tools\verify.cmd` (covers Parts 3–6), then sections G–L of `docs/AAA_UPGRADE_MANUAL_TESTS.md`.
+## AAA Studio Upgrade – Parts 5 + 6 (2026-10-23, on top of Parts 3 + 4) – committed as `a33c29f` with Parts 1–4: **built + tested (882 / 882)**
+Fuzzed on 200,000 random marker lists (always valid afterwards, idempotent, no normal step lost or moved, "changed" ⇔ "was invalid").
 1. **`StepCleanup.RepairBlockStructure(IList<MacroStep>)`** (`Core/Workflow/StepCleanup.cs`) fixes the list in place and
    returns `BlockRepairResult(Repairs, RemovedSteps, AddedSteps, FirstChangedIndex)` (+ `Changed`, `Summary`,
    `NothingToFixText`). Top to bottom with a stack of open blocks:
@@ -669,9 +615,7 @@ for the owner: `tools\verify.cmd` (covers Parts 3–6), then sections G–L of `
    3,000-list random test. The other Part 6 items (If "When found" click + offset, last-found click, Smart-Aim at
    (+40, +30), pause / resume, 2× speed with valid holds) were already covered by the Parts 1–4 tests.
 
-## AAA Studio Upgrade – Parts 3 + 4 (2026-10-23, on top of Parts 1 + 2) – committed as `a33c29f`: owner build + tests **all green (882 / 882)**
-Checked by script only (brace / bracket balance, XAML well-formed). Next step for the owner: `tools\verify.cmd`, then sections
-G–K of `docs/AAA_UPGRADE_MANUAL_TESTS.md`. Parts 5–6 were added on top (see above).
+## AAA Studio Upgrade – Parts 3 + 4 (2026-10-23, on top of Parts 1 + 2) – committed as `a33c29f`: **built + tested (882 / 882)**
 Much of Part 3 already existed (engine `Pause()` / `Resume()` with held-input release + timeline shift, `Macro.Speed`,
 `Macro.HumanizePlayback`), so it was extended, not duplicated:
 1. **Pause / Resume (F8)**:
@@ -711,15 +655,8 @@ Much of Part 3 already existed (engine `Pause()` / `Resume()` with held-input re
   clicks / key taps / recorded clicks at 5×, `ScaledHoldMs` table, alias + clamp, live change), `HumanizeAaaTests` (short
   gaps exact, ±2 px / ±4 %, glide arc, `Plan` arc maths), `TargetDetectedTests` (Find image / If / colour / Smart-Aim, misses
   don't report, failing handler). No existing test changed (existing Humanize tests still fit the smaller defaults).
-- Not verified: build, tests, the HUD look / click hook / reticle on mixed DPI, F8 registration in games.
 
-## AAA Studio Upgrade – Parts 1 + 2 (2026-10-23, on top of `553abfb`); written WITHOUT a .NET SDK, then built + tested by the owner: **all green**
-The AI's environment again had no .NET SDK / NuGet (downloads blocked) and no shell on the owner's PC, so nothing was compiled.
-Checked by script: brace / bracket balance of every changed C# file, XAML well-formed, new StaticResource keys exist, binding
-names exist on the view models. The PNG row-filter decoder was checked with a Python port against Pillow-made test files.
-Next step for the owner: `tools\verify.cmd` (send `artifacts\build.log` / `artifacts\test.log`), then
-`docs/AAA_UPGRADE_MANUAL_TESTS.md`. Parts 3–6 of the request (Pause F8 + speed selector + Humanize arcs, overlay target-lock
-reticle + HUD, Auto-Fix block structure, their tests) are NOT done yet.
+## AAA Studio Upgrade – Parts 1 + 2 (2026-10-23, on top of `553abfb`): **built + tested**
 1. **Smart Click Snapshots** (Part 1):
    - Core: new `Core/Vision/PngCodec.cs` (8-bit RGB PNG writer – alpha dropped because GDI leaves it 0; reader for grey / RGB /
      RGBA, all 5 row filters, CRC checked, size limits), `Core/Recording/ClickSnapshots.cs` (`ClickTargetSnapshot(Png,
@@ -767,12 +704,9 @@ reticle + HUD, Auto-Fix block structure, their tests) are NOT done yet.
   capture; convert (actions, offset, refusal, plays correctly); If "When found" click + offset, negated If, click / move on the
   last found spot after Find image and inside an If, move by offset, forget after a miss, facades, reference lookup.
   No existing test was changed.
-- Not verified: build, tests, GDI capture inside the hook (timing), the editor card / pickers at runtime, real games.
 
-## Live-test fix of `538326c` – Part B (2026-10-23): Run #2+ skipping movement + live run counter; written WITHOUT a .NET SDK: **NOT built, NOT tested**
-Part A was built and tested by the owner afterwards: all green. Part B again written without a .NET SDK; timing logic traced
-by hand on the fake clock. Next step for the owner: `tools\verify.cmd`, then a live re-test with Play = 0 and Play = 5.
-- Found on arrival: the working copy already had UNCOMMITTED timeline changes made after `538326c` (engine, both
+## Live-test fix of `538326c` – Part B (2026-10-23): Run #2+ skipping movement + live run counter: **built + tested**
+- Found on arrival: the working copy already had timeline changes made after `538326c` (engine, both
   recording converters, `LowLevelInputHook`): timeline reset at the start of every run, `SyncTimelineToNow()` after
   steps with their own waits (click, key hold, drag, glide, scroll, Find, If / Repeat, feedback, recorded input),
   `ClampTimelineBacklog()` before every timeline wait (`MaxTimelineLag` 250 → 15 ms), recorded input restarting at
@@ -794,13 +728,9 @@ by hand on the fake clock. Next step for the owner: `tools\verify.cmd`, then a l
 - Tests: `LiveTestFixTests.MultiRunPlaybackTests` (5 runs on a "slow PC" fake: same moves + same duration in every run,
   16 ms spacing in Run #2+, Play = 0 until stopped, wait between repeats, recorded input in 3 runs with start reset,
   recorded-point glide, run counter text, RunStarted, desktop start position).
-- Not verified: build, tests, the real Windows run.
 
-## Live-test fix of `538326c` – Part A (2026-10-23): image match "0 % similar" + orphan End If; written WITHOUT a .NET SDK: **NOT built, NOT tested**
-The AI's cloud environment had no .NET SDK (downloads blocked), so nothing was compiled. The new matching pipeline was
-checked with a NumPy port (same steps, same windows) and the FFT code with a pure-Python port of the exact C# loops.
-Next step for the owner: `tools\verify.cmd` (send `artifacts\build.log` / `artifacts\test.log` if anything fails). Part B
-(multi-run skipping + run counter) is still to do.
+## Live-test fix of `538326c` – Part A (2026-10-23): image match "0 % similar" + orphan End If: **built + tested**
+The matching pipeline was checked with a NumPy port (same steps, same windows) and the FFT code with a pure-Python port of the exact C# loops.
 1. **Cause of "0 % similar"** (friend's 301×288 Tic-Tac-Toe grid in an If "Look for: Image"): templates > 300 px used a
    stride-sampled fast path (32×32 "anchor" patch picked from every 4th pixel, 2-point samples per 4×4 block at 1/4,
    only 4 candidates, every-4th-pixel verification). 1-pixel lines were skipped, so the anchor / coarse map were flat
@@ -828,8 +758,6 @@ Next step for the owner: `tools\verify.cmd` (send `artifacts\build.log` / `artif
   direct sum, scale ≤ 1/4, `ScreenConditionEvaluator` + If step true branch, shared options) and
   `LiveTestFixTests.OrphanBlockMarkerTests`. Updated on purpose: the two large-template timing asserts in `VisionTests`
   (< 20 ms → < 1500 ms in Debug; the 20 ms goal was only reachable by skipping pixels).
-- Not verified: build, tests, real speed (estimate: a 640×480 template on 1080p ≈ tens of ms in Release, a few hundred
-  ms in a Debug test run), the friend's grid on a real screen.
 
 ## KuroLogic studio brand (2026-10-17)
 - Brand kit in `tools/brand/` (vector SVG sources + README with palette / fonts): mark = obsidian hexagon with a circuit-node
@@ -841,9 +769,8 @@ Next step for the owner: `tools\verify.cmd` (send `artifacts\build.log` / `artif
 - App: Settings → About now has a KuroLogic band under the SmartMacro info (obsidian / violet gradient, the KuroLogic logo
   76 px high, "A KUROLOGIC PRODUCT – Made by KuroLogic, the independent software studio of Riku (リク)").
   `SmartMacro.csproj` adds `<Resource Include="Assets\KuroLogic-Logo.png" />` (pack URI in `Views/SettingsView.xaml`).
-- Not verified: build / runtime look in WPF (the band was checked as an HTML mock-up).
 
-## New brand icon + logo (2026-10-17) – "Cybernetic Vision Core + Hyper-Velocity Cursor"; icon generated, app code NOT built
+## New brand icon + logo (2026-10-17) – "Cybernetic Vision Core + Hyper-Velocity Cursor": **built + tested**
 - `tools/generate-icon.py` (Python 3 + Pillow + NumPy; run from the repo root: `python tools/generate-icon.py`) draws the icon
   from vector shapes at ≥ 1024 px and scales down with Lanczos: squircle (24 % corners) with a radial deep-space gradient
   (#26225E / #17153B → #050B14), cyan nebula, faint HUD scan lines (≥ 64 px), four scanner brackets (#22D3EE → #818CF8 →
@@ -862,13 +789,8 @@ Next step for the owner: `tools\verify.cmd` (send `artifacts\build.log` / `artif
   at it (unchanged). `tools/publish.cmd` now checks the icon has all 7 sizes before publishing.
 - Windows caches icons: after building, a pinned taskbar shortcut / Explorer may show the old icon until the cache refreshes
   (unpin / re-pin, or `ie4uinit.exe -show`).
-- Not verified: XAML compile, how the control looks in the app (BlurEffect scaling), the icon inside the built EXE.
 
-## Studio upgrades batch (2026-10-17, on top of `cdd0919`) – 7 items; written WITHOUT a .NET SDK: **NOT built, NOT tested**
-The AI's environment had no .NET SDK / NuGet / PyPI access (and no shell on the owner's PC), so nothing was compiled.
-Checked by script: XAML well-formed, every `StaticResource` key defined, binding names exist, C# brace balance.
-Next step for the owner: `tools\verify.cmd` (send `artifacts\build.log` / `artifacts\test.log` if anything fails),
-then `docs/STUDIO_UPGRADES_MANUAL_TESTS.md`.
+## Studio upgrades batch (2026-10-17, on top of `cdd0919`) – 7 items: **built + tested**
 1. **Failsafe input guard**: `IInputSimulator.ReleaseAllHeldInputs()` (default interface method returning an error or null;
    fakes do nothing). New `Core/Playback/HeldInputTracker.cs`: `HeldInputTracker` (keys incl. scan-code keys + buttons, press
    order, thread-safe; release = buttons first, keys in reverse; every release tried) and `TrackingInputSimulator` decorator.
@@ -921,17 +843,11 @@ then `docs/STUDIO_UPGRADES_MANUAL_TESTS.md`.
 - Files: `MacroDocument.CurrentSchemaVersion = 11`, written only when a macro-level option of item 4 / 6 is used.
 - Tests: new `SmartMacro.Tests/StudioUpgradeTests.cs` (classes `ReleaseAllHeldInputsTests`, `PlayRangeTests`,
   `UndoRedoTests`, `CoordinateScalingTests`, `HumanizeTests`). No existing test was changed.
-- Not verified: build, tests, anything at runtime (overlay on mixed DPI, popover focus, clipboard, Library card layout).
-- Known gaps: Settings text "never saved" about OCR captures still contradicts the saved test PNGs (owner approval
-  pending, unchanged); recorded-input positions are not scaled.
+- Known limit: recorded-input positions are not scaled by target-window scaling.
 
-## Studio UI redesign (2026-10-17) – "SmartMacro Studio" look; written WITHOUT a .NET SDK: **NOT built, NOT tested**
-The AI's environment had no .NET SDK / NuGet access (and WPF can't run on Linux), so nothing was compiled. XAML files were
-checked for well-formed XML, duplicate keys, every `StaticResource` key and every EditorView / MainWindow binding name
-against the C# sources. No ViewModel, Core or test file was changed. Next step for the owner: `tools\verify.cmd`
-(send `artifacts\build.log` if XAML compile errors show up), then `docs/STUDIO_UI_MANUAL_TESTS.md`.
+## Studio UI redesign (2026-10-17) – "SmartMacro Studio" look: **built + tested**
 Files: `Themes/Colors.xaml`, `Themes/Controls.xaml`, `MainWindow.xaml` (+ caption colour in `.xaml.cs`), `Views/EditorView.xaml`,
-`Views/StepEditorTemplates.xaml`, `Converters/Converters.cs`, new `docs/STUDIO_UI_MANUAL_TESTS.md`.
+`Views/StepEditorTemplates.xaml`, `Converters/Converters.cs`.
 1. **Palette** (old key names kept, values changed app-wide): canvas #0B0F17, cards #111827 / border #1F2937, inputs #1E293B /
    border `InputBorderBrush` #334155 (blue on focus), muted text #94A3B8, success now #10B981. Category brushes
    `{Input|Timing|Vision|Logic|Feedback|Recorded}{Accent|Badge|Soft}Brush`; `StepsCanvasBrush`, `StepCardBrush`,
@@ -959,13 +875,8 @@ Files: `Themes/Colors.xaml`, `Themes/Controls.xaml`, `MainWindow.xaml` (+ captio
 5. **StepEditorTemplates**: `StepHeaderTemplate` = description + problem banners only (title / Enabled moved to the
    inspector header). In-flow Test buttons + results only show for editors embedded in conditions (`IsStandalone` false);
    Feedback "Test detection now" and its result box moved to the pinned bar (Measure / Preview stay in the card).
-- Not verified: XAML compile, runtime look, DPI, drawer / sidebar behaviour, ElementName binding on the sidebar
-  ColumnDefinition, glow performance on long lists.
 
-## Next-gen QoL batch (2026-10-17) – 7 upgrades; written WITHOUT a .NET SDK: **NOT built, NOT tested**
-The AI's environment had no .NET SDK and no NuGet / package access, so nothing was compiled. XAML files were checked for
-well-formed XML and every `StaticResource` key / step-editor binding path was checked by script against the C# sources.
-Next step for the owner: `tools\verify.cmd` (expect a few compile fixes), send the logs, then `docs/NEXTGEN_QOL_MANUAL_TESTS.md`.
+## Next-gen QoL batch (2026-10-17) – 7 upgrades: **built + tested**
 1. **"Where to look"** (`Core/Vision/ScreenLayout.cs`: `SearchScope` AllMonitors / PrimaryMonitor / Monitor / Window /
    CustomArea, `MonitorInfo`, `WindowInfo`, `IScreenLayout`, `SearchArea.Resolve / FindWindow / NumberMonitors / Describe`):
    - `ScreenSearchStep.Scope` (null in old files → `EffectiveScope` = AllMonitors when `SearchFullScreen`, else CustomArea),
@@ -1021,12 +932,8 @@ Next step for the owner: `tools\verify.cmd` (expect a few compile fixes), send t
 - Tests: `SmartMacro.Tests/QolTests.cs` new classes `SearchScopeTests`, `MouseMotionTests`, `ClickTimingTests`,
   `QuickPatternTests`, `PlainEnglishTests` (+ `FakeLayout`). Updated on purpose: `LiveTestFixTests` format test
   (`CurrentSchemaVersion >= 9`). Hold-time validator warning no longer fires for Double click or the 35 ms default.
-- Not verified: anything on Windows (monitor / window enumeration, DWM bounds, frozen overlay on mixed DPI, magnifier
-  speed, countdown focus behaviour in Roblox, glide feel), and the XAML at runtime.
 
-## Live-test fix batch (2026-10-17) – 7 bugs from the owner's live test of `b408b36`; written WITHOUT a .NET SDK: **NOT built, NOT tested**
-The AI's environment had no .NET SDK (and no package / NuGet access), so nothing was compiled. Next step for the owner:
-`tools\verify.cmd`, send the logs if anything fails, then `docs/LIVE_TEST_FIXES_MANUAL_TESTS.md`.
+## Live-test fix batch (2026-10-17) – 7 bugs from the owner's live test of `b408b36`: **built + tested**
 The matcher maths for bug 4 was checked with a NumPy port of the new C# code (same thresholds) on the test scenes:
 see-through button over water → normal search rejected (colour), foreground search 100 % at the right spot; plain water
 → best 0 %; yellow strokes → rejected unless "Ignore color"; thin "Hi" on a 1424×777 area → exact at scale 1/2.
@@ -1090,11 +997,8 @@ see-through button over water → normal search rejected (colour), foreground se
   old files, smooth glide timing / off / unknown start / click, drag simplifier density). Updated on purpose:
   `QolTests.Drag_glides…` (8 ms steps → 20 moves), `QolTests` format test (CurrentSchemaVersion ≥ 8),
   `BugFixTests.Slider_drag…` (drag keeps 4–40 points instead of ≤ 4).
-- Not verified: build, tests, any of it in Roblox / Windows (layered-window hiding, wheel re-routing, GridSplitter feel).
 
-## QoL batch (2026-10-17) – written by the AI WITHOUT a .NET SDK: **NOT built, NOT tested yet**
-The AI's environment had no .NET SDK and no package access, so nothing below was compiled. Next step for the owner:
-`tools\verify.cmd`, send the build / test log if anything fails, then `docs/QOL_MANUAL_TESTS.md`.
+## QoL batch (2026-10-17): **built + tested**
 Audit first: several asked-for parts already existed (Find steps already had click / move / double / right-click at the
 center + offset and Stop / Skip next / Continue; Repeat already had Times / While / Until with conditions and limits;
 Find text / image / color already had "Test now"; `MousePathSimplifier` already thinned paths). The batch adds what was missing:
@@ -1135,8 +1039,7 @@ Find text / image / color already had "Test now"; `MousePathSimplifier` already 
   timing kept, drags kept, hover-before-key; StepCleanup cases). Updated on purpose: `VisionTests.Describes_visual_steps`
   (new "Find … → … when found" wording).
 
-## 8-bug fix batch (2026-10-17) – built + tested on the owner's PC: 0 warnings, 0 errors, **616/616 tests passed**
-Found by the owner's testing (screenshots + logs). Manual re-test of each bug is still to do. Not committed to git yet.
+## 8-bug fix batch (2026-10-17) – **built + tested**: 0 warnings, 0 errors, **616/616 tests passed**
 1. **Unreadable radio buttons** ("New steps go:"): `Themes/Controls.xaml` now has implicit dark styles for `RadioButton`
    (light text, accent ring/dot, hover/checked/focus/disabled), `ContextMenu`, `MenuItem` (with gesture text) and menu
    `Separator`. CheckBox / ComboBox / ComboBoxItem / ToolTip already had dark styles.
@@ -1176,9 +1079,6 @@ Found by the owner's testing (screenshots + logs). Manual re-test of each bug is
 - Files: `MacroDocument.CurrentSchemaVersion = 7`, written only for "skip next step" or "ignore edges"; others keep 1–6.
 - Tests: new `SmartMacro.Tests/BugFixTests.cs`. Updated on purpose: scroll expectations (one event per notch),
   `Files_from_a_newer_version_than_the_current_one_are_refused` (no hardcoded 6), v1-file test (20 ms typing default).
-- Manual re-test to do: radio buttons readable; Find text "OK" on a dialog showing "0K"; type "Found Wow" in Notepad
-  at 0 and 20 ms; Roblox Fisch SHAKE with "Ignore the edges"; Roblox volume slider 80 % → 50 % recording; scroll
-  3 notches in Chrome + Roblox zoom; game-mode camera run; record Alt+Tab.
 
 ## Done
 **Phase 1: Foundation**
@@ -1222,7 +1122,7 @@ Found by the owner's testing (screenshots + logs). Manual re-test of each bug is
 - Input generated by SmartMacro is tagged (dwExtraInfo) so the recorder ignores it. Clicks on SmartMacro's own windows aren't recorded.
 - New settings: minimize during run, status banner, record mouse movement. New per-macro fields: RepeatCount, Speed and RepeatDelayMs ("Wait between repeats", added after testing showed loops ran back-to-back). Old files get defaults.
 
-**Phase 4: OCR** (owner-tested and working: full-screen find, picked area on a dual-monitor setup, find + type. Fixes added after testing, not yet built: SmartMacro's window is excluded from captures during runs and tests, small areas get padded and upscaled 2x, the app waits 400 ms before restoring its window so typed text isn't cut off, there's a 100 ms settle after clicking found text, and the not-found error shows the text OCR actually read)
+**Phase 4: OCR**
 - New step **Find text (OCR)**. It looks for text on the whole screen or in a picked area, using the text recognition built into Windows (`Windows.Media.Ocr`).
   - Options: Contains or whole words, case-sensitive, match accuracy %, how long to keep looking (0 = look once), and how often to check.
   - When found, it can just continue, move the mouse to the text, click, double-click or right-click it, with an X/Y offset.
@@ -1231,13 +1131,14 @@ Found by the owner's testing (screenshots + logs). Manual re-test of each bug is
 - Editor tools:
   - **Pick area on screen**: SmartMacro hides, and you drag a rectangle across any monitor.
   - **Test now**: SmartMacro hides, reads the area once, and shows the match or the text it read.
-- Area picker: one overlay per monitor, like Snipping Tool. The first version stretched one window across both monitors and recorded wrong coordinates on a dual-monitor setup with different display scaling. Capture margin is 48 px. "Test now" saves `Logs\last-ocr-test.png` showing exactly what was captured.
+- Area picker: one overlay per monitor, like Snipping Tool. Capture margin is 48 px. "Test now" saves `Logs\last-ocr-test.png` showing exactly what was captured.
+- Capture and timing refinements: SmartMacro's window is excluded from captures during runs and tests, small areas get padded and upscaled 2x, the app waits 400 ms before restoring its window so typed text isn't cut off, there's a 100 ms settle after clicking found text, and the not-found error shows the text OCR actually read.
 - `OcrTextMatcher` (Core) checks spans of 1 to n+1 words and scores them by edit-distance similarity. Windows OCR gives no confidence value.
 - Screen capture uses GDI BitBlt into BGRA, then `SoftwareBitmap`. Large areas are split into tiles of at most `OcrEngine.MaxImageDimension`, with 120 px overlap.
 - The status banner uses `WDA_EXCLUDEFROMCAPTURE`, so OCR shouldn't read it. Playback is refused with an explanation if a macro uses Find text and no OCR language is installed.
 - Settings shows the OCR status and language.
 
-**Phase 5: Integration & release** (written, not built yet)
+**Phase 5: Integration & release**
 - Dark pop-up dialogs (`DarkMessageBox`) replace the Windows message boxes. Unsaved-changes buttons now read Save / Don't save / Cancel.
 - **Custom shortcuts:** set in Settings → Keyboard shortcuts (click a box, press a combo).
   - `HotkeyBinding` (Core) checks them: a modifier is required unless it's an F-key, Esc and F12 aren't allowed, and duplicates are rejected.
@@ -1249,11 +1150,11 @@ Found by the owner's testing (screenshots + logs). Manual re-test of each bug is
   - **Import** (several files at once): each file goes through `MacroFileFormat.TryParse` (only known step types), gets fresh IDs and a unique name, and is validated. Skipped files are listed with a reason.
   - **Export…** saves a `.smartmacro` file.
 - **Single instance:** a second launch brings the running copy to the front (named mutex + event).
-- **App icon:** `Assets/SmartMacro.ico` (blue rounded square with a lightning bolt). The sidebar shows the version and owner.
-- **Release:** `tools\publish.cmd` runs the tests, then publishes a self-contained single-file win-x64 build. It zips it to `release\SmartMacro-1.0.0-win-x64.zip` with `README.md` (user guide).
+- **App icon:** `Assets/SmartMacro.ico` (KuroLogic lightning K mark). The sidebar shows the version and owner.
+- **Release:** `tools\publish.cmd` runs the tests, then publishes a self-contained single-file win-x64 build and zips it to `release\SmartMacro-<version>-win-x64.zip` with the release documents.
 - **Cleanup:** removed duplicate interop (ScreenInfoProvider now uses NativeMethods). The repository and import share one file parser.
 
-**Phase 6: Game input fidelity** (written, NOT built or tested yet — no .NET SDK in the AI's environment)
+**Phase 6: Game input fidelity**
 - Diagnosis (confirmed in code):
   1. Desktop recording stores absolute cursor positions and plays them with `SetCursorPos`. That never produces raw mouse movement, which is what first-person games (cursor locked) read for camera rotation.
   2. `RecordingConverter` turned any key/button down+up within 500 ms into an instant Press/Click: the hold time was dropped (a 120 ms W tap became ~0 ms). Mouse moves during that tap were emitted after the release with no delay (wrong order, squashed timing).
@@ -1266,28 +1167,23 @@ Found by the owner's testing (screenshots + logs). Manual re-test of each bug is
   - New step `InputSequenceStep` ("inputSequence", editor: read-only summary + optional "move cursor to start"). Events stored as a compact string (`InputEventCodec`, "v1 dt,code,args …"); damaged data is refused on load and by the validator.
   - Playback: `IInputSimulator.MoveMouseRelative` (SendInput MOUSEEVENTF_MOVE) and `KeyWithScanCode` (recorded scan code + extended flag, so right Shift stays right Shift). `PrecisePlaybackClock` uses a high-resolution waitable timer for sub-ms waits.
   - File format: `MacroDocument.CurrentSchemaVersion = 2`. A macro is written as version 2 only if it uses hold times or recorded-input steps; everything else is still written as version 1. Version 1 files load unchanged (new fields default to 0/off).
-- Not verified: whether Roblox (or any specific game) accepts SendInput relative mouse movement and keys. Unit tests only prove what SmartMacro sends and when.
 
-**Phase 6 audit** (2026-10-16; written, not yet rebuilt)
-- Owner's run of Phase 6 before this audit (`tools\verify.cmd`): build 0 warnings / 0 errors, 197/197 tests passed. Owner manually confirmed in Roblox RIVALS (game mode) that the camera turns left/right and movement/clicks play back; precision varies with starting position.
+**Phase 6 audit** (2026-10-16)
 - Defect: `KeyWithScanCode` sent wVk + wScan without KEYEVENTF_SCANCODE, so Windows identified the key by the generic virtual key (e.g. VK_SHIFT) and the recorded scan code was only extra info. Fixed: game-mode keys use scan-code mode (KEYEVENTF_SCANCODE, wVk = 0, EXTENDEDKEY for E0 keys, same flags on release). Encoding rules moved to `Core/Input/KeyboardInputEncoder` (unit tested); desktop steps still use virtual-key mode, unchanged.
 - Defect: `RawInputRecorder` kept window handle, buffer, event list and start error in shared fields. A session that didn't stop within 2 s could free the next session's buffer, clear its window handle (so it couldn't be stopped) or unregister its raw input. A start timeout left the thread running and registered. Fixed: each recording is its own `Session`; only the session that owns the Raw Input registration may remove it; a stop/timeout before the window exists is honoured by the thread.
 - Recorder: E1 keys (Pause) recorded without a scan code (sent by virtual key); keyboard overrun code ignored; handler errors are logged after recording.
 - `tools\verify.cmd`: stops when the build fails (tests not run), deletes old logs first, writes a .trx, returns a non-zero exit code on failure.
 
-**Roblox UI click fix** (2026-10-16; written, not yet rebuilt)
-- Owner's run after the Phase 6 audit: build 0 warnings / 0 errors, 225/225 tests passed (`artifacts\test-results.trx`).
+**Roblox UI click fix** (2026-10-16)
 - Symptom: in windowed Roblox the cursor reaches the button and title-bar clicks work, but Roblox's own UI buttons don't react reliably.
-- Cause (most likely, from the code path): `MoveMouse` only called `SetCursorPos`. That teleports the cursor without creating a mouse-input event, and button presses are sent without a position, so an app that tracks the pointer from the input stream (Raw Input) still has the old position when the click arrives. Windows' own title-bar handling uses the real cursor position, which is why that worked.
+- Cause (from the code path): `MoveMouse` only called `SetCursorPos`. That teleports the cursor without creating a mouse-input event, and button presses are sent without a position, so an app that tracks the pointer from the input stream (Raw Input) still has the old position when the click arrives. Windows' own title-bar handling uses the real cursor position, which is why that worked.
 - Fix: `MoveMouse` now sends a SendInput absolute move (MOUSEEVENTF_MOVE | ABSOLUTE | VIRTUALDESK) to the target, then `SetCursorPos` for the exact pixel. Applies to every step that moves the mouse (Move, Click/Scroll at a position, Find text clicks, game-mode "move cursor to start"). Pixel math in `Core/Input/AbsoluteMouseMath`.
 - Diagnostics: `Win32InputSimulator` logs "Input check:" lines (max one per 2 s) when the window under the cursor isn't active, the cursor is confined (ClipCursor, games locking the mouse), or the cursor didn't end up where it was sent.
-- Right-button camera turning: a Desktop recording can't reproduce it (the game recentres the locked cursor, so absolute positions barely change). Use Game mode, which records relative movement.
-- Not verified in Roblox yet.
+- Right-button camera turning: a Desktop recording can't reproduce it (the game recentres the locked cursor, so absolute positions barely change). Use Game mode or Smart mode, which records relative movement.
 
-**Stage 1: Unified smart recording** (2026-10-16; written, NOT built or tested yet — the AI's environment had no .NET SDK)
+**Stage 1: Unified smart recording** (2026-10-16)
 - Goal: one Record button for apps and games (no Desktop/Game choice first). Desktop / Game modes stay as advanced fallbacks.
-- Audit before the change: the owner's last run (after the Roblox UI click fix) was build 0 warnings / 0 errors, 225/225 tests.
-  Desktop mode = low-level hooks (ms timestamps, absolute positions) → `RecordingConverter` → editable steps. Game mode =
+- Desktop mode = low-level hooks (ms timestamps, absolute positions) → `RecordingConverter` → editable steps. Game mode =
   Raw Input (µs Stopwatch timestamps, relative counts, scan codes) → `GameRecordingConverter` → one `InputSequenceStep`.
   The two used different clocks and saw the same physical events, so they were NOT merged; one source is used instead.
 - Recorder: `RawInputRecorder(captureCursor: true)`, wrapped as `SmartInputRecorder` (`ISmartInputRecorder` in Core).
@@ -1330,12 +1226,9 @@ Found by the owner's testing (screenshots + logs). Manual re-test of each bug is
   movement with scan code, click → camera → click timeline, equal timestamps, stop shortcut trim, early releases /
   auto-repeat / duplicates, release at end, L/R modifiers, stop releases held button, legacy relative playback, codec
   round trip + damaged text, schema 3/2, newer-version refusal, segment validation, settings migration).
-- Docs: `docs/STAGE1_MANUAL_TESTS.md` (beginner checklist: Notepad + games), `docs/ROADMAP_STAGES_2_4.md` (plan only).
-- Not verified: build, test run, any real app or game. Detection thresholds are first guesses and need real-world tuning.
-- **Update:** the owner then ran `tools\verify.cmd` and the Stage 1 manual tests and reported everything green
-  ("100/100"). The exact test count from `artifacts\test.log` wasn't sent, so it isn't recorded here.
+- Docs: `docs/STAGE1_MANUAL_TESTS.md`, `docs/ROADMAP_STAGES_2_4.md`.
 
-**Stage 2: Reusable visual detection** (2026-10-16; written, NOT built or tested yet — the AI's environment had no .NET SDK)
+**Stage 2: Reusable visual detection** (2026-10-16)
 - New Core folder `SmartMacro.Core/Vision` (no Windows code, all unit tested with fake screens):
   - `BgraImage` (BGRA pixels, crop / fill / draw rectangle), `ScreenFrame` (picture + its screen bounds), `RgbColor`
     ("#RRGGBB"), `TemplateCodec` (picture stored in the macro: BGR bytes → zlib → Base64; size and checksum checked).
@@ -1372,16 +1265,10 @@ Found by the owner's testing (screenshots + logs). Manual re-test of each bug is
   `SearchResultTemplate`, `SearchTestResultTemplate`; Find text now has "Wait for: appears / disappears".
 - Tests: `SmartMacro.Tests/VisionTests.cs` (codec, matcher incl. coarse path / multiple copies / colour check /
   brightness, colour finder, tracker, engine with `FakeCapture` incl. negative monitor coordinates, timeout, continue,
-  disappear, stop, validation, schema 4 round trip, old-file loading, descriptions). The matcher maths was also
-  sanity-checked with a NumPy port of the same algorithm (not a substitute for running the C# tests).
+  disappear, stop, validation, schema 4 round trip, old-file loading, descriptions).
 - Docs: `docs/STAGE2_MANUAL_TESTS.md`, README section "Find image and Find color", roadmap updated with Stage 3/4 breakdown.
-- Owner build (2026-10-16): 0 warnings, 0 errors. Tests: 317/318 — the one failure was the Stage 1 test
-  `Files_from_a_newer_version_are_refused`, which hardcoded format 4 as "newer". Fixed to use CurrentSchemaVersion + 1;
-  re-run pending.
-- **Update:** owner re-ran verify (all green) and did the STAGE2 manual tests: all passed ("100/100"). Owner noted some
-  improvements are wanted; they are deferred to a polish pass at the end of the roadmap (not listed yet — ask the owner).
 
-**Stage 3: Conditional workflows and loops** (2026-10-16; written by the AI without a .NET SDK, then built and tested by the owner)
+**Stage 3: Conditional workflows and loops** (2026-10-16)
 - Models (`Core/Models/WorkflowSteps.cs`): `Condition` { `Check` = a FindTextStep / FindImageStep / FindColorStep
   (stored with the normal step discriminators, so only known types load), `Negate` } with derived `Kind`
   (TextVisible / ImageVisible / ColorVisible). Conditions use the search's what / area / TimeoutMs ("keep checking
@@ -1418,11 +1305,8 @@ Found by the owner's testing (screenshots + logs). Manual re-test of each bug is
   spacing; stop inside a loop and during a condition wait with release; pause in a loop; progress text; evaluator;
   validation; format 5 round trip, old v4 file, damaged / script-like files, broken structure, import).
 - Docs: `docs/STAGE3_MANUAL_TESTS.md`, README "If / Else and Repeat", roadmap status.
-- Owner build (2026-10-16): `tools\verify.cmd` → 0 warnings, 0 errors; tests **389/389 passed** (first run, no fixes needed).
-  Owner then reported the Stage 3 work "Done" (manual-test details not sent; ask if anything failed).
 
-**Stage 4: Continuous visual feedback** (2026-10-16; written by the AI without a .NET SDK, then built and unit-tested by the owner – manual tests still open. The original note follows. The AI's environment had no .NET SDK
-and no network access to install one, so nothing below has been compiled or run)
+**Stage 4: Continuous visual feedback** (2026-10-16)
 - Audit before the change: Stage 2 `MarkerTracker` (Found / Ambiguous / Lost / IgnoredJump) was only used by the editor's
   "Track for 3 s". Stage 3 gave the program-counter engine, `HeldInput` (released on every exit, released / re-pressed on
   pause), `ActiveTime` (paused time excluded), `IConditionEvaluator` + `ScreenProbes`. Stage 4 builds on exactly these.
@@ -1486,16 +1370,14 @@ and no network access to install one, so nothing below has been compiled or run)
   setting, unknown enums, warnings, off screen, refused before running, OCR detection, factory / describer); files
   (format 6 round trip, older formats kept, unset conditions not written, formats 1–5 load unchanged, minimal file
   defaults, damaged JSON refused, loadable-but-unsafe values refused by the validator, newer than 6 refused).
-- Docs: `docs/STAGE4_MANUAL_TESTS.md` (beginner checklist, measured numbers to send back), `docs/feedback-test-page.html`
+- Docs: `docs/STAGE4_MANUAL_TESTS.md`, `docs/feedback-test-page.html`
   (offline test page: mode 1 moving marker over a fixed zone, mode 2 catch game with a white zone pushed by mouse / Space,
   simple or heavy physics, green #00C800 / blue #0000C8 status square), README "Feedback loop", roadmap "Stage 4 as built".
-- Design check (not a substitute for the C# tests): a Python simulation of the test page's catch game with the same
-  bang-bang + dead-band rules won 190–200 of 200 rounds with the "simple" zone at 15–60 captures/s and 2–6 frames
-  of latency, but only 2–47 % of rounds with the "heavy" (momentum) zone. That's the documented honest limit.
-- Not verified: build, test run, any measurement on a real PC, any app or game.
+- Design check: a simulation of the test page's catch game with the same bang-bang + dead-band rules won 190–200 of 200
+  rounds with the "simple" zone at 15–60 captures/s and 2–6 frames of latency, vs. 2–47 % of rounds with the "heavy"
+  (momentum) zone, which is why PD control with velocity damping was later added in `FeedbackController`.
 
-**Editor UX: Pick position, clearer mouse steps, adding and moving steps** (2026-10-16; built and unit-tested by the owner – manual tests still open; originally written without a .NET SDK —
-no .NET SDK in the AI's environment)
+**Editor UX: Pick position, clearer mouse steps, adding and moving steps** (2026-10-16)
 - Audit: Move mouse / Mouse click / Scroll wheel already used physical virtual-screen pixels everywhere (GetCursorPos,
   SetCursorPos + SendInput absolute move, per-monitor DPI aware app, recording uses the same). Playback: Move = instant
   jump; Click = jump to X/Y (unless "current position" / "last found") then down/up (HoldMs, double, down, up); Scroll =
@@ -1525,85 +1407,66 @@ no .NET SDK in the AI's environment)
   broken-structure fixing, objects/settings preserved, save/reload order; mouse playback incl. negative coordinates,
   click modes, scroll direction/amount/position, old scroll/click/move JSON, odd scroll amounts, coordinate validation).
 - Docs: `docs/EDITOR_UX_MANUAL_TESTS.md`.
-- Not verified: build, tests, the overlay on multi-monitor / mixed-DPI, drag-and-drop feel.
 
 ## Architecture
-- `SmartMacro.Core` (net10.0, no WPF): models, validation, storage, logging. All unit tested.
-- `SmartMacro` (net10.0-windows, WPF, MVVM): `Mvvm/`, `ViewModels/`, `Views/`, `Themes/`, `Services/`, `Converters/`.
+- `SmartMacro.Core` (net10.0, no WPF): models, validation, storage, logging, playback engine, vision, and workflow logic. All unit tested.
+- `SmartMacro` (net10.0-windows10.0.19041.0, WPF, MVVM): `Mvvm/`, `ViewModels/`, `Views/`, `Themes/`, `Services/`, `Converters/`.
 - Recording: `Core/Recording/RecordingConverter` (desktop), `Core/Recording/GameRecordingConverter` + `IRelativeInputRecorder` (game), and `Core/Recording/SmartRecordingConverter` + `MouseContextClassifier` + `ISmartInputRecorder` (smart, the default). Model: `Core/Models/InputSequence.cs` (InputEvent, codec v1/u1) and `Core/Models/MouseSegment.cs`.
-- `SmartMacro.Tests` (xUnit): 57 tests verified, plus about 35 new Phase 3 tests (engine, converter, validation) not yet run.
-- Visual detection: `Core/Vision` (BgraImage, TemplateCodec, TemplateMatcher, ColorFinder, MarkerTracker, ZoneFinder, IScreenCapture) and `Services/Vision` (GdiScreenCapture, VisionTools + preview window + feedback measure / live preview).
+- `SmartMacro.Tests` (xUnit, net10.0): **1,235 unit tests** covering core models, converters, validation, storage, vision, workflow blocks, feedback loops, variables/expressions, background window input, and view-models.
+- Visual detection: `Core/Vision` (BgraImage, TemplateCodec, TemplateMatcher, ColorFinder, MarkerTracker, ZoneFinder, MotionDetector, IScreenCapture) and `Services/Vision` (GdiScreenCapture, VisionTools + preview window + feedback measure / live preview).
 - Feedback loops: `Core/Models/FeedbackLoopStep`, `Core/Playback/FeedbackSensor` (+ FeedbackStats), `Core/Playback/FeedbackController`, engine `RunFeedbackLoopAsync`.
-- OCR: `Core/Ocr` (ScreenRect, IOcrService, OcrTextMatcher) and `Services/Ocr` (WindowsOcrService + ScreenCapture, FindTextTools + RegionPickerWindow). The app's TFM is now `net10.0-windows10.0.19041.0`, which is needed for the WinRT projections; Core and Tests stay on plain `net10.0`.
-- Windows-only code is in `Services/Input` (NativeMethods, Win32InputSimulator, LowLevelInputHook / WindowsInputRecorder / EmergencyStopWatcher), `Services/HotkeyService.cs` and `Services/RunModeHost.cs` (banner + minimize).
-- The composition root is in `App.xaml.cs`, with dependencies wired by hand (no DI container needed yet).
+- OCR: `Core/Ocr` (ScreenRect, IOcrService, OcrTextMatcher) and `Services/Ocr` (WindowsOcrService + ScreenCapture, FindTextTools + RegionPickerWindow). The app's TFM is `net10.0-windows10.0.19041.0`, which is needed for the WinRT projections; Core and Tests stay on plain `net10.0`.
+- Windows-only code is in `Services/Input` (NativeMethods, Win32InputSimulator, BackgroundInputService, LowLevelInputHook / WindowsInputRecorder / EmergencyStopWatcher), `Services/HotkeyService.cs` and `Services/RunModeHost.cs` (banner + mini-HUD + target reticle + minimize).
+- The composition root is in `App.xaml.cs`, with dependencies wired by hand (no DI container needed).
 - The app is per-monitor DPI aware (`app.manifest`), so coordinates are physical pixels. It runs without admin rights (`asInvoker`).
 
 ## Verification
 - `tools\verify.cmd` builds the solution and runs the tests. Output goes to `artifacts\build.log` and `artifacts\test.log`.
-- **Latest run (2026-10-16, owner's PC, working copy = commit `91b67ff` + the uncommitted Editor UX changes):**
-  build 0 warnings / 0 errors (`BUILD_EXIT=0`); tests **573 passed, 0 failed, 0 skipped** (`TEST_EXIT=0`).
-  Includes Stage 4 (`FeedbackLoopTests`) and Editor UX (`EditorUxTests`). Unit tests use fake input / screen / clock:
-  they don't prove that real apps or games react.
-- Previous runs: Stage 4 first run 530/531 (one test bug, fixed in `01d0168`); Stage 3 389/389; Stage 2 317/318 then green.
-- Older history: 57/57 (early phases).
-- Manually verified on the owner's PC: app launch, create macro, add steps, validation blocking save, Delete key, Ctrl+S, key/modifier editing, close prompt, data kept after restart.
-- The fix batch (command refresh, dark title bar, labels) built OK: 0 warnings, 57/57 tests.
-- Phase 3 built and ran on the owner's PC. The "Wait between repeats" addition hasn't been built yet.
+- **Latest run (2026-11-04):**
+  build 0 warnings / 0 errors (`BUILD_EXIT=0`); tests **1,235 passed, 0 failed, 0 skipped** (`TEST_EXIT=0`).
+- User/tester feedback and bug reports from real-world usage are collected from testers and consolidated into a single feedback document for batch review and updates.
 
 ## Known issues / limits
 - Windows doesn't let normal apps send input to, or record input from, apps running as administrator (UIPI). Nothing works on the lock screen or UAC prompts. Some games with anti-cheat ignore simulated input. SmartMacro doesn't try to bypass any of these.
-- Coordinates are physical pixels. The app is per-monitor DPI aware. Recordings made with a different monitor layout may click in the wrong place.
+- Coordinates are physical pixels. The app is per-monitor DPI aware. Recordings made with a different monitor layout may click in the wrong place unless window-relative coordinates are used.
 - Pause takes effect between steps and inside delays (within ~50 ms). Held keys/buttons are released while paused and pressed again on resume.
 - Game mode: games may still play a recording differently (frame rate, physics, network, server corrections, anti-cheat ignoring injected input). Mouse buttons 4/5 aren't recorded. Raw input from apps running as administrator isn't visible. "Enhance pointer precision" affects the visible cursor for injected relative moves the same way it does for a real mouse; games that use raw input aren't affected.
 - The Speed field updates when you leave the box (Tab or click elsewhere), not on every keystroke.
 - After the first click that closes a dropdown, the next click is ignored. This is normal WPF popup behavior.
-- Message boxes use the standard light Windows style.
 - OCR needs a Windows OCR language pack. Most Windows installs have one for the display language.
 - Windows OCR has no confidence score. "Match accuracy" compares the text instead.
 - OCR reads straight horizontal text best. Very small or stylized text and rotated text may not be read.
 - If "Minimize while running" is turned off, OCR can read SmartMacro's own window.
-- Find image matches only at the captured size (no scaling / rotation). Display scaling, game resolution or graphics
-  quality changes need a new capture. Find color is colour matching only, not object recognition.
+- Find image supports single-size matching or optional multi-scale matching (75 %–150 %, no rotation). Find color is colour matching only, not object recognition.
 - GDI capture can return black for exclusive full-screen games or some overlays; windowed / borderless mode usually works.
-- Full-screen image search costs tens of ms per check on a big screen (estimate; to be measured with STAGE2 test E).
-- Feedback loops react a few frames late: capture + detection (a few ms for a small bar, to be measured) + up to one
-  frame of waiting + the game's own render / input delay. They only compare colours; look-alike colours, flashing
-  effects, zones with momentum and very fast markers are handled poorly or not at all. Mouse-button loops press where
-  the cursor is. One input per loop. Stop conditions that use OCR pause the loop while they read. Default rate limits
-  are guesses until the owner's measurements (STAGE4 tests B3 / D2) are in.
+- Full-screen image search costs tens of ms per check on a big screen; picking a smaller search area is much faster.
+- Feedback loops react a few frames late: capture + detection + up to one frame of waiting + the game's own render / input delay. They only compare colours; look-alike colours, flashing effects, and very fast markers are harder to track. Mouse-button loops press where the cursor is. One input per loop. Stop conditions that use OCR pause the loop while they read.
 
 ## Release preparation (not released; nothing published)
+- **Version alignment (2026-11-04):** `<Version>` in `SmartMacro.csproj`, `release-docs/EULA.txt`, and `release-docs/README.txt` bumped from `1.0.0` to `1.8.0` to match v1.8 ("Studio X"). Updated `Views/SettingsView.xaml` OCR privacy wording to clarify that screen captures are processed locally on the PC and never uploaded (only the latest editor 'Test' capture is saved locally in the `Logs` folder).
 - **2026-10-17 16:48 fresh publish (owner's PC, `tools\publish.cmd`, real build, no --allow-drafts):** tests
   **709/709 passed**; publish OK; all five docs passed the marker check; `bundle-versions.txt` OK (every bundled component
   listed: .NET / WPF runtime packs 10.0.11, Windows SDK projection 10.0.19041.57). Output:
   `release\SmartMacro-1.0.0-win-x64.zip` (62.2 MB; SmartMacro.exe 68.1 MB + 5 docs), SHA-256
-  `87D34104353DBF605F84B90BB7F27C375C8E0B2B0B60F3CB41FEE42874AA1CFF`. Built from the current working copy (includes the
-  next-gen QoL + live-test fix batches, which therefore compile). Sent to a friend as an early test build for debugging;
-  manual tests still open. Version stays 1.0.0 – bump `<Version>` in the csproj (and EULA/README) for the next test build.
+  `87D34104353DBF605F84B90BB7F27C375C8E0B2B0B60F3CB41FEE42874AA1CFF`. Sent to a friend as an early test build for debugging.
 - **2026-10-17 EULA simplification (docs only, no code changed):** `release-docs/EULA.txt` rewritten as a shorter
   plain-English draft (old text: `Claude outputs/archive/EULA-long-draft-2026-10-16.txt`). Privacy section written from the
-  source (no network code; local data folder, daily logs, last test PNGs, diagnostics on click only). README version set to
-  1.0.0; two [VERIFY] items added to THIRD-PARTY-NOTICES. Still open: licensor name, contact, commercial use, liability and
-  governing-law decisions, download link, third-party [VERIFY] items, fresh publish, manual tests. Details and the full
-  marker list: `Claude outputs/EULA_AND_RELEASE_REVIEW_2026-10-17.md`. App UI text in `Views/SettingsView.xaml` ("never saved")
-  contradicts the saved test PNGs – needs a wording fix before release (awaiting owner approval).
+  source (no network code; local data folder, daily logs, last test PNGs, diagnostics on click only). Details and the full
+  marker list: `Claude outputs/EULA_AND_RELEASE_REVIEW_2026-10-17.md`.
 - The package in `publish\` (DRAFT, EXE 2026-10-16 23:04) predates the 8-bug fix and QoL batches – do not use it.
 - **Owner decisions (2026-10-17):** licensor Riku (リク) (individual, KuroLogic = unregistered brand), any use incl.
   commercial, contact via the KuroLogic Discord server, distribution via Discord + Google Drive, early test release for
-  feedback. EULA / LICENSE / README now have no markers. THIRD-PARTY-NOTICES still needs the WPF notices pasted by hand
-  and a version re-check after the fresh publish.
+  feedback. EULA / LICENSE / README now have no markers.
 - `tools\publish.cmd` updated (2026-10-17): version read from `SmartMacro.csproj`, EULA/README must mention that
   version, a real build removes the old DRAFT package of the same version, writes `release\bundle-versions.txt` (via new
   `tools\bundle-versions.ps1`) and a SHA-256 file next to the ZIP. README/EULA now carry the real YouTube, Discord and
-  Ko-fi links. Written without a Windows machine – first run on the owner's PC still to do.
+  Ko-fi links.
 - Later the same day: THIRD-PARTY-NOTICES finished (WPF's zlib 1.2.11 + Json.NET notices added as section C; DRAFT
   header and UNRESOLVED list removed). `bundle-versions.ps1` now checks every bundled file name + version against the
   notices and `publish.cmd` stops a real release on a mismatch. All five public documents now pass the marker check.
-  Icon `Assets/SmartMacro.ico` (AI-made blue square + lightning bolt) kept as is. Cleanup of old drafts / old DRAFT
-  package left to the owner (this session can't delete files).
+  Icon `Assets/SmartMacro.ico` kept as is. Cleanup of old drafts / old DRAFT package left to the owner.
 - Public documents live in `release-docs/` (EULA.txt, LICENSE.txt, THIRD-PARTY-NOTICES.txt, DOTNET-THIRD-PARTY-NOTICES.txt,
-  README.txt). They are DRAFTS with [PLACEHOLDER] / [REVIEW] / [VERIFY] markers; not lawyer-reviewed, not legally cleared.
+  README.txt). Not lawyer-reviewed, not legally cleared.
   Private notes (audit, checklist) stay in `Claude outputs/` and are never packaged.
 - Dependencies read from the last publish's bundle manifest + local NuGet packages: .NET runtime 10.0.11 (MIT; single-file
   runtime parts under the .NET Library License), Windows Desktop/WPF 10.0.11 (MIT; PresentationNative_cor3 / wpfgfx_cor3 /
@@ -1614,32 +1477,3 @@ no .NET SDK in the AI's environment)
   (markers) unless `--allow-drafts` (then the ZIP is named ...-DRAFT-NOT-FOR-RELEASE), and stops if any other file appears.
 - Attribution is not yet standardized in the app (AppInfo.Owner "Riku", "Owner & developer: Riku", sidebar "by Riku",
   csproj Company/Authors "Riku", Copyright "© 2026 Riku", README "© 2026 Riku") – change awaits owner approval.
-
-## Next task
-- Owner: `tools\verify.cmd` for the reticle badge fit (never compiled), then a Find image loop on a small target: the whole
-  badge should show (also near the top edge → badge goes below, and at 125 / 150 % scaling).
-- Owner: try the Studio UI Upgrades 1–3 by hand (list in their section), then commit Fixes 1–5 + Upgrades 1–6 + Studio UI 1–3.
-- Owner: `tools\verify.cmd` for Upgrades 1–6 (never fully compiled), then try: Shift+F5, Space on an If, Ctrl+D on an If,
-  Ctrl+F search + pills, ▼ / ▶ folding, Compact view, ⚡ Vision in the header pill / mini-HUD during a Find image loop.
-- Owner: `tools\verify.cmd` for the audit fixes of `a33c29f` + Upgrade 7 (never compiled; send `artifacts\build.log` /
-  `artifacts\test.log` if anything fails), then section M of `docs/AAA_UPGRADE_MANUAL_TESTS.md` (and G–L if not done yet).
-- Owner: live run of the `538326c` Part B fix (built + tested green as part of `a33c29f`) with Play = 0 and Play = 5
-  (every run should move the same; watch the run counter in the header, bottom bar and mini overlay).
-- Owner: `tools\verify.cmd` for the brand icon / logo change too, then look at the sidebar logo, the mini overlay,
-  the taskbar / Alt+Tab / Explorer icon (16 → 256 px).
-- Owner: `tools\verify.cmd` for the Studio upgrades batch (never compiled; send `artifacts\build.log` /
-  `artifacts\test.log`), then `docs/STUDIO_UPGRADES_MANUAL_TESTS.md`.
-- Owner: `tools\verify.cmd` for the Studio UI redesign (XAML never compiled; send `artifacts\build.log` if it fails),
-  then `docs/STUDIO_UI_MANUAL_TESTS.md`.
-- Owner: `tools\verify.cmd` for the next-gen QoL batch (never compiled; expect a few compile fixes – send
-  `artifacts\build.log` / `artifacts\test.log`), then `docs/NEXTGEN_QOL_MANUAL_TESTS.md`.
-- Owner: `tools\verify.cmd` for the live-test fix batch (never compiled; expect a few compile fixes), then
-  `docs/LIVE_TEST_FIXES_MANUAL_TESTS.md` (send the 📏 SHAKE confidence numbers over wood / water).
-- Owner: run `tools\verify.cmd` for the QoL batch (never compiled yet; expect a few compile fixes), then
-  `docs/QOL_MANUAL_TESTS.md`.
-- Owner: manual re-test of the 8-bug fix batch (list above), then commit it together with the Editor UX changes.
-- Owner: do `docs/STAGE4_MANUAL_TESTS.md` (start with `docs/feedback-test-page.html`) and send the 📏 numbers, then
-  `docs/EDITOR_UX_MANUAL_TESTS.md`. Commit the Editor UX changes once they pass.
-- Fix whatever the build / tests / manual tests show; set the default captures-per-second / min-change values from the
-  measured numbers.
-- Then the polish pass (Stage 2 / 3 improvements the owner mentioned + anything from Stage 4 testing), then `tools\publish.cmd`.

@@ -407,13 +407,37 @@ public sealed class IfStepViewModel : StepViewModel
     public int ThenOffsetX
     {
         get => _step.ThenOffsetX;
-        set { if (_step.ThenOffsetX == value) return; _step.ThenOffsetX = value; NotifyChanged(); }
+        set
+        {
+            if (_step.ThenOffsetX == value) return;
+            _step.ThenOffsetX = value;
+            OnPropertyChanged(nameof(OffsetX));
+            NotifyChanged();
+        }
     }
 
     public int ThenOffsetY
     {
         get => _step.ThenOffsetY;
-        set { if (_step.ThenOffsetY == value) return; _step.ThenOffsetY = value; NotifyChanged(); }
+        set
+        {
+            if (_step.ThenOffsetY == value) return;
+            _step.ThenOffsetY = value;
+            OnPropertyChanged(nameof(OffsetY));
+            NotifyChanged();
+        }
+    }
+
+    public int OffsetX
+    {
+        get => ThenOffsetX;
+        set => ThenOffsetX = value;
+    }
+
+    public int OffsetY
+    {
+        get => ThenOffsetY;
+        set => ThenOffsetY = value;
     }
 
     public int ThenHoldMs

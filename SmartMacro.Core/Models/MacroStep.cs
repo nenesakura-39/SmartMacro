@@ -42,6 +42,8 @@ public enum MacroMouseButton
     Left,
     Right,
     Middle,
+    XButton1,
+    XButton2,
 }
 
 public enum MouseClickAction
@@ -511,6 +513,17 @@ public sealed class KeyPressStep : MacroStep
     public KeyModifiers Modifiers { get; set; } = KeyModifiers.None;
 
     /// <summary>
+    /// Optional hardware scan code (1..255) captured during recording or live key binding.
+    /// When non-zero, playback sends the exact hardware scan code alongside the virtual-key code.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public int ScanCode { get; set; }
+
+    /// <summary>Whether the key uses the extended scan-code prefix (0xE0), e.g. arrow keys or right-hand modifiers.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public bool Extended { get; set; }
+
+    /// <summary>
     /// How long the key stays down for a Press, in ms. 0 = instant (down and up back to back),
     /// which is what macros made before this option existed do. Recordings fill in the real hold time,
     /// so a short W tap that moved a game character for 120 ms still lasts 120 ms when played back.
@@ -590,6 +603,116 @@ public enum WaitGoal
 
     /// <summary>Wait until it is no longer on screen (e.g. a "Loading…" message or a progress bar).</summary>
     Disappear,
+}
+
+/// <summary>
+/// Vision 2.0 1-Click Scenario preset for Find Image / Color / Text steps. Configures polling rate, partial visibility,
+/// motion tracking, predictive click, and detector strategy in one choice for beginners.
+/// </summary>
+public enum VisionScenario
+{
+    /// <summary>Manual / standard settings (default).</summary>
+    Custom = 0,
+
+    /// <summary>🖥️ Static App / Website button (clean 90% match, standard 250 ms checks).</summary>
+    StaticUi = 1,
+
+    /// <summary>🎮 Game HUD / Menu (ignores 15% outer corners + see-through backgrounds, Day/Night adaptation).</summary>
+    GameHud = 2,
+
+    /// <summary>🏃 Moving Object / Target (Kalman velocity tracking + predictive lead click + 70% partial visibility).</summary>
+    MovingTarget = 3,
+
+    /// <summary>✨ Busy Scene / Particles (matches with 40% occlusion, Template+Edge fusion, 2-frame flash confirmation).</summary>
+    BusyParticles = 4,
+
+    /// <summary>📜 Shuffling / Scrolling Text (O(1) word index + Find-Once-Then-Track as image).</summary>
+    ScrollingText = 5,
+
+    /// <summary>⚡ Instant Reflex (fastest 20 ms checks, 16 ms budget, predictive click).</summary>
+    FastReaction = 6,
+}
+
+/// <summary>Vision 2.0 time / accuracy search strategy per step.</summary>
+public enum VisionSearchStrategy
+{
+    /// <summary>Default: Hot-Spot fast path + coarse-to-fine pyramid.</summary>
+    Balanced = 0,
+
+    /// <summary>Fastest reaction: prioritizes tracked/motion ROIs and tighter candidate budgets.</summary>
+    Fastest = 1,
+
+    /// <summary>Highest accuracy: runs full multi-detector / partial-visibility checks.</summary>
+    MostAccurate = 2,
+
+    /// <summary>Time-budgeted: adapts candidate refinement to complete each look within <see cref="ScreenSearchStep.TimeBudgetMs"/>.</summary>
+    Deadline = 3,
+}
+
+/// <summary>Vision 2.0 image detector algorithm.</summary>
+public enum ImageDetectorKind
+{
+    /// <summary>Standard ZNCC + Direct Color template matching (default).</summary>
+    Template = 0,
+
+    /// <summary>Sobel gradient-orientation shape matching (invariant to severe colour/lighting shifts and flat fills).</summary>
+    EdgeShape = 1,
+
+    /// <summary>Fuses Template + EdgeShape matching (keeps the higher confidence at each candidate).</summary>
+    Combined = 2,
+}
+
+/// <summary>Vision 2.0 colour matching space.</summary>
+public enum ColorSpaceKind
+{
+    /// <summary>Per-channel RGB tolerance (default).</summary>
+    Rgb = 0,
+
+    /// <summary>Hue / Saturation / Value range (resilient to lighting and particle bloom).</summary>
+    Hsv = 1,
+
+    /// <summary>Perceptual CIE L*a*b* Delta-E distance.</summary>
+    LabDeltaE = 2,
+}
+
+/// <summary>Vision 2.0 rule for choosing which matching colour object to act on.</summary>
+public enum ColorSelectRule
+{
+    /// <summary>Largest object by pixel count (default).</summary>
+    Largest = 0,
+
+    /// <summary>Closest to the center of the search area.</summary>
+    NearestToCenter = 1,
+
+    /// <summary>Closest to where the target was last found / tracked.</summary>
+    NearestToLastSpot = 2,
+
+    /// <summary>Highest on screen (smallest Y, then smallest X).</summary>
+    TopMost = 3,
+}
+
+/// <summary>Vision 2.0 OCR image preprocessing mode for stylized or low-contrast game fonts.</summary>
+public enum OcrPreprocessMode
+{
+    /// <summary>Standard padding and small-region 2× upscale (default).</summary>
+    Auto = 0,
+
+    /// <summary>Stretches 2nd–98th percentile luminance for faint or low-contrast text.</summary>
+    HighContrast = 1,
+
+    /// <summary>Inverts bright HUD text on dark backgrounds before OCR.</summary>
+    InvertLightOnDark = 2,
+
+    /// <summary>Adaptive Otsu binarization to strip noisy backgrounds/particles behind text.</summary>
+    BinarizeOtsu = 3,
+}
+
+/// <summary>An additional stored template frame (e.g. animation frame or hover/glow variant) on a <see cref="FindImageStep"/>.</summary>
+public sealed class TemplateVariant
+{
+    public int Width { get; set; }
+    public int Height { get; set; }
+    public string Data { get; set; } = string.Empty;
 }
 
 /// <summary>
@@ -711,6 +834,59 @@ public abstract class ScreenSearchStep : MacroStep
     /// <summary>The custom search area as a rectangle (only used with <see cref="Vision.SearchScope.CustomArea"/>).</summary>
     [JsonIgnore]
     public Ocr.ScreenRect Region => new(RegionX, RegionY, RegionWidth, RegionHeight);
+
+    // ---------------- Vision 2.0: Scenarios, Tracking, Predictive Click & Budget ----------------
+
+    /// <summary>1-click beginner scenario preset (Custom = default).</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public VisionScenario Scenario { get; set; }
+
+    /// <summary>Speed vs accuracy search strategy (Balanced = default).</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public VisionSearchStrategy Strategy { get; set; }
+
+    /// <summary>Optional per-look time budget in ms (0 = unlimited; used with <see cref="VisionSearchStrategy.Deadline"/>).</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public int TimeBudgetMs { get; set; }
+
+    /// <summary>When true, tracks the target's 2D velocity across checks and searches a predicted ROI along its path first.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public bool TrackTarget { get; set; }
+
+    /// <summary>When true, leads clicks on moving targets to where the target will be (<c>pos + velocity × leadMs</c>).</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public bool PredictiveClick { get; set; }
+
+    /// <summary>How far ahead (ms) <see cref="PredictiveClick"/> leads a moving target (0 = default 60 ms when PredictiveClick is on).</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public int PredictiveLeadMs { get; set; }
+
+    /// <summary>Effective predictive lead time in ms (0 when <see cref="PredictiveClick"/> is off).</summary>
+    [JsonIgnore]
+    public int EffectivePredictiveLeadMs => !PredictiveClick ? 0 : PredictiveLeadMs > 0 ? PredictiveLeadMs : Vision.TargetTracker.DefaultLeadMs;
+
+    /// <summary>
+    /// Temporal confirmation: requires the target to be found in at least this many consecutive checks before acting
+    /// (0 or 1 = act on first hit; 2..5 = ignore 1-frame particle flashes).
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public int ConfirmFrames { get; set; }
+
+    /// <summary>Motion-aware search: when true, prioritizes regions that changed since the previous frame.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public bool OnlyWhereMoved { get; set; }
+
+    /// <summary>True when any Vision 2.0 property on this base search step is set to a non-default value (schema 18).</summary>
+    [JsonIgnore]
+    public bool UsesVision2BaseFeatures =>
+        Scenario != VisionScenario.Custom
+        || Strategy != VisionSearchStrategy.Balanced
+        || TimeBudgetMs > 0
+        || TrackTarget
+        || PredictiveClick
+        || PredictiveLeadMs > 0
+        || ConfirmFrames > 1
+        || OnlyWhereMoved;
 }
 
 /// <summary>
@@ -762,6 +938,21 @@ public sealed class FindTextStep : ScreenSearchStep
     /// On by default; files made before this option load with it on too.
     /// </summary>
     public bool NormalizeLookAlikes { get; set; } = true;
+
+    /// <summary>Vision 2.0: when true, interprets <see cref="Text"/> as a regular expression or pipe pattern (e.g. <c>nice|great</c>).</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public bool UseRegexPattern { get; set; }
+
+    /// <summary>Vision 2.0: image preprocessing applied before OCR (HighContrast, InvertLightOnDark, BinarizeOtsu).</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public OcrPreprocessMode Preprocess { get; set; }
+
+    /// <summary>
+    /// Vision 2.0 "Find-Once-Then-Track": once OCR finds the word, crops its pixels into a visual template and tracks it at
+    /// frame rate (1–3 ms) as it moves or shuffles on screen.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public bool TrackTextAsImage { get; set; }
 
     [JsonIgnore]
     public override StepKind Kind => StepKind.FindText;
@@ -837,6 +1028,26 @@ public sealed class FindImageStep : ScreenSearchStep
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public bool AllowMultiScale { get; set; }
 
+    /// <summary>Vision 2.0: detector algorithm (Template = default, EdgeShape, or Combined).</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public ImageDetectorKind Detector { get; set; }
+
+    /// <summary>
+    /// Vision 2.0 Partial Visibility ("Occlusion tolerance"): minimum percentage of the template's cells that must be
+    /// visible (40–100%, or 0 = compare whole picture). Setting 65% lets the target match even when 35% of it is covered by
+    /// game particles, floating damage numbers, or effects.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public int MinVisiblePercent { get; set; }
+
+    /// <summary>Vision 2.0: optional rotation range in degrees (0 = upright only; 1..45 = checks ±RotationRangeDeg).</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public int RotationRangeDeg { get; set; }
+
+    /// <summary>Vision 2.0: optional extra template appearances (animation frames, glow states, learned samples).</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public List<TemplateVariant>? AdditionalTemplates { get; set; }
+
     [JsonIgnore]
     public override StepKind Kind => StepKind.FindImage;
 }
@@ -877,6 +1088,31 @@ public sealed class FindColorStep : ScreenSearchStep
     /// </summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public bool MatchShades { get; set; }
+
+    /// <summary>Vision 2.0: colour space used for comparison (Rgb = default, Hsv, or LabDeltaE).</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public ColorSpaceKind ColorSpace { get; set; }
+
+    /// <summary>Vision 2.0: rule for choosing which matching colour object to return (Largest = default).</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public ColorSelectRule SelectRule { get; set; }
+
+    /// <summary>Vision 2.0: optional maximum blob size in pixels (0 = unlimited; filters out large background walls).</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public int MaxPixels { get; set; }
+
+    /// <summary>
+    /// Vision 2.0: minimum shape compactness / circularity (0–100%, 0 = any shape). E.g. 35% keeps round/compact targets
+    /// and rejects thin particle streaks or bars.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public int MinCircularityPercent { get; set; }
+
+    /// <summary>
+    /// Vision 2.0: minimum bounding-box fill density (0–100%, 0 = any density). Rejects sparse scattered particle clouds.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public int MinFillPercent { get; set; }
 
     /// <summary>The one-click tuning presets of the Find colour editor.</summary>
     public static readonly (string Name, int Tolerance, bool MatchShades) ExactUiPreset = ("Exact UI Color (Strict)", 10, false);

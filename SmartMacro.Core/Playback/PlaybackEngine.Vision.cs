@@ -37,6 +37,8 @@ public sealed partial class PlaybackEngine
             TimeSpan Elapsed() => _clock.Elapsed - started - (_timelineShift - shiftAtStart);
             string Stats() => timer is null ? string.Empty : " " + timer.Describe(Elapsed());
 
+            var confirmTarget = Math.Clamp(step.ConfirmFrames <= 0 ? 1 : step.ConfirmFrames, 1, 10);
+            var confirmHits = 0;
             string? missMessage = null;
             while (true)
             {
@@ -48,6 +50,14 @@ public sealed partial class PlaybackEngine
 
                 if (step.Goal == WaitGoal.Appear && result.Found)
                 {
+                    confirmHits++;
+                    if (confirmHits < confirmTarget)
+                    {
+                        var confirmInterval = Math.Clamp(step.CheckIntervalMs, 8, 25);
+                        await WaitAsync(confirmInterval, token).ConfigureAwait(false);
+                        continue;
+                    }
+
                     RememberFound(result.X, result.Y, result.Match);
                     ReportTarget(result.X, result.Y, result.Match, result.Confidence, StepDescriber.DisplayName(step.Kind), result.ElapsedMs,
                         result.FromHotSpot);
@@ -63,6 +73,8 @@ public sealed partial class PlaybackEngine
 
                     return;
                 }
+
+                confirmHits = 0;
 
                 if (step.Goal == WaitGoal.Disappear && !result.Found)
                 {
@@ -92,7 +104,10 @@ public sealed partial class PlaybackEngine
                     break;
                 }
 
-                await WaitAsync(step.CheckIntervalMs, token).ConfigureAwait(false);
+                var pollMs = step.Strategy == VisionSearchStrategy.Fastest
+                    ? Math.Min(step.CheckIntervalMs, 16)
+                    : step.CheckIntervalMs;
+                await WaitAsync(pollMs, token).ConfigureAwait(false);
             }
 
             if (attempt < maxRetries)

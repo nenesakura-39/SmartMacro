@@ -9,7 +9,7 @@
         d:DataContext="{d:DesignInstance Type=vm:MainViewModel}"
         Title="SmartMacro — Mission Control"
         Icon="pack://application:,,,/Assets/SmartMacro.ico"
-        Width="420" Height="500" MinWidth="360" MinHeight="380"
+        Width="430" Height="515" MinWidth="360" MinHeight="380"
         WindowStartupLocation="Manual"
         Topmost="True"
         Background="{DynamicResource BackgroundBrush}"
@@ -19,7 +19,7 @@
         TextOptions.TextFormattingMode="Display">
 
     <WindowChrome.WindowChrome>
-        <WindowChrome CaptionHeight="36"
+        <WindowChrome CaptionHeight="38"
                       ResizeBorderThickness="6"
                       GlassFrameThickness="-1"
                       UseAeroCaptionButtons="False" />
@@ -29,39 +29,57 @@
         <KeyBinding Key="Escape" Command="{Binding Automation.StopCommand}" />
     </Window.InputBindings>
 
-    <Border BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" Background="{DynamicResource BackgroundBrush}">
+    <Border BorderBrush="{DynamicResource InputBorderBrush}" BorderThickness="1.2" Background="{DynamicResource BackgroundBrush}">
         <Grid>
             <Grid.RowDefinitions>
-                <RowDefinition Height="36" />
+                <RowDefinition Height="38" />
                 <RowDefinition Height="*" />
                 <RowDefinition Height="Auto" />
             </Grid.RowDefinitions>
 
-            <!-- Custom 36px Studio Pod Header -->
-            <Border Grid.Row="0" Background="{DynamicResource TitleBarBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,0,1">
-                <DockPanel>
-                    <Button DockPanel.Dock="Right" Width="40" Height="36" Style="{StaticResource CaptionCloseButton}"
-                            Click="CloseButton_Click" ToolTip="Close Mission Control" AutomationProperties.Name="Close Mission Control">
-                        <ctrl:StudioIcon Kind="Close" Size="12" />
-                    </Button>
-                    <ToggleButton x:Name="PinTopmostToggle" DockPanel.Dock="Right"
-                                  IsChecked="{Binding Topmost, RelativeSource={RelativeSource AncestorType=Window}, Mode=TwoWay}"
-                                  Style="{StaticResource GhostToggle}" Padding="8,4" Margin="0,4,4,4"
-                                  WindowChrome.IsHitTestVisibleInChrome="True"
-                                  ToolTip="Keep Mission Control always on top of other windows"
-                                  AutomationProperties.Name="Always on top">
-                        <StackPanel Orientation="Horizontal">
-                            <ctrl:StudioIcon Kind="Pin" Size="12" />
-                            <TextBlock Text="Pin" FontSize="11" Margin="5,0,0,0" />
-                        </StackPanel>
-                    </ToggleButton>
+            <!-- Custom 38px Studio Pod Header v3 -->
+            <Border Grid.Row="0" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,0,1">
+                <Border.Background>
+                    <LinearGradientBrush StartPoint="0,0" EndPoint="1,0">
+                        <GradientStop Color="#14182E" Offset="0" />
+                        <GradientStop Color="#0D0F1C" Offset="1" />
+                    </LinearGradientBrush>
+                </Border.Background>
+                <Grid>
+                    <!-- Top specular neon line -->
+                    <Border Height="1.5" VerticalAlignment="Top">
+                        <Border.Background>
+                            <LinearGradientBrush StartPoint="0,0" EndPoint="1,0">
+                                <GradientStop Color="#0022D3EE" Offset="0" />
+                                <GradientStop Color="#CC6366F1" Offset="0.5" />
+                                <GradientStop Color="#00A855F7" Offset="1" />
+                            </LinearGradientBrush>
+                        </Border.Background>
+                    </Border>
+                    <DockPanel>
+                        <Button DockPanel.Dock="Right" Width="40" Height="38" Style="{StaticResource CaptionCloseButton}"
+                                Click="CloseButton_Click" ToolTip="Close Mission Control" AutomationProperties.Name="Close Mission Control">
+                            <ctrl:StudioIcon Kind="Close" Size="12" />
+                        </Button>
+                        <ToggleButton x:Name="PinTopmostToggle" DockPanel.Dock="Right"
+                                      IsChecked="{Binding Topmost, RelativeSource={RelativeSource AncestorType=Window}, Mode=TwoWay}"
+                                      Style="{StaticResource GhostToggle}" Padding="8,4" Margin="0,4,4,4"
+                                      WindowChrome.IsHitTestVisibleInChrome="True"
+                                      ToolTip="Keep Mission Control always on top of other windows"
+                                      AutomationProperties.Name="Always on top">
+                            <StackPanel Orientation="Horizontal">
+                                <ctrl:StudioIcon Kind="Pin" Size="12" />
+                                <TextBlock Text="Pin" FontSize="11" Margin="5,0,0,0" />
+                            </StackPanel>
+                        </ToggleButton>
 
-                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="12,0,0,0">
-                        <ctrl:StudioIcon Kind="MissionControl" Size="15" Foreground="{DynamicResource AccentHoverBrush}" />
-                        <TextBlock Text="MISSION CONTROL" FontSize="11" FontWeight="Bold" Margin="8,0,0,0"
-                                   Foreground="{DynamicResource TextBrush}" VerticalAlignment="Center" />
-                    </StackPanel>
-                </DockPanel>
+                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="12,0,0,0">
+                            <ctrl:StudioIcon Kind="MissionControl" Size="15" Foreground="{DynamicResource AccentHoverBrush}" />
+                            <TextBlock Text="MISSION CONTROL · LIVE TELEMETRY" FontFamily="{StaticResource MonoFont}" FontSize="10.5" FontWeight="Bold" Margin="8,0,0,0"
+                                       Foreground="{DynamicResource TextBrush}" VerticalAlignment="Center" />
+                        </StackPanel>
+                    </DockPanel>
+                </Grid>
             </Border>
 
             <!-- Live Telemetry Body -->
@@ -92,10 +110,10 @@
                                                 </Style>
                                             </Ellipse.Style>
                                         </Ellipse>
-                                        <TextBlock Text="{Binding Automation.StateText}" FontSize="11" FontWeight="SemiBold" Margin="6,0,0,0" />
+                                        <TextBlock Text="{Binding Automation.StateText}" FontFamily="{StaticResource MonoFont}" FontSize="10.5" FontWeight="SemiBold" Margin="6,0,0,0" />
                                     </StackPanel>
                                 </Border>
-                                <TextBlock Text="{Binding Automation.RunningMacroTitle}" FontSize="14" FontWeight="SemiBold"
+                                <TextBlock Text="{Binding Automation.RunningMacroTitle}" FontSize="14.5" FontWeight="Bold"
                                            TextTrimming="CharacterEllipsis" VerticalAlignment="Center" Margin="0,0,8,0" />
                             </DockPanel>
 
@@ -110,7 +128,7 @@
                                 <Border Grid.Column="0" Background="{DynamicResource InputBrush}" CornerRadius="8" Padding="12,8"
                                         BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1">
                                     <StackPanel>
-                                        <TextBlock Text="CURRENT RUN" FontSize="9.5" FontWeight="Bold" Foreground="{DynamicResource SubtleTextBrush}" />
+                                        <TextBlock Text="CURRENT RUN" FontFamily="{StaticResource MonoFont}" FontSize="9.5" FontWeight="Bold" Foreground="{DynamicResource SubtleTextBrush}" />
                                         <TextBlock FontSize="18" FontWeight="Bold" FontFamily="{StaticResource MonoFont}" Margin="0,2,0,0"
                                                    Foreground="{DynamicResource AccentHoverBrush}">
                                             <TextBlock.Style>
@@ -128,10 +146,10 @@
                                     </StackPanel>
                                 </Border>
 
-                                <Border Grid.Column="2" MinWidth="118" Background="{DynamicResource InputBrush}" CornerRadius="8" Padding="12,8"
+                                <Border Grid.Column="2" MinWidth="122" Background="{DynamicResource InputBrush}" CornerRadius="8" Padding="12,8"
                                         BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1">
                                     <StackPanel>
-                                        <TextBlock Text="ELAPSED" FontSize="9.5" FontWeight="Bold" Foreground="{DynamicResource SubtleTextBrush}" />
+                                        <TextBlock Text="ELAPSED TIME" FontFamily="{StaticResource MonoFont}" FontSize="9.5" FontWeight="Bold" Foreground="{DynamicResource SubtleTextBrush}" />
                                         <TextBlock Text="{Binding Automation.ElapsedText}" FontSize="18" FontWeight="Bold"
                                                    FontFamily="{StaticResource MonoFont}" Margin="0,2,0,0" />
                                     </StackPanel>
@@ -147,10 +165,10 @@
                                 <TextBlock DockPanel.Dock="Right" Text="{Binding Automation.VisionTelemetryText}"
                                            FontFamily="{StaticResource MonoFont}" FontSize="11" Foreground="{DynamicResource VisionAccentBrush}"
                                            Visibility="{Binding Automation.HasVisionTelemetry, Converter={StaticResource BoolToVisibility}}" />
-                                <TextBlock Text="ACTIVE STEP" FontSize="10" FontWeight="Bold" Foreground="{DynamicResource SubtleTextBrush}" />
+                                <TextBlock Text="ACTIVE STEP TELEMETRY" FontFamily="{StaticResource MonoFont}" FontSize="10" FontWeight="Bold" Foreground="{DynamicResource SubtleTextBrush}" />
                             </DockPanel>
 
-                            <TextBlock Text="{Binding Automation.StepCounterText}" FontSize="12" FontWeight="SemiBold"
+                            <TextBlock Text="{Binding Automation.StepCounterText}" FontFamily="{StaticResource MonoFont}" FontSize="11.5" FontWeight="SemiBold"
                                        Foreground="{DynamicResource AccentHoverBrush}" Margin="0,6,0,0"
                                        Visibility="{Binding Automation.IsPlaying, Converter={StaticResource BoolToVisibility}}" />
                             <TextBlock Text="{Binding Automation.ActiveStepDetailText}" FontSize="12.5" Margin="0,3,0,8" TextWrapping="Wrap" />
@@ -170,7 +188,7 @@
                                 </TextBlock>
                                 <StackPanel Orientation="Horizontal">
                                     <ctrl:StudioIcon Kind="Variable" Size="13" Foreground="{DynamicResource MemoryAccentBrush}" />
-                                    <TextBlock Text="LIVE VARIABLES" FontSize="10" FontWeight="Bold" Foreground="{DynamicResource SubtleTextBrush}" Margin="6,0,0,0" VerticalAlignment="Center" />
+                                    <TextBlock Text="LIVE BRAIN VARIABLES" FontFamily="{StaticResource MonoFont}" FontSize="10" FontWeight="Bold" Foreground="{DynamicResource SubtleTextBrush}" Margin="6,0,0,0" VerticalAlignment="Center" />
                                 </StackPanel>
                             </DockPanel>
 

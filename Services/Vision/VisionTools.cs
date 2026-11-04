@@ -558,7 +558,21 @@ public sealed class VisionTools : IVisionTools
         }
 
         var watch = Stopwatch.StartNew();
-        var result = await Task.Run(() => ColorFinder.FindObjects(frame.Image, color, secondaryColor, step.Tolerance, step.MinPixels, maxResults: 10, matchShades: step.MatchShades));
+        var colorOpts = new ColorSearchOptions
+        {
+            MinPixels = step.MinPixels,
+            MaxPixels = step.MaxPixels,
+            MaxResults = 10,
+            MatchShades = step.MatchShades,
+            ColorSpace = step.ColorSpace,
+            SelectRule = step.SelectRule,
+            MinCircularityPercent = step.MinCircularityPercent,
+            MinFillPercent = step.MinFillPercent,
+            ReferencePoint = step.SelectRule is ColorSelectRule.NearestToCenter or ColorSelectRule.NearestToLastSpot
+                ? (frame.Image.Width / 2, frame.Image.Height / 2)
+                : null,
+        };
+        var result = await Task.Run(() => ColorFinder.FindObjects(frame.Image, color, secondaryColor, step.Tolerance, colorOpts));
         var searchTime = watch.Elapsed;
 
         var picture = frame.Image.Clone();
@@ -691,7 +705,7 @@ public sealed class VisionTools : IVisionTools
         }
 
         var stats = summary.Stats;
-        var input = copy.InputKind == FeedbackInputKind.MouseButton ? $"the {copy.MouseButton.ToString().ToLowerInvariant()} mouse button" : Core.Input.VirtualKeys.GetName(copy.VirtualKey);
+        var input = copy.InputKind == FeedbackInputKind.MouseButton ? $"the {StepDescriber.DescribeMouseButton(copy.MouseButton)}" : Core.Input.VirtualKeys.GetName(copy.VirtualKey);
         var text = $"Preview ({(summary.Stopped ? "stopped" : "finished")}) – NO input was sent. {stats.Describe(summary.Elapsed, summary.FrameInterval)} " +
                    $"With input on, it would have pressed {input} {stats.Presses} time(s), released it {stats.Releases} time(s) and tapped it {stats.Taps} time(s); it would have been held for {Share(summary.HeldFrames, stats.Frames)} of the frames.";
         if (summary.LoopEnds.Count > 0)
@@ -757,7 +771,7 @@ public sealed class VisionTools : IVisionTools
                 _ => "INSIDE the zone",
             };
             var action = copy.ActionFor(region);
-            var input = copy.InputKind == FeedbackInputKind.MouseButton ? $"the {copy.MouseButton.ToString().ToLowerInvariant()} button" : Core.Input.VirtualKeys.GetName(copy.VirtualKey);
+            var input = copy.InputKind == FeedbackInputKind.MouseButton ? $"the {StepDescriber.DescribeMouseButton(copy.MouseButton)}" : Core.Input.VirtualKeys.GetName(copy.VirtualKey);
             var would = action switch
             {
                 FeedbackAction.Hold => $"HOLD {input}",
