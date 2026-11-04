@@ -92,13 +92,13 @@ public sealed class StudioXUpgradeTests
         Assert.Contains(subMacroCommands, c => c.Step == StepKind.CallMacro);
 
         var blueprints = StudioCommandCatalog.Filter("blueprint");
-        Assert.Equal(7, blueprints.Count);
+        Assert.Equal(10, blueprints.Count);
     }
 
     [Fact]
     public void MacroBlueprints_AllBuildNonEmptyBalancedStepLists()
     {
-        Assert.Equal(7, MacroBlueprints.All.Count);
+        Assert.Equal(10, MacroBlueprints.All.Count);
         foreach (var bp in MacroBlueprints.All)
         {
             Assert.False(string.IsNullOrWhiteSpace(bp.Title));

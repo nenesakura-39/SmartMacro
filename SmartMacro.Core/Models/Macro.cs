@@ -233,7 +233,9 @@ public sealed class MacroDocument
         {
             var needed = step switch
             {
-                SetVariableStep { Source: VariableSourceKind.ScreenGaugePercent } => 17,
+                SetVariableStep { Source: VariableSourceKind.ScreenGaugePercent or VariableSourceKind.LineAtLoopIndex } => 17,
+                SetVariableStep { Operation: VariableOperation.TrimText or VariableOperation.ExtractDigits or VariableOperation.ToUpper or VariableOperation.ToLower } => 17,
+                FocusWindowStep { SnapLayout: not WindowSnapLayout.KeepCurrent } => 17,
                 _ when UsesVersion16StepFeatures(step) => 16,
                 _ when UsesVersion15Features(step) => 15,
                 MouseMoveStep { UseRelativeDelta: true } => 14,

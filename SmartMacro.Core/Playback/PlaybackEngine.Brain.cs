@@ -153,6 +153,15 @@ public sealed partial class PlaybackEngine
                 break;
             }
 
+            case VariableSourceKind.LineAtLoopIndex:
+            {
+                var turn = loops.Count > 0 ? loops[^1].Turns + 1 : Math.Max(1, run.Iteration);
+                var listText = run.Variables.Interpolate(step.Value);
+                rawValue = VariableStore.ExtractItemAtOneBasedIndex(listText, turn);
+                inferredType = MacroVariableType.Text;
+                break;
+            }
+
             default:
                 rawValue = string.Empty;
                 break;

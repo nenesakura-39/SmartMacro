@@ -68,6 +68,11 @@ public interface IWindowFocuser
     /// foreground window afterwards (Windows can refuse, e.g. while another app is in a full-screen exclusive mode).
     /// </summary>
     bool TryFocus(WindowInfo window, bool restoreIfMinimized);
+
+    /// <summary>
+    /// Optional v1.7 "Workbench": snaps, tiles, maximizes, or centers <paramref name="window"/> on <paramref name="primaryBounds"/>.
+    /// </summary>
+    bool TrySnap(WindowInfo window, WindowSnapLayout snapLayout, ScreenRect primaryBounds) => false;
 }
 
 /// <summary>Thrown when a step's "where to look" can't be used right now (the window isn't open, no such monitor…).</summary>

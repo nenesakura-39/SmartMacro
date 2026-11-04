@@ -38,6 +38,10 @@
             <CheckBox Content="Restore it if it's minimized" IsChecked="{Binding RestoreIfMinimized}" Margin="0,12,0,0"
                       AutomationProperties.Name="Restore it if it's minimized" />
 
+            <TextBlock Text="Window layout / snap (optional)" Style="{StaticResource FieldLabel}" Margin="0,10,0,4" />
+            <ComboBox ItemsSource="{x:Static steps:FocusWindowStepViewModel.SnapChoices}" DisplayMemberPath="Label" SelectedValuePath="Value"
+                      SelectedValue="{Binding SnapLayout}" AutomationProperties.Name="Window snap layout" />
+
             <Grid>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*" />

@@ -261,6 +261,13 @@ public sealed partial class PlaybackEngine
                     }
 
                     var focused = focuser.TryFocus(window, step.RestoreIfMinimized);
+                    if (step.SnapLayout != WindowSnapLayout.KeepCurrent)
+                    {
+                        var primary = layout.GetMonitors().FirstOrDefault(m => m.IsPrimary)?.Bounds
+                                      ?? layout.GetMonitors().FirstOrDefault()?.Bounds
+                                      ?? new ScreenRect(0, 0, 1920, 1080);
+                        focuser.TrySnap(window, step.SnapLayout, primary);
+                    }
                     Message?.Invoke(this, focused
                         ? $"Brought the window \"{window.Title}\" to the front."
                         : $"Found the window \"{window.Title}\", but Windows didn't let SmartMacro bring it to the front (click it once by hand, or run SmartMacro as the same user / admin level as the game).");

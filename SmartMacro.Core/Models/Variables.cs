@@ -60,6 +60,18 @@ public enum VariableOperation
     Add,
     Subtract,
     AppendText,
+
+    /// <summary>v1.7 "Workbench": stores trimmed text with collapsed internal whitespace.</summary>
+    TrimText,
+
+    /// <summary>v1.7 "Workbench": extracts only ASCII digits (0–9) from the source text.</summary>
+    ExtractDigits,
+
+    /// <summary>v1.7 "Workbench": converts the source text to uppercase.</summary>
+    ToUpper,
+
+    /// <summary>v1.7 "Workbench": converts the source text to lowercase.</summary>
+    ToLower,
 }
 
 /// <summary>Where a <see cref="SetVariableStep"/> reads its input value from.</summary>
@@ -94,6 +106,12 @@ public enum VariableSourceKind
     /// inside <see cref="SetVariableStep.Region"/> by matching <see cref="SetVariableStep.GaugeColor"/>.
     /// </summary>
     ScreenGaugePercent,
+
+    /// <summary>
+    /// v1.7 "Workbench": reads the N-th line or comma/semicolon-separated item from <see cref="SetVariableStep.Value"/>
+    /// (where N is the 1-based current Repeat loop turn), or empty string when past the end of the list.
+    /// </summary>
+    LineAtLoopIndex,
 }
 
 /// <summary>Comparison operators for <see cref="ConditionKind.VariableCompare"/>.</summary>

@@ -425,6 +425,24 @@ public static class ManualCatalog
                 "Adjust the Input ({batchSize} → count) and Output (profit → earned) bindings to match your helper macro's variable names.",
                 "Exporting this macro from Library automatically bundles your helper sub-macro into the same .smacro file.",
             },
+            [MacroBlueprint.ArenaAutoPotionLoop] = new[]
+            {
+                "Select the first Set variable step (📊 Read bar / gauge fill %) and click Pick area on screen around your HP or Mana bar.",
+                "Click 🎨 Pick fill color to sample the green/red/blue fill color of the bar.",
+                "Customize the 35% threshold on the If step or the '1' potion key on the Key press step.",
+            },
+            [MacroBlueprint.ArenaSkillPriorityRotation] = new[]
+            {
+                "Select the If step and pick the bright ready-color and area of your Ultimate cooldown icon.",
+                "Customize the Ultimate key ('R') and fallback Main Skill key ('Q') to match your keybinds.",
+                "Pair with a Repeat-While-Held trigger in the ⚡ Triggers dock so holding one key runs your priority rotation.",
+            },
+            [MacroBlueprint.WorkbenchListRowLoop] = new[]
+            {
+                "Open 🧠 Variables in the bottom dock and paste your comma-separated or multi-line items into {rowList} (and set the Repeat count to match).",
+                "Each turn automatically extracts the N-th item into {currentItem} and trims extra spaces.",
+                "Customize the Type text and Key press steps inside the loop to match your spreadsheet or web form.",
+            },
         };
 
         foreach (var info in MacroBlueprints.All)

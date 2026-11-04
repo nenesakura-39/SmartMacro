@@ -5,6 +5,7 @@ using SmartMacro.Core.Playback;
 using SmartMacro.Core.Storage;
 using SmartMacro.Core.Validation;
 using SmartMacro.Core.Vision;
+using SmartMacro.Core.Workflow;
 using Xunit;
 
 namespace SmartMacro.Tests;
@@ -394,5 +395,79 @@ public sealed class BedrockAndReflexTests
         Assert.Equal(17, MacroDocument.RequiredSchemaVersion(macro));
         var issues = MacroValidator.Validate(macro);
         Assert.DoesNotContain(issues, i => i.Severity == IssueSeverity.Error);
+    }
+
+    // ---------------- v1.7 Workbench + Arena: Text Transforms, List Indexing, Window Snap & Blueprints ----------------
+
+    [Fact]
+    public void VariableStore_WorkbenchTextOperations_And_LineAtLoopIndex_WorkCleanly()
+    {
+        var store = new VariableStore();
+
+        Assert.Equal("Hello World", store.Apply("clean", MacroVariableType.Text, VariableOperation.TrimText, "   Hello   \r\n  World  "));
+        Assert.Equal("12450", store.Apply("digits", MacroVariableType.Text, VariableOperation.ExtractDigits, "Order #12-450 (Paid)"));
+        Assert.Equal("URGENT", store.Apply("upper", MacroVariableType.Text, VariableOperation.ToUpper, "  urgent "));
+        Assert.Equal("ready", store.Apply("lower", MacroVariableType.Text, VariableOperation.ToLower, " READY "));
+
+        // CSV / semicolon single-line list
+        var csv = "SKU-101, SKU-102 ; SKU-103";
+        Assert.Equal("SKU-101", VariableStore.ExtractItemAtOneBasedIndex(csv, 1));
+        Assert.Equal("SKU-102", VariableStore.ExtractItemAtOneBasedIndex(csv, 2));
+        Assert.Equal("SKU-103", VariableStore.ExtractItemAtOneBasedIndex(csv, 3));
+        Assert.Equal(string.Empty, VariableStore.ExtractItemAtOneBasedIndex(csv, 4));
+
+        // Multi-line list
+        var lines = "First Row\r\n\r\nSecond Row\nThird Row";
+        Assert.Equal("First Row", VariableStore.ExtractItemAtOneBasedIndex(lines, 1));
+        Assert.Equal("Second Row", VariableStore.ExtractItemAtOneBasedIndex(lines, 2));
+        Assert.Equal("Third Row", VariableStore.ExtractItemAtOneBasedIndex(lines, 3));
+        Assert.Equal(string.Empty, VariableStore.ExtractItemAtOneBasedIndex(lines, 4));
+    }
+
+    [Fact]
+    public void FocusWindowStep_SnapLayout_BumpsSchema17_AndDescribesCleanly()
+    {
+        var focus = new FocusWindowStep
+        {
+            WindowTitle = "Excel",
+            RestoreIfMinimized = true,
+            SnapLayout = WindowSnapLayout.SnapLeftHalf,
+        };
+        var macro = new Macro
+        {
+            Name = "Snap Excel",
+            Steps = new List<MacroStep> { focus },
+        };
+
+        Assert.Equal(17, MacroDocument.RequiredSchemaVersion(macro));
+        Assert.Contains("snap left half", StepDescriber.Describe(focus));
+    }
+
+    [Fact]
+    public void MacroBlueprints_ArenaAndWorkbench_BuildBalancedBlocks_AndSeedVariables()
+    {
+        foreach (var bp in new[]
+        {
+            MacroBlueprint.ArenaAutoPotionLoop,
+            MacroBlueprint.ArenaSkillPriorityRotation,
+            MacroBlueprint.WorkbenchListRowLoop,
+        })
+        {
+            var info = MacroBlueprints.Info(bp);
+            Assert.False(string.IsNullOrWhiteSpace(info.Title));
+
+            var steps = MacroBlueprints.Build(bp);
+            Assert.NotEmpty(steps);
+
+            var blocks = BlockStructure.Analyze(steps);
+            Assert.True(blocks.IsValid);
+        }
+
+        var autoPotVars = MacroBlueprints.BuildVariables(MacroBlueprint.ArenaAutoPotionLoop);
+        Assert.Contains(autoPotVars, v => v.Name == "hp");
+
+        var workbenchVars = MacroBlueprints.BuildVariables(MacroBlueprint.WorkbenchListRowLoop);
+        Assert.Contains(workbenchVars, v => v.Name == "rowList");
+        Assert.Contains(workbenchVars, v => v.Name == "currentItem");
     }
 }

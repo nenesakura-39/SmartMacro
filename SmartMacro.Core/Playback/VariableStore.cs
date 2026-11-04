@@ -157,7 +157,7 @@ public sealed class VariableStore
                     Name = trimmed,
                     Type = operation is VariableOperation.Add or VariableOperation.Subtract
                         ? MacroVariableType.Number
-                        : operation == VariableOperation.AppendText
+                        : operation is VariableOperation.AppendText or VariableOperation.TrimText or VariableOperation.ExtractDigits or VariableOperation.ToUpper or VariableOperation.ToLower
                             ? MacroVariableType.Text
                             : fallbackType,
                 };
@@ -194,6 +194,17 @@ public sealed class VariableStore
                     var currentText = entry.Format();
                     entry.Type = MacroVariableType.Text;
                     entry.TextValue = currentText + incomingText;
+                    break;
+                }
+
+                case VariableOperation.TrimText:
+                case VariableOperation.ExtractDigits:
+                case VariableOperation.ToUpper:
+                case VariableOperation.ToLower:
+                {
+                    var source = string.IsNullOrEmpty(incomingText) ? entry.Format() : incomingText;
+                    entry.Type = MacroVariableType.Text;
+                    entry.TextValue = TransformText(operation, source);
                     break;
                 }
             }
@@ -456,5 +467,79 @@ public sealed class VariableStore
         if (Math.Abs(n - Math.Round(n)) < 1e-9 && Math.Abs(n) < 1e15)
             return ((long)Math.Round(n)).ToString(CultureInfo.InvariantCulture);
         return n.ToString("0.######", CultureInfo.InvariantCulture);
+    }
+
+    /// <summary>
+    /// v1.7 "Workbench": transforms <paramref name="text"/> according to a text-cleanup <see cref="VariableOperation"/>.
+    /// </summary>
+    public static string TransformText(VariableOperation operation, string? text)
+    {
+        var s = text ?? string.Empty;
+        switch (operation)
+        {
+            case VariableOperation.TrimText:
+            {
+                var sb = new StringBuilder(s.Length);
+                var inWhitespace = false;
+                foreach (var ch in s.Trim())
+                {
+                    if (char.IsWhiteSpace(ch))
+                    {
+                        if (!inWhitespace)
+                        {
+                            sb.Append(' ');
+                            inWhitespace = true;
+                        }
+                    }
+                    else
+                    {
+                        sb.Append(ch);
+                        inWhitespace = false;
+                    }
+                }
+                return sb.ToString();
+            }
+
+            case VariableOperation.ExtractDigits:
+            {
+                var sb = new StringBuilder(s.Length);
+                foreach (var ch in s)
+                {
+                    if (ch is >= '0' and <= '9') sb.Append(ch);
+                }
+                return sb.ToString();
+            }
+
+            case VariableOperation.ToUpper:
+                return s.Trim().ToUpperInvariant();
+
+            case VariableOperation.ToLower:
+                return s.Trim().ToLowerInvariant();
+
+            default:
+                return s;
+        }
+    }
+
+    /// <summary>
+    /// v1.7 "Workbench": extracts the <paramref name="oneBasedIndex"/>-th non-empty line (or comma/semicolon-separated item
+    /// when single-line) from <paramref name="text"/>. Returns <see cref="string.Empty"/> when <paramref name="oneBasedIndex"/>
+    /// is out of range so a <c>Repeat Until {item} == ""</c> loop stops cleanly at the end of a list.
+    /// </summary>
+    public static string ExtractItemAtOneBasedIndex(string? text, int oneBasedIndex)
+    {
+        if (string.IsNullOrWhiteSpace(text) || oneBasedIndex < 1) return string.Empty;
+
+        string[] parts;
+        if (text.Contains('\n') || text.Contains('\r'))
+        {
+            parts = text.Split(new[] { "\r\n", "\n", "\r" }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        }
+        else
+        {
+            parts = text.Split(new[] { ',', ';', '\t' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        }
+
+        return oneBasedIndex <= parts.Length ? parts[oneBasedIndex - 1] : string.Empty;
     }
 }

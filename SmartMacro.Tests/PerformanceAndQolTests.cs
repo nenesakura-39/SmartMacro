@@ -1636,7 +1636,7 @@ public class BlueprintTests
             Assert.NotEqual(MacroBlueprints.Build(info.Blueprint)[0].Id, steps[0].Id); // new objects every time
         }
 
-        Assert.Equal(7, MacroBlueprints.All.Count);
+        Assert.Equal(10, MacroBlueprints.All.Count);
     }
 
     [Fact]

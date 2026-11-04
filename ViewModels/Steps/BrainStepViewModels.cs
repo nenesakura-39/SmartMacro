@@ -296,6 +296,10 @@ public sealed class SetVariableStepViewModel : StepViewModel
         new Choice<VariableOperation>(VariableOperation.Add, "Add (+=) — add to number"),
         new Choice<VariableOperation>(VariableOperation.Subtract, "Subtract (-=) — subtract from number"),
         new Choice<VariableOperation>(VariableOperation.AppendText, "Append text — add to end of text"),
+        new Choice<VariableOperation>(VariableOperation.TrimText, "✂ Trim & collapse spaces"),
+        new Choice<VariableOperation>(VariableOperation.ExtractDigits, "🔢 Extract digits only (0–9)"),
+        new Choice<VariableOperation>(VariableOperation.ToUpper, "🔠 Convert to UPPERCASE"),
+        new Choice<VariableOperation>(VariableOperation.ToLower, "🔡 Convert to lowercase"),
     };
 
     public static IReadOnlyList<Choice<VariableSourceKind>> Sources { get; } = new[]
@@ -304,6 +308,7 @@ public sealed class SetVariableStepViewModel : StepViewModel
         new Choice<VariableSourceKind>(VariableSourceKind.ScreenOcrNumber, "🔢 Read number from screen area (OCR)"),
         new Choice<VariableSourceKind>(VariableSourceKind.ScreenOcrText, "🔤 Read text from screen area (OCR)"),
         new Choice<VariableSourceKind>(VariableSourceKind.ScreenGaugePercent, "📊 Read bar / gauge fill % (0–100)"),
+        new Choice<VariableSourceKind>(VariableSourceKind.LineAtLoopIndex, "📄 N-th line or CSV item (by loop turn)"),
         new Choice<VariableSourceKind>(VariableSourceKind.ClipboardText, "📋 Clipboard text"),
         new Choice<VariableSourceKind>(VariableSourceKind.LastFoundX, "🎯 Last found X coordinate"),
         new Choice<VariableSourceKind>(VariableSourceKind.LastFoundY, "🎯 Last found Y coordinate"),
@@ -349,6 +354,7 @@ public sealed class SetVariableStepViewModel : StepViewModel
         VariableSourceKind.ScreenOcrNumber => $"a number read via OCR at ({_step.RegionX}, {_step.RegionY}) {_step.RegionWidth}×{_step.RegionHeight}",
         VariableSourceKind.ScreenOcrText => $"text read via OCR at ({_step.RegionX}, {_step.RegionY}) {_step.RegionWidth}×{_step.RegionHeight}",
         VariableSourceKind.ScreenGaugePercent => $"bar/gauge fill % ({_step.EffectiveGaugeColor}) at ({_step.RegionX}, {_step.RegionY}) {_step.RegionWidth}×{_step.RegionHeight}",
+        VariableSourceKind.LineAtLoopIndex => $"item #turn from list \"{_step.Value}\"",
         VariableSourceKind.ClipboardText => "the Windows clipboard",
         VariableSourceKind.LastFoundX => "the X coordinate of the last found target",
         VariableSourceKind.LastFoundY => "the Y coordinate of the last found target",
@@ -396,7 +402,7 @@ public sealed class SetVariableStepViewModel : StepViewModel
         }
     }
 
-    public bool UsesConstantValue => _step.Source == VariableSourceKind.Constant;
+    public bool UsesConstantValue => _step.Source is VariableSourceKind.Constant or VariableSourceKind.LineAtLoopIndex;
     public bool UsesScreenRegion => _step.UsesScreenRegion;
     public bool IsScreenGauge => _step.Source == VariableSourceKind.ScreenGaugePercent;
 
@@ -487,6 +493,7 @@ public sealed class SetVariableStepViewModel : StepViewModel
         VariableSourceKind.ScreenOcrNumber => "Reads text inside the box with Windows OCR and extracts the number (e.g. \"Gold: 12,450\" → 12450, \"$9.50\" → 9.5). If no digits are visible yet, keeps 0 (or adds 0).",
         VariableSourceKind.ScreenOcrText => "Reads all visible words inside the box with Windows OCR and stores them as text.",
         VariableSourceKind.ScreenGaugePercent => "Measures how full a progress bar, HP/MP bar, or stamina gauge is (0 to 100%) by scanning the bar area for the fill color. Works even when text or icons sit in the middle of the bar.",
+        VariableSourceKind.LineAtLoopIndex => "Extracts the N-th line or comma/semicolon-separated item from the text box above (or {listVar}), where N is the current Repeat loop turn (1, 2, 3…). Stores empty text once past the last item.",
         VariableSourceKind.ClipboardText => "Reads the current plain text on the Windows clipboard.",
         VariableSourceKind.LastFoundX => "Stores the X pixel coordinate of the latest Find step / condition match (0 if nothing has matched yet).",
         VariableSourceKind.LastFoundY => "Stores the Y pixel coordinate of the latest Find step / condition match (0 if nothing has matched yet).",

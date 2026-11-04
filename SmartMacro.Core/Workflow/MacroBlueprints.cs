@@ -25,6 +25,15 @@ public enum MacroBlueprint
 
     /// <summary>v1.2 Brain: Set Batch Variable → Call Sub-Macro (Inputs &amp; Outputs) → If Result &gt; 0.</summary>
     ModularSubMacroPipeline,
+
+    /// <summary>v1.7 Arena: Read HP Bar Fill % → If {hp} &lt; 35 → Press Potion Key + Cooldown Delay.</summary>
+    ArenaAutoPotionLoop,
+
+    /// <summary>v1.7 Arena: Priority Cooldown Rotation (If Ultimate Ready → Else Primary Skill → Else Basic Attack).</summary>
+    ArenaSkillPriorityRotation,
+
+    /// <summary>v1.7 Workbench: Table / List Row Batch Processor (Repeat N× → LineAtLoopIndex → Type &amp; Enter + Settle).</summary>
+    WorkbenchListRowLoop,
 }
 
 /// <summary>
@@ -94,6 +103,18 @@ public static class MacroBlueprints
             "Set Batch → Call Sub-Macro (Inputs & Outputs) → If Result",
             "Passes {batchSize} into a reusable library sub-macro, receives {earned} back into this macro's memory, and branches on the returned result.",
             "submacro composition call subroutine helper parameter input output bundle"),
+        new MacroBlueprintInfo(MacroBlueprint.ArenaAutoPotionLoop, "🧪", "Smart HP / Mana Auto-Potion",
+            "Read HP Bar % → If {hp} < 35% → Press Potion Key",
+            "Reads your game's HP / Mana bar fill percentage (0–100%) using the v1.6 HUD Gauge Reader and automatically presses your potion key when health drops below 35%.",
+            "arena game hp mana health bar gauge potion heal survival", EnablesHumanize: true),
+        new MacroBlueprintInfo(MacroBlueprint.ArenaSkillPriorityRotation, "⚔️", "Priority Cooldown Rotation",
+            "If Ultimate Ready → Else Skill 1 → Else Basic Attack",
+            "Checks your highest-priority cooldown icon color first; fires Ultimate if ready, otherwise falls back to your main skill with Humanized timing.",
+            "arena game rotation cooldown skill priority combat mmo arpg", EnablesHumanize: true),
+        new MacroBlueprintInfo(MacroBlueprint.WorkbenchListRowLoop, "📊", "Table / List Row Batch Loop",
+            "Repeat 3× → Read N-th List Item → Type {currentItem} + Enter",
+            "Loops through a list of IDs, SKUs, or lines (one per loop turn into {currentItem}), types each entry into your work app, presses Enter, and waits until the UI settles.",
+            "workbench work excel csv list batch loop table row form data entry"),
     };
 
     public static MacroBlueprintInfo Info(MacroBlueprint blueprint) => All.First(b => b.Blueprint == blueprint);
@@ -108,6 +129,9 @@ public static class MacroBlueprints
         MacroBlueprint.ScreenCounterGoalLoop => ScreenCounterGoalLoop(),
         MacroBlueprint.CheckpointRecoveryFlow => CheckpointRecoveryFlow(),
         MacroBlueprint.ModularSubMacroPipeline => ModularSubMacroPipeline(),
+        MacroBlueprint.ArenaAutoPotionLoop => ArenaAutoPotionLoop(),
+        MacroBlueprint.ArenaSkillPriorityRotation => ArenaSkillPriorityRotation(),
+        MacroBlueprint.WorkbenchListRowLoop => WorkbenchListRowLoop(),
         _ => throw new ArgumentOutOfRangeException(nameof(blueprint), blueprint, "Unknown blueprint."),
     };
 
@@ -123,6 +147,15 @@ public static class MacroBlueprints
         {
             new MacroVariableDefinition { Name = "batchSize", Type = MacroVariableType.Number, DefaultValue = "10" },
             new MacroVariableDefinition { Name = "earned", Type = MacroVariableType.Number, DefaultValue = "0" },
+        },
+        MacroBlueprint.ArenaAutoPotionLoop => new[]
+        {
+            new MacroVariableDefinition { Name = "hp", Type = MacroVariableType.Number, DefaultValue = "100" },
+        },
+        MacroBlueprint.WorkbenchListRowLoop => new[]
+        {
+            new MacroVariableDefinition { Name = "rowList", Type = MacroVariableType.Text, DefaultValue = "SKU-101, SKU-102, SKU-103" },
+            new MacroVariableDefinition { Name = "currentItem", Type = MacroVariableType.Text, DefaultValue = "" },
         },
         _ => Array.Empty<MacroVariableDefinition>(),
     };
@@ -325,6 +358,119 @@ public static class MacroBlueprints
             },
             followUpWait,
             new EndIfStep(),
+        };
+    }
+
+    private static List<MacroStep> ArenaAutoPotionLoop()
+    {
+        var potionKey = (KeyPressStep)MacroFactory.CreateStep(StepKind.KeyPress);
+        potionKey.VirtualKey = 0x31; // '1' key
+        potionKey.Comment = "Presses potion key '1' when HP drops below 35%";
+
+        var cooldownWait = (DelayStep)MacroFactory.CreateStep(StepKind.Delay, 600);
+        cooldownWait.Comment = "Potion cooldown pause";
+
+        return new List<MacroStep>
+        {
+            new SetVariableStep
+            {
+                VariableName = "hp",
+                VariableType = MacroVariableType.Number,
+                Operation = VariableOperation.Set,
+                Source = VariableSourceKind.ScreenGaugePercent,
+                RegionX = 100,
+                RegionY = 60,
+                RegionWidth = 240,
+                RegionHeight = 24,
+                GaugeColor = "#22C55E",
+                GaugeTolerance = 32,
+                GaugeDirection = Vision.GaugeDirection.LeftToRight,
+                Comment = "Pick your game's HP bar area and fill color",
+            },
+            new IfStep
+            {
+                Condition = new Condition
+                {
+                    Comparison = new VariableComparison
+                    {
+                        VariableName = "hp",
+                        Operator = VariableCompareOperator.LessThan,
+                        RightValue = "35",
+                    },
+                },
+                Comment = "Check if HP bar is below 35%",
+            },
+            potionKey,
+            cooldownWait,
+            new EndIfStep(),
+        };
+    }
+
+    private static List<MacroStep> ArenaSkillPriorityRotation()
+    {
+        var ultKey = (KeyPressStep)MacroFactory.CreateStep(StepKind.KeyPress);
+        ultKey.VirtualKey = 0x52; // 'R'
+        ultKey.Comment = "Fire Ultimate skill (R)";
+
+        var mainSkillKey = (KeyPressStep)MacroFactory.CreateStep(StepKind.KeyPress);
+        mainSkillKey.VirtualKey = 0x51; // 'Q'
+        mainSkillKey.Comment = "Fallback: fire Main Skill (Q)";
+
+        var gcdDelay = (DelayStep)MacroFactory.CreateStep(StepKind.Delay, 250);
+        gcdDelay.Comment = "Global cooldown spacing";
+
+        return new List<MacroStep>
+        {
+            new IfStep
+            {
+                Condition = MacroFactory.NewCondition(ConditionKind.ColorVisible),
+                Comment = "Pick the bright ready-color on your Ultimate skill icon",
+            },
+            ultKey,
+            new ElseStep(),
+            mainSkillKey,
+            new EndIfStep(),
+            gcdDelay,
+        };
+    }
+
+    private static List<MacroStep> WorkbenchListRowLoop()
+    {
+        var typeItem = (TypeTextStep)MacroFactory.CreateStep(StepKind.TypeText);
+        typeItem.Text = "{currentItem}";
+        typeItem.Comment = "Types the current row's item";
+
+        var pressEnter = (KeyPressStep)MacroFactory.CreateStep(StepKind.KeyPress);
+        pressEnter.VirtualKey = 0x0D; // Enter
+        pressEnter.Comment = "Submit / move to next row";
+
+        var settle = (DelayStep)MacroFactory.CreateStep(StepKind.Delay, 500);
+        settle.Mode = DelayMode.UntilScreenSettles;
+        settle.MinDurationMs = 120;
+        settle.MaxDurationMs = 1500;
+        settle.Comment = "Wait until form / table settles";
+
+        return new List<MacroStep>
+        {
+            new RepeatStep
+            {
+                Mode = RepeatMode.Times,
+                Count = 3,
+                Comment = "Process each item in {rowList}",
+            },
+            new SetVariableStep
+            {
+                VariableName = "currentItem",
+                VariableType = MacroVariableType.Text,
+                Operation = VariableOperation.TrimText,
+                Source = VariableSourceKind.LineAtLoopIndex,
+                Value = "{rowList}",
+                Comment = "Extracts the N-th item for the current loop turn",
+            },
+            typeItem,
+            pressEnter,
+            settle,
+            new EndRepeatStep(),
         };
     }
 }

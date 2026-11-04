@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Runtime.InteropServices;
 using System.Text;
+using SmartMacro.Core.Models;
 using SmartMacro.Core.Ocr;
 using SmartMacro.Core.Validation;
 using SmartMacro.Core.Vision;
@@ -194,6 +195,37 @@ public sealed class ScreenInfoProvider : IScreenInfoProvider, IScreenLayout, IWi
         return FocusNow(window, restoreIfMinimized);
     }
 
+    public bool TrySnap(WindowInfo window, WindowSnapLayout snapLayout, ScreenRect primaryBounds)
+    {
+        ArgumentNullException.ThrowIfNull(window);
+        if (snapLayout == WindowSnapLayout.KeepCurrent) return true;
+
+        var hwnd = new IntPtr(window.Handle);
+        if (!WindowApi.IsWindow(hwnd)) return false;
+
+        using var dpi = NativeMethods.PhysicalPixelsScope.Enter();
+        if (snapLayout == WindowSnapLayout.Maximize)
+        {
+            return WindowApi.ShowWindow(hwnd, WindowApi.SW_MAXIMIZE);
+        }
+
+        WindowApi.ShowWindow(hwnd, WindowApi.SW_RESTORE);
+        var b = primaryBounds.IsEmpty ? new ScreenRect(0, 0, 1920, 1080) : primaryBounds;
+        var target = snapLayout switch
+        {
+            WindowSnapLayout.SnapLeftHalf => new ScreenRect(b.X, b.Y, Math.Max(200, b.Width / 2), b.Height),
+            WindowSnapLayout.SnapRightHalf => new ScreenRect(b.X + b.Width / 2, b.Y, Math.Max(200, b.Width - b.Width / 2), b.Height),
+            WindowSnapLayout.CenterOnPrimary => new ScreenRect(
+                b.X + (int)(b.Width * 0.1),
+                b.Y + (int)(b.Height * 0.1),
+                Math.Max(320, (int)(b.Width * 0.8)),
+                Math.Max(240, (int)(b.Height * 0.8))),
+            _ => b,
+        };
+
+        return WindowApi.SetWindowPos(hwnd, IntPtr.Zero, target.X, target.Y, target.Width, target.Height, WindowApi.SWP_NOZORDER | WindowApi.SWP_NOACTIVATE);
+    }
+
     private static bool FocusNow(WindowInfo window, bool restoreIfMinimized)
     {
         var hwnd = new IntPtr(window.Handle);
@@ -298,7 +330,14 @@ internal static class WindowApi
     public static extern short GetAsyncKeyState(int vKey);
 
     // "Focus window" step.
+    public const int SW_MAXIMIZE = 3;
     public const int SW_RESTORE = 9;
+    public const uint SWP_NOZORDER = 0x0004;
+    public const uint SWP_NOACTIVATE = 0x0010;
+
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags);
 
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]

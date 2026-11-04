@@ -70,6 +70,7 @@ public static class StepDescriber
             VariableSourceKind.ScreenOcrNumber => $"screen number at ({v.RegionX}, {v.RegionY}) {v.RegionWidth}×{v.RegionHeight}",
             VariableSourceKind.ScreenOcrText => $"screen text at ({v.RegionX}, {v.RegionY}) {v.RegionWidth}×{v.RegionHeight}",
             VariableSourceKind.ScreenGaugePercent => $"bar fill % ({v.EffectiveGaugeColor}) at ({v.RegionX}, {v.RegionY}) {v.RegionWidth}×{v.RegionHeight}",
+            VariableSourceKind.LineAtLoopIndex => $"item #turn from \"{Preview(v.Value)}\"",
             VariableSourceKind.ClipboardText => "clipboard text",
             VariableSourceKind.LastFoundX => "last found X",
             VariableSourceKind.LastFoundY => "last found Y",
@@ -83,6 +84,10 @@ public static class StepDescriber
             VariableOperation.Add => $"Add {source} to {name}",
             VariableOperation.Subtract => $"Subtract {source} from {name}",
             VariableOperation.AppendText => $"Append {source} to {name}",
+            VariableOperation.TrimText => $"Set {name} = Trim({source})",
+            VariableOperation.ExtractDigits => $"Set {name} = Digits({source})",
+            VariableOperation.ToUpper => $"Set {name} = Upper({source})",
+            VariableOperation.ToLower => $"Set {name} = Lower({source})",
             _ => $"Set {name} = {source}",
         };
     }
@@ -118,7 +123,15 @@ public static class StepDescriber
     private static string DescribeFocusWindow(FocusWindowStep w)
     {
         var title = string.IsNullOrWhiteSpace(w.WindowTitle) ? "a window (not chosen yet)" : $"\"{Preview(w.WindowTitle)}\"";
-        return $"Bring {title} to the front{(w.RestoreIfMinimized ? " (restore if minimized)" : "")}";
+        var snap = w.SnapLayout switch
+        {
+            WindowSnapLayout.SnapLeftHalf => ", snap left half",
+            WindowSnapLayout.SnapRightHalf => ", snap right half",
+            WindowSnapLayout.Maximize => ", maximize",
+            WindowSnapLayout.CenterOnPrimary => ", center on primary",
+            _ => "",
+        };
+        return $"Bring {title} to the front{(w.RestoreIfMinimized ? " (restore if minimized)" : "")}{snap}";
     }
 
     /// <summary>"Save a screenshot of the main monitor as SmartMacro_….png".</summary>

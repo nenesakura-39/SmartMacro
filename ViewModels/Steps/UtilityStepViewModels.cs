@@ -259,6 +259,21 @@ public sealed class FocusWindowStepViewModel : StepViewModel
         }
     }
 
+    public static IReadOnlyList<Choice<WindowSnapLayout>> SnapChoices { get; } = new[]
+    {
+        new Choice<WindowSnapLayout>(WindowSnapLayout.KeepCurrent, "Keep current position & size"),
+        new Choice<WindowSnapLayout>(WindowSnapLayout.SnapLeftHalf, "◧ Snap to Left Half of screen"),
+        new Choice<WindowSnapLayout>(WindowSnapLayout.SnapRightHalf, "◨ Snap to Right Half of screen"),
+        new Choice<WindowSnapLayout>(WindowSnapLayout.Maximize, "🗖 Maximize window"),
+        new Choice<WindowSnapLayout>(WindowSnapLayout.CenterOnPrimary, "🎯 Center on Primary Monitor (80%)"),
+    };
+
+    public WindowSnapLayout SnapLayout
+    {
+        get => _step.SnapLayout;
+        set { if (_step.SnapLayout == value) return; _step.SnapLayout = value; NotifyChanged(); }
+    }
+
     public bool RestoreIfMinimized
     {
         get => _step.RestoreIfMinimized;

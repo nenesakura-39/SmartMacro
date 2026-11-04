@@ -65,6 +65,25 @@ public sealed class WaitForChangeStep : MacroStep
     public override StepKind Kind => StepKind.WaitForChange;
 }
 
+/// <summary>Optional window placement / tiling action for <see cref="FocusWindowStep"/> (v1.7 "Workbench").</summary>
+public enum WindowSnapLayout
+{
+    /// <summary>Keep the window's current size and position (default).</summary>
+    KeepCurrent,
+
+    /// <summary>Snap the window to the left half of the primary monitor.</summary>
+    SnapLeftHalf,
+
+    /// <summary>Snap the window to the right half of the primary monitor.</summary>
+    SnapRightHalf,
+
+    /// <summary>Maximize the window on its current monitor.</summary>
+    Maximize,
+
+    /// <summary>Center the window (80% width × 80% height) on the primary monitor.</summary>
+    CenterOnPrimary,
+}
+
 /// <summary>
 /// "Focus window" (UTILITY &amp; GAME): brings an app window to the front (and restores it when it's minimized) so the
 /// keys and clicks after it go to that app, e.g. the game after checking something in a browser. The window is found by
@@ -77,6 +96,10 @@ public sealed class FocusWindowStep : MacroStep
 
     /// <summary>Restore the window first when it is minimized to the taskbar.</summary>
     public bool RestoreIfMinimized { get; set; } = true;
+
+    /// <summary>Optional window snap / layout mode applied after focusing (v1.7 "Workbench").</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public WindowSnapLayout SnapLayout { get; set; } = WindowSnapLayout.KeepCurrent;
 
     /// <summary>How long to wait for the window to exist (an app that is still starting). 0 = look once.</summary>
     public int WaitForWindowMs { get; set; } = 5_000;
