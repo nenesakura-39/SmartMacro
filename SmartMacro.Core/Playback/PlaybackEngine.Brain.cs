@@ -141,6 +141,18 @@ public sealed partial class PlaybackEngine
                 break;
             }
 
+            case VariableSourceKind.ScreenGaugePercent:
+            {
+                var cap = _capture;
+                if (cap is null)
+                    throw new InvalidOperationException("Screen capture isn't available to read a HUD / progress bar.");
+                var frame = await cap.CaptureAsync(step.Region, token).ConfigureAwait(false);
+                var pct = GaugeFillReader.MeasureFillPercent(frame, step.EffectiveGaugeColor, step.GaugeTolerance, step.GaugeDirection);
+                rawValue = pct.ToString("0.#", CultureInfo.InvariantCulture);
+                inferredType = MacroVariableType.Number;
+                break;
+            }
+
             default:
                 rawValue = string.Empty;
                 break;

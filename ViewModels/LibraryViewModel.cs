@@ -55,6 +55,9 @@ public sealed class MacroListItemViewModel : ObservableObject
     public string TriggerSummary => _macro.TriggerSummary;
     public bool HasTriggerSummary => !string.IsNullOrEmpty(TriggerSummary);
 
+    public string ProfileName => _macro.ProfileName?.Trim() ?? string.Empty;
+    public bool HasProfile => !string.IsNullOrEmpty(ProfileName);
+
     // Proportional Star weights for the Workflow Fingerprint Strip on the card
     public GridLength InputWeight { get; private set; } = new(0, GridUnitType.Star);
     public GridLength VisionWeight { get; private set; } = new(0, GridUnitType.Star);
@@ -140,7 +143,8 @@ public sealed class MacroListItemViewModel : ObservableObject
     public bool Matches(string term)
     {
         if (Name.Contains(term, StringComparison.CurrentCultureIgnoreCase)
-            || (_macro.Description?.Contains(term, StringComparison.CurrentCultureIgnoreCase) ?? false))
+            || (_macro.Description?.Contains(term, StringComparison.CurrentCultureIgnoreCase) ?? false)
+            || (_macro.ProfileName?.Contains(term, StringComparison.CurrentCultureIgnoreCase) ?? false))
             return true;
 
         return term.ToLowerInvariant() switch
@@ -152,6 +156,7 @@ public sealed class MacroListItemViewModel : ObservableObject
             "logic" or "if" or "repeat" => UsesLogic || UsesMemory,
             "brain" or "memory" or "variable" or "variables" or "watcher" or "checkpoint" => UsesMemory,
             "intent" or "smart" => UsesIntent,
+            "trigger" or "triggers" or "hotkey" => HasTriggerSummary,
             "error" or "errors" or "problem" or "problems" => HasErrors,
             _ => false,
         };
@@ -270,12 +275,33 @@ public sealed class LibraryViewModel : ObservableObject
 
     public bool HasSelection => _selectedItem is not null;
 
+    private string _selectedProfileFilter = ProfileRouter.AllProfilesLabel;
+
     public string SearchText
     {
         get => _searchText;
         set
         {
             if (SetProperty(ref _searchText, value ?? string.Empty))
+            {
+                ItemsView.Refresh();
+                RaiseStateChanged();
+            }
+        }
+    }
+
+    public IReadOnlyList<string> ProfileChoices =>
+        new[] { ProfileRouter.AllProfilesLabel }
+            .Concat(Items.Select(i => i.ProfileName).Where(p => !string.IsNullOrEmpty(p)).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(p => p))
+            .ToList();
+
+    public string SelectedProfileFilter
+    {
+        get => _selectedProfileFilter;
+        set
+        {
+            var next = string.IsNullOrWhiteSpace(value) ? ProfileRouter.AllProfilesLabel : value.Trim();
+            if (SetProperty(ref _selectedProfileFilter, next))
             {
                 ItemsView.Refresh();
                 RaiseStateChanged();
@@ -586,6 +612,12 @@ public sealed class LibraryViewModel : ObservableObject
     private bool FilterItem(object obj)
     {
         if (obj is not MacroListItemViewModel item) return false;
+        if (!string.IsNullOrWhiteSpace(_selectedProfileFilter)
+            && !string.Equals(_selectedProfileFilter, ProfileRouter.AllProfilesLabel, StringComparison.OrdinalIgnoreCase))
+        {
+            if (!string.Equals(item.ProfileName, _selectedProfileFilter, StringComparison.OrdinalIgnoreCase))
+                return false;
+        }
         if (string.IsNullOrWhiteSpace(_searchText)) return true;
         return item.Matches(_searchText.Trim());
     }
@@ -596,6 +628,7 @@ public sealed class LibraryViewModel : ObservableObject
         OnPropertyChanged(nameof(IsFilteredEmpty));
         OnPropertyChanged(nameof(HasVisibleItems));
         OnPropertyChanged(nameof(CountText));
+        OnPropertyChanged(nameof(ProfileChoices));
     }
 
     private void HandleError(Exception ex)

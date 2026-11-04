@@ -92,6 +92,12 @@
                 <Border DockPanel.Dock="Right" Style="{StaticResource Pill}" Margin="12,0,0,0">
                     <TextBlock Text="{Binding CountText}" Foreground="{DynamicResource MutedTextBrush}" FontSize="11" />
                 </Border>
+                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center" Margin="12,0,0,0">
+                    <TextBlock Text="🗂 Profile:" Foreground="{DynamicResource MutedTextBrush}" FontSize="11.5" VerticalAlignment="Center" Margin="0,0,6,0" />
+                    <ComboBox ItemsSource="{Binding ProfileChoices}" SelectedItem="{Binding SelectedProfileFilter}"
+                              MinWidth="140" Padding="8,4" FontSize="11.5"
+                              ToolTip="Filter macros by app or game profile" AutomationProperties.Name="Filter by profile" />
+                </StackPanel>
                 <Grid MaxWidth="520" HorizontalAlignment="Left">
                     <TextBox x:Name="SearchBox" Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}"
                              Tag="Search by name or description (or type vision, ocr, feedback, logic, input)"
@@ -199,6 +205,13 @@
                                             </Border>
 
                                             <WrapPanel Margin="0,7,0,0">
+                                                <Border Style="{StaticResource CategoryPill}" Background="{DynamicResource AccentSoftBrush}" ToolTip="App / Game Profile tag"
+                                                        Visibility="{Binding HasProfile, Converter={StaticResource BoolToVisibility}}">
+                                                    <StackPanel Orientation="Horizontal">
+                                                        <TextBlock Text="🗂 " FontSize="9" Foreground="{DynamicResource AccentBrush}" />
+                                                        <TextBlock Text="{Binding ProfileName}" FontSize="9" FontWeight="Bold" Foreground="{DynamicResource AccentBrush}" />
+                                                    </StackPanel>
+                                                </Border>
                                                 <Border Style="{StaticResource CategoryPill}" Background="{DynamicResource InputSoftBrush}" ToolTip="Mouse, keyboard or recorded input"
                                                         Visibility="{Binding UsesInput, Converter={StaticResource BoolToVisibility}}">
                                                     <TextBlock Text="INPUT" FontSize="9" FontWeight="Bold" Foreground="{DynamicResource InputAccentBrush}" />

@@ -21,6 +21,7 @@ public partial class App : Application
     private LogService? _log;
     private MainViewModel? _mainViewModel;
     private HotkeyService? _hotkeys;
+    private SystemTrayService? _tray;
     private RunModeHost? _runHost;
     private PrecisePlaybackClock? _playbackClock;
 
@@ -108,9 +109,22 @@ public partial class App : Application
         _hotkeys.Attach(window);
         _hotkeys.Apply(mainViewModel.CurrentSettings);
 
+        _tray = new SystemTrayService(
+            openStudio: BringToFront,
+            areTriggersArmed: () => mainViewModel.AreTriggersArmed,
+            toggleTriggers: () => mainViewModel.AreTriggersArmed = !mainViewModel.AreTriggersArmed,
+            stopPlayback: () =>
+            {
+                if (mainViewModel.Automation.StopCommand.CanExecute(null))
+                    mainViewModel.Automation.StopCommand.Execute(null);
+            },
+            exitApp: () => window.ForceClose());
+        _tray.Attach(window);
+
         mainViewModel.MacroHotkeysChanged += (_, _) =>
         {
             _hotkeys.ApplyMacroHotkeys(mainViewModel.GetActiveTriggerHotkeys());
+            _tray.UpdateTooltip($"SmartMacro Studio — {mainViewModel.TriggersArmedStatusText}");
         };
 
         // Pause / resume (F8 by default) is only a global shortcut while a macro plays, so F8 works normally otherwise.
@@ -151,6 +165,7 @@ public partial class App : Application
             _singleInstance.Dispose();
         }
 
+        _tray?.Dispose();
         _hotkeys?.Dispose();
         _runHost?.Dispose();
         _mainViewModel?.Dispose();

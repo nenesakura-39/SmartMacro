@@ -24,6 +24,8 @@ public sealed class SettingsViewModel : ObservableObject
     private bool _showLogPanel;
     private bool _minimizeDuringRun;
     private bool _showRunOverlay;
+    private bool _minimizeToTrayOnClose;
+    private bool _autoSwitchProfileByWindow = true;
     private bool _recordMouseMovement;
     private RecordingMode _recordingMode;
     private RecordingFidelity _recordingFidelity = RecordingFidelity.Exact1To1;
@@ -280,6 +282,18 @@ public sealed class SettingsViewModel : ObservableObject
         set { if (SetProperty(ref _showRunOverlay, value)) IsDirty = true; }
     }
 
+    public bool MinimizeToTrayOnClose
+    {
+        get => _minimizeToTrayOnClose;
+        set { if (SetProperty(ref _minimizeToTrayOnClose, value)) IsDirty = true; }
+    }
+
+    public bool AutoSwitchProfileByWindow
+    {
+        get => _autoSwitchProfileByWindow;
+        set { if (SetProperty(ref _autoSwitchProfileByWindow, value)) IsDirty = true; }
+    }
+
     /// <summary>
     /// "🎥 Show overlays in OBS / Discord" (streamer mode). Applied and saved at once (like the editor's top-bar pill), so it
     /// doesn't wait for Save and isn't undone by Revert.
@@ -438,6 +452,8 @@ public sealed class SettingsViewModel : ObservableObject
         _showLogPanel = settings.ShowLogPanel;
         _minimizeDuringRun = settings.MinimizeDuringRun;
         _showRunOverlay = settings.ShowRunOverlay;
+        _minimizeToTrayOnClose = settings.MinimizeToTrayOnClose;
+        _autoSwitchProfileByWindow = settings.AutoSwitchProfileByWindow;
         _recordMouseMovement = settings.RecordMouseMovement;
         _recordingMode = settings.RecordingMode;
         _recordingFidelity = settings.RecordingFidelity;
@@ -471,6 +487,9 @@ public sealed class SettingsViewModel : ObservableObject
             ShowLogPanel = ShowLogPanel,
             MinimizeDuringRun = MinimizeDuringRun,
             ShowRunOverlay = ShowRunOverlay,
+            MinimizeToTrayOnClose = MinimizeToTrayOnClose,
+            AutoSwitchProfileByWindow = AutoSwitchProfileByWindow,
+            ProfileRules = _saved.ProfileRules is null ? null : new List<MacroProfileRule>(_saved.ProfileRules),
             RecordMouseMovement = RecordMouseMovement,
             RecordingMode = RecordingMode,
             RecordingFidelity = RecordingFidelity,

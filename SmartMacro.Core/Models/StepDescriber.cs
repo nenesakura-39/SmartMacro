@@ -69,6 +69,7 @@ public static class StepDescriber
         {
             VariableSourceKind.ScreenOcrNumber => $"screen number at ({v.RegionX}, {v.RegionY}) {v.RegionWidth}×{v.RegionHeight}",
             VariableSourceKind.ScreenOcrText => $"screen text at ({v.RegionX}, {v.RegionY}) {v.RegionWidth}×{v.RegionHeight}",
+            VariableSourceKind.ScreenGaugePercent => $"bar fill % ({v.EffectiveGaugeColor}) at ({v.RegionX}, {v.RegionY}) {v.RegionWidth}×{v.RegionHeight}",
             VariableSourceKind.ClipboardText => "clipboard text",
             VariableSourceKind.LastFoundX => "last found X",
             VariableSourceKind.LastFoundY => "last found Y",

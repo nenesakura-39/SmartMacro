@@ -162,7 +162,29 @@ public sealed class AppSettings
     /// <summary>Keep the left navigation rail pinned expanded (200 px) instead of collapsed to the 56 px icon rail.</summary>
     public bool SidebarPinned { get; set; }
 
-    public AppSettings Clone() => (AppSettings)MemberwiseClone();
+    /// <summary>
+    /// v1.5 "Context": when enabled, clicking the window Close (X) button hides SmartMacro to the Windows system tray
+    /// instead of exiting, so per-macro hotkeys, schedules, and window triggers keep running in the background.
+    /// </summary>
+    public bool MinimizeToTrayOnClose { get; set; }
+
+    /// <summary>
+    /// v1.5 "Context": when enabled (default), macros assigned to a Profile only arm their triggers when a matching
+    /// window is active (or when that Profile is selected in the Library). Global macros (no Profile) stay armed everywhere.
+    /// </summary>
+    public bool AutoSwitchProfileByWindow { get; set; } = true;
+
+    /// <summary>Optional explicit window-title → profile mapping rules.</summary>
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public List<MacroProfileRule>? ProfileRules { get; set; }
+
+    public AppSettings Clone()
+    {
+        var copy = (AppSettings)MemberwiseClone();
+        if (ProfileRules is { } rules)
+            copy.ProfileRules = rules.Select(r => r.Clone()).ToList();
+        return copy;
+    }
 
     /// <summary>Clamps values that came from a hand-edited or old file into safe ranges.</summary>
     public void Sanitize()

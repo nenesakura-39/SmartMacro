@@ -1,8 +1,10 @@
 using SmartMacro.Core.Logging;
 using SmartMacro.Core.Models;
+using SmartMacro.Core.Ocr;
 using SmartMacro.Core.Playback;
 using SmartMacro.Core.Storage;
 using SmartMacro.Core.Validation;
+using SmartMacro.Core.Vision;
 using Xunit;
 
 namespace SmartMacro.Tests;
@@ -257,5 +259,140 @@ public sealed class BedrockAndReflexTests
         Assert.Equal(TriggerDecisionKind.StartMacro, next.Kind);
         Assert.Equal(windowMacro.Id, next.Macro!.Id);
         Assert.Equal(0, evaluator.QueuedCount);
+    }
+
+    // ---------------- v1.5 Context: ProfileRouter & Auto-Switching ----------------
+
+    [Fact]
+    public void ProfileRouter_ResolvesActiveProfile_And_FiltersArmedMacros()
+    {
+        var globalMacro = new Macro { Name = "Global Macro", ProfileName = null };
+        var excelMacro = new Macro { Name = "Excel Macro", ProfileName = "Excel" };
+        var gameMacro = new Macro { Name = "Elden Ring Macro", ProfileName = "Elden Ring", TargetWindowTitle = "ELDEN RING" };
+        var workMacro = new Macro { Name = "Work Macro", ProfileName = "Work" };
+        var library = new[] { globalMacro, excelMacro, gameMacro, workMacro };
+
+        var rules = new[]
+        {
+            new MacroProfileRule { ProfileName = "Work", WindowTitleMatch = "Google Docs", Enabled = true },
+        };
+
+        // 1. Explicit rule match ("Google Docs" -> "Work")
+        var resolvedWork = ProfileRouter.ResolveActiveProfile(rules, library, "Budget - Google Docs", manualProfileFilter: null, autoSwitchByWindow: true);
+        Assert.Equal("Work", resolvedWork);
+
+        // 2. Direct ProfileName substring match ("ELDEN RING™" -> "Elden Ring")
+        var resolvedGame = ProfileRouter.ResolveActiveProfile(rules, library, "ELDEN RING™", manualProfileFilter: null, autoSwitchByWindow: true);
+        Assert.Equal("Elden Ring", resolvedGame);
+
+        // 3. Direct ProfileName substring match ("Book1 - Excel" -> "Excel")
+        var resolvedExcel = ProfileRouter.ResolveActiveProfile(rules, library, "Book1 - Excel", manualProfileFilter: null, autoSwitchByWindow: true);
+        Assert.Equal("Excel", resolvedExcel);
+
+        // 4. FilterArmedMacros when AutoSwitch is ON and Excel is focused: only Global + Excel macros are armed.
+        var armedInExcel = ProfileRouter.FilterArmedMacros(
+            library,
+            activeProfile: resolvedExcel,
+            foregroundWindowTitle: "Book1 - Excel",
+            autoSwitchByWindow: true,
+            isManualProfileSelected: false);
+        Assert.Equal(2, armedInExcel.Count);
+        Assert.Contains(armedInExcel, m => m.Id == globalMacro.Id);
+        Assert.Contains(armedInExcel, m => m.Id == excelMacro.Id);
+
+        // 5. FilterArmedMacros when AutoSwitch is OFF and no manual filter is set: all macros are armed.
+        var armedAll = ProfileRouter.FilterArmedMacros(
+            library,
+            activeProfile: null,
+            foregroundWindowTitle: "Desktop",
+            autoSwitchByWindow: false,
+            isManualProfileSelected: false);
+        Assert.Equal(4, armedAll.Count);
+    }
+
+    // ---------------- v1.6 Eyes: GaugeFillReader & RelativeRect ----------------
+
+    [Fact]
+    public void GaugeFillReader_MeasuresHorizontalAndVerticalBars_AndHandlesTextOverlay()
+    {
+        var green = new RgbColor(34, 197, 94); // #22C55E
+        var white = new RgbColor(255, 255, 255);
+
+        // 100x20 horizontal bar filled 65% left-to-right
+        var img = BgraImage.Create(100, 20);
+        img.FillRectangle(new ScreenRect(0, 0, 65, 20), green);
+        // Simulate white HP text ("650 / 1000") sitting in the middle 4 rows of the bar
+        img.FillRectangle(new ScreenRect(35, 8, 20, 4), white);
+
+        var frame = new ScreenFrame(new ScreenRect(0, 0, 100, 20), img);
+        var pct = GaugeFillReader.MeasureFillPercent(frame, "#22C55E", tolerance: 24, GaugeDirection.LeftToRight);
+        Assert.Equal(65.0, pct);
+
+        // Right-to-left bar filled 40% from the right edge
+        var rtlImg = BgraImage.Create(100, 16);
+        rtlImg.FillRectangle(new ScreenRect(60, 0, 40, 16), green);
+        var rtlPct = GaugeFillReader.MeasureFillPercent(new ScreenFrame(new ScreenRect(0, 0, 100, 16), rtlImg), "#22C55E", 24, GaugeDirection.RightToLeft);
+        Assert.Equal(40.0, rtlPct);
+
+        // Bottom-to-top vertical bar filled 75% from the bottom
+        var bttImg = BgraImage.Create(20, 100);
+        bttImg.FillRectangle(new ScreenRect(0, 25, 20, 75), green);
+        var bttPct = GaugeFillReader.MeasureFillPercent(new ScreenFrame(new ScreenRect(0, 0, 20, 100), bttImg), "#22C55E", 24, GaugeDirection.BottomToTop);
+        Assert.Equal(75.0, bttPct);
+    }
+
+    [Fact]
+    public void RelativeRect_ScalesCleanly_From1080p_To1440pAnd4K()
+    {
+        var fullHd = new ScreenRect(0, 0, 1920, 1080);
+        var barAt1080p = new ScreenRect(192, 972, 384, 54); // 10% X, 90% Y, 20% W, 5% H
+
+        var rel = RelativeRect.FromScreenRect(barAt1080p, fullHd);
+        Assert.True(rel.IsValid);
+        Assert.Equal(0.1, rel.X, 4);
+        Assert.Equal(0.9, rel.Y, 4);
+        Assert.Equal(0.2, rel.Width, 4);
+        Assert.Equal(0.05, rel.Height, 4);
+
+        var qhd = new ScreenRect(0, 0, 2560, 1440);
+        var barAt1440p = rel.ToScreenRect(qhd);
+        Assert.Equal(new ScreenRect(256, 1296, 512, 72), barAt1440p);
+
+        var uhd4k = new ScreenRect(0, 0, 3840, 2160);
+        var barAt4k = rel.ToScreenRect(uhd4k);
+        Assert.Equal(new ScreenRect(384, 1944, 768, 108), barAt4k);
+    }
+
+    [Fact]
+    public void SetVariableStep_ScreenGaugePercent_ValidatesAndBumpsSchema17()
+    {
+        var macro = new Macro
+        {
+            Name = "HP Watcher",
+            ProfileName = "Elden Ring",
+            Variables = new List<MacroVariableDefinition>
+            {
+                new() { Name = "hp", Type = MacroVariableType.Number, DefaultValue = "100" },
+            },
+            Steps = new List<MacroStep>
+            {
+                new SetVariableStep
+                {
+                    VariableName = "hp",
+                    Source = VariableSourceKind.ScreenGaugePercent,
+                    RegionX = 100,
+                    RegionY = 50,
+                    RegionWidth = 200,
+                    RegionHeight = 20,
+                    GaugeColor = "#22C55E",
+                    GaugeTolerance = 28,
+                    GaugeDirection = GaugeDirection.LeftToRight,
+                },
+            },
+        };
+
+        Assert.Equal(17, MacroDocument.RequiredSchemaVersion(macro));
+        var issues = MacroValidator.Validate(macro);
+        Assert.DoesNotContain(issues, i => i.Severity == IssueSeverity.Error);
     }
 }

@@ -423,7 +423,40 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         }
     }
 
-    public string TriggersArmedStatusText => TriggerEngine.IsArmed ? "⚡ Triggers Armed" : "⚡ Triggers Paused";
+    private string? _activeProfileName;
+
+    public string? ActiveProfileName
+    {
+        get => _activeProfileName;
+        private set
+        {
+            if (SetProperty(ref _activeProfileName, value))
+                OnPropertyChanged(nameof(TriggersArmedStatusText));
+        }
+    }
+
+    public string TriggersArmedStatusText =>
+        !TriggerEngine.IsArmed
+            ? "⚡ Triggers Paused"
+            : string.IsNullOrWhiteSpace(_activeProfileName)
+                ? "⚡ Triggers Armed"
+                : $"⚡ Armed ({_activeProfileName})";
+
+    private IReadOnlyList<Macro> GetArmedLibraryMacros(string? fg)
+    {
+        var all = Library.Items.Select(i => i.Macro).ToList();
+        var manualFilter = Library.SelectedProfileFilter;
+        var isManual = !string.IsNullOrWhiteSpace(manualFilter)
+            && !string.Equals(manualFilter, ProfileRouter.AllProfilesLabel, StringComparison.OrdinalIgnoreCase);
+        var activeProfile = ProfileRouter.ResolveActiveProfile(
+            _settings.ProfileRules,
+            all,
+            fg,
+            manualFilter,
+            _settings.AutoSwitchProfileByWindow);
+        ActiveProfileName = activeProfile;
+        return ProfileRouter.FilterArmedMacros(all, activeProfile, fg, _settings.AutoSwitchProfileByWindow, isManual);
+    }
 
     /// <summary>Returns all distinct valid hotkeys used by enabled macro triggers across the library (empty when disarmed).</summary>
     public IReadOnlyList<HotkeyBinding> GetActiveTriggerHotkeys()
@@ -447,8 +480,8 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     public void HandleMacroHotkeyDown(HotkeyBinding binding)
     {
         if (Automation.IsRecording) return;
-        var macros = Library.Items.Select(i => i.Macro).ToList();
         var fg = _screen.GetForegroundWindowTitle();
+        var macros = GetArmedLibraryMacros(fg);
         var decision = TriggerEngine.EvaluateHotkeyDown(
             macros,
             binding,
@@ -470,10 +503,12 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     public async Task EvaluateBackgroundTriggersAsync()
     {
         if (!TriggerEngine.IsArmed || Automation.IsRecording) return;
-        var macros = Library.Items.Select(i => i.Macro).ToList();
-        if (macros.Count == 0) return;
+        if (Library.Items.Count == 0) return;
 
         var fg = _screen.GetForegroundWindowTitle();
+        var macros = GetArmedLibraryMacros(fg);
+        if (macros.Count == 0) return;
+
         IReadOnlyList<string> openWindows = _screen is Core.Vision.IScreenLayout layout
             ? layout.GetWindows().Select(w => w.Title).Where(t => !string.IsNullOrWhiteSpace(t)).ToList()
             : Array.Empty<string>();

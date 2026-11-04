@@ -291,6 +291,10 @@ public static partial class MacroValidator
             issues.Add(Error($"The target window title must be 1 to {SearchArea.MaxWindowTitleLength} characters (or choose \"Any / main screen\").",
                 property: nameof(Macro.TargetWindowTitle)));
 
+        if (macro.ProfileName is { } profile && (profile.Trim().Length == 0 || profile.Trim().Length > MacroProfileRule.MaxProfileNameLength))
+            issues.Add(Error($"The profile name must be 1 to {MacroProfileRule.MaxProfileNameLength} characters (or leave it empty for Global).",
+                property: nameof(Macro.ProfileName)));
+
         if (macro.ScaleCoordinatesToWindow)
         {
             if (macro.ReferenceWidth <= 0 || macro.ReferenceHeight <= 0 || macro.ReferenceWidth > 100_000 || macro.ReferenceHeight > 100_000)

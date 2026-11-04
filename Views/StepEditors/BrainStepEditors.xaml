@@ -89,6 +89,39 @@
                                    Visibility="{Binding StatusText, Converter={StaticResource NullToVisibility}}" />
                     </StackPanel>
 
+                    <!-- v1.6 Eyes: HUD Bar / Progress Bar Fill % Settings -->
+                    <StackPanel Visibility="{Binding IsScreenGauge, Converter={StaticResource BoolToVisibility}}" Margin="0,10,0,0">
+                        <TextBlock Text="BAR / GAUGE FILL COLOR &amp; DIRECTION" Style="{StaticResource SetupCardTitle}" Margin="0,0,0,6" />
+                        <DockPanel>
+                            <Button DockPanel.Dock="Right" Command="{Binding PickGaugeColorCommand}" Margin="8,0,0,0" Padding="10,5"
+                                    ToolTip="Pick the filled color inside the HP / progress bar">
+                                <TextBlock Text="🎨 Pick fill color" />
+                            </Button>
+                            <Border DockPanel.Dock="Left" Width="28" Height="28" CornerRadius="6" BorderBrush="{DynamicResource BorderBrush}"
+                                    BorderThickness="1" Background="{Binding GaugeColorBrush}" Margin="0,0,8,0" VerticalAlignment="Center" />
+                            <TextBox Text="{Binding GaugeColor, UpdateSourceTrigger=PropertyChanged}" Tag="#22C55E" MaxLength="9"
+                                     VerticalAlignment="Center" AutomationProperties.Name="Bar fill hex color" />
+                        </DockPanel>
+                        <Grid Margin="0,8,0,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="130" />
+                                <ColumnDefinition Width="10" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Grid.Column="0">
+                                <TextBlock Text="Tolerance (0–255)" Style="{StaticResource FieldLabel}" Margin="0,0,0,4" />
+                                <TextBox Text="{Binding GaugeTolerance, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}"
+                                         AutomationProperties.Name="Gauge color tolerance" />
+                            </StackPanel>
+                            <StackPanel Grid.Column="2">
+                                <TextBlock Text="Fill direction" Style="{StaticResource FieldLabel}" Margin="0,0,0,4" />
+                                <ComboBox ItemsSource="{x:Static steps:SetVariableStepViewModel.GaugeDirections}"
+                                          DisplayMemberPath="Label" SelectedValuePath="Value" SelectedValue="{Binding GaugeDirection}"
+                                          AutomationProperties.Name="Gauge fill direction" />
+                            </StackPanel>
+                        </Grid>
+                    </StackPanel>
+
                     <TextBlock Text="{Binding SourceHelp}" Style="{StaticResource MutedText}" FontSize="11" Margin="0,8,0,0" TextWrapping="Wrap" />
                 </StackPanel>
             </Border>

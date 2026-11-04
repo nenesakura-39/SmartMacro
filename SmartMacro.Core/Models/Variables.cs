@@ -1,5 +1,6 @@
 using System.Text.Json.Serialization;
 using SmartMacro.Core.Ocr;
+using SmartMacro.Core.Vision;
 
 namespace SmartMacro.Core.Models;
 
@@ -87,6 +88,12 @@ public enum VariableSourceKind
 
     /// <summary>Active seconds elapsed since playback started (paused time excluded).</summary>
     ElapsedSeconds,
+
+    /// <summary>
+    /// v1.6 "Eyes": reads the fill percentage (0–100) of a HUD bar (HP, Mana, Stamina, Cast meter) or a work progress bar
+    /// inside <see cref="SetVariableStep.Region"/> by matching <see cref="SetVariableStep.GaugeColor"/>.
+    /// </summary>
+    ScreenGaugePercent,
 }
 
 /// <summary>Comparison operators for <see cref="ConditionKind.VariableCompare"/>.</summary>
@@ -155,8 +162,24 @@ public sealed class SetVariableStep : MacroStep
     [JsonIgnore]
     public ScreenRect Region => new(RegionX, RegionY, RegionWidth, RegionHeight);
 
+    /// <summary>Fill colour ("#RRGGBB") of the HUD bar / progress bar when <see cref="Source"/> is <see cref="VariableSourceKind.ScreenGaugePercent"/>.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? GaugeColor { get; set; }
+
+    /// <summary>Allowed colour difference per RGB channel (0–255) for <see cref="VariableSourceKind.ScreenGaugePercent"/>.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public int GaugeTolerance { get; set; } = 32;
+
+    /// <summary>Fill direction of the HUD bar / progress bar for <see cref="VariableSourceKind.ScreenGaugePercent"/>.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public GaugeDirection GaugeDirection { get; set; } = GaugeDirection.LeftToRight;
+
     [JsonIgnore]
-    public bool UsesScreenRegion => Source is VariableSourceKind.ScreenOcrNumber or VariableSourceKind.ScreenOcrText;
+    public string EffectiveGaugeColor => string.IsNullOrWhiteSpace(GaugeColor) ? "#22C55E" : GaugeColor.Trim();
+
+    [JsonIgnore]
+    public bool UsesScreenRegion =>
+        Source is VariableSourceKind.ScreenOcrNumber or VariableSourceKind.ScreenOcrText or VariableSourceKind.ScreenGaugePercent;
 
     [JsonIgnore]
     public override StepKind Kind => StepKind.SetVariable;

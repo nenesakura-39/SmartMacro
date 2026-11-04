@@ -348,6 +348,11 @@
                                             </StackPanel>
                                         </Grid>
 
+                                        <TextBlock Text="Profile / context tag (optional)" Style="{StaticResource FieldLabel}" Margin="0,12,0,4" />
+                                        <TextBox Text="{Binding ProfileName, UpdateSourceTrigger=PropertyChanged}" Tag="e.g. Work, Excel, Elden Ring (empty = global)"
+                                                 MaxLength="60" AutomationProperties.Name="Profile or context tag"
+                                                 ToolTip="Assigns this macro to an app or game profile. When Auto-Switch Profile by Active Window is enabled, shortcuts for this profile only fire while that app/game is active." />
+
                                         <TextBlock Text="Target window" Style="{StaticResource FieldLabel}" Margin="0,12,0,4" />
                                         <DockPanel>
                                             <Button DockPanel.Dock="Right" Command="{Binding RefreshTargetWindowsCommand}" Padding="8,5" Margin="6,0,0,0"

@@ -367,6 +367,16 @@ public static partial class MacroValidator
             else if (screen is not null && !v.Region.IntersectsWith(new Ocr.ScreenRect(screen.Left, screen.Top, screen.Width, screen.Height)))
                 issues.Add(Warning("The screen region is outside your current screen.", "Region"));
         }
+
+        if (v.Source == VariableSourceKind.ScreenGaugePercent)
+        {
+            if (!GaugeFillReader.TryParseHexColor(v.EffectiveGaugeColor, out _, out _, out _))
+                issues.Add(Error("Enter the bar fill color as #RRGGBB (for example #22C55E), or pick it from the screen.", nameof(SetVariableStep.GaugeColor)));
+            if (v.GaugeTolerance is < 0 or > 255)
+                issues.Add(Error("Bar color tolerance must be 0 to 255.", nameof(SetVariableStep.GaugeTolerance)));
+            if (!Enum.IsDefined(v.GaugeDirection))
+                issues.Add(Error("Unknown bar fill direction.", nameof(SetVariableStep.GaugeDirection)));
+        }
     }
 
     private static void ValidateCallMacro(List<ValidationIssue> issues, CallMacroStep call)

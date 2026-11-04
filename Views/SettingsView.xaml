@@ -320,6 +320,14 @@
                             </Border>
                             <CheckBox Style="{StaticResource SettingSwitch}" IsChecked="{Binding MinimizeDuringRun}"
                                       Content="Minimize SmartMacro while recording or playing" AutomationProperties.Name="Minimize while running" />
+                            <CheckBox Style="{StaticResource SettingSwitch}" IsChecked="{Binding MinimizeToTrayOnClose}"
+                                      Content="⚡ Resident Tray Mode: keep SmartMacro in the system tray when closing the window"
+                                      AutomationProperties.Name="Keep in system tray when closing" />
+                            <TextBlock Style="{StaticResource SettingHelp}" Text="Keeps per-macro hotkeys, schedules and window triggers armed in the background. Right-click the SmartMacro tray icon anytime to pause triggers or exit completely." />
+                            <CheckBox Style="{StaticResource SettingSwitch}" IsChecked="{Binding AutoSwitchProfileByWindow}"
+                                      Content="🗂 Auto-Switch Profile by Active Window"
+                                      AutomationProperties.Name="Auto switch profile by active window" />
+                            <TextBlock Style="{StaticResource SettingHelp}" Text="When ON, macros tagged with a Profile (e.g. 'Excel' or 'Elden Ring') only fire their shortcuts when that app or game window is focused." />
                             <CheckBox Style="{StaticResource SettingSwitch}" IsChecked="{Binding ShowRunOverlay}"
                                       Content="Show mini status overlay while recording or playing" AutomationProperties.Name="Show mini status overlay" />
                             <TextBlock Style="{StaticResource SettingHelp}" Text="A small click-through pill in the top-right corner: the current step and what it's doing." />

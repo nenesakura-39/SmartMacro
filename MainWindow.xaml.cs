@@ -28,9 +28,16 @@ public partial class MainWindow : Window
 
     private bool _closeConfirmed;
     private bool _closePending;
+    private bool _forceExit;
     private bool _maxButtonPressed;
     private MissionControlWindow? _missionControl;
     private MainViewModel? _wiredViewModel;
+
+    public void ForceClose()
+    {
+        _forceExit = true;
+        Close();
+    }
 
     public MainWindow()
     {
@@ -236,6 +243,14 @@ public partial class MainWindow : Window
 
     protected override void OnClosing(CancelEventArgs e)
     {
+        if (!_forceExit && DataContext is MainViewModel trayVm && trayVm.CurrentSettings.MinimizeToTrayOnClose)
+        {
+            e.Cancel = true;
+            Hide();
+            trayVm.SetStatus("SmartMacro is running in the system tray (macro triggers stay active).", StatusKind.Info);
+            return;
+        }
+
         if (_closeConfirmed || DataContext is not MainViewModel vm || (!vm.Editor.IsDirty && !vm.Automation.IsBusy))
         {
             base.OnClosing(e);

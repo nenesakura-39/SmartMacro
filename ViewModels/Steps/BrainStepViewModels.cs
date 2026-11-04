@@ -284,8 +284,9 @@ public sealed class SetVariableStepViewModel : StepViewModel
     {
         _step = step;
         PickRegionCommand = new AsyncRelayCommand(PickRegionAsync, ex => StatusText = ex.Message, () => _tools is not null && !_isBusy);
+        PickGaugeColorCommand = new AsyncRelayCommand(PickGaugeColorAsync, ex => StatusText = ex.Message, () => _tools is not null && !_isBusy);
         ShowRegionCommand = new RelayCommand(() =>
-            ScreenHighlightOverlay.ShowResult(_step.Region, null, found: true, $"OCR variable area · {_step.RegionWidth}×{_step.RegionHeight}",
+            ScreenHighlightOverlay.ShowResult(_step.Region, null, found: true, $"Variable screen area · {_step.RegionWidth}×{_step.RegionHeight}",
                 TimeSpan.FromMilliseconds(1600)), () => UsesScreenRegion && _step.RegionWidth > 0 && _step.RegionHeight > 0);
     }
 
@@ -302,11 +303,20 @@ public sealed class SetVariableStepViewModel : StepViewModel
         new Choice<VariableSourceKind>(VariableSourceKind.Constant, "Constant value or {variable} text"),
         new Choice<VariableSourceKind>(VariableSourceKind.ScreenOcrNumber, "🔢 Read number from screen area (OCR)"),
         new Choice<VariableSourceKind>(VariableSourceKind.ScreenOcrText, "🔤 Read text from screen area (OCR)"),
+        new Choice<VariableSourceKind>(VariableSourceKind.ScreenGaugePercent, "📊 Read bar / gauge fill % (0–100)"),
         new Choice<VariableSourceKind>(VariableSourceKind.ClipboardText, "📋 Clipboard text"),
         new Choice<VariableSourceKind>(VariableSourceKind.LastFoundX, "🎯 Last found X coordinate"),
         new Choice<VariableSourceKind>(VariableSourceKind.LastFoundY, "🎯 Last found Y coordinate"),
         new Choice<VariableSourceKind>(VariableSourceKind.LoopCounter, "🔁 Current loop / run counter"),
         new Choice<VariableSourceKind>(VariableSourceKind.ElapsedSeconds, "⏱ Elapsed run time (seconds)"),
+    };
+
+    public static IReadOnlyList<Choice<GaugeDirection>> GaugeDirections { get; } = new[]
+    {
+        new Choice<GaugeDirection>(GaugeDirection.LeftToRight, "➡ Left to Right (standard HP / progress bar)"),
+        new Choice<GaugeDirection>(GaugeDirection.RightToLeft, "⬅ Right to Left (mirrored bar)"),
+        new Choice<GaugeDirection>(GaugeDirection.BottomToTop, "⬆ Bottom to Top (vertical gauge)"),
+        new Choice<GaugeDirection>(GaugeDirection.TopToBottom, "⬇ Top to Bottom (vertical drop)"),
     };
 
     public IVisionTools? Tools
@@ -320,6 +330,7 @@ public sealed class SetVariableStepViewModel : StepViewModel
     }
 
     public AsyncRelayCommand PickRegionCommand { get; }
+    public AsyncRelayCommand PickGaugeColorCommand { get; }
     public RelayCommand ShowRegionCommand { get; }
 
     public string? StatusText
@@ -337,6 +348,7 @@ public sealed class SetVariableStepViewModel : StepViewModel
     {
         VariableSourceKind.ScreenOcrNumber => $"a number read via OCR at ({_step.RegionX}, {_step.RegionY}) {_step.RegionWidth}×{_step.RegionHeight}",
         VariableSourceKind.ScreenOcrText => $"text read via OCR at ({_step.RegionX}, {_step.RegionY}) {_step.RegionWidth}×{_step.RegionHeight}",
+        VariableSourceKind.ScreenGaugePercent => $"bar/gauge fill % ({_step.EffectiveGaugeColor}) at ({_step.RegionX}, {_step.RegionY}) {_step.RegionWidth}×{_step.RegionHeight}",
         VariableSourceKind.ClipboardText => "the Windows clipboard",
         VariableSourceKind.LastFoundX => "the X coordinate of the last found target",
         VariableSourceKind.LastFoundY => "the Y coordinate of the last found target",
@@ -378,13 +390,61 @@ public sealed class SetVariableStepViewModel : StepViewModel
             NotifyChanged();
             OnPropertyChanged(nameof(UsesConstantValue));
             OnPropertyChanged(nameof(UsesScreenRegion));
+            OnPropertyChanged(nameof(IsScreenGauge));
             OnPropertyChanged(nameof(SourceHelp));
             System.Windows.Input.CommandManager.InvalidateRequerySuggested();
         }
     }
 
     public bool UsesConstantValue => _step.Source == VariableSourceKind.Constant;
-    public bool UsesScreenRegion => _step.Source is VariableSourceKind.ScreenOcrNumber or VariableSourceKind.ScreenOcrText;
+    public bool UsesScreenRegion => _step.UsesScreenRegion;
+    public bool IsScreenGauge => _step.Source == VariableSourceKind.ScreenGaugePercent;
+
+    public string GaugeColor
+    {
+        get => _step.EffectiveGaugeColor;
+        set
+        {
+            var trimmed = (value ?? string.Empty).Trim();
+            if (_step.GaugeColor == trimmed) return;
+            _step.GaugeColor = string.IsNullOrEmpty(trimmed) ? null : trimmed;
+            NotifyChanged();
+            OnPropertyChanged(nameof(GaugeColorBrush));
+        }
+    }
+
+    public System.Windows.Media.Brush GaugeColorBrush
+    {
+        get
+        {
+            if (!RgbColor.TryParse(_step.EffectiveGaugeColor, out var c)) return System.Windows.Media.Brushes.Transparent;
+            var brush = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(c.R, c.G, c.B));
+            brush.Freeze();
+            return brush;
+        }
+    }
+
+    public int GaugeTolerance
+    {
+        get => _step.GaugeTolerance;
+        set
+        {
+            if (_step.GaugeTolerance == value) return;
+            _step.GaugeTolerance = Math.Clamp(value, 0, 255);
+            NotifyChanged();
+        }
+    }
+
+    public GaugeDirection GaugeDirection
+    {
+        get => _step.GaugeDirection;
+        set
+        {
+            if (_step.GaugeDirection == value) return;
+            _step.GaugeDirection = value;
+            NotifyChanged();
+        }
+    }
 
     public string ValueText
     {
@@ -426,6 +486,7 @@ public sealed class SetVariableStepViewModel : StepViewModel
     {
         VariableSourceKind.ScreenOcrNumber => "Reads text inside the box with Windows OCR and extracts the number (e.g. \"Gold: 12,450\" → 12450, \"$9.50\" → 9.5). If no digits are visible yet, keeps 0 (or adds 0).",
         VariableSourceKind.ScreenOcrText => "Reads all visible words inside the box with Windows OCR and stores them as text.",
+        VariableSourceKind.ScreenGaugePercent => "Measures how full a progress bar, HP/MP bar, or stamina gauge is (0 to 100%) by scanning the bar area for the fill color. Works even when text or icons sit in the middle of the bar.",
         VariableSourceKind.ClipboardText => "Reads the current plain text on the Windows clipboard.",
         VariableSourceKind.LastFoundX => "Stores the X pixel coordinate of the latest Find step / condition match (0 if nothing has matched yet).",
         VariableSourceKind.LastFoundY => "Stores the Y pixel coordinate of the latest Find step / condition match (0 if nothing has matched yet).",
@@ -456,7 +517,31 @@ public sealed class SetVariableStepViewModel : StepViewModel
             OnPropertyChanged(nameof(RegionWidth));
             OnPropertyChanged(nameof(RegionHeight));
             NotifyChanged(nameof(RegionX));
-            StatusText = $"OCR read area set to {rect}.";
+            StatusText = $"Screen read area set to {rect}.";
+        }
+        finally
+        {
+            _isBusy = false;
+            System.Windows.Input.CommandManager.InvalidateRequerySuggested();
+        }
+    }
+
+    private async Task PickGaugeColorAsync()
+    {
+        if (_isBusy || _tools is not { } vision) return;
+        _isBusy = true;
+        System.Windows.Input.CommandManager.InvalidateRequerySuggested();
+        try
+        {
+            var picked = await vision.PickColorAsync();
+            if (picked is null)
+            {
+                StatusText = "Picking the fill color was cancelled.";
+                return;
+            }
+
+            GaugeColor = picked.Color.ToString();
+            StatusText = $"Bar fill color {picked.Color} picked at ({picked.X}, {picked.Y}).";
         }
         finally
         {

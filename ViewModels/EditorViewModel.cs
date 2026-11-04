@@ -60,8 +60,9 @@ public sealed partial class EditorViewModel : ObservableObject
     private bool _isCompactView;
     private bool _suspendTouch;
 
-    // Macro settings: target window + "auto-adjust coordinates", Humanize.
+    // Macro settings: target window + "auto-adjust coordinates", Humanize, Profile.
     private string? _targetWindowTitle;
+    private string? _profileName;
     private bool _scaleCoordinates;
     private int _referenceLeft;
     private int _referenceTop;
@@ -226,6 +227,21 @@ public sealed partial class EditorViewModel : ObservableObject
 
     /// <summary>"Use current size": remembers where the target window / main screen is now as the reference.</summary>
     public RelayCommand UseCurrentSizeCommand { get; }
+
+    /// <summary>Optional app / game profile tag (e.g. "Excel", "Work", "Elden Ring"). Empty = global.</summary>
+    public string ProfileName
+    {
+        get => _profileName ?? string.Empty;
+        set
+        {
+            var normalized = string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+            if (_profileName == normalized) return;
+            _profileName = normalized;
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(TargetSummary));
+            Touch();
+        }
+    }
 
     /// <summary>The window the macro is made for (part of its title); empty = any / main screen.</summary>
     public string TargetWindowTitle
@@ -659,6 +675,7 @@ public sealed partial class EditorViewModel : ObservableObject
         _speed = copy.Speed;
         RefreshSpeedChoices(rebuild: true);
         _repeatDelayMs = copy.RepeatDelayMs;
+        _profileName = string.IsNullOrWhiteSpace(copy.ProfileName) ? null : copy.ProfileName.Trim();
         _targetWindowTitle = string.IsNullOrWhiteSpace(copy.TargetWindowTitle) ? null : copy.TargetWindowTitle.Trim();
         _scaleCoordinates = copy.ScaleCoordinatesToWindow;
         (_referenceLeft, _referenceTop, _referenceWidth, _referenceHeight) = (copy.ReferenceLeft, copy.ReferenceTop, copy.ReferenceWidth, copy.ReferenceHeight);
@@ -707,6 +724,7 @@ public sealed partial class EditorViewModel : ObservableObject
         _saved = null;
         _name = string.Empty;
         _description = string.Empty;
+        _profileName = null;
         _history.Clear();
         RaiseHistoryChanged();
         ResetViewState();
@@ -763,6 +781,7 @@ public sealed partial class EditorViewModel : ObservableObject
         RepeatCount = RepeatCount,
         Speed = Speed,
         RepeatDelayMs = RepeatDelayMs,
+        ProfileName = _profileName,
         TargetWindowTitle = _targetWindowTitle,
         ScaleCoordinatesToWindow = _scaleCoordinates,
         ReferenceLeft = _referenceLeft,

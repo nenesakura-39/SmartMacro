@@ -121,7 +121,14 @@ public sealed class Macro
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public List<MacroWatcher>? Watchers { get; set; }
 
-    // ---------------- v1.4 "Reflex": Declarative Triggers (format 17) ----------------
+    // ---------------- v1.4 "Reflex" & v1.5 "Context": Declarative Triggers & Profiles (format 17) ----------------
+
+    /// <summary>
+    /// Optional profile / context tag (e.g. "Work", "Excel", "Elden Ring").
+    /// When set, the Library can filter by profile and auto-switch triggers when a matching window is active.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ProfileName { get; set; }
 
     /// <summary>
     /// Per-macro triggers (Hotkey with PressOnce / Toggle / HoldToRun / RepeatWhileHeld, Schedule, WindowEvent).
@@ -226,6 +233,7 @@ public sealed class MacroDocument
         {
             var needed = step switch
             {
+                SetVariableStep { Source: VariableSourceKind.ScreenGaugePercent } => 17,
                 _ when UsesVersion16StepFeatures(step) => 16,
                 _ when UsesVersion15Features(step) => 15,
                 MouseMoveStep { UseRelativeDelta: true } => 14,
@@ -259,9 +267,9 @@ public sealed class MacroDocument
         || macro.ClickJitterPx is not null || macro.DelayJitterPercent is not null
         || macro.ReferenceWidth != 0 || macro.ReferenceHeight != 0;
 
-    /// <summary>True if the macro declares Triggers added in format 17.</summary>
+    /// <summary>True if the macro declares Triggers or a ProfileName added in format 17.</summary>
     private static bool UsesVersion17MacroFeatures(Macro macro) =>
-        macro.Triggers is { Count: > 0 };
+        macro.Triggers is { Count: > 0 } || !string.IsNullOrWhiteSpace(macro.ProfileName);
 
     /// <summary>True if the macro declares Variables or Watchers added in format 16.</summary>
     private static bool UsesVersion16MacroFeatures(Macro macro) =>
