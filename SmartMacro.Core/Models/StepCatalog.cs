@@ -147,6 +147,12 @@ public static class StepCatalog
             "\uE70E",
             "Closes a Repeat block: playback goes back to the Repeat for the next turn."),
         new(
+            StepKind.FlowControl,
+            StepCategory.Logic,
+            StepDescriber.DisplayName(StepKind.FlowControl),
+            "\uE8B7",
+            "Breaks out of the innermost Repeat loop, skips to its next turn (Continue), or stops the macro cleanly."),
+        new(
             StepKind.SetVariable,
             StepCategory.Brain,
             StepDescriber.DisplayName(StepKind.SetVariable),

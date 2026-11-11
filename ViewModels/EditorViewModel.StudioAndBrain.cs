@@ -171,6 +171,8 @@ public sealed partial class EditorViewModel : ObservableObject
     public RelayCommand ApplySuggestionCommand { get; }
     public RelayCommand ApplyAllSuggestionsCommand { get; }
     public RelayCommand DismissSuggestionsCommand { get; }
+    public RelayCommand OpenFailureSnapshotCommand { get; }
+    public RelayCommand DismissFailureSnapshotCommand { get; }
 
     public bool HasVariables => Variables.Count > 0;
     public bool HasWatchers => Watchers.Count > 0;
@@ -184,8 +186,8 @@ public sealed partial class EditorViewModel : ObservableObject
     public string SelfHealBannerText => PendingSuggestions.Count == 0
         ? string.Empty
         : PendingSuggestions.Count == 1
-            ? $"🩹 Smart Self-Heal Suggestion — {PendingSuggestions[0].SummaryText}"
-            : $"🩹 {PendingSuggestions.Count} Smart Self-Heal Suggestions — {PendingSuggestions[0].SummaryText} (+{PendingSuggestions.Count - 1} more)";
+            ? $"🔧 Smart Self-Heal Suggestion — {PendingSuggestions[0].SummaryText}"
+            : $"🔧 {PendingSuggestions.Count} Smart Self-Heal Suggestions — {PendingSuggestions[0].SummaryText} (+{PendingSuggestions.Count - 1} more)";
 
     private void AddVariable()
     {
@@ -297,6 +299,26 @@ public sealed partial class EditorViewModel : ObservableObject
         if (result.FinalVariables is { Count: > 0 } finalVars)
             UpdateLiveVariables(finalVars);
 
+        // v1.8 Evergreen Profiler: populate per-step execution count & average ms badges.
+        var statMap = result.StepStats ?? new Dictionary<Guid, StepExecutionStat>();
+        foreach (var stepVm in Steps)
+        {
+            if (statMap.TryGetValue(stepVm.Id, out var stat) && stat.ExecutionCount > 0)
+            {
+                var avgText = stat.AverageMs >= 1000
+                    ? $"{stat.AverageMs / 1000.0:0.##} s"
+                    : $"{stat.AverageMs:0.#} ms";
+                stepVm.TelemetryBadgeText = $"×{stat.ExecutionCount} · {avgText}";
+            }
+            else
+            {
+                stepVm.TelemetryBadgeText = null;
+            }
+        }
+
+        // v1.8 Evergreen Blackbox Flight Recorder: show "View Failure Snapshot" banner if a vision step timed out.
+        FailureSnapshotPath = result.Outcome == PlaybackOutcome.Failed ? result.FailureSnapshotPath : null;
+
         PendingSuggestions.Clear();
         if (result.Suggestions is { Count: > 0 } suggestions)
         {
@@ -325,7 +347,7 @@ public sealed partial class EditorViewModel : ObservableObject
         PendingSuggestions.Remove(item);
         RaiseSelfHealChanged();
         Touch();
-        _setStatus($"🩹 Updated step #{stepIndex + 1} coordinates to ({click.X}, {click.Y}). Ctrl+Z undoes it.", StatusKind.Success);
+        _setStatus($"🔧 Updated step #{stepIndex + 1} coordinates to ({click.X}, {click.Y}). Ctrl+Z undoes it.", StatusKind.Success);
     }
 
     private void ApplyAllSuggestions()
@@ -347,7 +369,7 @@ public sealed partial class EditorViewModel : ObservableObject
         if (applied > 0)
         {
             Touch();
-            _setStatus($"🩹 Applied {applied} self-heal coordinate update{(applied == 1 ? "" : "s")}. Click Save to keep them, or Ctrl+Z to undo.", StatusKind.Success);
+            _setStatus($"🔧 Applied {applied} self-heal coordinate update{(applied == 1 ? "" : "s")}. Click Save to keep them, or Ctrl+Z to undo.", StatusKind.Success);
         }
     }
 
@@ -356,6 +378,37 @@ public sealed partial class EditorViewModel : ObservableObject
         OnPropertyChanged(nameof(HasPendingSuggestions));
         OnPropertyChanged(nameof(SelfHealBannerText));
         System.Windows.Input.CommandManager.InvalidateRequerySuggested();
+    }
+
+    private string? _failureSnapshotPath;
+
+    /// <summary>Path to the PNG captured automatically when a vision/wait step timed out and stopped the macro.</summary>
+    public string? FailureSnapshotPath
+    {
+        get => _failureSnapshotPath;
+        set
+        {
+            if (SetProperty(ref _failureSnapshotPath, value))
+            {
+                OnPropertyChanged(nameof(HasFailureSnapshot));
+                System.Windows.Input.CommandManager.InvalidateRequerySuggested();
+            }
+        }
+    }
+
+    public bool HasFailureSnapshot => !string.IsNullOrWhiteSpace(_failureSnapshotPath) && System.IO.File.Exists(_failureSnapshotPath);
+
+    private void OpenFailureSnapshot()
+    {
+        if (!HasFailureSnapshot || string.IsNullOrWhiteSpace(_failureSnapshotPath)) return;
+        try
+        {
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(_failureSnapshotPath) { UseShellExecute = true });
+        }
+        catch (Exception ex)
+        {
+            _setStatus($"Couldn't open failure snapshot: {ex.Message}", StatusKind.Error);
+        }
     }
 
     /// <summary>Refreshes sub-macro dropdown choices and call-graph validation when the library changes.</summary>
@@ -668,6 +721,9 @@ public sealed partial class EditorViewModel : ObservableObject
                 break;
             case StudioCommandKind.CleanUp:
                 Run(CleanUpMousePathsCommand, null, "Nothing to clean up: there are no Move mouse steps.");
+                break;
+            case StudioCommandKind.MergeKeysToText:
+                Run(MergeKeysToTextCommand, null, "Nothing to merge: select or record at least 2 KeyPress steps.");
                 break;
             case StudioCommandKind.ToggleCompactView:
                 IsCompactView = !IsCompactView;

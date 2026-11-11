@@ -141,6 +141,15 @@ public enum ScreenshotArea
     Window,
 }
 
+/// <summary>Optional built-in sound cue played when a <see cref="ScreenshotStep"/> runs.</summary>
+public enum SoundCueKind
+{
+    None = 0,
+    SuccessChime = 1,
+    SoftBell = 2,
+    DoubleBeep = 3,
+}
+
 /// <summary>
 /// "Take screenshot" (UTILITY &amp; GAME): saves a PNG of the screen, an area or an app window into a folder (by default
 /// Pictures\SmartMacro Screenshots), named with a prefix and the date and time, e.g. "Catch_20261024_180511_042.png".
@@ -166,6 +175,18 @@ public sealed class ScreenshotStep : MacroStep
 
     /// <summary>Start of the file name (the date and time are added).</summary>
     public string FileNamePrefix { get; set; } = Vision.ScreenshotFiles.DefaultPrefix;
+
+    /// <summary>v1.8 "Evergreen": optional non-intrusive studio sound cue played when this step runs.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public SoundCueKind SoundCue { get; set; }
+
+    /// <summary>v1.8 "Evergreen": optional notification message (supports <c>{var}</c> placeholders) logged and sent to webhook when set.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? NotificationMessage { get; set; }
+
+    /// <summary>v1.8 "Evergreen": optional HTTPS webhook URL (Discord/Slack compatible) that receives a JSON POST with <see cref="NotificationMessage"/>.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? WebhookUrl { get; set; }
 
     /// <summary>The custom area as a rectangle (only used with <see cref="ScreenshotArea.CustomArea"/>).</summary>
     [JsonIgnore]

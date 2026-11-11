@@ -3,187 +3,103 @@
                     xmlns:models="clr-namespace:SmartMacro.Core.Models;assembly=SmartMacro.Core"
                     xmlns:steps="clr-namespace:SmartMacro.ViewModels.Steps"
                     xmlns:vision="clr-namespace:SmartMacro.Services.Vision"
+                    xmlns:controls="clr-namespace:SmartMacro.Controls"
                     xmlns:conv="clr-namespace:SmartMacro.Converters">
 
     <ResourceDictionary.MergedDictionaries>
         <ResourceDictionary Source="/SmartMacro;component/Views/StepEditors/StepEditorsShared.xaml" />
     </ResourceDictionary.MergedDictionaries>
 
+    <!-- ===================================== 1. FIND TEXT (OCR) ===================================== -->
     <DataTemplate DataType="{x:Type steps:FindTextStepViewModel}">
         <StackPanel>
-            <ContentControl Content="{Binding}" ContentTemplate="{StaticResource StepHeaderTemplate}" Focusable="False" Visibility="{Binding IsStandalone, Converter={StaticResource BoolToVisibility}}" />
+            <ContentControl Content="{Binding}" ContentTemplate="{StaticResource StepHeaderTemplate}" Focusable="False"
+                            Visibility="{Binding IsStandalone, Converter={StaticResource BoolToVisibility}}" />
             <ContentControl Content="{Binding}" ContentTemplate="{StaticResource SummaryBannerTemplate}" Focusable="False" />
 
-            <Border Margin="0,10,0,0" Padding="10,8" CornerRadius="6" Background="{DynamicResource WarningSoftBrush}"
+            <Border Margin="0,8,0,0" Padding="10,8" CornerRadius="6" Background="{DynamicResource WarningSoftBrush}"
                     Visibility="{Binding OcrWarning, Converter={StaticResource NullToVisibility}}">
                 <TextBlock Text="{Binding OcrWarning}" TextWrapping="Wrap" FontSize="12" />
             </Border>
 
-            <!-- Essential setup -->
-            <Border Style="{StaticResource SetupCard}">
+            <!-- SETUP TAB: 1. What to Find -->
+            <Border Style="{StaticResource SetupCard}" Visibility="{Binding ShowSetupSection, Converter={StaticResource BoolToVisibility}}">
                 <StackPanel>
-                    <TextBlock Text="1. WHAT TO FIND" Style="{StaticResource SetupCardTitle}" ToolTip="The words to look for on screen (read with Windows text recognition)." />
-                    <TextBlock Text="Text to find" Style="{StaticResource FieldLabel}" ToolTip="The words to look for, e.g. Sign in or OK." />
-                    <TextBox Text="{Binding Text, UpdateSourceTrigger=PropertyChanged}" MaxLength="200" Tag="e.g. Sign in"
-                             AutomationProperties.Name="Text to find" ToolTip="The words to look for, e.g. Sign in or OK. Short, distinctive words work best." />
-                    <!-- Shown for Find text steps AND text conditions of If / Repeat (this editor is embedded there too). -->
-                    <TextBlock Text="How to match" Style="{StaticResource FieldLabel}" ToolTip="Whole word and exact case are on for new steps, so a short word never matches inside a longer one or in another case." />
-                    <CheckBox Content="Match whole word only (e.g. 'art' won't match 'apart')" IsChecked="{Binding MatchWholeWord}" Margin="0,4,0,0"
-                              ToolTip="On (default): the text must be a complete word on screen – 'art' matches 'art' and 'art,' but never 'apart' or 'apartment'. Off: it may also be part of a longer word ('Save' matches 'Saved')."
-                              AutomationProperties.Name="Match whole word only" />
-                    <CheckBox Content="Match exact case (e.g. 'aRt' only matches 'aRt')" IsChecked="{Binding MatchCase}" Margin="0,8,0,0"
-                              ToolTip="On (default): upper / lower case must be exactly the same – 'aRt' never matches 'art' or 'Art'. Off: case is ignored."
-                              AutomationProperties.Name="Match exact case" />
-                </StackPanel>
-            </Border>
-            <ContentControl Content="{Binding}" ContentTemplate="{StaticResource SearchCardsTemplate}" Focusable="False" />
+                    <TextBlock Text="1. WHAT TO FIND (OCR TEXT)" Style="{StaticResource SetupCardTitle}" />
+                    <TextBlock Text="Text to find (separate alternatives with |)" Style="{StaticResource FieldLabel}" />
+                    <TextBox Text="{Binding Text, UpdateSourceTrigger=PropertyChanged}" MaxLength="200" Tag="e.g. nice (or nice | great)"
+                             AutomationProperties.Name="Text to find" />
 
-            <!-- Advanced Tuning & Movement (collapsed by default) -->
-            <Expander Header="Advanced Tuning &amp; Movement" Style="{StaticResource AdvancedExpander}"
-                      ToolTip="Match accuracy, character options, how the cursor moves and click timing. The defaults work for most apps and games.">
-                <StackPanel>
-                    <TextBlock Text="Match accuracy (%)" Style="{StaticResource FieldLabel}"
-                               ToolTip="100 = exact. Lower values tolerate OCR mistakes (like reading I as l)." />
-                    <TextBox Text="{Binding MinSimilarityPercent, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}" Width="80" HorizontalAlignment="Left"
-                             AutomationProperties.Name="Match accuracy percent" ToolTip="100 = exact. Lower values tolerate OCR mistakes (like reading I as l). 85 is a good start." />
-                    <TextBlock Style="{StaticResource MutedText}" FontSize="11" Margin="0,4,0,0"
-                               Text="Windows OCR doesn't report its own confidence, so this compares the text instead." />
-                    <CheckBox Content="Normalize similar characters (0/O, 1/I/l)" IsChecked="{Binding NormalizeLookAlikes}" Margin="0,10,0,0"
-                              ToolTip="Windows OCR often reads a capital O as zero or a capital I as 1 or l on short words like OK. With this on, those count as the same letter."
-                              AutomationProperties.Name="Normalize similar characters" />
-                    <CheckBox Content="Use Regular Expression (Regex) pattern" IsChecked="{Binding UseRegexPattern}" Margin="0,8,0,0"
-                              ToolTip="Treat 'Text to find' as a .NET Regular Expression (e.g. \bLv\.?\s*\d+ or nice|great)."
-                              AutomationProperties.Name="Use regex pattern" />
-                    <CheckBox Content="🚀 Find-Once-Then-Track: lock onto found word as a moving image (60 FPS)" IsChecked="{Binding TrackTextAsImage}" Margin="0,8,0,0"
-                              ToolTip="Once OCR finds the word among hundreds of shuffling words, SmartMacro crops its visual appearance and tracks it at frame rate (1–3 ms) as it moves—without waiting for slow OCR again."
-                              AutomationProperties.Name="Track found text as image" />
-                    <TextBlock Text="Image pre-processing before OCR" Style="{StaticResource FieldLabel}" Margin="0,10,0,4" />
-                    <ComboBox ItemsSource="{x:Static steps:FindTextStepViewModel.PreprocessModes}" DisplayMemberPath="Label" SelectedValuePath="Value"
-                              SelectedValue="{Binding Preprocess}" AutomationProperties.Name="OCR image preprocessing" />
-                    <ContentControl Content="{Binding}" ContentTemplate="{StaticResource SearchMovementTemplate}" Focusable="False"
-                                    Visibility="{Binding IsStandalone, Converter={StaticResource BoolToVisibility}}" />
-                </StackPanel>
-            </Expander>
-
-            <!-- Standalone steps get this button in the pinned bar at the bottom of the Properties panel. -->
-            <Button Command="{Binding TestCommand}" HorizontalAlignment="Left" Margin="0,16,0,0" Style="{StaticResource TestActionButton}"
-                    Visibility="{Binding IsStandalone, Converter={StaticResource BoolToVisibility}, ConverterParameter=Invert}"
-                    ToolTip="SmartMacro hides for a moment and reads the place it would search once." AutomationProperties.Name="Test detection now">
-                <StackPanel Orientation="Horizontal">
-                    <TextBlock Text="&#xE721;" Style="{StaticResource IconText}" />
-                    <TextBlock Text="Test detection now" Margin="8,0,0,0" />
-                </StackPanel>
-            </Button>
-            <ContentControl Content="{Binding}" ContentTemplate="{StaticResource SearchTestResultTemplate}" Focusable="False"
-                            Visibility="{Binding IsStandalone, Converter={StaticResource BoolToVisibility}, ConverterParameter=Invert}" />
-
-            <ContentControl Content="{Binding}" ContentTemplate="{StaticResource StepFooterTemplate}" Focusable="False" Visibility="{Binding IsStandalone, Converter={StaticResource BoolToVisibility}}" />
-        </StackPanel>
-    </DataTemplate>
-
-    <DataTemplate DataType="{x:Type steps:FindImageStepViewModel}">
-        <StackPanel>
-            <ContentControl Content="{Binding}" ContentTemplate="{StaticResource StepHeaderTemplate}" Focusable="False" Visibility="{Binding IsStandalone, Converter={StaticResource BoolToVisibility}}" />
-            <ContentControl Content="{Binding}" ContentTemplate="{StaticResource SummaryBannerTemplate}" Focusable="False" />
-
-            <!-- Essential setup -->
-            <Border Style="{StaticResource SetupCard}">
-                <StackPanel>
-                    <TextBlock Text="1. WHAT TO FIND" Style="{StaticResource SetupCardTitle}" ToolTip="The picture (button, icon…) to look for on screen." />
-                    <Border Padding="8" Margin="0,8,0,0" CornerRadius="6" Background="{DynamicResource SurfaceBrush}" HorizontalAlignment="Left"
-                            Visibility="{Binding TemplatePreview, Converter={StaticResource NullToVisibility}}">
-                        <Image Source="{Binding TemplatePreview}" Stretch="Uniform" StretchDirection="Both" MaxHeight="120" MaxWidth="320"
-                               RenderOptions.BitmapScalingMode="HighQuality" AutomationProperties.Name="Image to find"
-                               ToolTip="The stored picture SmartMacro looks for." />
-                    </Border>
-                    <TextBlock Text="{Binding TemplateInfo}" Style="{StaticResource MutedText}" FontSize="12" TextWrapping="Wrap" Margin="0,6,0,0" />
-                    <WrapPanel Margin="0,10,0,0">
-                        <Button Command="{Binding CaptureTemplateCommand}" Margin="0,0,8,6" Style="{StaticResource PrimaryButton}"
-                                ToolTip="SmartMacro hides and the screen freezes (like Win + Shift + S). Drag a box tightly around the button or icon to find. Space = new picture, Esc = cancel."
-                                AutomationProperties.Name="Capture image">
+                    <!-- 1-click {Variable} token insertion + Inspect Screen Text -->
+                    <WrapPanel Margin="0,8,0,0" VerticalAlignment="Center">
+                        <Button Command="{Binding InspectScreenTextCommand}" Style="{StaticResource PrimaryButton}" Margin="0,0,8,6"
+                                ToolTip="Captures the search area, runs Windows OCR across all words on screen, highlights every match, and lets you click any word chip to select it."
+                                AutomationProperties.Name="Inspect screen text">
                             <StackPanel Orientation="Horizontal">
-                                <TextBlock Text="&#xE722;" Style="{StaticResource IconText}" />
-                                <TextBlock Text="Capture image" Margin="8,0,0,0" />
+                                <TextBlock Text="👁" />
+                                <TextBlock Text="Inspect screen text" Margin="6,0,0,0" />
                             </StackPanel>
                         </Button>
-                        <Button Command="{Binding AutoTuneCommand}" Margin="0,0,8,6"
-                                ToolTip="Analyzes your captured image (border variation, stroke contrast, and detail) and automatically sets the best detector, similarity, and partial-occlusion settings."
-                                AutomationProperties.Name="Auto-Tune image settings">
-                            <StackPanel Orientation="Horizontal">
-                                <TextBlock Text="✨" />
-                                <TextBlock Text="Auto-Tune" Margin="6,0,0,0" />
-                            </StackPanel>
-                        </Button>
-                        <ComboBox Style="{StaticResource FreezeComboBox}" Margin="0,0,0,6" />
+                        <Button Content="{}{value}" Command="{Binding InsertVariableTokenCommand}" CommandParameter="value"
+                                Style="{StaticResource VariableTokenChipButtonStyle}" Margin="0,0,4,6" ToolTip="Insert {value} variable token" />
+                        <Button Content="{}{target}" Command="{Binding InsertVariableTokenCommand}" CommandParameter="target"
+                                Style="{StaticResource VariableTokenChipButtonStyle}" Margin="0,0,6,6" ToolTip="Insert {target} variable token" />
+                        <Border Padding="8,4" CornerRadius="6" Background="{DynamicResource AccentSoftBrush}" VerticalAlignment="Center" Margin="0,0,0,6"
+                                Visibility="{Binding MatchCountBadgeText, Converter={StaticResource NullToVisibility}}">
+                            <TextBlock Text="{Binding MatchCountBadgeText}" FontSize="11.5" FontWeight="SemiBold" Foreground="{DynamicResource AccentHoverBrush}" />
+                        </Border>
                     </WrapPanel>
-                    <TextBlock Style="{StaticResource MutedText}" FontSize="11" Margin="0,2,0,0" TextWrapping="Wrap"
-                               Text="Tip: for a button that pops up fast, choose a 3 s countdown, click Capture, switch to the game and make the button appear. The image must look the same size on screen as when you captured it (same display scaling and game resolution)." />
+
+                    <TextBlock Text="Matching rules" Style="{StaticResource FieldLabel}" Margin="0,6,0,2" />
+                    <CheckBox Content="Match whole word only (e.g. 'art' won't match 'apart')" IsChecked="{Binding MatchWholeWord}" Margin="0,4,0,0"
+                              AutomationProperties.Name="Match whole word only" />
+                    <CheckBox Content="Match exact case (e.g. 'aRt' only matches 'aRt')" IsChecked="{Binding MatchCase}" Margin="0,6,0,0"
+                              AutomationProperties.Name="Match exact case" />
+                    <CheckBox Content="Strict exact characters (reject attached punctuation like 'nice!')" IsChecked="{Binding StrictPunctuation}" Margin="0,6,0,0"
+                              AutomationProperties.Name="Strict exact characters" />
                 </StackPanel>
             </Border>
+
+            <!-- Shared Tab-Aware Cards (Setup: Scenario + Where + Action | Tune: Match Selection | Recovery: Timing + FailurePolicy) -->
             <ContentControl Content="{Binding}" ContentTemplate="{StaticResource SearchCardsTemplate}" Focusable="False" />
 
-            <!-- Advanced Tuning & Movement (collapsed by default) -->
-            <Expander Header="Advanced Tuning &amp; Movement" Style="{StaticResource AdvancedExpander}"
-                      ToolTip="Match accuracy, see-through game UI options, how the cursor moves and click timing. The defaults work for most buttons.">
+            <!-- TUNE & MOTION TAB: OCR Accuracy, Preprocessing & Cursor Movement -->
+            <Border Style="{StaticResource SetupCard}" Visibility="{Binding ShowTuneSection, Converter={StaticResource BoolToVisibility}}">
                 <StackPanel>
-                    <TextBlock Text="Match accuracy (%)" Style="{StaticResource FieldLabel}"
-                               ToolTip="How similar a spot must be. 90 is a good start; lower it a little if the image glows or animates." />
-                    <TextBox Text="{Binding MinSimilarityPercent, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}" Width="80" HorizontalAlignment="Left"
-                             AutomationProperties.Name="Match accuracy percent"
-                             ToolTip="How similar a spot must be. 90 is a good start; lower it a little if the image glows or animates, raise it if wrong things match." />
-                    <TextBlock Style="{StaticResource MutedText}" FontSize="11" Margin="0,4,0,0" TextWrapping="Wrap"
-                               Text="&quot;Test detection now&quot; shows the best similarity it saw." />
-                    <CheckBox Content="Adapt to Day/Night lighting changes" IsChecked="{Binding AdaptToLighting}" Margin="0,10,0,0"
-                              ToolTip="Uses Zero-Mean Normalized Cross-Correlation (ZNCC) and normalized chroma so a button captured during the daytime still matches when the game world gets darker, brighter, or tinted at night."
-                              AutomationProperties.Name="Adapt to Day/Night lighting changes" />
-                    <CheckBox Content="Match across display scales &amp; sizes (75%–150%)" IsChecked="{Binding AllowMultiScale}" Margin="0,8,0,0"
-                              ToolTip="Checks resized copies of the image when 1:1 doesn't match, so a macro recorded at 100 % display scaling still finds buttons on a 125 % or 150 % monitor (or resized UI)."
-                              AutomationProperties.Name="Match across display scales and sizes" />
-                    <CheckBox Content="Ignore color (match the shape only)" IsChecked="{Binding IgnoreColor}" Margin="0,8,0,0"
-                              ToolTip="Normally a match must also have about the same colors, so a grey disabled button doesn't match a green one." AutomationProperties.Name="Ignore color" />
-                    <CheckBox Content="Transparent Game UI / Edge Mode: ignore the edges (round buttons)" IsChecked="{Binding IgnoreEdges}" Margin="0,8,0,0"
-                              ToolTip="Only the inner part of the picture is compared, so a changing background in the corners (a 3D game scene behind a round button) doesn't stop the match."
-                              AutomationProperties.Name="Ignore the edges" />
-                    <StackPanel Orientation="Horizontal" Margin="26,6,0,0" Visibility="{Binding IgnoreEdges, Converter={StaticResource BoolToVisibility}}">
-                        <TextBlock Text="Ignore on each side (%)" Style="{StaticResource MutedText}" VerticalAlignment="Center" Margin="0,0,8,0"
-                                   ToolTip="How much of each side to ignore (0–40 %). 15 % removes the corners of a round button." />
-                        <TextBox Text="{Binding IgnoreEdgesPercent, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}" Width="60"
-                                 AutomationProperties.Name="Ignore edges percent" ToolTip="How much of each side to ignore (0–40 %). 15 % removes the corners of a round button." />
-                    </StackPanel>
-                    <CheckBox Content="Transparent Game UI: ignore background / match bright text and edges" IsChecked="{Binding MatchForeground}" Margin="0,8,0,0"
-                              ToolTip="For buttons you can partly see through, like a white &quot;SHAKE&quot; ring over the game world: only the strokes that stand out (the white text and ring) are compared, so it still matches when water, wood or rocks show through it."
-                              AutomationProperties.Name="Ignore background and match bright text and edges" />
-                    <TextBlock Text="Vision 2.0 detector mode" Style="{StaticResource FieldLabel}" Margin="0,12,0,4" />
-                    <ComboBox ItemsSource="{x:Static steps:FindImageStepViewModel.Detectors}" DisplayMemberPath="Label" SelectedValuePath="Value"
-                              SelectedValue="{Binding Detector}" AutomationProperties.Name="Image detector mode" />
-                    <Grid Margin="0,8,0,0">
+                    <TextBlock Text="🎛 OCR ACCURACY &amp; PREPROCESSING" Style="{StaticResource SetupCardTitle}" />
+                    <TextBlock Text="Match accuracy (%)" Style="{StaticResource FieldLabel}" Margin="0,8,0,4" />
+                    <Grid>
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*" />
                             <ColumnDefinition Width="10" />
-                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="134" />
                         </Grid.ColumnDefinitions>
-                        <StackPanel Grid.Column="0">
-                            <TextBlock Text="Min visible part (%) (0 = full, 60 = 40% covered by particles)" Style="{StaticResource FieldLabel}"
-                                       ToolTip="Splits the image into a 4×4 sub-patch grid and matches the unoccluded parts so targets covered by particles or explosions still match." />
-                            <TextBox Text="{Binding MinVisiblePercent, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}"
-                                     AutomationProperties.Name="Minimum visible percent" />
-                        </StackPanel>
-                        <StackPanel Grid.Column="2">
-                            <TextBlock Text="Rotation tolerance (±° 0–45)" Style="{StaticResource FieldLabel}"
-                                       ToolTip="Also checks rotated copies up to ±N degrees for Tilted or spinning targets." />
-                            <TextBox Text="{Binding RotationRangeDeg, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}"
-                                     AutomationProperties.Name="Rotation tolerance in degrees" />
-                        </StackPanel>
+                        <Slider Grid.Column="0" Minimum="50" Maximum="100" TickFrequency="1" IsSnapToTickEnabled="True"
+                                Value="{Binding MinSimilarityPercent}" VerticalAlignment="Center" />
+                        <controls:StudioNumberBox Grid.Column="2" Value="{Binding MinSimilarityPercent}" Unit="%" Step="1" Minimum="50" Maximum="100"
+                                                  AutomationProperties.Name="Match accuracy percent" />
                     </Grid>
+
+                    <CheckBox Content="Normalize similar characters (0/O, 1/I/l)" IsChecked="{Binding NormalizeLookAlikes}" Margin="0,10,0,0"
+                              AutomationProperties.Name="Normalize similar characters" />
+                    <CheckBox Content="Use Regular Expression (Regex) pattern" IsChecked="{Binding UseRegexPattern}" Margin="0,6,0,0"
+                              AutomationProperties.Name="Use regex pattern" />
+                    <CheckBox Content="🚀 Find-Once-Then-Track: lock onto found word as a moving image (60 FPS)" IsChecked="{Binding TrackTextAsImage}" Margin="0,6,0,0"
+                              AutomationProperties.Name="Track found text as image" />
+
+                    <TextBlock Text="Image pre-processing before OCR" Style="{StaticResource FieldLabel}" Margin="0,10,0,4" />
+                    <ComboBox ItemsSource="{x:Static steps:FindTextStepViewModel.PreprocessModes}" DisplayMemberPath="Label" SelectedValuePath="Value"
+                              SelectedValue="{Binding Preprocess}" AutomationProperties.Name="OCR image preprocessing" />
+
                     <ContentControl Content="{Binding}" ContentTemplate="{StaticResource SearchMovementTemplate}" Focusable="False"
+                                    Margin="0,12,0,0"
                                     Visibility="{Binding IsStandalone, Converter={StaticResource BoolToVisibility}}" />
                 </StackPanel>
-            </Expander>
+            </Border>
 
-            <!-- Standalone steps get this button in the pinned bar at the bottom of the Properties panel. -->
-            <Button Command="{Binding TestCommand}" HorizontalAlignment="Left" Margin="0,16,0,0" Style="{StaticResource TestActionButton}"
+            <!-- Inline Test button only when embedded inside an If/Repeat condition -->
+            <Button Command="{Binding TestCommand}" HorizontalAlignment="Left" Margin="0,12,0,0" Style="{StaticResource TestActionButton}"
                     Visibility="{Binding IsStandalone, Converter={StaticResource BoolToVisibility}, ConverterParameter=Invert}"
-                    ToolTip="SmartMacro hides for a moment, looks once where the step would look, and shows a picture with the matches marked."
                     AutomationProperties.Name="Test detection now">
                 <StackPanel Orientation="Horizontal">
                     <TextBlock Text="&#xE721;" Style="{StaticResource IconText}" />
@@ -193,34 +109,159 @@
             <ContentControl Content="{Binding}" ContentTemplate="{StaticResource SearchTestResultTemplate}" Focusable="False"
                             Visibility="{Binding IsStandalone, Converter={StaticResource BoolToVisibility}, ConverterParameter=Invert}" />
 
-            <ContentControl Content="{Binding}" ContentTemplate="{StaticResource StepFooterTemplate}" Focusable="False" Visibility="{Binding IsStandalone, Converter={StaticResource BoolToVisibility}}" />
+            <ContentControl Content="{Binding}" ContentTemplate="{StaticResource StepFooterTemplate}" Focusable="False"
+                            Visibility="{Binding IsStandalone, Converter={StaticResource BoolToVisibility}}" />
         </StackPanel>
     </DataTemplate>
 
-    <DataTemplate DataType="{x:Type steps:FindColorStepViewModel}">
+    <!-- ===================================== 2. FIND IMAGE ===================================== -->
+    <DataTemplate DataType="{x:Type steps:FindImageStepViewModel}">
         <StackPanel>
-            <ContentControl Content="{Binding}" ContentTemplate="{StaticResource StepHeaderTemplate}" Focusable="False" Visibility="{Binding IsStandalone, Converter={StaticResource BoolToVisibility}}" />
+            <ContentControl Content="{Binding}" ContentTemplate="{StaticResource StepHeaderTemplate}" Focusable="False"
+                            Visibility="{Binding IsStandalone, Converter={StaticResource BoolToVisibility}}" />
             <ContentControl Content="{Binding}" ContentTemplate="{StaticResource SummaryBannerTemplate}" Focusable="False" />
 
-            <!-- Essential setup -->
-            <Border Style="{StaticResource SetupCard}">
+            <!-- SETUP TAB: 1. What to Find + Interactive Crosshair Template Preview -->
+            <Border Style="{StaticResource SetupCard}" Visibility="{Binding ShowSetupSection, Converter={StaticResource BoolToVisibility}}">
                 <StackPanel>
-                    <TextBlock Text="1. WHAT TO FIND" Style="{StaticResource SetupCardTitle}" ToolTip="The color to look for (e.g. a marker, a health bar, a button)." />
-                    <TextBlock Text="Color (#RRGGBB)" Style="{StaticResource FieldLabel}" ToolTip="The color as #RRGGBB, e.g. #FF0000 for red. Easiest: Pick from screen." />
+                    <TextBlock Text="1. WHAT TO FIND (IMAGE TEMPLATE)" Style="{StaticResource SetupCardTitle}" />
+
+                    <!-- Interactive Template Preview + Aim Reticle -->
+                    <controls:OffsetCrosshairPreview Source="{Binding TemplatePreview}"
+                                                     OffsetX="{Binding OffsetX}" OffsetY="{Binding OffsetY}"
+                                                     Height="136" Margin="0,8,0,4"
+                                                     Visibility="{Binding TemplatePreview, Converter={StaticResource NullToVisibility}}" />
+
+                    <TextBlock Text="{Binding TemplateInfo}" Style="{StaticResource MutedText}" FontSize="11.5" TextWrapping="Wrap" Margin="0,4,0,0" />
+                    <WrapPanel Margin="0,8,0,0">
+                        <Button Command="{Binding CaptureTemplateCommand}" Margin="0,0,8,6" Style="{StaticResource PrimaryButton}"
+                                ToolTip="SmartMacro hides and the screen freezes. Drag a box tightly around the button or icon to find."
+                                AutomationProperties.Name="Capture image">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="&#xE722;" Style="{StaticResource IconText}" />
+                                <TextBlock Text="Capture image" Margin="8,0,0,0" />
+                            </StackPanel>
+                        </Button>
+                        <Button Command="{Binding AutoTuneCommand}" Margin="0,0,8,6"
+                                ToolTip="Analyzes your captured image and automatically sets the best detector, similarity, and partial-occlusion settings."
+                                AutomationProperties.Name="Auto-Tune image settings">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="✨" />
+                                <TextBlock Text="Auto-Tune" Margin="6,0,0,0" />
+                            </StackPanel>
+                        </Button>
+                        <ComboBox Style="{StaticResource FreezeComboBox}" Margin="0,0,0,6" />
+                    </WrapPanel>
+                </StackPanel>
+            </Border>
+
+            <!-- Shared Tab-Aware Cards -->
+            <ContentControl Content="{Binding}" ContentTemplate="{StaticResource SearchCardsTemplate}" Focusable="False" />
+
+            <!-- TUNE & MOTION TAB: Similarity Slider, Detector Mode & Movement -->
+            <Border Style="{StaticResource SetupCard}" Visibility="{Binding ShowTuneSection, Converter={StaticResource BoolToVisibility}}">
+                <StackPanel>
+                    <TextBlock Text="🎛 IMAGE SIMILARITY &amp; DETECTOR TUNING" Style="{StaticResource SetupCardTitle}" />
+                    <TextBlock Text="Match similarity threshold (%)" Style="{StaticResource FieldLabel}" Margin="0,8,0,4" />
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="10" />
+                            <ColumnDefinition Width="134" />
+                        </Grid.ColumnDefinitions>
+                        <Slider Grid.Column="0" Minimum="50" Maximum="100" TickFrequency="1" IsSnapToTickEnabled="True"
+                                Value="{Binding MinSimilarityPercent}" VerticalAlignment="Center" />
+                        <controls:StudioNumberBox Grid.Column="2" Value="{Binding MinSimilarityPercent}" Unit="%" Step="1" Minimum="50" Maximum="100"
+                                                  AutomationProperties.Name="Match accuracy percent" />
+                    </Grid>
+
+                    <CheckBox Content="Adapt to Day/Night lighting changes (ZNCC)" IsChecked="{Binding AdaptToLighting}" Margin="0,10,0,0"
+                              AutomationProperties.Name="Adapt to Day/Night lighting changes" />
+                    <CheckBox Content="Match across display scales &amp; sizes (75%–150%)" IsChecked="{Binding AllowMultiScale}" Margin="0,6,0,0"
+                              AutomationProperties.Name="Match across display scales and sizes" />
+                    <CheckBox Content="Ignore color (match shape only)" IsChecked="{Binding IgnoreColor}" Margin="0,6,0,0"
+                              AutomationProperties.Name="Ignore color" />
+                    <CheckBox Content="Transparent Game UI / Edge Mode: ignore corners (round buttons)" IsChecked="{Binding IgnoreEdges}" Margin="0,6,0,0"
+                              AutomationProperties.Name="Ignore the edges" />
+                    <StackPanel Orientation="Horizontal" Margin="24,6,0,0" Visibility="{Binding IgnoreEdges, Converter={StaticResource BoolToVisibility}}">
+                        <TextBlock Text="Crop each edge by:" Style="{StaticResource MutedText}" VerticalAlignment="Center" Margin="0,0,8,0" />
+                        <controls:StudioNumberBox Value="{Binding IgnoreEdgesPercent}" Unit="%" Step="1" Minimum="0" Maximum="40" Width="134"
+                                                  AutomationProperties.Name="Ignore edges percent" />
+                    </StackPanel>
+                    <CheckBox Content="Transparent Game UI: match bright text &amp; strokes only" IsChecked="{Binding MatchForeground}" Margin="0,6,0,0"
+                              AutomationProperties.Name="Ignore background and match bright text and edges" />
+
+                    <TextBlock Text="Vision 2.0 detector mode" Style="{StaticResource FieldLabel}" Margin="0,10,0,4" />
+                    <ComboBox ItemsSource="{x:Static steps:FindImageStepViewModel.Detectors}" DisplayMemberPath="Label" SelectedValuePath="Value"
+                              SelectedValue="{Binding Detector}" AutomationProperties.Name="Image detector mode" />
+
+                    <Grid Margin="0,8,0,0">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="10" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <StackPanel Grid.Column="0" VerticalAlignment="Bottom">
+                            <TextBlock Text="Min visible (0 = full)" Style="{StaticResource FieldLabel}" />
+                            <controls:StudioNumberBox Value="{Binding MinVisiblePercent}" Unit="%" Step="5" Minimum="0" Maximum="100"
+                                                      AutomationProperties.Name="Minimum visible percent" />
+                        </StackPanel>
+                        <StackPanel Grid.Column="2" VerticalAlignment="Bottom">
+                            <TextBlock Text="Rotation range (±°)" Style="{StaticResource FieldLabel}" />
+                            <controls:StudioNumberBox Value="{Binding RotationRangeDeg}" Unit="°" Step="5" Minimum="0" Maximum="45"
+                                                      AutomationProperties.Name="Rotation tolerance in degrees" />
+                        </StackPanel>
+                    </Grid>
+
+                    <ContentControl Content="{Binding}" ContentTemplate="{StaticResource SearchMovementTemplate}" Focusable="False"
+                                    Margin="0,12,0,0"
+                                    Visibility="{Binding IsStandalone, Converter={StaticResource BoolToVisibility}}" />
+                </StackPanel>
+            </Border>
+
+            <!-- Inline Test button only when embedded inside an If/Repeat condition -->
+            <Button Command="{Binding TestCommand}" HorizontalAlignment="Left" Margin="0,12,0,0" Style="{StaticResource TestActionButton}"
+                    Visibility="{Binding IsStandalone, Converter={StaticResource BoolToVisibility}, ConverterParameter=Invert}"
+                    AutomationProperties.Name="Test detection now">
+                <StackPanel Orientation="Horizontal">
+                    <TextBlock Text="&#xE721;" Style="{StaticResource IconText}" />
+                    <TextBlock Text="Test detection now" Margin="8,0,0,0" />
+                </StackPanel>
+            </Button>
+            <ContentControl Content="{Binding}" ContentTemplate="{StaticResource SearchTestResultTemplate}" Focusable="False"
+                            Visibility="{Binding IsStandalone, Converter={StaticResource BoolToVisibility}, ConverterParameter=Invert}" />
+
+            <ContentControl Content="{Binding}" ContentTemplate="{StaticResource StepFooterTemplate}" Focusable="False"
+                            Visibility="{Binding IsStandalone, Converter={StaticResource BoolToVisibility}}" />
+        </StackPanel>
+    </DataTemplate>
+
+    <!-- ===================================== 3. FIND COLOR ===================================== -->
+    <DataTemplate DataType="{x:Type steps:FindColorStepViewModel}">
+        <StackPanel>
+            <ContentControl Content="{Binding}" ContentTemplate="{StaticResource StepHeaderTemplate}" Focusable="False"
+                            Visibility="{Binding IsStandalone, Converter={StaticResource BoolToVisibility}}" />
+            <ContentControl Content="{Binding}" ContentTemplate="{StaticResource SummaryBannerTemplate}" Focusable="False" />
+
+            <!-- SETUP TAB: 1. What to Find (Color Swatch, Eyedropper & Tolerance) -->
+            <Border Style="{StaticResource SetupCard}" Visibility="{Binding ShowSetupSection, Converter={StaticResource BoolToVisibility}}">
+                <StackPanel>
+                    <TextBlock Text="1. WHAT TO FIND (PIXEL / BLOB COLOR)" Style="{StaticResource SetupCardTitle}" />
+                    <TextBlock Text="Primary Color (#RRGGBB)" Style="{StaticResource FieldLabel}" />
                     <Grid>
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="Auto" />
                             <ColumnDefinition Width="10" />
                             <ColumnDefinition Width="*" />
                         </Grid.ColumnDefinitions>
-                        <Border Grid.Column="0" Width="30" Height="30" CornerRadius="6" Background="{Binding ColorBrush}"
-                                BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" ToolTip="A swatch of the color." />
+                        <Border Grid.Column="0" Width="32" Height="32" CornerRadius="7" Background="{Binding ColorBrush}"
+                                BorderBrush="{DynamicResource BorderStrongBrush}" BorderThickness="1" ToolTip="Primary color swatch" />
                         <TextBox Grid.Column="2" Text="{Binding Color, UpdateSourceTrigger=PropertyChanged}" MaxLength="7" Tag="#FF0000"
-                                 AutomationProperties.Name="Color to find" ToolTip="The color as #RRGGBB, e.g. #FF0000 for red." />
+                                 FontFamily="{StaticResource FontFamilyMono}"
+                                 AutomationProperties.Name="Color to find" />
                     </Grid>
-                    <WrapPanel Margin="0,10,0,0">
+                    <WrapPanel Margin="0,8,0,0">
                         <Button Command="{Binding PickColorCommand}" Margin="0,0,8,6" Style="{StaticResource PrimaryButton}"
-                                ToolTip="SmartMacro hides and the screen freezes; click the color. The 8× magnifier shows the exact pixel, its color and position."
                                 AutomationProperties.Name="Pick color from screen">
                             <StackPanel Orientation="Horizontal">
                                 <TextBlock Text="&#xEF3C;" Style="{StaticResource IconText}" />
@@ -229,8 +270,8 @@
                         </Button>
                         <ComboBox Style="{StaticResource FreezeComboBox}" Margin="0,0,0,6" />
                     </WrapPanel>
-                    <CheckBox Content="+ Add 2nd Color" IsChecked="{Binding UseSecondaryColor}" Margin="0,8,0,0"
-                              ToolTip="Match pixels that have EITHER the primary color OR this 2nd color (useful for buttons or indicators that alternate between two colors)."
+
+                    <CheckBox Content="+ Add 2nd Color (match either color)" IsChecked="{Binding UseSecondaryColor}" Margin="0,6,0,0"
                               AutomationProperties.Name="+ Add 2nd Color" />
                     <StackPanel Visibility="{Binding UseSecondaryColor, Converter={StaticResource BoolToVisibility}}" Margin="0,6,0,0">
                         <TextBlock Text="2nd Color (#RRGGBB)" Style="{StaticResource FieldLabel}" />
@@ -242,117 +283,130 @@
                                 <ColumnDefinition Width="10" />
                                 <ColumnDefinition Width="Auto" />
                             </Grid.ColumnDefinitions>
-                            <Border Grid.Column="0" Width="30" Height="30" CornerRadius="6" Background="{Binding SecondaryColorBrush}"
-                                    BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" ToolTip="A swatch of the 2nd color." />
+                            <Border Grid.Column="0" Width="32" Height="32" CornerRadius="7" Background="{Binding SecondaryColorBrush}"
+                                    BorderBrush="{DynamicResource BorderStrongBrush}" BorderThickness="1" />
                             <TextBox Grid.Column="2" Text="{Binding SecondaryColor, UpdateSourceTrigger=PropertyChanged}" MaxLength="7" Tag="#FFFFFF"
+                                     FontFamily="{StaticResource FontFamilyMono}"
                                      AutomationProperties.Name="2nd Color to find" />
-                            <Button Grid.Column="4" Command="{Binding PickSecondaryColorCommand}" ToolTip="Pick the 2nd color from the screen."
+                            <Button Grid.Column="4" Command="{Binding PickSecondaryColorCommand}"
                                     AutomationProperties.Name="Pick 2nd color from screen">
                                 <StackPanel Orientation="Horizontal">
                                     <TextBlock Text="&#xEF3C;" Style="{StaticResource IconText}" />
-                                    <TextBlock Text="Pick 2nd color" Margin="8,0,0,0" />
+                                    <TextBlock Text="Pick 2nd" Margin="6,0,0,0" />
                                 </StackPanel>
                             </Button>
                         </Grid>
                     </StackPanel>
-                    <!-- One-click tuning presets (set tolerance + shade variation together). A ✓ marks the preset that's active. -->
-                    <TextBlock Text="Quick tuning" Style="{StaticResource FieldLabel}"
-                               ToolTip="Pick what you're looking for; it sets the tolerance and shade variation for you. You can still fine-tune below." />
-                    <WrapPanel Margin="0,2,0,0">
-                        <Button Command="{Binding ApplyColorPresetCommand}" CommandParameter="exact" Padding="10,5" Margin="0,0,6,6" FontSize="11.5"
-                                ToolTip="Exact UI Color (Strict): tolerance 10, shade variation off. For flat app / menu colours that never change."
+
+                    <!-- One-click tuning presets -->
+                    <TextBlock Text="Quick tolerance presets" Style="{StaticResource FieldLabel}" Margin="0,8,0,4" />
+                    <WrapPanel>
+                        <Button Command="{Binding ApplyColorPresetCommand}" CommandParameter="exact" Padding="9,4" Margin="0,0,6,6" FontSize="11.5"
                                 AutomationProperties.Name="Exact UI Color preset">
                             <StackPanel Orientation="Horizontal">
                                 <TextBlock Text="✓ " Foreground="{DynamicResource SuccessBrush}" FontWeight="Bold"
                                            Visibility="{Binding IsExactPreset, Converter={StaticResource BoolToVisibility}}" />
-                                <TextBlock Text="🎯 Exact UI Color (Strict)" />
+                                <TextBlock Text="🎯 Exact UI (10)" />
                             </StackPanel>
                         </Button>
-                        <Button Command="{Binding ApplyColorPresetCommand}" CommandParameter="game" Padding="10,5" Margin="0,0,6,6" FontSize="11.5"
-                                ToolTip="Game Target / Solid Object (Recommended): tolerance 28, shade variation on. For a red ball, an enemy marker, a coloured button in a game – also its darker and lighter sides."
+                        <Button Command="{Binding ApplyColorPresetCommand}" CommandParameter="game" Padding="9,4" Margin="0,0,6,6" FontSize="11.5"
                                 AutomationProperties.Name="Game Target preset">
                             <StackPanel Orientation="Horizontal">
                                 <TextBlock Text="✓ " Foreground="{DynamicResource SuccessBrush}" FontWeight="Bold"
                                            Visibility="{Binding IsGamePreset, Converter={StaticResource BoolToVisibility}}" />
-                                <TextBlock Text="🔴 Game Target / Solid Object (Recommended)" TextWrapping="Wrap" />
+                                <TextBlock Text="🔴 Game Object (28)" />
                             </StackPanel>
                         </Button>
-                        <Button Command="{Binding ApplyColorPresetCommand}" CommandParameter="glow" Padding="10,5" Margin="0,0,6,6" FontSize="11.5"
-                                ToolTip="Lighting / Glowing Object (Broad): tolerance 50, shade variation on. For targets under changing light, glowing or flashing effects. Keep the search area small – more things match."
+                        <Button Command="{Binding ApplyColorPresetCommand}" CommandParameter="glow" Padding="9,4" Margin="0,0,6,6" FontSize="11.5"
                                 AutomationProperties.Name="Lighting or Glowing Object preset">
                             <StackPanel Orientation="Horizontal">
                                 <TextBlock Text="✓ " Foreground="{DynamicResource SuccessBrush}" FontWeight="Bold"
                                            Visibility="{Binding IsGlowPreset, Converter={StaticResource BoolToVisibility}}" />
-                                <TextBlock Text="🌅 Lighting / Glowing Object (Broad)" />
+                                <TextBlock Text="🌅 Glow / Broad (50)" />
                             </StackPanel>
                         </Button>
                     </WrapPanel>
-                    <TextBlock Style="{StaticResource FieldLabel}"
-                               ToolTip="How far each of red, green and blue may differ. About 20-40 is typical.">
-                        <Run Text="Color tolerance: " /><Run Text="{Binding Tolerance, Mode=OneWay}" FontWeight="SemiBold" />
-                        <Run Text=" (0 = exact colour only, higher = more similar colours count)" />
-                    </TextBlock>
-                    <Slider Minimum="0" Maximum="150" TickFrequency="1" IsSnapToTickEnabled="True" Value="{Binding Tolerance}"
-                            AutomationProperties.Name="Color tolerance slider" ToolTip="How far each of red, green and blue may differ. About 20-40 is typical." />
-                    <TextBox Text="{Binding Tolerance, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}" Width="80" HorizontalAlignment="Left" Margin="0,6,0,0"
-                             AutomationProperties.Name="Color tolerance" ToolTip="Exact tolerance (0-255). How far each of red, green and blue may differ." />
-                    <CheckBox Content="Shade variation (also match darker / lighter shades of this colour)" IsChecked="{Binding MatchShades}" Margin="0,10,0,0"
-                              ToolTip="On: the shadowed and highlighted sides of a 3D ball or a glowing target count too (same colour, 50 %–200 % brightness). Off: only the colour ± tolerance."
+
+                    <!-- Unified Slider + StudioNumberBox for Tolerance -->
+                    <TextBlock Text="Color tolerance (0 = exact, 150 = broad)" Style="{StaticResource FieldLabel}" Margin="0,4,0,4" />
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="10" />
+                            <ColumnDefinition Width="134" />
+                        </Grid.ColumnDefinitions>
+                        <Slider Grid.Column="0" Minimum="0" Maximum="150" TickFrequency="1" IsSnapToTickEnabled="True"
+                                Value="{Binding Tolerance}" VerticalAlignment="Center"
+                                AutomationProperties.Name="Color tolerance slider" />
+                        <controls:StudioNumberBox Grid.Column="2" Value="{Binding Tolerance}" Unit="±" Step="2" Minimum="0" Maximum="255"
+                                                  AutomationProperties.Name="Color tolerance" />
+                    </Grid>
+
+                    <CheckBox Content="Shade variation (match darker / lighter 3D shades)" IsChecked="{Binding MatchShades}" Margin="0,8,0,0"
                               AutomationProperties.Name="Shade variation" />
                 </StackPanel>
             </Border>
+
+            <!-- Shared Tab-Aware Cards -->
             <ContentControl Content="{Binding}" ContentTemplate="{StaticResource SearchCardsTemplate}" Focusable="False" />
 
-            <!-- Advanced Tuning & Movement (collapsed by default) -->
-            <Expander Header="Advanced Tuning &amp; Movement" Style="{StaticResource AdvancedExpander}"
-                      ToolTip="Minimum patch size, how the cursor moves and click timing.">
+            <!-- TUNE & MOTION TAB: Blob Size, Shape Circularity & Cursor Movement -->
+            <Border Style="{StaticResource SetupCard}" Visibility="{Binding ShowTuneSection, Converter={StaticResource BoolToVisibility}}">
                 <StackPanel>
-                    <TextBlock Text="Minimum size (pixels)" Style="{StaticResource FieldLabel}"
-                               ToolTip="The patch of color must have at least this many pixels (ignores stray single pixels)." />
-                    <TextBox Text="{Binding MinPixels, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}" Width="100" HorizontalAlignment="Left"
-                             AutomationProperties.Name="Minimum size in pixels" ToolTip="The patch of color must have at least this many pixels (ignores stray single pixels)." />
-                    <TextBlock Text="Color space" Style="{StaticResource FieldLabel}" Margin="0,10,0,4" />
-                    <ComboBox ItemsSource="{x:Static steps:FindColorStepViewModel.ColorSpaces}" DisplayMemberPath="Label" SelectedValuePath="Value"
-                              SelectedValue="{Binding ColorSpace}" AutomationProperties.Name="Color space" />
-                    <TextBlock Text="Which matching blob to pick" Style="{StaticResource FieldLabel}" Margin="0,10,0,4" />
-                    <ComboBox ItemsSource="{x:Static steps:FindColorStepViewModel.SelectRules}" DisplayMemberPath="Label" SelectedValuePath="Value"
-                              SelectedValue="{Binding SelectRule}" AutomationProperties.Name="Color blob selection rule" />
+                    <TextBlock Text="🎛 COLOR BLOB &amp; SHAPE FILTERING" Style="{StaticResource SetupCardTitle}" />
                     <Grid Margin="0,8,0,0">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*" />
                             <ColumnDefinition Width="10" />
                             <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <StackPanel Grid.Column="0" VerticalAlignment="Bottom">
+                            <TextBlock Text="Min blob size" Style="{StaticResource FieldLabel}" />
+                            <controls:StudioNumberBox Value="{Binding MinPixels}" Unit="px" Step="5" Minimum="1" Maximum="100000"
+                                                      AutomationProperties.Name="Minimum size in pixels" />
+                        </StackPanel>
+                        <StackPanel Grid.Column="2" VerticalAlignment="Bottom">
+                            <TextBlock Text="Max blob (0 = any)" Style="{StaticResource FieldLabel}" />
+                            <controls:StudioNumberBox Value="{Binding MaxPixels}" Unit="px" Step="50" Minimum="0" Maximum="1000000"
+                                                      AutomationProperties.Name="Maximum size in pixels" />
+                        </StackPanel>
+                    </Grid>
+
+                    <Grid Margin="0,6,0,0">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
                             <ColumnDefinition Width="10" />
                             <ColumnDefinition Width="*" />
                         </Grid.ColumnDefinitions>
-                        <StackPanel Grid.Column="0">
-                            <TextBlock Text="Max size (px, 0=any)" Style="{StaticResource FieldLabel}" />
-                            <TextBox Text="{Binding MaxPixels, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}"
-                                     AutomationProperties.Name="Maximum size in pixels" />
+                        <StackPanel Grid.Column="0" VerticalAlignment="Bottom">
+                            <TextBlock Text="Min roundness" Style="{StaticResource FieldLabel}" />
+                            <controls:StudioNumberBox Value="{Binding MinCircularityPercent}" Unit="%" Step="5" Minimum="0" Maximum="100"
+                                                      AutomationProperties.Name="Minimum roundness percent" />
                         </StackPanel>
-                        <StackPanel Grid.Column="2">
-                            <TextBlock Text="Min roundness (%)" Style="{StaticResource FieldLabel}"
-                                       ToolTip="0 = any shape. 50+ = round orbs/dots only (rejects long thin particle streaks)." />
-                            <TextBox Text="{Binding MinCircularityPercent, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}"
-                                     AutomationProperties.Name="Minimum roundness percent" />
-                        </StackPanel>
-                        <StackPanel Grid.Column="4">
-                            <TextBlock Text="Min fill density (%)" Style="{StaticResource FieldLabel}" />
-                            <TextBox Text="{Binding MinFillPercent, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}"
-                                     AutomationProperties.Name="Minimum fill density percent" />
+                        <StackPanel Grid.Column="2" VerticalAlignment="Bottom">
+                            <TextBlock Text="Min fill density" Style="{StaticResource FieldLabel}" />
+                            <controls:StudioNumberBox Value="{Binding MinFillPercent}" Unit="%" Step="5" Minimum="0" Maximum="100"
+                                                      AutomationProperties.Name="Minimum fill density percent" />
                         </StackPanel>
                     </Grid>
-                    <TextBlock Style="{StaticResource MutedText}" FontSize="11" Margin="0,4,0,0" TextWrapping="Wrap"
-                               Text="This only matches colors, it doesn't recognize objects: anything else with a similar color in the search place also counts, so keep it small (a custom area or an app window)." />
+
+                    <TextBlock Text="Color space" Style="{StaticResource FieldLabel}" Margin="0,8,0,4" />
+                    <ComboBox ItemsSource="{x:Static steps:FindColorStepViewModel.ColorSpaces}" DisplayMemberPath="Label" SelectedValuePath="Value"
+                              SelectedValue="{Binding ColorSpace}" AutomationProperties.Name="Color space" />
+
+                    <TextBlock Text="Which matching blob to pick" Style="{StaticResource FieldLabel}" Margin="0,8,0,4" />
+                    <ComboBox ItemsSource="{x:Static steps:FindColorStepViewModel.SelectRules}" DisplayMemberPath="Label" SelectedValuePath="Value"
+                              SelectedValue="{Binding SelectRule}" AutomationProperties.Name="Color blob selection rule" />
+
                     <ContentControl Content="{Binding}" ContentTemplate="{StaticResource SearchMovementTemplate}" Focusable="False"
+                                    Margin="0,12,0,0"
                                     Visibility="{Binding IsStandalone, Converter={StaticResource BoolToVisibility}}" />
                 </StackPanel>
-            </Expander>
+            </Border>
 
-            <WrapPanel Margin="0,16,0,0">
+            <WrapPanel Margin="0,12,0,0">
                 <Button Command="{Binding TestCommand}" Style="{StaticResource TestActionButton}" Margin="0,0,8,6" HorizontalAlignment="Left"
                         Visibility="{Binding IsStandalone, Converter={StaticResource BoolToVisibility}, ConverterParameter=Invert}"
-                        ToolTip="SmartMacro hides for a moment, looks once where the step would look, and shows a picture with the matching patches marked."
                         AutomationProperties.Name="Test detection now">
                     <StackPanel Orientation="Horizontal">
                         <TextBlock Text="&#xE721;" Style="{StaticResource IconText}" />
@@ -360,7 +414,7 @@
                     </StackPanel>
                 </Button>
                 <Button Command="{Binding TrackCommand}" Margin="0,0,0,6"
-                        ToolTip="Follows the color inside a custom search area for 3 seconds (like a moving marker on a bar) and reports its positions and the frame rate."
+                        ToolTip="Follows the color inside a custom search area for 3 seconds and reports its positions and frame rate."
                         AutomationProperties.Name="Track for 3 seconds">
                     <StackPanel Orientation="Horizontal">
                         <TextBlock Text="&#xE916;" Style="{StaticResource IconText}" />
@@ -371,120 +425,150 @@
             <ContentControl Content="{Binding}" ContentTemplate="{StaticResource SearchTestResultTemplate}" Focusable="False"
                             Visibility="{Binding IsStandalone, Converter={StaticResource BoolToVisibility}, ConverterParameter=Invert}" />
 
-            <ContentControl Content="{Binding}" ContentTemplate="{StaticResource StepFooterTemplate}" Focusable="False" Visibility="{Binding IsStandalone, Converter={StaticResource BoolToVisibility}}" />
+            <ContentControl Content="{Binding}" ContentTemplate="{StaticResource StepFooterTemplate}" Focusable="False"
+                            Visibility="{Binding IsStandalone, Converter={StaticResource BoolToVisibility}}" />
         </StackPanel>
     </DataTemplate>
 
-    <!-- Wait for screen change (VISION & AI) -->
+    <!-- ===================================== 4. WAIT FOR SCREEN CHANGE ===================================== -->
     <DataTemplate DataType="{x:Type steps:WaitForChangeStepViewModel}">
         <StackPanel>
             <ContentControl Content="{Binding}" ContentTemplate="{StaticResource StepHeaderTemplate}" Focusable="False" />
             <ContentControl Content="{Binding}" ContentTemplate="{StaticResource SummaryBannerTemplate}" Focusable="False" />
 
-            <Border Style="{StaticResource SetupCard}">
-                <StackPanel>
-                    <TextBlock Text="1. THE AREA TO WATCH" Style="{StaticResource SetupCardTitle}"
-                               ToolTip="Only this area is compared. Keep it small and around the spot where something appears (a bite marker, a pop-up)." />
-                    <WrapPanel Margin="0,8,0,0">
-                        <Button Command="{Binding PickAreaCommand}" Margin="0,0,8,6" Style="{StaticResource PrimaryButton}"
-                                ToolTip="SmartMacro hides and the screen freezes; drag a box around the part of the screen to watch."
-                                AutomationProperties.Name="Pick area to watch">
-                            <StackPanel Orientation="Horizontal">
-                                <TextBlock Text="&#xE8B0;" Style="{StaticResource IconText}" />
-                                <TextBlock Text="Pick area" Margin="8,0,0,0" />
-                            </StackPanel>
-                        </Button>
-                        <Button Command="{Binding ShowAreaCommand}" Margin="0,0,8,6"
-                                ToolTip="Outlines the watched area on screen for a moment." AutomationProperties.Name="Show watched area on screen">
-                            <StackPanel Orientation="Horizontal">
-                                <TextBlock Text="🎯" />
-                                <TextBlock Text="Show on screen" Margin="6,0,0,0" />
-                            </StackPanel>
-                        </Button>
-                        <ComboBox Style="{StaticResource FreezeComboBox}" Margin="0,0,0,6" />
-                    </WrapPanel>
-                    <Grid Margin="0,4,0,0">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="*" />
-                            <ColumnDefinition Width="8" />
-                            <ColumnDefinition Width="*" />
-                            <ColumnDefinition Width="8" />
-                            <ColumnDefinition Width="*" />
-                            <ColumnDefinition Width="8" />
-                            <ColumnDefinition Width="*" />
-                        </Grid.ColumnDefinitions>
-                        <StackPanel Grid.Column="0">
-                            <TextBlock Text="X" Style="{StaticResource FieldLabel}" />
-                            <TextBox Text="{Binding RegionX, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}" AutomationProperties.Name="Area X" />
-                        </StackPanel>
-                        <StackPanel Grid.Column="2">
-                            <TextBlock Text="Y" Style="{StaticResource FieldLabel}" />
-                            <TextBox Text="{Binding RegionY, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}" AutomationProperties.Name="Area Y" />
-                        </StackPanel>
-                        <StackPanel Grid.Column="4">
-                            <TextBlock Text="Width" Style="{StaticResource FieldLabel}" />
-                            <TextBox Text="{Binding RegionWidth, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}" AutomationProperties.Name="Area width" />
-                        </StackPanel>
-                        <StackPanel Grid.Column="6">
-                            <TextBlock Text="Height" Style="{StaticResource FieldLabel}" />
-                            <TextBox Text="{Binding RegionHeight, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}" AutomationProperties.Name="Area height" />
-                        </StackPanel>
-                    </Grid>
-                </StackPanel>
-            </Border>
+            <!-- SETUP TAB: Area to Watch (with Radar) + Action When Changed -->
+            <StackPanel Visibility="{Binding ShowSetupSection, Converter={StaticResource BoolToVisibility}}">
+                <Border Style="{StaticResource SetupCard}">
+                    <StackPanel>
+                        <TextBlock Text="1. THE AREA TO WATCH" Style="{StaticResource SetupCardTitle}" />
 
-            <Border Style="{StaticResource SetupCard}">
-                <StackPanel>
-                    <TextBlock Text="2. WHAT COUNTS AS A CHANGE" Style="{StaticResource SetupCardTitle}" />
-                    <Grid Margin="0,2,0,0">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="*" />
-                            <ColumnDefinition Width="12" />
-                            <ColumnDefinition Width="*" />
-                        </Grid.ColumnDefinitions>
-                        <StackPanel>
-                            <TextBlock Text="How much must change (%)" Style="{StaticResource FieldLabel}"
-                                       ToolTip="The share of the area's pixels that must look different from the starting picture. 1 % ignores most noise; use 0.1 % for a tiny marker in a big area." />
-                            <TextBox Text="{Binding MinChangedPercent, UpdateSourceTrigger=LostFocus, ValidatesOnExceptions=True}" AutomationProperties.Name="How much must change in percent" />
-                        </StackPanel>
-                        <StackPanel Grid.Column="2">
-                            <TextBlock Text="Ignore colour shifts up to" Style="{StaticResource FieldLabel}"
-                                       ToolTip="A pixel only counts as changed when its red, green or blue value moved more than this (0–255). 20–40 ignores glow, shading and video noise." />
-                            <TextBox Text="{Binding PixelTolerance, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}" AutomationProperties.Name="Colour tolerance" />
-                        </StackPanel>
-                    </Grid>
-                    <Grid>
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="*" />
-                            <ColumnDefinition Width="12" />
-                            <ColumnDefinition Width="*" />
-                        </Grid.ColumnDefinitions>
-                        <StackPanel>
-                            <TextBlock Text="Wait up to (ms)" Style="{StaticResource FieldLabel}" ToolTip="0 = check once. Time spent paused doesn't count." />
-                            <TextBox Text="{Binding TimeoutMs, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}" AutomationProperties.Name="Wait up to in milliseconds" />
-                        </StackPanel>
-                        <StackPanel Grid.Column="2">
-                            <TextBlock Text="Check every (ms)" Style="{StaticResource FieldLabel}" ToolTip="Pause between looks. 100 ms reacts fast; larger values use less CPU." />
-                            <TextBox Text="{Binding CheckIntervalMs, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}" AutomationProperties.Name="Check every in milliseconds" />
-                        </StackPanel>
-                    </Grid>
-                </StackPanel>
-            </Border>
+                        <!-- Mini Monitor Radar for Watched Region -->
+                        <controls:SearchRegionRadar Scope="CustomArea"
+                                                    RegionX="{Binding RegionX}" RegionY="{Binding RegionY}"
+                                                    RegionWidth="{Binding RegionWidth}" RegionHeight="{Binding RegionHeight}" />
 
-            <Border Style="{StaticResource SetupCard}">
-                <StackPanel>
-                    <TextBlock Text="3. WHEN IT CHANGES" Style="{StaticResource SetupCardTitle}" />
-                    <ComboBox ItemsSource="{x:Static steps:WaitForChangeStepViewModel.Actions}" DisplayMemberPath="Label" SelectedValuePath="Value"
-                              SelectedValue="{Binding Action}" Margin="0,8,0,0" AutomationProperties.Name="When it changes" />
-                    <StackPanel Visibility="{Binding UsesHold, Converter={StaticResource BoolToVisibility}}">
-                        <TextBlock Text="Hold for (ms)" Style="{StaticResource FieldLabel}" />
-                        <TextBox Text="{Binding ActionHoldMs, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}" Width="120" HorizontalAlignment="Left"
-                                 AutomationProperties.Name="Hold time in milliseconds" />
+                        <WrapPanel Margin="0,8,0,0">
+                            <Button Command="{Binding PickAreaCommand}" Margin="0,0,8,6" Style="{StaticResource PrimaryButton}"
+                                    AutomationProperties.Name="Pick area to watch">
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock Text="&#xE8B0;" Style="{StaticResource IconText}" />
+                                    <TextBlock Text="Pick area" Margin="8,0,0,0" />
+                                </StackPanel>
+                            </Button>
+                            <Button Command="{Binding ShowAreaCommand}" Margin="0,0,8,6"
+                                    AutomationProperties.Name="Show watched area on screen">
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock Text="🎯" />
+                                    <TextBlock Text="Show on screen" Margin="6,0,0,0" />
+                                </StackPanel>
+                            </Button>
+                            <ComboBox Style="{StaticResource FreezeComboBox}" Margin="0,0,0,6" />
+                        </WrapPanel>
+                        <Grid Margin="0,4,0,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="8" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
+                            <StackPanel Grid.Row="0" Grid.Column="0">
+                                <TextBlock Text="Left (X)" Style="{StaticResource FieldLabel}" />
+                                <controls:StudioNumberBox Value="{Binding RegionX}" Unit="px" Step="10" ShowStepper="False"
+                                                          AutomationProperties.Name="Area X" />
+                            </StackPanel>
+                            <StackPanel Grid.Row="0" Grid.Column="2">
+                                <TextBlock Text="Top (Y)" Style="{StaticResource FieldLabel}" />
+                                <controls:StudioNumberBox Value="{Binding RegionY}" Unit="px" Step="10" ShowStepper="False"
+                                                          AutomationProperties.Name="Area Y" />
+                            </StackPanel>
+                            <StackPanel Grid.Row="1" Grid.Column="0" Margin="0,4,0,0">
+                                <TextBlock Text="Width" Style="{StaticResource FieldLabel}" />
+                                <controls:StudioNumberBox Value="{Binding RegionWidth}" Unit="px" Step="10" Minimum="0" ShowStepper="False"
+                                                          AutomationProperties.Name="Area width" />
+                            </StackPanel>
+                            <StackPanel Grid.Row="1" Grid.Column="2" Margin="0,4,0,0">
+                                <TextBlock Text="Height" Style="{StaticResource FieldLabel}" />
+                                <controls:StudioNumberBox Value="{Binding RegionHeight}" Unit="px" Step="10" Minimum="0" ShowStepper="False"
+                                                          AutomationProperties.Name="Area height" />
+                            </StackPanel>
+                        </Grid>
                     </StackPanel>
-                    <TextBlock Text="If nothing changes in time" Style="{StaticResource FieldLabel}" />
-                    <ContentControl Content="{Binding FailurePolicy}" ContentTemplate="{StaticResource FailurePolicyEditorTemplate}" Focusable="False" />
-                </StackPanel>
-            </Border>
+                </Border>
+
+                <Border Style="{StaticResource SetupCard}">
+                    <StackPanel>
+                        <TextBlock Text="2. WHEN IT CHANGES" Style="{StaticResource SetupCardTitle}" />
+                        <ComboBox ItemsSource="{x:Static steps:WaitForChangeStepViewModel.Actions}" DisplayMemberPath="Label" SelectedValuePath="Value"
+                                  SelectedValue="{Binding Action}" Margin="0,8,0,0" AutomationProperties.Name="When it changes" />
+                        <StackPanel Visibility="{Binding UsesHold, Converter={StaticResource BoolToVisibility}}" Margin="0,6,0,0">
+                            <TextBlock Text="Hold for" Style="{StaticResource FieldLabel}" />
+                            <controls:StudioNumberBox Value="{Binding ActionHoldMs}" Unit="ms" Step="50" Minimum="0" Maximum="60000"
+                                                      Presets="50,100,250,500"
+                                                      AutomationProperties.Name="Hold time in milliseconds" />
+                        </StackPanel>
+                    </StackPanel>
+                </Border>
+            </StackPanel>
+
+            <!-- TUNE TAB: Change Sensitivity & Pixel Tolerance -->
+            <StackPanel Visibility="{Binding ShowTuneSection, Converter={StaticResource BoolToVisibility}}">
+                <Border Style="{StaticResource SetupCard}">
+                    <StackPanel>
+                        <TextBlock Text="🎛 CHANGE SENSITIVITY &amp; NOISE FILTER" Style="{StaticResource SetupCardTitle}" />
+                        <Grid Margin="0,8,0,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="10" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Grid.Column="0" VerticalAlignment="Bottom">
+                                <TextBlock Text="Min changed (%)" Style="{StaticResource FieldLabel}" />
+                                <TextBox Text="{Binding MinChangedPercent, UpdateSourceTrigger=LostFocus, ValidatesOnExceptions=True}"
+                                         AutomationProperties.Name="How much must change in percent" />
+                            </StackPanel>
+                            <StackPanel Grid.Column="2" VerticalAlignment="Bottom">
+                                <TextBlock Text="Color shift tol." Style="{StaticResource FieldLabel}" />
+                                <controls:StudioNumberBox Value="{Binding PixelTolerance}" Unit="±" Step="2" Minimum="0" Maximum="255"
+                                                          AutomationProperties.Name="Colour tolerance" />
+                            </StackPanel>
+                        </Grid>
+                    </StackPanel>
+                </Border>
+            </StackPanel>
+
+            <!-- RECOVERY & TIMING TAB: Timeout, Poll Interval & Failure Policy -->
+            <StackPanel Visibility="{Binding ShowRecoverySection, Converter={StaticResource BoolToVisibility}}">
+                <Border Style="{StaticResource SetupCard}">
+                    <StackPanel>
+                        <TextBlock Text="🛡 WATCH TIMING &amp; SELF-HEALING" Style="{StaticResource SetupCardTitle}" />
+                        <Grid Margin="0,8,0,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="12" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Grid.Column="0">
+                                <TextBlock Text="Wait up to" Style="{StaticResource FieldLabel}" />
+                                <controls:StudioNumberBox Value="{Binding TimeoutMs}" Unit="ms" Step="250" Minimum="0" Maximum="3600000"
+                                                          Presets="1000,3000,5000,10000"
+                                                          AutomationProperties.Name="Wait up to in milliseconds" />
+                            </StackPanel>
+                            <StackPanel Grid.Column="2">
+                                <TextBlock Text="Check every" Style="{StaticResource FieldLabel}" />
+                                <controls:StudioNumberBox Value="{Binding CheckIntervalMs}" Unit="ms" Step="25" Minimum="10" Maximum="60000"
+                                                          Presets="16,50,100,250"
+                                                          AutomationProperties.Name="Check every in milliseconds" />
+                            </StackPanel>
+                        </Grid>
+
+                        <TextBlock Text="If nothing changes in time" Style="{StaticResource FieldLabel}" Margin="0,10,0,4" />
+                        <ContentControl Content="{Binding FailurePolicy}" ContentTemplate="{StaticResource FailurePolicyEditorTemplate}" Focusable="False" />
+                    </StackPanel>
+                </Border>
+            </StackPanel>
 
             <TextBlock Text="{Binding TestResult}" Style="{StaticResource MutedText}" FontSize="11" Margin="0,8,0,0" TextWrapping="Wrap"
                        Visibility="{Binding TestResult, Converter={StaticResource NullToVisibility}}" />

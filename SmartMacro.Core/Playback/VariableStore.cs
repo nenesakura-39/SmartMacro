@@ -4,10 +4,14 @@ using SmartMacro.Core.Models;
 
 namespace SmartMacro.Core.Playback;
 
-/// <summary>Reads plain text from the OS clipboard (implemented by the WPF host; mocked in unit tests).</summary>
+/// <summary>Reads and writes plain text on the OS clipboard (implemented by the WPF host; mocked in unit tests).</summary>
 public interface IClipboardReader
 {
     string? ReadText();
+
+    void WriteText(string text)
+    {
+    }
 }
 
 /// <summary>Immutable snapshot of one variable's current value for the live Variables panel.</summary>
@@ -155,7 +159,7 @@ public sealed class VariableStore
                 entry = new Entry
                 {
                     Name = trimmed,
-                    Type = operation is VariableOperation.Add or VariableOperation.Subtract
+                    Type = operation is VariableOperation.Add or VariableOperation.Subtract or VariableOperation.Multiply or VariableOperation.Divide or VariableOperation.Modulo or VariableOperation.Round
                         ? MacroVariableType.Number
                         : operation is VariableOperation.AppendText or VariableOperation.TrimText or VariableOperation.ExtractDigits or VariableOperation.ToUpper or VariableOperation.ToLower
                             ? MacroVariableType.Text
@@ -186,6 +190,34 @@ public sealed class VariableStore
                         entry.NumberValue = current + delta;
                     }
 
+                    break;
+                }
+
+                case VariableOperation.Multiply:
+                case VariableOperation.Divide:
+                case VariableOperation.Modulo:
+                {
+                    var factor = ParseNumberOrZero(incomingText);
+                    var current = entry.Type == MacroVariableType.Number ? entry.NumberValue : ParseNumberOrZero(entry.Format());
+                    entry.Type = MacroVariableType.Number;
+                    entry.NumberValue = operation switch
+                    {
+                        VariableOperation.Multiply => current * factor,
+                        VariableOperation.Divide => Math.Abs(factor) < 1e-12 ? 0 : current / factor,
+                        VariableOperation.Modulo => Math.Abs(factor) < 1e-12 ? 0 : current % factor,
+                        _ => current,
+                    };
+                    break;
+                }
+
+                case VariableOperation.Round:
+                {
+                    var decimals = string.IsNullOrWhiteSpace(incomingText)
+                        ? 0
+                        : Math.Clamp((int)Math.Round(ParseNumberOrZero(incomingText)), 0, 6);
+                    var current = entry.Type == MacroVariableType.Number ? entry.NumberValue : ParseNumberOrZero(entry.Format());
+                    entry.Type = MacroVariableType.Number;
+                    entry.NumberValue = Math.Round(current, decimals, MidpointRounding.AwayFromZero);
                     break;
                 }
 
@@ -541,5 +573,47 @@ public sealed class VariableStore
         }
 
         return oneBasedIndex <= parts.Length ? parts[oneBasedIndex - 1] : string.Empty;
+    }
+
+    /// <summary>
+    /// v1.8 "Evergreen": parses a random integer range such as <c>"1..100"</c>, <c>"1, 100"</c>, <c>"1-100"</c>, or a single
+    /// maximum like <c>"50"</c> (meaning <c>1..50</c>). Defaults to <c>(1, 100)</c> when empty or invalid.
+    /// </summary>
+    public static (int Min, int Max) ParseRandomRange(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return (1, 100);
+        var s = text.Trim();
+
+        string[] parts;
+        if (s.Contains("..", StringComparison.Ordinal))
+        {
+            parts = s.Split("..", StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        }
+        else if (s.Contains(',') || s.Contains(';'))
+        {
+            parts = s.Split(new[] { ',', ';' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        }
+        else
+        {
+            var dashIdx = s.IndexOf('-', 1);
+            parts = dashIdx > 0
+                ? new[] { s[..dashIdx].Trim(), s[(dashIdx + 1)..].Trim() }
+                : new[] { s };
+        }
+
+        if (parts.Length >= 2
+            && int.TryParse(parts[0], NumberStyles.Integer, CultureInfo.InvariantCulture, out var min)
+            && int.TryParse(parts[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out var max))
+        {
+            return min <= max ? (min, max) : (max, min);
+        }
+
+        if (parts.Length == 1
+            && int.TryParse(parts[0], NumberStyles.Integer, CultureInfo.InvariantCulture, out var single))
+        {
+            return single >= 1 ? (1, single) : (single, 1);
+        }
+
+        return (1, 100);
     }
 }

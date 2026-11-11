@@ -60,14 +60,49 @@ public sealed partial class PlaybackEngine
 
                     RememberFound(result.X, result.Y, result.Match);
                     ReportTarget(result.X, result.Y, result.Match, result.Confidence, StepDescriber.DisplayName(step.Kind), result.ElapsedMs,
-                        result.FromHotSpot);
+                        result.FromHotSpot, result.AllMatches);
                     Message?.Invoke(this, result.FoundText + Stats());
-                    await PerformFoundActionAsync(step.Action, result.X + step.OffsetX, result.Y + step.OffsetY, step.ActionHoldMs,
-                        FoundActionTiming.Of(step), _held ?? throw new InvalidOperationException("Playback isn't running."), token, result.Match).ConfigureAwait(false);
+
+                    var held = _held ?? throw new InvalidOperationException("Playback isn't running.");
+                    var timing = FoundActionTiming.Of(step);
+                    var lastActedX = result.X;
+                    var lastActedY = result.Y;
+
+                    if (step.TargetSelection == SearchMatchMode.AllMatches
+                        && step.Action != FoundTextAction.None
+                        && result.EffectiveMatches is { Count: > 1 } multiMatches)
+                    {
+                        var limit = step.MaxMatchesToActOn > 0 ? Math.Min(step.MaxMatchesToActOn, multiMatches.Count) : multiMatches.Count;
+                        for (var i = 0; i < limit; i++)
+                        {
+                            await WaitIfPausedAsync(token).ConfigureAwait(false);
+                            token.ThrowIfCancellationRequested();
+
+                            var mRect = multiMatches[i];
+                            var (mx, my) = (mRect.CenterX, mRect.CenterY);
+                            RememberFound(mx, my, mRect);
+                            lastActedX = mx;
+                            lastActedY = my;
+
+                            await PerformFoundActionAsync(step.Action, mx + step.OffsetX, my + step.OffsetY, step.ActionHoldMs,
+                                timing, held, token, mRect).ConfigureAwait(false);
+
+                            if (i + 1 < limit && step.BetweenMatchesDelayMs > 0)
+                            {
+                                await WaitAsync(Vary(step.BetweenMatchesDelayMs, HumanizeMinDelayMs), token).ConfigureAwait(false);
+                            }
+                        }
+                    }
+                    else
+                    {
+                        await PerformFoundActionAsync(step.Action, result.X + step.OffsetX, result.Y + step.OffsetY, step.ActionHoldMs,
+                            timing, held, token, result.Match).ConfigureAwait(false);
+                    }
+
                     if (step.MoveCursorAwayAfterAction && step.Action is not (FoundTextAction.None or FoundTextAction.Move))
                     {
                         // "Park" the cursor so it (and its hover effect) doesn't cover the spot where the next button appears.
-                        var (awayX, awayY) = AwaySpot(step, result.X, result.Y, result.Area);
+                        var (awayX, awayY) = AwaySpot(step, lastActedX, lastActedY, result.Area);
                         await MoveCursorAsync(awayX, awayY, step.MoveStyle, step.MoveDurationMs, 1.0, onTimeline: false, token).ConfigureAwait(false);
                     }
 
@@ -357,6 +392,81 @@ public sealed partial class PlaybackEngine
         {
             Message?.Invoke(this, $"📸 Couldn't save the screenshot in \"{folder}\": {ex.Message}");
         }
+
+        if (step.SoundCue != SoundCueKind.None)
+        {
+            try
+            {
+                SoundCuePlayer?.Invoke(step.SoundCue);
+            }
+            catch
+            {
+                // Sound cue errors never interrupt playback.
+            }
+        }
+
+        var noteText = !string.IsNullOrWhiteSpace(step.NotificationMessage)
+            ? InterpolateActive(step.NotificationMessage).Trim()
+            : string.Empty;
+        if (noteText.Length > 0)
+        {
+            Message?.Invoke(this, $"🔔 {noteText}");
+        }
+
+        if (!string.IsNullOrWhiteSpace(step.WebhookUrl))
+        {
+            var webhookMsg = noteText.Length > 0
+                ? noteText
+                : $"📸 SmartMacro screenshot saved ({prefix}) at {now:HH:mm:ss}";
+            await TryPostWebhookAsync(step.WebhookUrl.Trim(), webhookMsg, token).ConfigureAwait(false);
+        }
+    }
+
+    private static readonly System.Net.Http.HttpClient WebhookHttpClient = new()
+    {
+        Timeout = TimeSpan.FromSeconds(3),
+    };
+
+    private DateTimeOffset _lastWebhookSentAt = DateTimeOffset.MinValue;
+
+    private async Task TryPostWebhookAsync(string webhookUrl, string messageText, CancellationToken token)
+    {
+        if (!Uri.TryCreate(webhookUrl, UriKind.Absolute, out var uri)
+            || !string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        if ((now - _lastWebhookSentAt).TotalSeconds < 2.0)
+        {
+            return; // Rate-limit to at most 1 webhook every 2 seconds.
+        }
+
+        _lastWebhookSentAt = now;
+        try
+        {
+            var escaped = messageText
+                .Replace("\\", "\\\\", StringComparison.Ordinal)
+                .Replace("\"", "\\\"", StringComparison.Ordinal)
+                .Replace("\r", " ", StringComparison.Ordinal)
+                .Replace("\n", "\\n", StringComparison.Ordinal);
+            var payload = $"{{\"content\":\"{escaped}\",\"text\":\"{escaped}\"}}";
+            using var content = new System.Net.Http.StringContent(payload, System.Text.Encoding.UTF8, "application/json");
+            using var response = await WebhookHttpClient.PostAsync(uri, content, token).ConfigureAwait(false);
+            if (response.IsSuccessStatusCode)
+            {
+                Message?.Invoke(this, "🌐 Webhook notification sent.");
+            }
+        }
+        catch (OperationCanceledException) when (token.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            Message?.Invoke(this, $"🌐 Webhook skipped: {ex.Message}");
+        }
     }
 
     /// <summary>How far below the clicked spot the cursor goes when the step searches the whole screen.</summary>
@@ -384,7 +494,15 @@ public sealed partial class PlaybackEngine
     /// How a "when found" / "when true" action moves and clicks: movement style + glide time, click hold, double-click
     /// gap and the wait after the click. If steps (which have no such settings) use the defaults: jump, 35 / 65 / 120 ms.
     /// </summary>
-    private readonly record struct FoundActionTiming(MouseMoveStyle? Style, int MoveMs, int HoldMs, int DoubleGapMs, int SettleMs)
+    private readonly record struct FoundActionTiming(
+        MouseMoveStyle? Style,
+        int MoveMs,
+        int HoldMs,
+        int DoubleGapMs,
+        int SettleMs,
+        int FoundKey = 0x20,
+        string? FoundText = null,
+        int ScrollClicks = 3)
     {
         public static FoundActionTiming Default => new(null, 0, FoundClickHoldMs, DoubleClickGapMs, ClickSettleMs);
 
@@ -392,7 +510,8 @@ public sealed partial class PlaybackEngine
         public static FoundActionTiming Snappy => new(null, 0, MinTargetClickHoldMs, DoubleClickGapMs, ClickSettleMs);
 
         public static FoundActionTiming Of(ScreenSearchStep step) =>
-            new(step.MoveStyle, step.MoveDurationMs, step.ClickHoldMs, step.DoubleClickIntervalMs, step.PostActionDelayMs);
+            new(step.MoveStyle, step.MoveDurationMs, step.ClickHoldMs, step.DoubleClickIntervalMs, step.PostActionDelayMs,
+                step.FoundVirtualKey <= 0 ? 0x20 : step.FoundVirtualKey, step.FoundTextToType, step.FoundScrollClicks <= 0 ? 3 : step.FoundScrollClicks);
     }
 
     /// <summary>
@@ -405,6 +524,20 @@ public sealed partial class PlaybackEngine
         CancellationToken token, ScreenRect matchBounds = default)
     {
         if (action == FoundTextAction.None) return;
+        if (action == FoundTextAction.PressKey)
+        {
+            var vk = timing.FoundKey <= 0 ? 0x20 : timing.FoundKey;
+            var keyHold = Math.Max(MinTargetClickHoldMs, timing.HoldMs);
+            var hk = new HeldKey(vk);
+            _input.Key(vk, true);
+            held.PressKey(hk);
+            await WaitAsync(keyHold, token).ConfigureAwait(false);
+            _input.Key(vk, false);
+            held.ReleaseKey(hk);
+            await WaitAsync(Math.Max(0, timing.SettleMs), token).ConfigureAwait(false);
+            return;
+        }
+
         if (action != FoundTextAction.Move) (x, y) = Jitter(x, y, matchBounds); // Humanize: stays inside what was found
 
         await MoveCursorAsync(x, y, timing.Style, timing.MoveMs, 1.0, onTimeline: false, token).ConfigureAwait(false);
@@ -418,6 +551,10 @@ public sealed partial class PlaybackEngine
             case FoundTextAction.Click:
                 await HeldClickAsync(MacroMouseButton.Left, clickHold, held, token).ConfigureAwait(false);
                 break;
+            case FoundTextAction.HoverThenClick:
+                await WaitAsync(Math.Max(60, holdMs > 0 && holdMs != ScreenSearchStep.DefaultActionHoldMs ? holdMs : 80), token).ConfigureAwait(false);
+                await HeldClickAsync(MacroMouseButton.Left, clickHold, held, token).ConfigureAwait(false);
+                break;
             case FoundTextAction.DoubleClick:
                 await HeldClickAsync(MacroMouseButton.Left, clickHold, held, token).ConfigureAwait(false);
                 await WaitAsync(Math.Max(0, timing.DoubleGapMs), token).ConfigureAwait(false);
@@ -426,12 +563,40 @@ public sealed partial class PlaybackEngine
             case FoundTextAction.RightClick:
                 await HeldClickAsync(MacroMouseButton.Right, clickHold, held, token).ConfigureAwait(false);
                 break;
+            case FoundTextAction.MiddleClick:
+                await HeldClickAsync(MacroMouseButton.Middle, clickHold, held, token).ConfigureAwait(false);
+                break;
             case FoundTextAction.Hold:
                 _input.MouseButton(MacroMouseButton.Left, true);
                 held.Buttons.Add(MacroMouseButton.Left);
                 await WaitAsync(TimeSpan.FromMilliseconds(Math.Max(0, holdMs)), token).ConfigureAwait(false);
                 _input.MouseButton(MacroMouseButton.Left, false);
                 held.Buttons.Remove(MacroMouseButton.Left);
+                break;
+            case FoundTextAction.ClickAndPressKey:
+            {
+                await HeldClickAsync(MacroMouseButton.Left, clickHold, held, token).ConfigureAwait(false);
+                await WaitAsync(35, token).ConfigureAwait(false);
+                var vk = timing.FoundKey <= 0 ? 0x20 : timing.FoundKey;
+                var hk = new HeldKey(vk);
+                _input.Key(vk, true);
+                held.PressKey(hk);
+                await WaitAsync(clickHold, token).ConfigureAwait(false);
+                _input.Key(vk, false);
+                held.ReleaseKey(hk);
+                break;
+            }
+            case FoundTextAction.ClickAndTypeText:
+                await HeldClickAsync(MacroMouseButton.Left, clickHold, held, token).ConfigureAwait(false);
+                await WaitAsync(45, token).ConfigureAwait(false);
+                if (!string.IsNullOrEmpty(timing.FoundText))
+                    _input.TypeCharacters(InterpolateActive(timing.FoundText));
+                break;
+            case FoundTextAction.ScrollUp:
+                _input.Scroll(Math.Max(1, timing.ScrollClicks) * 120, horizontal: false);
+                break;
+            case FoundTextAction.ScrollDown:
+                _input.Scroll(-Math.Max(1, timing.ScrollClicks) * 120, horizontal: false);
                 break;
         }
 

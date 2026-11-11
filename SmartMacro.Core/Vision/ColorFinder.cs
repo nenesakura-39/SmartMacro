@@ -1,3 +1,6 @@
+using System.Numerics;
+using System.Runtime.Intrinsics;
+using System.Runtime.Intrinsics.X86;
 using SmartMacro.Core.Models;
 using SmartMacro.Core.Ocr;
 
@@ -83,7 +86,72 @@ public static class ColorFinder
         // 0 = no match, 1 = match not visited yet, 2 = visited.
         var mask = new byte[width * height];
         var matching = 0;
-        for (int j = 0, i = 0; j < mask.Length; j++, i += 4)
+        int j = 0, i = 0;
+        if (Avx2.IsSupported && mask.Length >= 8)
+        {
+            var rgbMask = Vector256.Create(0x00FFFFFFu).AsByte();
+            var tolVec = Vector256.Create((byte)tolerance);
+            var target1 = Vector256.Create((uint)(color.B | (color.G << 8) | (color.R << 16))).AsByte();
+            var target2 = hasSecondary ? Vector256.Create((uint)(sb | (sg << 8) | (sr << 16))).AsByte() : default;
+
+            for (; j <= mask.Length - 8; j += 8, i += 32)
+            {
+                var vp = Vector256.Create<byte>(p.AsSpan(i, 32));
+                var diff1 = Avx2.And(Avx2.Max(Avx2.SubtractSaturate(vp, target1), Avx2.SubtractSaturate(target1, vp)), rgbMask);
+                var ex1 = Avx2.SubtractSaturate(diff1, tolVec);
+                var hitVec = Avx2.CompareEqual(ex1.AsUInt32(), Vector256<uint>.Zero);
+
+                if (hasSecondary)
+                {
+                    var diff2 = Avx2.And(Avx2.Max(Avx2.SubtractSaturate(vp, target2), Avx2.SubtractSaturate(target2, vp)), rgbMask);
+                    var ex2 = Avx2.SubtractSaturate(diff2, tolVec);
+                    hitVec = Avx2.Or(hitVec, Avx2.CompareEqual(ex2.AsUInt32(), Vector256<uint>.Zero));
+                }
+
+                uint hitMask = (uint)Avx2.MoveMask(hitVec.AsSingle());
+                while (hitMask != 0)
+                {
+                    int k = BitOperations.TrailingZeroCount(hitMask);
+                    mask[j + k] = 1;
+                    matching++;
+                    hitMask &= hitMask - 1;
+                }
+            }
+        }
+
+        if (Sse2.IsSupported && j <= mask.Length - 4)
+        {
+            var rgbMask128 = Vector128.Create(0x00FFFFFFu).AsByte();
+            var tolVec128 = Vector128.Create((byte)tolerance);
+            var target1_128 = Vector128.Create((uint)(color.B | (color.G << 8) | (color.R << 16))).AsByte();
+            var target2_128 = hasSecondary ? Vector128.Create((uint)(sb | (sg << 8) | (sr << 16))).AsByte() : default;
+
+            for (; j <= mask.Length - 4; j += 4, i += 16)
+            {
+                var vp = Vector128.Create<byte>(p.AsSpan(i, 16));
+                var diff1 = Sse2.And(Sse2.Max(Sse2.SubtractSaturate(vp, target1_128), Sse2.SubtractSaturate(target1_128, vp)), rgbMask128);
+                var ex1 = Sse2.SubtractSaturate(diff1, tolVec128);
+                var hitVec = Sse2.CompareEqual(ex1.AsUInt32(), Vector128<uint>.Zero);
+
+                if (hasSecondary)
+                {
+                    var diff2 = Sse2.And(Sse2.Max(Sse2.SubtractSaturate(vp, target2_128), Sse2.SubtractSaturate(target2_128, vp)), rgbMask128);
+                    var ex2 = Sse2.SubtractSaturate(diff2, tolVec128);
+                    hitVec = Sse2.Or(hitVec, Sse2.CompareEqual(ex2.AsUInt32(), Vector128<uint>.Zero));
+                }
+
+                uint hitMask = (uint)Sse2.MoveMask(hitVec.AsSingle());
+                while (hitMask != 0)
+                {
+                    int k = BitOperations.TrailingZeroCount(hitMask);
+                    mask[j + k] = 1;
+                    matching++;
+                    hitMask &= hitMask - 1;
+                }
+            }
+        }
+
+        for (; j < mask.Length; j++, i += 4)
         {
             if ((Math.Abs(p[i] - color.B) <= tolerance && Math.Abs(p[i + 1] - color.G) <= tolerance && Math.Abs(p[i + 2] - color.R) <= tolerance)
                 || (hasSecondary && Math.Abs(p[i] - sb) <= tolerance && Math.Abs(p[i + 1] - sg) <= tolerance && Math.Abs(p[i + 2] - sr) <= tolerance))
@@ -219,12 +287,64 @@ public static class ColorFinder
         var maxX = new int[cw * ch];
         var maxY = new int[cw * ch];
         var matching = 0;
+        bool useAvx2Rgb = Avx2.IsSupported && colorSpace == ColorSpaceKind.Rgb && !matchShades && width >= 8;
+        var rgbMaskObj = useAvx2Rgb ? Vector256.Create(0x00FFFFFFu).AsByte() : default;
+        var tolVecObj = useAvx2Rgb ? Vector256.Create((byte)tolerance) : default;
+        var target1Obj = useAvx2Rgb ? Vector256.Create((uint)(color.B | (color.G << 8) | (color.R << 16))).AsByte() : default;
+        var target2Obj = useAvx2Rgb && hasSecondary ? Vector256.Create((uint)(sb | (sg << 8) | (sr << 16))).AsByte() : default;
+
         for (var y = 0; y < height; y++)
         {
             if ((y & 63) == 0) cancellationToken.ThrowIfCancellationRequested();
             var row = y * width * 4;
             var cellRow = y / cell * cw;
-            for (var x = 0; x < width; x++)
+            var x = 0;
+
+            if (useAvx2Rgb)
+            {
+                for (; x <= width - 8; x += 8)
+                {
+                    var i = row + x * 4;
+                    var vp = Vector256.Create<byte>(p.AsSpan(i, 32));
+                    var diff1 = Avx2.And(Avx2.Max(Avx2.SubtractSaturate(vp, target1Obj), Avx2.SubtractSaturate(target1Obj, vp)), rgbMaskObj);
+                    var ex1 = Avx2.SubtractSaturate(diff1, tolVecObj);
+                    var hitVec = Avx2.CompareEqual(ex1.AsUInt32(), Vector256<uint>.Zero);
+
+                    if (hasSecondary)
+                    {
+                        var diff2 = Avx2.And(Avx2.Max(Avx2.SubtractSaturate(vp, target2Obj), Avx2.SubtractSaturate(target2Obj, vp)), rgbMaskObj);
+                        var ex2 = Avx2.SubtractSaturate(diff2, tolVecObj);
+                        hitVec = Avx2.Or(hitVec, Avx2.CompareEqual(ex2.AsUInt32(), Vector256<uint>.Zero));
+                    }
+
+                    uint hitMask = (uint)Avx2.MoveMask(hitVec.AsSingle());
+                    while (hitMask != 0)
+                    {
+                        int k = BitOperations.TrailingZeroCount(hitMask);
+                        int px = x + k;
+                        matching++;
+                        var c = cellRow + px / cell;
+                        if (count[c] == 0)
+                        {
+                            minX[c] = maxX[c] = px;
+                            minY[c] = maxY[c] = y;
+                        }
+                        else
+                        {
+                            if (px < minX[c]) minX[c] = px;
+                            if (px > maxX[c]) maxX[c] = px;
+                            if (y > maxY[c]) maxY[c] = y;
+                        }
+
+                        count[c]++;
+                        sumX[c] += px;
+                        sumY[c] += y;
+                        hitMask &= hitMask - 1;
+                    }
+                }
+            }
+
+            for (; x < width; x++)
             {
                 var i = row + x * 4;
                 byte pb = p[i], pg = p[i + 1], pr = p[i + 2];

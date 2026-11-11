@@ -35,6 +35,9 @@ public enum StepKind
     SetVariable,
     Checkpoint,
     CallMacro,
+
+    // Pro Flow Control (see WorkflowSteps.cs).
+    FlowControl,
 }
 
 public enum MacroMouseButton
@@ -179,6 +182,7 @@ public static class MouseMotionDefaults
 [JsonDerivedType(typeof(SetVariableStep), "setVariable")]
 [JsonDerivedType(typeof(CheckpointStep), "checkpoint")]
 [JsonDerivedType(typeof(CallMacroStep), "callMacro")]
+[JsonDerivedType(typeof(FlowControlStep), "flowControl")]
 public abstract class MacroStep
 {
     public Guid Id { get; set; } = Guid.NewGuid();
@@ -486,6 +490,17 @@ public sealed class MouseClickStep : MacroStep
     [JsonIgnore]
     public bool HasTargetIntent => Target is { HasAnySignal: true };
 
+    /// <summary>
+    /// Optional target window title or process name for background / inactive window clicks via <c>PostMessage</c>.
+    /// When set, the click is dispatched directly to the matching window without moving the physical cursor or stealing focus.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? BackgroundWindowTitle { get; set; }
+
+    /// <summary>True when this click should be sent directly to a background window without moving the physical cursor.</summary>
+    [JsonIgnore]
+    public bool SendInBackground => !string.IsNullOrWhiteSpace(BackgroundWindowTitle);
+
     [JsonIgnore]
     public override StepKind Kind => StepKind.MouseClick;
 }
@@ -538,6 +553,17 @@ public sealed class KeyPressStep : MacroStep
         set => HoldMs = value;
     }
 
+    /// <summary>
+    /// Optional target window title or process name for background / inactive window key presses via <c>PostMessage</c>.
+    /// When set, the key is posted directly to the matching window without stealing focus.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? BackgroundWindowTitle { get; set; }
+
+    /// <summary>True when this key press should be sent directly to a background window without stealing focus.</summary>
+    [JsonIgnore]
+    public bool SendInBackground => !string.IsNullOrWhiteSpace(BackgroundWindowTitle);
+
     [JsonIgnore]
     public override StepKind Kind => StepKind.KeyPress;
 }
@@ -555,6 +581,17 @@ public sealed class TypeTextStep : MacroStep
     /// simulator still keeps a few ms between key down / up and between characters so nothing gets dropped.
     /// </summary>
     public int CharacterDelayMs { get; set; } = DefaultCharacterDelayMs;
+
+    /// <summary>
+    /// Optional target window title or process name for background / inactive window text typing via <c>PostMessage(WM_CHAR)</c>.
+    /// When set, characters are posted directly to the matching window without stealing focus.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? BackgroundWindowTitle { get; set; }
+
+    /// <summary>True when this text should be typed directly into a background window without stealing focus.</summary>
+    [JsonIgnore]
+    public bool SendInBackground => !string.IsNullOrWhiteSpace(BackgroundWindowTitle);
 
     [JsonIgnore]
     public override StepKind Kind => StepKind.TypeText;
@@ -580,6 +617,27 @@ public enum FoundTextAction
 
     /// <summary>Hold the left button on it for <see cref="ScreenSearchStep.ActionHoldMs"/>, then release.</summary>
     Hold,
+
+    /// <summary>Middle-click its center.</summary>
+    MiddleClick,
+
+    /// <summary>Move to it, pause briefly so game/UI hover state registers, then left-click.</summary>
+    HoverThenClick,
+
+    /// <summary>Press a keyboard key (e.g. Space / E / Enter) without clicking.</summary>
+    PressKey,
+
+    /// <summary>Left-click its center, then press a keyboard key.</summary>
+    ClickAndPressKey,
+
+    /// <summary>Left-click its center, then type text.</summary>
+    ClickAndTypeText,
+
+    /// <summary>Scroll the mouse wheel up at its center.</summary>
+    ScrollUp,
+
+    /// <summary>Scroll the mouse wheel down at its center.</summary>
+    ScrollDown,
 }
 
 /// <summary>What happens when a Find text / image / color step times out.</summary>
@@ -707,6 +765,42 @@ public enum OcrPreprocessMode
     BinarizeOtsu = 3,
 }
 
+/// <summary>
+/// How a Find text / image / color step chooses among multiple matches on screen (e.g. finding "nice" on a 1,500-word screen).
+/// </summary>
+public enum SearchMatchMode
+{
+    /// <summary>Find One: pick the highest-confidence / first match (default).</summary>
+    FirstOrBest = 0,
+
+    /// <summary>Find All: detect and count every occurrence on screen, highlight all of them, and optionally act on all matches in sequence.</summary>
+    AllMatches = 1,
+
+    /// <summary>Find Specific #: pick the N-th match in reading order (top-to-bottom, left-to-right), set by <see cref="ScreenSearchStep.TargetMatchIndex"/>.</summary>
+    ReadingOrderNth = 2,
+
+    /// <summary>Find One (Random): pick a random match among all occurrences found on screen.</summary>
+    RandomMatch = 3,
+
+    /// <summary>Find One (Nearest to Mouse): pick the match closest to the current cursor position.</summary>
+    NearestToCursor = 4,
+}
+
+/// <summary>
+/// Order in which <see cref="SearchMatchMode.AllMatches"/> acts on multiple matches when an action (Click, Move, etc.) is enabled.
+/// </summary>
+public enum MultiMatchOrder
+{
+    /// <summary>Top-to-bottom, left-to-right reading order (default).</summary>
+    ReadingOrder = 0,
+
+    /// <summary>Bottom-to-top, right-to-left (ideal when clicking items removes or collapses rows in a list).</summary>
+    BottomToTop = 1,
+
+    /// <summary>Shortest path (nearest-neighbor chain starting from the first match or cursor).</summary>
+    NearestNeighbor = 2,
+}
+
 /// <summary>An additional stored template frame (e.g. animation frame or hover/glow variant) on a <see cref="FindImageStep"/>.</summary>
 public sealed class TemplateVariant
 {
@@ -812,6 +906,18 @@ public abstract class ScreenSearchStep : MacroStep
 
     public const int DefaultActionHoldMs = 500;
 
+    /// <summary>For PressKey / ClickAndPressKey actions: the Windows virtual-key code to press (default: Space 0x20).</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public int FoundVirtualKey { get; set; } = 0x20;
+
+    /// <summary>For ClickAndTypeText action: the text to type after clicking the found target.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? FoundTextToType { get; set; }
+
+    /// <summary>For ScrollUp / ScrollDown actions: how many wheel notches to scroll (default: 3).</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public int FoundScrollClicks { get; set; } = 3;
+
     /// <summary>
     /// After a click / hold on what was found: move the cursor out of the search area, so a hover effect or the cursor
     /// itself doesn't cover the next thing to find (a game button that re-appears in the same spot). Off by default.
@@ -876,6 +982,81 @@ public abstract class ScreenSearchStep : MacroStep
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public bool OnlyWhereMoved { get; set; }
 
+    // ---------------- Multi-Match Detection, Counting & Batch Actions ("Find One vs. Find All") ----------------
+
+    /// <summary>Default pause (ms) between acting on each match when <see cref="TargetSelection"/> is <see cref="SearchMatchMode.AllMatches"/>.</summary>
+    public const int DefaultBetweenMatchesDelayMs = 80;
+
+    private int? _betweenMatchesDelayMs;
+
+    /// <summary>
+    /// Which match(es) to select when multiple occurrences exist on screen: Find One (First/Best), Find All (count &amp; act on all),
+    /// Find N-th in reading order, Random match, or Nearest to cursor.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public SearchMatchMode TargetSelection { get; set; }
+
+    /// <summary>
+    /// Sweep order when <see cref="TargetSelection"/> is <see cref="SearchMatchMode.AllMatches"/> and an action is performed on each match.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public MultiMatchOrder MatchOrder { get; set; }
+
+    /// <summary>
+    /// 1-based match number to pick when <see cref="TargetSelection"/> is <see cref="SearchMatchMode.ReadingOrderNth"/>
+    /// (e.g. 2 = pick the 2nd "nice" on screen). 0 or 1 = 1st match.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public int TargetMatchIndex { get; set; }
+
+    /// <summary>Effective 1-based match index for <see cref="SearchMatchMode.ReadingOrderNth"/> (at least 1).</summary>
+    [JsonIgnore]
+    public int EffectiveTargetMatchIndex => Math.Max(1, TargetMatchIndex);
+
+    /// <summary>
+    /// Minimum number of occurrences that must be present on screen at the same time for the step to count as "Found"
+    /// (0 or 1 = at least 1 match; e.g. 5 = wait until at least 5 occurrences of "nice" are on screen).
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public int MinMatchCount { get; set; }
+
+    /// <summary>Effective minimum match count required for detection (at least 1).</summary>
+    [JsonIgnore]
+    public int EffectiveMinMatchCount => Math.Max(1, MinMatchCount);
+
+    /// <summary>
+    /// Optional cap on how many matches <see cref="SearchMatchMode.AllMatches"/> acts on in one step (0 = act on all found matches).
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public int MaxMatchesToActOn { get; set; }
+
+    /// <summary>
+    /// Delay (ms) between acting on each match when <see cref="TargetSelection"/> is <see cref="SearchMatchMode.AllMatches"/>.
+    /// Default is <see cref="DefaultBetweenMatchesDelayMs"/> (80 ms).
+    /// </summary>
+    [JsonIgnore]
+    public int BetweenMatchesDelayMs
+    {
+        get => _betweenMatchesDelayMs ?? DefaultBetweenMatchesDelayMs;
+        set => _betweenMatchesDelayMs = value == DefaultBetweenMatchesDelayMs ? null : Math.Max(0, value);
+    }
+
+    /// <summary>Serialized form of <see cref="BetweenMatchesDelayMs"/>; omitted when using the 80 ms default.</summary>
+    [JsonPropertyName("betweenMatchesDelayMs")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? BetweenMatchesDelayOverride
+    {
+        get => _betweenMatchesDelayMs;
+        set => _betweenMatchesDelayMs = value;
+    }
+
+    /// <summary>
+    /// Optional macro variable name (e.g. <c>nice_count</c>) that receives the exact number of matches found on screen
+    /// every time this step checks the screen.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? CountVariableName { get; set; }
+
     /// <summary>True when any Vision 2.0 property on this base search step is set to a non-default value (schema 18).</summary>
     [JsonIgnore]
     public bool UsesVision2BaseFeatures =>
@@ -886,7 +1067,14 @@ public abstract class ScreenSearchStep : MacroStep
         || PredictiveClick
         || PredictiveLeadMs > 0
         || ConfirmFrames > 1
-        || OnlyWhereMoved;
+        || OnlyWhereMoved
+        || TargetSelection != SearchMatchMode.FirstOrBest
+        || MatchOrder != MultiMatchOrder.ReadingOrder
+        || TargetMatchIndex > 1
+        || MinMatchCount > 1
+        || MaxMatchesToActOn > 0
+        || _betweenMatchesDelayMs is not null
+        || !string.IsNullOrWhiteSpace(CountVariableName);
 }
 
 /// <summary>
@@ -938,6 +1126,13 @@ public sealed class FindTextStep : ScreenSearchStep
     /// On by default; files made before this option load with it on too.
     /// </summary>
     public bool NormalizeLookAlikes { get; set; } = true;
+
+    /// <summary>
+    /// When true, rejects words that have punctuation attached (e.g. searching "nice" will reject "nice!" or "nice,")
+    /// and disables look-alike character substitution so only exact characters match.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public bool StrictPunctuation { get; set; }
 
     /// <summary>Vision 2.0: when true, interprets <see cref="Text"/> as a regular expression or pipe pattern (e.g. <c>nice|great</c>).</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]

@@ -96,6 +96,12 @@ public sealed class SmartRecordingOptions
     /// <see cref="DelayMode.UntilScreenSettles"/> steps.
     /// </summary>
     public bool SmartTiming { get; init; }
+
+    /// <summary>
+    /// Smart Typing Coalescer: merges consecutive printable <see cref="KeyPressStep"/> taps in editable cursor chunks
+    /// into a single <see cref="TypeTextStep"/>.
+    /// </summary>
+    public bool CoalesceTypedText { get; init; }
 }
 
 /// <summary>What a smart recording turned into, for the log and the status bar.</summary>
@@ -454,6 +460,7 @@ public static class SmartRecordingConverter
             Fidelity = options.Fidelity,
             RelativeMouse = options.RelativeMouse,
             SmartTiming = options.SmartTiming,
+            CoalesceTypedText = options.CoalesceTypedText,
             StartX = hasStart ? options.StartX : null,
             StartY = hasStart ? options.StartY : null,
         });
@@ -488,6 +495,7 @@ public static class SmartRecordingConverter
                 DelayStep d => d.DurationMs,
                 MouseClickStep { Action: MouseClickAction.Click } c => c.HoldMs,
                 KeyPressStep { Action: KeyAction.Press } k => k.HoldMs,
+                TypeTextStep t => Math.Max(0L, ((t.Text?.Length ?? 0) - 1L) * Math.Max(0, t.CharacterDelayMs)),
                 _ => 0,
             };
         }

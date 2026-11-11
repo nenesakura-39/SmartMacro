@@ -226,9 +226,32 @@ public sealed class ScreenInfoProvider : IScreenInfoProvider, IScreenLayout, IWi
         return WindowApi.SetWindowPos(hwnd, IntPtr.Zero, target.X, target.Y, target.Width, target.Height, WindowApi.SWP_NOZORDER | WindowApi.SWP_NOACTIVATE);
     }
 
-    private static bool FocusNow(WindowInfo window, bool restoreIfMinimized)
+    internal static bool FocusWindowHandle(IntPtr hwnd, bool restoreIfMinimized = false)
     {
-        var hwnd = new IntPtr(window.Handle);
+        if (hwnd == IntPtr.Zero || !WindowApi.IsWindow(hwnd)) return false;
+
+        var dispatcher = System.Windows.Application.Current?.Dispatcher;
+        if (dispatcher is not null && !dispatcher.CheckAccess() && !dispatcher.HasShutdownStarted)
+        {
+            try
+            {
+                return dispatcher.Invoke(() => FocusWindowHandleCore(hwnd, restoreIfMinimized),
+                    System.Windows.Threading.DispatcherPriority.Send, CancellationToken.None, TimeSpan.FromSeconds(1));
+            }
+            catch (Exception ex) when (ex is TaskCanceledException or InvalidOperationException)
+            {
+                return false;
+            }
+        }
+
+        return FocusWindowHandleCore(hwnd, restoreIfMinimized);
+    }
+
+    private static bool FocusNow(WindowInfo window, bool restoreIfMinimized) =>
+        FocusWindowHandleCore(new IntPtr(window.Handle), restoreIfMinimized);
+
+    private static bool FocusWindowHandleCore(IntPtr hwnd, bool restoreIfMinimized)
+    {
         if (!WindowApi.IsWindow(hwnd)) return false;
 
         if (restoreIfMinimized && WindowApi.IsIconic(hwnd))

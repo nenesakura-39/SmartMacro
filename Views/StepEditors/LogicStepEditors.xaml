@@ -3,139 +3,167 @@
                     xmlns:models="clr-namespace:SmartMacro.Core.Models;assembly=SmartMacro.Core"
                     xmlns:steps="clr-namespace:SmartMacro.ViewModels.Steps"
                     xmlns:vision="clr-namespace:SmartMacro.Services.Vision"
+                    xmlns:controls="clr-namespace:SmartMacro.Controls"
                     xmlns:conv="clr-namespace:SmartMacro.Converters">
 
     <ResourceDictionary.MergedDictionaries>
         <ResourceDictionary Source="/SmartMacro;component/Views/StepEditors/StepEditorsShared.xaml" />
     </ResourceDictionary.MergedDictionaries>
 
+    <!-- ===================================== 1. IF CONDITION BLOCK ===================================== -->
     <DataTemplate DataType="{x:Type steps:IfStepViewModel}">
         <StackPanel>
             <ContentControl Content="{Binding}" ContentTemplate="{StaticResource StepHeaderTemplate}" Focusable="False" />
 
-            <Border Style="{StaticResource SetupCard}">
-                <StackPanel>
-                    <TextBlock Text="1 · BRANCH CONDITION" Style="{StaticResource SetupCardTitle}" />
-                    <ContentControl Content="{Binding Condition}" ContentTemplate="{StaticResource ConditionEditorTemplate}" Focusable="False" Margin="0,8,0,0" />
-                </StackPanel>
-            </Border>
+            <StackPanel Visibility="{Binding ShowSetupSection, Converter={StaticResource BoolToVisibility}}">
+                <Border Style="{StaticResource SetupCard}">
+                    <StackPanel>
+                        <DockPanel>
+                            <TextBlock Text="🔀 CONDITION TO CHECK" Style="{StaticResource SetupCardTitle}" VerticalAlignment="Center" />
+                            <Border Style="{StaticResource InfoHintBadgeStyle}" DockPanel.Dock="Right" HorizontalAlignment="Right"
+                                    ToolTip="When this condition is true, the steps between If and Else (or End If) run. Otherwise, the steps after Else run.">
+                                <TextBlock Text="?" FontSize="10" FontWeight="Bold" Foreground="{DynamicResource BrandPrimaryBrush}"
+                                           HorizontalAlignment="Center" VerticalAlignment="Center" />
+                            </Border>
+                        </DockPanel>
+                        <ContentControl Content="{Binding Condition}" ContentTemplate="{StaticResource ConditionEditorTemplate}"
+                                        Focusable="False" Margin="0,8,0,0" />
 
-            <Border Style="{StaticResource SetupCard}" Visibility="{Binding ShowsWhenFound, Converter={StaticResource BoolToVisibility}}">
-                <StackPanel>
-                    <TextBlock Text="2 · WHEN FOUND ACTION (OPTIONAL)" Style="{StaticResource SetupCardTitle}"
-                               ToolTip="When the image / color / text is on screen, act on the spot where it was found before the steps inside the If run." />
-                    <TextBlock Text="When found, also:" Style="{StaticResource FieldLabel}" Margin="0,8,0,4" />
-                    <ComboBox ItemsSource="{x:Static steps:IfStepViewModel.WhenFoundActions}" DisplayMemberPath="Label" SelectedValuePath="Value"
-                              SelectedValue="{Binding WhenFoundAction}" AutomationProperties.Name="When found, also" />
-                    <StackPanel Visibility="{Binding HasThenAction, Converter={StaticResource BoolToVisibility}}">
-                        <Grid Margin="0,6,0,0">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="10" />
-                                <ColumnDefinition Width="*" />
-                            </Grid.ColumnDefinitions>
-                            <StackPanel Grid.Column="0">
-                                <TextBlock Text="Offset X (+ = right)" Style="{StaticResource FieldLabel}" />
-                                <TextBox Text="{Binding ThenOffsetX, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}" AutomationProperties.Name="Offset X" />
+                        <!-- Optional "When found, also:" action right on the matched spot -->
+                        <StackPanel Visibility="{Binding ShowsWhenFound, Converter={StaticResource BoolToVisibility}}" Margin="0,12,0,0">
+                            <TextBlock Text="When found, also:" Style="{StaticResource FieldLabel}" />
+                            <ComboBox ItemsSource="{x:Static steps:IfStepViewModel.WhenFoundActions}" DisplayMemberPath="Label" SelectedValuePath="Value"
+                                      SelectedValue="{Binding WhenFoundAction}" AutomationProperties.Name="Action when condition is found" />
+
+                            <StackPanel Visibility="{Binding IsThenHold, Converter={StaticResource BoolToVisibility}}" Margin="0,6,0,0">
+                                <TextBlock Text="Hold duration" Style="{StaticResource FieldLabel}" />
+                                <controls:StudioNumberBox Value="{Binding ThenHoldMs}" Unit="ms" Step="50" Minimum="0" Maximum="60000"
+                                                          Presets="50,100,250,500,1000"
+                                                          AutomationProperties.Name="Hold time in milliseconds" />
                             </StackPanel>
-                            <StackPanel Grid.Column="2">
-                                <TextBlock Text="Offset Y (+ = down)" Style="{StaticResource FieldLabel}" />
-                                <TextBox Text="{Binding ThenOffsetY, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}" AutomationProperties.Name="Offset Y" />
+
+                            <StackPanel Visibility="{Binding HasThenAction, Converter={StaticResource BoolToVisibility}}" Margin="0,6,0,0">
+                                <ContentControl Content="{Binding}" ContentTemplate="{StaticResource OffsetFieldsTemplate}" Focusable="False" />
+                                <ContentControl Content="{Binding}" ContentTemplate="{StaticResource OffsetPickerTemplate}" Focusable="False" />
+                                <TextBlock Text="{Binding ThenActionHint}" Style="{StaticResource MutedText}" FontSize="11" Margin="0,4,0,0" TextWrapping="Wrap" />
                             </StackPanel>
-                        </Grid>
-                        <StackPanel Visibility="{Binding IsThenHold, Converter={StaticResource BoolToVisibility}}">
-                            <TextBlock Text="Hold the left button for (ms)" Style="{StaticResource FieldLabel}" />
-                            <TextBox Text="{Binding ThenHoldMs, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}" Width="100" HorizontalAlignment="Left"
-                                     AutomationProperties.Name="Hold time in milliseconds" />
                         </StackPanel>
-                        <ContentControl Content="{Binding}" ContentTemplate="{StaticResource OffsetPickerTemplate}" Focusable="False" />
                     </StackPanel>
-                    <TextBlock Text="{Binding ThenActionHint}" Style="{StaticResource MutedText}" FontSize="11" Margin="0,6,0,0" TextWrapping="Wrap" />
-                </StackPanel>
-            </Border>
-
-            <TextBlock Style="{StaticResource MutedText}" FontSize="11" Margin="0,8,0,0" TextWrapping="Wrap"
-                       Text="True: the steps up to Else (or End If) run. False: the steps after Else run, or nothing if there's no Else. When the condition sees the text / image / color, a later Mouse click can use &quot;the last found spot&quot;. Turning this If off skips its whole block." />
+                </Border>
+            </StackPanel>
 
             <ContentControl Content="{Binding}" ContentTemplate="{StaticResource StepFooterTemplate}" Focusable="False" />
         </StackPanel>
     </DataTemplate>
 
+    <!-- ===================================== 2. REPEAT LOOP BLOCK ===================================== -->
     <DataTemplate DataType="{x:Type steps:RepeatStepViewModel}">
         <StackPanel>
             <ContentControl Content="{Binding}" ContentTemplate="{StaticResource StepHeaderTemplate}" Focusable="False" />
 
-            <Border Style="{StaticResource SetupCard}">
-                <StackPanel>
-                    <TextBlock Text="1 · LOOP MODE &amp; CONDITION" Style="{StaticResource SetupCardTitle}" />
-                    <TextBlock Text="Repeat mode" Style="{StaticResource FieldLabel}" Margin="0,8,0,4" />
-                    <ComboBox ItemsSource="{x:Static steps:RepeatStepViewModel.Modes}" DisplayMemberPath="Label" SelectedValuePath="Value"
-                              SelectedValue="{Binding Mode}" AutomationProperties.Name="Repeat mode" />
+            <StackPanel Visibility="{Binding ShowSetupSection, Converter={StaticResource BoolToVisibility}}">
+                <Border Style="{StaticResource SetupCard}">
+                    <StackPanel>
+                        <TextBlock Text="🔁 LOOP MODE &amp; ITERATIONS" Style="{StaticResource SetupCardTitle}" />
+                        <TextBlock Text="How to repeat" Style="{StaticResource FieldLabel}" Margin="0,8,0,4" />
+                        <ListBox ItemsSource="{x:Static steps:RepeatStepViewModel.Modes}" DisplayMemberPath="Label" SelectedValuePath="Value"
+                                 SelectedValue="{Binding Mode}" Style="{StaticResource ChoiceChipListBoxStyle}"
+                                 AutomationProperties.Name="How to repeat" />
 
-                    <StackPanel Visibility="{Binding IsTimes, Converter={StaticResource BoolToVisibility}}">
-                        <TextBlock Text="Number of times" Style="{StaticResource FieldLabel}" />
-                        <TextBox Text="{Binding Count, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}" Width="120" HorizontalAlignment="Left"
-                                 AutomationProperties.Name="Number of times" />
-                    </StackPanel>
-
-                    <StackPanel Visibility="{Binding UsesCondition, Converter={StaticResource BoolToVisibility}}">
-                        <TextBlock Text="{Binding ConditionLabel}" Style="{StaticResource FieldLabel}" />
-                        <ContentControl Content="{Binding Condition}" ContentTemplate="{StaticResource ConditionEditorTemplate}" Focusable="False"
-                                        Visibility="{Binding Condition, Converter={StaticResource NullToVisibility}}" />
-                        <TextBlock Text="Keep checking before leaving (ms)" Style="{StaticResource FieldLabel}" TextWrapping="Wrap" />
-                        <TextBox Text="{Binding KeepCheckingForMs, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}" Width="120" HorizontalAlignment="Left"
-                                 AutomationProperties.Name="Keep checking before leaving, in milliseconds" />
-                        <TextBlock Text="{Binding KeepCheckingHint}" Style="{StaticResource MutedText}" FontSize="11" Margin="0,4,0,0" TextWrapping="Wrap" />
-                    </StackPanel>
-                </StackPanel>
-            </Border>
-
-            <Border Style="{StaticResource SetupCard}">
-                <StackPanel>
-                    <TextBlock Text="2 · SAFETY LIMITS &amp; TIMEOUT POLICY" Style="{StaticResource SetupCardTitle}" />
-                    <TextBlock Text="{Binding LimitHint}" Style="{StaticResource MutedText}" FontSize="11" TextWrapping="Wrap" Margin="0,6,0,4" />
-                    <Grid>
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="*" />
-                            <ColumnDefinition Width="10" />
-                            <ColumnDefinition Width="*" />
-                        </Grid.ColumnDefinitions>
-                        <StackPanel Grid.Column="0" Visibility="{Binding UsesCondition, Converter={StaticResource BoolToVisibility}}">
-                            <TextBlock Text="Max turns" Style="{StaticResource FieldLabel}" />
-                            <TextBox Text="{Binding MaxIterations, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}"
-                                     ToolTip="The loop stops after this many turns. 0 = no turn limit (then set Max time)." AutomationProperties.Name="Max turns" />
+                        <StackPanel Visibility="{Binding IsTimes, Converter={StaticResource BoolToVisibility}}" Margin="0,6,0,0">
+                            <TextBlock Text="Number of times to run" Style="{StaticResource FieldLabel}" />
+                            <controls:StudioNumberBox Value="{Binding Count}" Unit="×" Step="1" Minimum="1" Maximum="100000"
+                                                      Presets="2,3,5,10,25,50,100"
+                                                      AutomationProperties.Name="Repeat count" />
                         </StackPanel>
-                        <StackPanel Grid.Column="2">
-                            <TextBlock Text="Max time (ms)" Style="{StaticResource FieldLabel}" />
-                            <TextBox Text="{Binding MaxDurationMs, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}"
-                                     ToolTip="The loop stops after running this long. 0 = no time limit." AutomationProperties.Name="Max time in milliseconds" />
+
+                        <StackPanel Visibility="{Binding UsesCondition, Converter={StaticResource BoolToVisibility}}" Margin="0,8,0,0">
+                            <TextBlock Text="{Binding ConditionLabel}" Style="{StaticResource FieldLabel}" />
+                            <ContentControl Content="{Binding Condition}" ContentTemplate="{StaticResource ConditionEditorTemplate}"
+                                            Focusable="False" Margin="0,6,0,0" />
+
+                            <TextBlock Text="Keep checking condition for (before each pass)" Style="{StaticResource FieldLabel}" Margin="0,10,0,4" />
+                            <controls:StudioNumberBox Value="{Binding KeepCheckingForMs}" Unit="ms" Step="100" Minimum="0" Maximum="600000"
+                                                      Presets="0,250,1000,3000"
+                                                      AutomationProperties.Name="Keep checking condition in milliseconds" />
+                            <TextBlock Text="{Binding KeepCheckingHint}" Style="{StaticResource MutedText}" FontSize="11" Margin="0,4,0,0" TextWrapping="Wrap" />
+
+                            <Grid Margin="0,10,0,0">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="10" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Grid.Column="0" VerticalAlignment="Bottom">
+                                    <TextBlock Text="Max passes (cap)" Style="{StaticResource FieldLabel}" />
+                                    <controls:StudioNumberBox Value="{Binding MaxIterations}" Unit="×" Step="10" Minimum="1" Maximum="100000"
+                                                              Presets="10,50,100,500,1000"
+                                                              AutomationProperties.Name="Maximum passes" />
+                                </StackPanel>
+                                <StackPanel Grid.Column="2" VerticalAlignment="Bottom">
+                                    <TextBlock Text="Max runtime (0 = none)" Style="{StaticResource FieldLabel}" />
+                                    <controls:StudioNumberBox Value="{Binding MaxDurationMs}" Unit="ms" Step="1000" Minimum="0" Maximum="86400000"
+                                                              Presets="0,10000,30000,60000"
+                                                              AutomationProperties.Name="Maximum loop duration in milliseconds" />
+                                </StackPanel>
+                            </Grid>
+                            <TextBlock Text="{Binding MaxDurationText}" Style="{StaticResource MutedText}" FontSize="11" Margin="0,4,0,0" />
+
+                            <TextBlock Text="When a safety limit is reached" Style="{StaticResource FieldLabel}" Margin="0,8,0,4" />
+                            <ComboBox ItemsSource="{x:Static steps:RepeatStepViewModel.LimitOptions}" DisplayMemberPath="Label" SelectedValuePath="Value"
+                                      SelectedValue="{Binding WhenLimitReached}" AutomationProperties.Name="When safety limit is reached" />
+                            <TextBlock Text="{Binding LimitHint}" Style="{StaticResource MutedText}" FontSize="11" Margin="0,4,0,0" TextWrapping="Wrap" />
                         </StackPanel>
-                    </Grid>
-                    <TextBlock Text="{Binding MaxDurationText}" Style="{StaticResource MutedText}" FontSize="11" Margin="0,4,0,0" />
-
-                    <TextBlock Text="When a limit is reached" Style="{StaticResource FieldLabel}" />
-                    <ComboBox ItemsSource="{x:Static steps:RepeatStepViewModel.LimitOptions}" DisplayMemberPath="Label" SelectedValuePath="Value"
-                              SelectedValue="{Binding WhenLimitReached}" AutomationProperties.Name="When a limit is reached" />
-                </StackPanel>
-            </Border>
-
-            <TextBlock Style="{StaticResource MutedText}" FontSize="11" Margin="0,8,0,0" TextWrapping="Wrap"
-                       Text="The condition is checked before every turn (so a While loop may run 0 times), and checks are at least &quot;Check every&quot; apart. Example: Repeat UNTIL the reeling bar image is on screen, with a Find image &quot;Shake&quot; step set to &quot;Click its center&quot; inside. Stop, Esc and Pause work at any time inside the loop. Turning this Repeat off skips its whole block." />
+                    </StackPanel>
+                </Border>
+            </StackPanel>
 
             <ContentControl Content="{Binding}" ContentTemplate="{StaticResource StepFooterTemplate}" Focusable="False" />
         </StackPanel>
     </DataTemplate>
 
+    <!-- ===================================== 3. BLOCK MARKERS (ELSE / END IF / END REPEAT) ===================================== -->
     <DataTemplate DataType="{x:Type steps:BlockMarkerStepViewModel}">
         <StackPanel>
             <ContentControl Content="{Binding}" ContentTemplate="{StaticResource StepHeaderTemplate}" Focusable="False" />
             <Border Style="{StaticResource SetupCard}">
                 <StackPanel>
-                    <TextBlock Text="BLOCK BOUNDARY MARKER" Style="{StaticResource SetupCardTitle}" />
-                    <TextBlock Text="{Binding Explanation}" TextWrapping="Wrap" FontSize="12" Margin="0,8,0,0" />
-                    <TextBlock Text="{Binding DisableHint}" Style="{StaticResource MutedText}" FontSize="11" TextWrapping="Wrap" Margin="0,8,0,0" />
+                    <TextBlock Text="🔗 CONNECTED BLOCK BOUNDARY" Style="{StaticResource SetupCardTitle}" />
+                    <TextBlock Text="{Binding Explanation}" Style="{StaticResource MutedText}" FontSize="12" TextWrapping="Wrap" Margin="0,8,0,0" />
                 </StackPanel>
             </Border>
+            <Border Style="{StaticResource SetupCard}">
+                <StackPanel>
+                    <TextBlock Text="📝 STEP NOTE" Style="{StaticResource SetupCardTitle}" />
+                    <TextBox Text="{Binding Comment, UpdateSourceTrigger=PropertyChanged}" Tag="Optional note on this block marker…"
+                             MaxLength="500" Margin="0,8,0,0" AutomationProperties.Name="Step comment" />
+                </StackPanel>
+            </Border>
+        </StackPanel>
+    </DataTemplate>
+
+    <!-- ===================================== 4. FLOW CONTROL (BREAK / CONTINUE / STOP) ===================================== -->
+    <DataTemplate DataType="{x:Type steps:FlowControlStepViewModel}">
+        <StackPanel>
+            <ContentControl Content="{Binding}" ContentTemplate="{StaticResource StepHeaderTemplate}" Focusable="False" />
+
+            <StackPanel Visibility="{Binding ShowSetupSection, Converter={StaticResource BoolToVisibility}}">
+                <Border Style="{StaticResource SetupCard}">
+                    <StackPanel>
+                        <TextBlock Text="🔀 LOOP &amp; MACRO FLOW CONTROL" Style="{StaticResource SetupCardTitle}" />
+                        <TextBlock Text="Action when reached" Style="{StaticResource FieldLabel}" Margin="0,8,0,4" />
+                        <ComboBox ItemsSource="{x:Static steps:FlowControlStepViewModel.Actions}" DisplayMemberPath="Label" SelectedValuePath="Value"
+                                  SelectedValue="{Binding Action}" AutomationProperties.Name="Flow control action" />
+                        <TextBlock Text="{Binding ActionHelp}" Style="{StaticResource MutedText}" FontSize="11.5" TextWrapping="Wrap" Margin="0,6,0,0" />
+
+                        <TextBlock Text="Status message (optional — supports {variables})" Style="{StaticResource FieldLabel}" Margin="0,10,0,4" />
+                        <TextBox Text="{Binding Message, UpdateSourceTrigger=PropertyChanged}"
+                                 Tag="e.g. Target reached ({gold} gold), exiting loop…" MaxLength="500"
+                                 AutomationProperties.Name="Flow control status message" />
+                    </StackPanel>
+                </Border>
+            </StackPanel>
+
             <ContentControl Content="{Binding}" ContentTemplate="{StaticResource StepFooterTemplate}" Focusable="False" />
         </StackPanel>
     </DataTemplate>

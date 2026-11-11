@@ -150,7 +150,7 @@ public static class StepListView
         {
             StepFilter.VisionAndLogic => step.Kind is StepKind.FindText or StepKind.FindImage or StepKind.FindColor or StepKind.FeedbackLoop
                 or StepKind.WaitForChange or StepKind.If or StepKind.Else or StepKind.EndIf or StepKind.Repeat or StepKind.EndRepeat
-                or StepKind.SetVariable or StepKind.Checkpoint or StepKind.CallMacro,
+                or StepKind.SetVariable or StepKind.Checkpoint or StepKind.CallMacro or StepKind.FlowControl,
             StepFilter.Mouse => step.Kind is StepKind.MouseMove or StepKind.MouseClick or StepKind.MouseScroll or StepKind.InputSequence,
             StepFilter.Keyboard => step.Kind is StepKind.KeyPress or StepKind.TypeText or StepKind.InputSequence,
             StepFilter.Disabled => !step.Enabled,

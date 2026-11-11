@@ -131,6 +131,13 @@ public sealed class Macro
     public string? ProfileName { get; set; }
 
     /// <summary>
+    /// Evergreen Upgrade: when true, pins this macro to the top of the Library for instant access.
+    /// Omitted from JSON when false so older files stay byte-for-byte unchanged.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public bool IsPinned { get; set; }
+
+    /// <summary>
     /// Per-macro triggers (Hotkey with PressOnce / Toggle / HoldToRun / RepeatWhileHeld, Schedule, WindowEvent).
     /// Null or omitted when unused so older macros stay byte-for-byte unchanged.
     /// </summary>
@@ -206,6 +213,11 @@ public sealed class MacroDocument
     public const int CurrentSchemaVersion = 17;
 
     public int SchemaVersion { get; set; }
+
+    /// <summary>Optional SmartMacro Studio version that exported this file (e.g. "1.5.0").</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? AppVersion { get; set; }
+
     public Macro? Macro { get; set; }
 
     /// <summary>
@@ -225,17 +237,21 @@ public sealed class MacroDocument
     {
         ArgumentNullException.ThrowIfNull(macro);
         if (UsesVersion17MacroFeatures(macro)) return 17;
-        if (UsesVersion16MacroFeatures(macro)) return 16;
-        if (macro.Steps is null) return UsesVersion11Features(macro) ? 11 : 1;
-
-        var required = UsesVersion11Features(macro) ? 11 : 1;
+        var required = UsesVersion16MacroFeatures(macro) ? 16 : UsesVersion11Features(macro) ? 11 : 1;
+        if (macro.Steps is null) return required;
         foreach (var step in macro.Steps)
         {
             var needed = step switch
             {
-                SetVariableStep { Source: VariableSourceKind.ScreenGaugePercent or VariableSourceKind.LineAtLoopIndex } => 17,
-                SetVariableStep { Operation: VariableOperation.TrimText or VariableOperation.ExtractDigits or VariableOperation.ToUpper or VariableOperation.ToLower } => 17,
+                SetVariableStep { Source: VariableSourceKind.ScreenGaugePercent or VariableSourceKind.LineAtLoopIndex or VariableSourceKind.RandomNumber or VariableSourceKind.ActiveWindowTitle or VariableSourceKind.CurrentTimeText or VariableSourceKind.SystemAudioPeakPercent } => 17,
+                SetVariableStep { Operation: VariableOperation.TrimText or VariableOperation.ExtractDigits or VariableOperation.ToUpper or VariableOperation.ToLower or VariableOperation.Multiply or VariableOperation.Divide or VariableOperation.Modulo or VariableOperation.Round } => 17,
+                SetVariableStep { CopyResultToClipboard: true } => 17,
+                SetVariableStep { Source: VariableSourceKind.Formula } => 17,
+                FlowControlStep => 17,
+                MouseClickStep { SendInBackground: true } or KeyPressStep { SendInBackground: true } or TypeTextStep { SendInBackground: true } => 17,
                 FocusWindowStep { SnapLayout: not WindowSnapLayout.KeepCurrent } => 17,
+                ScreenshotStep s when s.SoundCue != SoundCueKind.None || !string.IsNullOrWhiteSpace(s.NotificationMessage) || !string.IsNullOrWhiteSpace(s.WebhookUrl) => 17,
+                _ when WorkflowSteps.ConditionOf(step) is { HasSecondCondition: true } => 17,
                 _ when UsesVersion16StepFeatures(step) => 16,
                 _ when UsesVersion15Features(step) => 15,
                 MouseMoveStep { UseRelativeDelta: true } => 14,

@@ -43,14 +43,56 @@ public static class LogServiceExtensions
 public sealed class LogService : ILogService
 {
     public const int MaxInMemoryEntries = 2_000;
+    public const int DefaultMaxRetainedLogDays = 30;
 
     private readonly object _gate = new();
     private readonly LinkedList<LogEntry> _recent = new();
     private bool _fileWriteFailed;
 
-    public LogService(string? logDirectory)
+    public LogService(string? logDirectory, bool pruneOldLogsOnStartup = true)
     {
         LogDirectory = logDirectory;
+        if (pruneOldLogsOnStartup && !string.IsNullOrWhiteSpace(logDirectory))
+        {
+            PruneOldLogs(logDirectory, DefaultMaxRetainedLogDays);
+        }
+    }
+
+    /// <summary>
+    /// Deletes daily <c>smartmacro-*.log</c> files older than <paramref name="maxDays"/> days so the Logs folder never
+    /// grows unbounded over months of daily use. Returns the number of deleted log files.
+    /// </summary>
+    public static int PruneOldLogs(string? logDirectory, int maxDays = DefaultMaxRetainedLogDays, DateTimeOffset? referenceUtcNow = null)
+    {
+        if (string.IsNullOrWhiteSpace(logDirectory) || maxDays < 1 || !Directory.Exists(logDirectory))
+            return 0;
+
+        var deleted = 0;
+        var cutoffUtc = (referenceUtcNow ?? DateTimeOffset.UtcNow).UtcDateTime.AddDays(-maxDays);
+        try
+        {
+            foreach (var file in new DirectoryInfo(logDirectory).GetFiles("smartmacro-*.log"))
+            {
+                if (file.LastWriteTimeUtc < cutoffUtc)
+                {
+                    try
+                    {
+                        file.Delete();
+                        deleted++;
+                    }
+                    catch
+                    {
+                        // Ignore files locked by another reader.
+                    }
+                }
+            }
+        }
+        catch
+        {
+            // Pruning must never throw during startup.
+        }
+
+        return deleted;
     }
 
     public event EventHandler<LogEntry>? EntryAdded;

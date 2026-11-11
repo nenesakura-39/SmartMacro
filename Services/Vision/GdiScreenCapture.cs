@@ -33,6 +33,13 @@ public sealed class GdiScreenCapture : IScreenCapture, IDisposable
         return Task.FromResult(Capture(region));
     }
 
+    public Task<ScreenFrame> CaptureWindowAsync(long windowHandle, ScreenRect region, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (windowHandle == 0) return Task.FromResult(Capture(region));
+        return Task.FromResult(ScreenCapture.CaptureWindowOrScreen(new IntPtr(windowHandle), region));
+    }
+
     /// <summary>
     /// Captures the on-screen part of the area right away (on the calling thread). Only these pixels are copied
     /// (BitBlt of exactly this rectangle into one of the two process-wide, lock-protected GDI buffers, which are only

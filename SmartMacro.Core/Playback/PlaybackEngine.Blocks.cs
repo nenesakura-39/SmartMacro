@@ -56,6 +56,17 @@ public sealed partial class PlaybackEngine
 
         public int Iteration { get; set; }
         public int StepsExecuted { get; set; }
+        public Dictionary<Guid, StepExecutionStat> StepStats { get; } = new();
+
+        public void RecordStepStat(Guid stepId, double elapsedMs)
+        {
+            if (stepId == Guid.Empty) return;
+            var ms = double.IsFinite(elapsedMs) && elapsedMs > 0 ? elapsedMs : 0.0;
+            if (StepStats.TryGetValue(stepId, out var prev))
+                StepStats[stepId] = new StepExecutionStat(prev.ExecutionCount + 1, prev.TotalElapsedMs + ms);
+            else
+                StepStats[stepId] = new StepExecutionStat(1, ms);
+        }
 
         /// <summary>Last answer of each If (by step index), so a loop doesn't log the same answer every turn.</summary>
         public Dictionary<int, bool> LastIfAnswer { get; } = new();
@@ -143,7 +154,12 @@ public sealed partial class PlaybackEngine
 
                 var stepOverThisStep = _stepOverRequested;
                 _stepOverRequested = false;
+                var stepStartedAt = ActiveTime;
+                var prevExecuted = run.StepsExecuted;
+                var attemptedStep = step.Enabled && step is not (ElseStep or EndIfStep or EndRepeatStep);
 
+                try
+                {
                 switch (step)
                 {
                     case IfStep ifStep:
@@ -277,6 +293,59 @@ public sealed partial class PlaybackEngine
                         pc++;
                         break;
 
+                    case FlowControlStep fc:
+                    {
+                        if (!fc.Enabled)
+                        {
+                            pc++;
+                            break;
+                        }
+
+                        Report(run, pc, loops);
+                        run.StepsExecuted++;
+                        var note = string.IsNullOrWhiteSpace(fc.Message) ? "" : $" ({InterpolateActive(fc.Message)})";
+                        switch (fc.Action)
+                        {
+                            case FlowControlAction.ExitLoop:
+                            {
+                                if (loops.Count == 0)
+                                {
+                                    Message?.Invoke(this, $"⏹ Break loop{note}: not inside a Repeat loop; continuing.");
+                                    pc++;
+                                    break;
+                                }
+                                var inner = loops[^1];
+                                loops.RemoveAt(loops.Count - 1);
+                                var endRepeatIdx = blocks.EndOf(inner.Start);
+                                Message?.Invoke(this, $"⏹ Break loop{note}: exited Repeat at step {run.StepNumberOf(inner.Start)}.");
+                                pc = endRepeatIdx >= 0 ? endRepeatIdx + 1 : pc + 1;
+                                break;
+                            }
+
+                            case FlowControlAction.ContinueLoop:
+                            {
+                                if (loops.Count == 0)
+                                {
+                                    Message?.Invoke(this, $"⏭ Continue loop{note}: not inside a Repeat loop; continuing.");
+                                    pc++;
+                                    break;
+                                }
+                                var inner = loops[^1];
+                                var endRepeatIdx = blocks.EndOf(inner.Start);
+                                Message?.Invoke(this, $"⏭ Continue loop{note}: jumping to next turn of Repeat at step {run.StepNumberOf(inner.Start)}.");
+                                pc = endRepeatIdx >= 0 ? endRepeatIdx : pc + 1;
+                                break;
+                            }
+
+                            default: // StopMacro
+                                Message?.Invoke(this, $"🛑 Stop macro triggered at step {run.StepNumberOf(pc)}{note}.");
+                                throw new MacroStopRequestedSignal();
+                        }
+
+                        SyncTimelineToNow();
+                        break;
+                    }
+
                     default:
                         _skipNextStep = false;
                         if (step.Enabled)
@@ -300,6 +369,14 @@ public sealed partial class PlaybackEngine
                         }
 
                         break;
+                }
+                }
+                finally
+                {
+                    if (run.StepsExecuted > prevExecuted || attemptedStep)
+                    {
+                        run.RecordStepStat(step.Id, (ActiveTime - stepStartedAt).TotalMilliseconds);
+                    }
                 }
 
                 _lastBreakpointPausedStepId = null;
@@ -393,9 +470,10 @@ public sealed partial class PlaybackEngine
         if (repeat.Mode != RepeatMode.Times)
         {
             condition = repeat.Condition ?? throw new InvalidOperationException($"The Repeat at step {number} has no condition.");
-            if (condition.Kind != ConditionKind.VariableCompare)
+            var primaryOrSecondarySearch = condition.Search ?? (condition.HasSecondCondition ? condition.SecondCondition?.Search : null);
+            if (condition.Kind != ConditionKind.VariableCompare || primaryOrSecondarySearch is not null)
             {
-                var search = condition.Search ?? throw new InvalidOperationException($"The condition of the Repeat at step {number} is damaged.");
+                var search = primaryOrSecondarySearch ?? throw new InvalidOperationException($"The condition of the Repeat at step {number} is damaged.");
 
                 // Keep condition checks at least "check every" apart, so a short (or empty) loop can't hammer the CPU.
                 if (frame.LastCheckAt is { } lastCheck)
@@ -458,7 +536,9 @@ public sealed partial class PlaybackEngine
         Func<ConditionCheck, bool>? stopWhen = null, TimeSpan? window = null, string label = "Condition")
     {
         var conditions = run.Conditions;
-        if (condition.Kind == ConditionKind.VariableCompare)
+        var isPureVariable = condition.Kind == ConditionKind.VariableCompare
+            && (!condition.HasSecondCondition || condition.SecondCondition?.Kind == ConditionKind.VariableCompare);
+        if (isPureVariable)
         {
             await WaitIfPausedAsync(token).ConfigureAwait(false);
             token.ThrowIfCancellationRequested();
@@ -466,7 +546,9 @@ public sealed partial class PlaybackEngine
             return new ConditionAnswer(vCheck.IsTrue, $"({conditions.Describe(condition)}: {(vCheck.IsTrue ? "true" : "false")}) {vCheck.Details}");
         }
 
-        var search = condition.Search ?? throw new InvalidOperationException("This condition has no valid search settings. The macro may be damaged.");
+        var search = condition.Search
+            ?? (condition.HasSecondCondition ? condition.SecondCondition?.Search : null)
+            ?? throw new InvalidOperationException("This condition has no valid search settings. The macro may be damaged.");
         var timeout = window ?? TimeSpan.FromMilliseconds(search.TimeoutMs);
         stopWhen ??= c => c.IsTrue;
         var timer = conditions.NewTimer(condition);

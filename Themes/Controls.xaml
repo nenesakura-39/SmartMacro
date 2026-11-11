@@ -274,8 +274,9 @@
                             <TextBlock x:Name="Placeholder" Text="{Binding Tag, RelativeSource={RelativeSource TemplatedParent}}"
                                        Foreground="{DynamicResource MutedTextBrush}" Margin="{TemplateBinding Padding}"
                                        Padding="2,0,0,0" VerticalAlignment="{TemplateBinding VerticalContentAlignment}"
+                                       TextTrimming="CharacterEllipsis"
                                        IsHitTestVisible="False" Visibility="Collapsed" />
-                            <ScrollViewer x:Name="PART_ContentHost" Margin="{TemplateBinding Padding}"
+                            <ScrollViewer x:Name="PART_ContentHost"
                                           VerticalAlignment="{TemplateBinding VerticalContentAlignment}" Focusable="False" />
                         </Grid>
                     </Border>
@@ -1479,6 +1480,135 @@
         <Setter Property="Padding" Value="10,0" />
         <Setter Property="FontSize" Value="12" />
         <Setter Property="WindowChrome.IsHitTestVisibleInChrome" Value="True" />
+    </Style>
+
+    <!-- ============ Studio X Ultra: Inspector Deck 2.0 Segmented Sub-Tab & Tactile Chip Styles ============ -->
+    <Style x:Key="InspectorTabRadioButtonStyle" TargetType="RadioButton">
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="Foreground" Value="{DynamicResource MutedTextBrush}" />
+        <Setter Property="FontSize" Value="11" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+        <Setter Property="Padding" Value="7,5" />
+        <Setter Property="Margin" Value="1" />
+        <Setter Property="Cursor" Value="Hand" />
+        <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="RadioButton">
+                    <Border x:Name="Bd" Background="{TemplateBinding Background}"
+                            BorderBrush="Transparent" BorderThickness="1"
+                            CornerRadius="6" Padding="{TemplateBinding Padding}" SnapsToDevicePixels="True">
+                        <Grid>
+                            <TextBlock Text="{TemplateBinding Content}"
+                                       HorizontalAlignment="Center" VerticalAlignment="Center"
+                                       TextTrimming="CharacterEllipsis" />
+                            <Border x:Name="ActiveBar" Height="2" VerticalAlignment="Bottom"
+                                    Margin="4,0,4,-4" CornerRadius="1"
+                                    Background="{DynamicResource BrandPrimaryBrush}" Visibility="Collapsed" />
+                        </Grid>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="Bd" Property="Background" Value="#1838BDF8" />
+                            <Setter Property="Foreground" Value="{DynamicResource TextBrush}" />
+                        </Trigger>
+                        <Trigger Property="IsChecked" Value="True">
+                            <Setter TargetName="Bd" Property="Background" Value="#2622D3EE" />
+                            <Setter TargetName="Bd" Property="BorderBrush" Value="#5522D3EE" />
+                            <Setter TargetName="ActiveBar" Property="Visibility" Value="Visible" />
+                            <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- Horizontal tactile segmented choice chips (binds just like a ComboBox/ListBox) -->
+    <Style x:Key="ChoiceChipListBoxItemStyle" TargetType="ListBoxItem">
+        <Setter Property="Background" Value="#181E293B" />
+        <Setter Property="BorderBrush" Value="#44334155" />
+        <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
+        <Setter Property="FontSize" Value="11.5" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+        <Setter Property="Padding" Value="10,5" />
+        <Setter Property="Margin" Value="0,0,5,5" />
+        <Setter Property="Cursor" Value="Hand" />
+        <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="ListBoxItem">
+                    <Border x:Name="ChipBd" Background="{TemplateBinding Background}"
+                            BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1"
+                            CornerRadius="6" Padding="{TemplateBinding Padding}" SnapsToDevicePixels="True">
+                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="ChipBd" Property="Background" Value="#2838BDF8" />
+                            <Setter TargetName="ChipBd" Property="BorderBrush" Value="#6638BDF8" />
+                            <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
+                        </Trigger>
+                        <Trigger Property="IsSelected" Value="True">
+                            <Setter TargetName="ChipBd" Property="Background" Value="#2E22D3EE" />
+                            <Setter TargetName="ChipBd" Property="BorderBrush" Value="{DynamicResource BrandPrimaryBrush}" />
+                            <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <Style x:Key="ChoiceChipListBoxStyle" TargetType="ListBox">
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="BorderThickness" Value="0" />
+        <Setter Property="Padding" Value="0" />
+        <Setter Property="ScrollViewer.HorizontalScrollBarVisibility" Value="Disabled" />
+        <Setter Property="ScrollViewer.VerticalScrollBarVisibility" Value="Disabled" />
+        <Setter Property="ItemContainerStyle" Value="{StaticResource ChoiceChipListBoxItemStyle}" />
+        <Setter Property="ItemsPanel">
+            <Setter.Value>
+                <ItemsPanelTemplate>
+                    <WrapPanel Orientation="Horizontal" />
+                </ItemsPanelTemplate>
+            </Setter.Value>
+        </Setter>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="ListBox">
+                    <ItemsPresenter SnapsToDevicePixels="{TemplateBinding SnapsToDevicePixels}" />
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- Compact '?' Info Hint Badge (replaces long grey text walls with a clean hover badge) -->
+    <Style x:Key="InfoHintBadgeStyle" TargetType="Border">
+        <Setter Property="Width" Value="17" />
+        <Setter Property="Height" Value="17" />
+        <Setter Property="CornerRadius" Value="8.5" />
+        <Setter Property="Background" Value="#2238BDF8" />
+        <Setter Property="BorderBrush" Value="#4438BDF8" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="VerticalAlignment" Value="Center" />
+        <Setter Property="Margin" Value="6,0,0,0" />
+        <Setter Property="Cursor" Value="Help" />
+        <Setter Property="ToolTipService.InitialShowDelay" Value="80" />
+        <Setter Property="ToolTipService.ShowDuration" Value="20000" />
+    </Style>
+
+    <!-- 1-click {Variable} token insertion chip button -->
+    <Style x:Key="VariableTokenChipButtonStyle" TargetType="Button" BasedOn="{StaticResource ButtonBaseStyle}">
+        <Setter Property="Background" Value="#20A855F7" />
+        <Setter Property="BorderBrush" Value="#50A855F7" />
+        <Setter Property="Foreground" Value="#D8B4FE" />
+        <Setter Property="FontFamily" Value="{StaticResource FontFamilyMono}" />
+        <Setter Property="FontSize" Value="10.5" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+        <Setter Property="Padding" Value="7,2" />
+        <Setter Property="Margin" Value="0,0,4,0" />
+        <Setter Property="Cursor" Value="Hand" />
     </Style>
 
 </ResourceDictionary>

@@ -53,6 +53,37 @@ public sealed class ScreenConditionEvaluator : IConditionEvaluator
     public async Task<ConditionCheck> CheckAsync(Condition condition, DetectionTimer? timer, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(condition);
+        var primary = await CheckSingleAsync(condition, timer, cancellationToken).ConfigureAwait(false);
+        if (!condition.HasSecondCondition || condition.SecondCondition is not { } second)
+            return primary;
+
+        if (condition.SecondCombinator == ConditionCombinator.And && !primary.IsTrue)
+            return primary;
+        if (condition.SecondCombinator == ConditionCombinator.Or && primary.IsTrue)
+            return primary;
+
+        var secondary = await CheckSingleAsync(second, null, cancellationToken).ConfigureAwait(false);
+        var combinedTrue = condition.SecondCombinator == ConditionCombinator.And
+            ? (primary.IsTrue && secondary.IsTrue)
+            : (primary.IsTrue || secondary.IsTrue);
+        var seen = primary.Seen || secondary.Seen;
+        var (x, y, match, conf) = primary.Seen
+            ? (primary.X, primary.Y, primary.Match, primary.Confidence)
+            : (secondary.X, secondary.Y, secondary.Match, secondary.Confidence);
+        var opWord = condition.SecondCombinator == ConditionCombinator.And ? "AND" : "OR";
+        return new ConditionCheck(
+            seen,
+            combinedTrue,
+            x,
+            y,
+            $"{primary.Details} {opWord} {secondary.Details}",
+            match,
+            conf,
+            primary.ElapsedMs + secondary.ElapsedMs);
+    }
+
+    private async Task<ConditionCheck> CheckSingleAsync(Condition condition, DetectionTimer? timer, CancellationToken cancellationToken)
+    {
         if (condition.Kind == ConditionKind.VariableCompare && condition.Comparison is { } comp)
         {
             var store = _variables ?? new VariableStore();
@@ -72,8 +103,17 @@ public sealed class ScreenConditionEvaluator : IConditionEvaluator
 
     public string Describe(Condition condition)
     {
-        if (condition.Kind == ConditionKind.VariableCompare && condition.Comparison is { } comp)
-            return StepDescriber.DescribeCondition(condition);
+        var first = DescribeSingle(condition);
+        if (!condition.HasSecondCondition || condition.SecondCondition is not { } second)
+            return first;
+        var opWord = condition.SecondCombinator == ConditionCombinator.And ? "AND" : "OR";
+        return $"{first} {opWord} {DescribeSingle(second)}";
+    }
+
+    private string DescribeSingle(Condition condition)
+    {
+        if (condition.Kind == ConditionKind.VariableCompare && condition.Comparison is not null)
+            return StepDescriber.DescribeSingleCondition(condition);
 
         var what = condition.Kind switch
         {

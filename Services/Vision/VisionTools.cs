@@ -433,13 +433,16 @@ public sealed class VisionTools : IVisionTools
             if (result.Passed && !result.Match.IsEmpty)
             {
                 _lastMatch = new ScreenPoint(result.Match.CenterX, result.Match.CenterY);
+                var countBadge = result.MatchCount > 1 ? $"{result.MatchCount}× · " : string.Empty;
                 FlashTestReticle(result.Match, result.Confidence, result.ElapsedMs, nearMiss: false,
-                    $"🧪 Test passed · {result.Confidence * 100:0}% · {TargetDetection.FormatMs(result.ElapsedMs)}");
+                    $"🧪 Test passed · {countBadge}{result.Confidence * 100:0}% · {TargetDetection.FormatMs(result.ElapsedMs)}",
+                    result.AllMatches);
             }
             else if (result.ShowNearMiss)
             {
                 FlashTestReticle(result.NearMiss, result.NearMissConfidence, result.ElapsedMs, nearMiss: true,
-                    $"🧪 Closest match {result.NearMissConfidence * 100:0}% (needs {result.RequiredConfidence * 100:0}%)");
+                    $"🧪 Closest match {result.NearMissConfidence * 100:0}% (needs {result.RequiredConfidence * 100:0}%)",
+                    result.AllMatches);
             }
         }
         catch (Exception)
@@ -450,10 +453,14 @@ public sealed class VisionTools : IVisionTools
         return result;
     }
 
-    private void FlashTestReticle(ScreenRect box, double confidence, double elapsedMs, bool nearMiss, string badge)
+    private void FlashTestReticle(ScreenRect box, double confidence, double elapsedMs, bool nearMiss, string badge,
+        IReadOnlyList<ScreenRect>? allMatches = null)
     {
         _testReticle ??= new TargetLockOverlay();
-        var target = new TargetDetection(box, confidence, nearMiss ? "Near miss" : "Test", box.CenterX, box.CenterY, elapsedMs);
+        var target = new TargetDetection(box, confidence, nearMiss ? "Near miss" : "Test", box.CenterX, box.CenterY, elapsedMs)
+        {
+            AllMatches = allMatches,
+        };
         _testReticle.ShowTarget(target, nearMiss, TestReticleHold, badge);
     }
 
@@ -513,7 +520,11 @@ public sealed class VisionTools : IVisionTools
                 : "";
             _lastMatch = new ScreenPoint(bounds.CenterX, bounds.CenterY);
             text = $"Matched at ({bounds.CenterX}, {bounds.CenterY}){scaleNote} — {best.Score:P0} confidence (needs {step.MinSimilarityPercent}%). Searched {where}.{more}";
-            ScreenHighlightOverlay.ShowResult(frame.Bounds, bounds, found: true, $"✓ {best.Score * 100:0}% Match{scaleNote}");
+            var allScreenRects = result.Matches.Select(m => frame.ToScreen(m.Bounds)).ToList();
+            var labelText = result.Matches.Count > 1
+                ? $"✓ {result.Matches.Count}× Match · {best.Score * 100:0}%{scaleNote}"
+                : $"✓ {best.Score * 100:0}% Match{scaleNote}";
+            ScreenHighlightOverlay.ShowMatches(frame.Bounds, allScreenRects, found: true, labelText);
         }
         else
         {
@@ -586,8 +597,13 @@ public sealed class VisionTools : IVisionTools
             var x = frame.Bounds.X + (int)Math.Round(blob.CenterX);
             var y = frame.Bounds.Y + (int)Math.Round(blob.CenterY);
             _lastMatch = new ScreenPoint(x, y);
-            var patch = new ScreenRect(frame.Bounds.X + blob.Bounds.X, frame.Bounds.Y + blob.Bounds.Y, blob.Bounds.Width, blob.Bounds.Height);
-            ScreenHighlightOverlay.ShowResult(frame.Bounds, patch, found: true, $"✓ Color match · {blob.PixelCount:N0} px");
+            var allColorRects = result.Blobs
+                .Select(b => new ScreenRect(frame.Bounds.X + b.Bounds.X, frame.Bounds.Y + b.Bounds.Y, b.Bounds.Width, b.Bounds.Height))
+                .ToList();
+            var colorLabel = result.Blobs.Count > 1
+                ? $"✓ {result.Blobs.Count}× Color match · {blob.PixelCount:N0} px"
+                : $"✓ Color match · {blob.PixelCount:N0} px";
+            ScreenHighlightOverlay.ShowMatches(frame.Bounds, allColorRects, found: true, colorLabel);
             text = $"Matched at ({x}, {y}) — color {color}, a patch of {blob.PixelCount:N0} pixels (green box). Searched {where}.";
             if (result.Blobs.Count > 1)
                 text += $" There are {result.Blobs.Count} separate patches of this color (orange); a macro uses the biggest. If that's wrong, pick a smaller area, lower the tolerance or raise the minimum size.";
@@ -1238,11 +1254,14 @@ public sealed class VisionTools : IVisionTools
     private async Task<T> WhileInvisibleAsync<T>(Func<Task<T>> action)
     {
         var hidden = new List<(Window Window, long Style)>();
-        foreach (Window window in Application.Current.Windows)
+        if (Application.Current?.Windows is { } windows)
         {
-            if (!window.IsVisible || (!ReferenceEquals(window, _mainWindow) && !ReferenceEquals(window.Owner, _mainWindow))) continue;
-            NativeMethods.SetExcludedFromCapture(window, true);
-            if (NativeMethods.MakeInvisible(window) is { } style) hidden.Add((window, style));
+            foreach (Window window in windows)
+            {
+                if (!window.IsVisible || (!ReferenceEquals(window, _mainWindow) && !ReferenceEquals(window.Owner, _mainWindow))) continue;
+                NativeMethods.SetExcludedFromCapture(window, true);
+                if (NativeMethods.MakeInvisible(window) is { } style) hidden.Add((window, style));
+            }
         }
 
         try
@@ -1254,8 +1273,18 @@ public sealed class VisionTools : IVisionTools
         {
             foreach (var (window, style) in hidden)
             {
-                NativeMethods.RestoreWindowStyle(window, style);
-                NativeMethods.SetExcludedFromCapture(window, false);
+                try
+                {
+                    if (PresentationSource.FromVisual(window) is { IsDisposed: false })
+                    {
+                        NativeMethods.RestoreWindowStyle(window, style);
+                        NativeMethods.SetExcludedFromCapture(window, false);
+                    }
+                }
+                catch
+                {
+                    // Window closed while awaiting the capture action.
+                }
             }
         }
     }
@@ -1272,9 +1301,19 @@ public sealed class VisionTools : IVisionTools
         }
         finally
         {
-            NativeMethods.SetExcludedFromCapture(_mainWindow, false);
-            _mainWindow.WindowState = previousState == WindowState.Minimized ? WindowState.Normal : previousState;
-            _mainWindow.Activate();
+            try
+            {
+                if (_mainWindow.IsLoaded && PresentationSource.FromVisual(_mainWindow) is { IsDisposed: false })
+                {
+                    NativeMethods.SetExcludedFromCapture(_mainWindow, false);
+                    _mainWindow.WindowState = previousState == WindowState.Minimized ? WindowState.Normal : previousState;
+                    _mainWindow.Activate();
+                }
+            }
+            catch
+            {
+                // Main window closed while awaiting the screen picker.
+            }
         }
     }
 }

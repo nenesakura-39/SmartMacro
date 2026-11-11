@@ -37,7 +37,7 @@
                 <TextBlock x:Name="StateText"
                            Text="SERVO [TRACKING]"
                            Foreground="#00D4FF"
-                           FontFamily="Cascadia Mono, Consolas, Segoe UI"
+                           FontFamily="Cascadia Mono, Consolas, Segoe UI, Segoe UI Emoji, Segoe UI Symbol"
                            FontSize="11.5"
                            FontWeight="Bold"
                            VerticalAlignment="Center" />
@@ -45,7 +45,7 @@
                     <TextBlock x:Name="ErrorText"
                                Text="ERR: +0px"
                                Foreground="#E2E8F0"
-                               FontFamily="Cascadia Mono, Consolas"
+                               FontFamily="Cascadia Mono, Consolas, Segoe UI, Segoe UI Emoji, Segoe UI Symbol"
                                FontSize="11"
                                FontWeight="SemiBold"
                                VerticalAlignment="Center" />
@@ -54,7 +54,7 @@
                     <TextBlock x:Name="PwmText"
                                Text="PWM: 45%"
                                Foreground="#00D4FF"
-                               FontFamily="Cascadia Mono, Consolas"
+                               FontFamily="Cascadia Mono, Consolas, Segoe UI, Segoe UI Emoji, Segoe UI Symbol"
                                FontSize="11"
                                FontWeight="SemiBold"
                                VerticalAlignment="Center" />
@@ -63,7 +63,7 @@
                     <TextBlock x:Name="OnTargetText"
                                Text="ON-TGT: 100%"
                                Foreground="#10B981"
-                               FontFamily="Cascadia Mono, Consolas"
+                               FontFamily="Cascadia Mono, Consolas, Segoe UI, Segoe UI Emoji, Segoe UI Symbol"
                                FontSize="11"
                                FontWeight="SemiBold"
                                VerticalAlignment="Center" />

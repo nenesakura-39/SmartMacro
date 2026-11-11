@@ -268,7 +268,7 @@ internal static class FreezeCountdown
                 Foreground = Brushes.White,
                 FontSize = 18,
                 FontWeight = FontWeights.SemiBold,
-                FontFamily = new FontFamily("Segoe UI Variable Text, Segoe UI"),
+                FontFamily = new FontFamily("Segoe UI Variable Text, Segoe UI, Segoe Fluent Icons, Segoe MDL2 Assets, Segoe UI Emoji, Segoe UI Symbol"),
             };
             Content = new Border
             {

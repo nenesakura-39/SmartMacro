@@ -146,8 +146,22 @@ public sealed class TargetLockOverlay : Window
             frame = ReticleLayout.Compute(box, 0, 0, screen);
         if (frame.Window.IsEmpty) return;
 
+        var windowBounds = frame.Window;
+        if (!_streamSafe && target.AllMatches is { Count: > 1 } multiMatches)
+        {
+            foreach (var m in multiMatches)
+            {
+                if (!m.IsEmpty)
+                {
+                    var padded = new ScreenRect(m.X - 16, m.Y - 24, m.Width + 32, m.Height + 36);
+                    windowBounds = windowBounds.Union(padded);
+                }
+            }
+            windowBounds = windowBounds.Intersect(screen);
+        }
+
         _frame = frame;
-        _bounds = frame.Window;
+        _bounds = windowBounds;
         _target = target;
         BeginAnimation(OpacityProperty, null);
         Opacity = 1;
@@ -256,14 +270,63 @@ public sealed class TargetLockOverlay : Window
             _canvas.Children.Add(MakeLine(cx + 2, cy, cx + 7, cy, Lock, 2));
             _canvas.Children.Add(MakeLine(cx, cy - 7, cx, cy - 2, Lock, 2));
             _canvas.Children.Add(MakeLine(cx, cy + 2, cx, cy + 7, Lock, 2));
+
+            // Draw additional matches (#2..#N) when multiple occurrences were detected on screen.
+            if (target.AllMatches is { Count: > 1 } multi)
+            {
+                var maxDraw = Math.Min(multi.Count, 120);
+                for (var i = 0; i < maxDraw; i++)
+                {
+                    var m = multi[i];
+                    if (m.IsEmpty) continue;
+                    double mx = m.X - _bounds.X, my = m.Y - _bounds.Y;
+                    if (i > 0)
+                    {
+                        var subBox = new Rectangle
+                        {
+                            Width = Math.Max(2, m.Width) + 4,
+                            Height = Math.Max(2, m.Height) + 4,
+                            Stroke = new SolidColorBrush(Color.FromArgb(0xD8, Lock.R, Lock.G, Lock.B)),
+                            StrokeThickness = 1.6,
+                            Fill = new SolidColorBrush(Color.FromArgb(0x18, Lock.R, Lock.G, Lock.B)),
+                            RadiusX = 3,
+                            RadiusY = 3,
+                        };
+                        Canvas.SetLeft(subBox, mx - 2);
+                        Canvas.SetTop(subBox, my - 2);
+                        _canvas.Children.Add(subBox);
+                    }
+
+                    var tag = new Border
+                    {
+                        Background = new SolidColorBrush(Color.FromArgb(0xE0, 0x0B, 0x12, 0x20)),
+                        BorderBrush = new SolidColorBrush(i == 0 ? NeonBright : Lock),
+                        BorderThickness = new Thickness(1),
+                        CornerRadius = new CornerRadius(3),
+                        Padding = new Thickness(3, 0, 3, 1),
+                        Child = new TextBlock
+                        {
+                            Text = $"#{i + 1}",
+                            Foreground = new SolidColorBrush(i == 0 ? NeonBright : Lock),
+                            FontSize = 10 * _badgeScale,
+                            FontWeight = FontWeights.Bold,
+                        },
+                    };
+                    Canvas.SetLeft(tag, Math.Max(0, mx - 2));
+                    Canvas.SetTop(tag, Math.Max(0, my - 16 * _badgeScale));
+                    _canvas.Children.Add(tag);
+                }
+            }
         }
 
         // "🎯 98% · 0.6ms · Find image" badge, centred above the target (below it when there's no room; pushed inward at the
         // screen edges). ⚡ = found at its last spot. The window was sized to fit it whole (ReticleLayout).
         if (_frame.Placement == BadgePlacement.None || string.IsNullOrEmpty(_badgeText)) return;
         var badge = BuildBadge(_badgeText, _badgeScale);
-        Canvas.SetLeft(badge, _frame.BadgeLeft);
-        Canvas.SetTop(badge, _frame.BadgeTop);
+        var badgeOffsetX = _frame.Window.X - _bounds.X;
+        var badgeOffsetY = _frame.Window.Y - _bounds.Y;
+        Canvas.SetLeft(badge, _frame.BadgeLeft + badgeOffsetX);
+        Canvas.SetTop(badge, _frame.BadgeTop + badgeOffsetY);
         _canvas.Children.Add(badge);
     }
 
@@ -285,7 +348,7 @@ public sealed class TargetLockOverlay : Window
             Foreground = new SolidColorBrush(NeonBright),
             FontSize = 12.5 * scale,
             FontWeight = FontWeights.SemiBold,
-            FontFamily = new FontFamily("Segoe UI Variable Text, Segoe UI"),
+            FontFamily = new FontFamily("Segoe UI Variable Text, Segoe UI, Segoe Fluent Icons, Segoe MDL2 Assets, Segoe UI Emoji, Segoe UI Symbol"),
             TextWrapping = TextWrapping.NoWrap,
         },
     };
@@ -367,5 +430,11 @@ public sealed class OverlayAwareScreenCapture : IScreenCapture
     {
         TargetLockOverlay.BeforeCapture();
         return _inner.CaptureAsync(region, cancellationToken);
+    }
+
+    public Task<ScreenFrame> CaptureWindowAsync(long windowHandle, ScreenRect region, CancellationToken cancellationToken)
+    {
+        TargetLockOverlay.BeforeCapture();
+        return _inner.CaptureWindowAsync(windowHandle, region, cancellationToken);
     }
 }

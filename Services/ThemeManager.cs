@@ -60,6 +60,10 @@ public static class ThemeManager
             SetBrush(res, "SectionCardBrush", "#0E1B36");
             SetBrush(res, "DotGridBrush", "#16274B");
             SetBrush(res, "IndentGuideBrush", "#233863");
+            SetBrush(res, "SurfaceRecessedBrush", "#081126");
+            SetBrush(res, "SurfaceElevatedBrush", "#132142");
+            SetBrush(res, "BorderSubtleBrush", "#213663");
+            SetBrush(res, "BorderStrongBrush", "#2B4270");
         }
         else // ObsidianNeon (default)
         {
@@ -81,6 +85,10 @@ public static class ThemeManager
             SetBrush(res, "SectionCardBrush", "#151E2E");
             SetBrush(res, "DotGridBrush", "#1C2638");
             SetBrush(res, "IndentGuideBrush", "#2A3547");
+            SetBrush(res, "SurfaceRecessedBrush", "#0D131F");
+            SetBrush(res, "SurfaceElevatedBrush", "#172033");
+            SetBrush(res, "BorderSubtleBrush", "#243045");
+            SetBrush(res, "BorderStrongBrush", "#334155");
         }
     }
 
@@ -96,6 +104,7 @@ public static class ThemeManager
         };
 
         SetBrush(res, "AccentBrush", main);
+        SetBrush(res, "BrandPrimaryBrush", main);
         SetBrush(res, "AccentHoverBrush", hover);
         SetBrush(res, "AccentPressedBrush", pressed);
         SetBrush(res, "AccentSoftBrush", soft);

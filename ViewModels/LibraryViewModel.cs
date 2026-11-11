@@ -13,6 +13,15 @@ using SmartMacro.Services;
 
 namespace SmartMacro.ViewModels;
 
+/// <summary>How the Macro Library orders cards (pinned macros always float above unpinned ones).</summary>
+public enum LibrarySortMode
+{
+    PinnedAndName = 0,
+    RecentlyModified = 1,
+    RecentlyCreated = 2,
+    MostSteps = 3,
+}
+
 /// <summary>One row in the macro library.</summary>
 public sealed class MacroListItemViewModel : ObservableObject
 {
@@ -28,6 +37,11 @@ public sealed class MacroListItemViewModel : ObservableObject
 
     public Guid Id => _macro.Id;
     public string Name => _macro.Name;
+    public bool IsPinned => _macro.IsPinned;
+    public string PinGlyph => _macro.IsPinned ? "⭐" : "☆";
+    public string PinTooltip => _macro.IsPinned ? "Unpin macro from top of Library" : "Pin macro to top of Library";
+    public DateTimeOffset ModifiedAt => _macro.ModifiedAt;
+    public DateTimeOffset CreatedAt => _macro.CreatedAt;
     public string Description => string.IsNullOrWhiteSpace(_macro.Description) ? "No description" : _macro.Description!;
     public bool HasDescription => !string.IsNullOrWhiteSpace(_macro.Description);
     public int StepCount => _macro.Steps.Count;
@@ -100,7 +114,7 @@ public sealed class MacroListItemViewModel : ObservableObject
         UsesVision = searches.Any(s => s is FindImageStep or FindColorStep);
         UsesOcr = searches.Any(s => s is FindTextStep);
         UsesFeedback = steps.Any(s => s is FeedbackLoopStep);
-        UsesLogic = steps.Any(WorkflowSteps.IsBlockStep);
+        UsesLogic = steps.Any(s => WorkflowSteps.IsBlockStep(s) || s is FlowControlStep);
         UsesMemory = steps.Any(s => s is SetVariableStep or CheckpointStep or CallMacroStep)
                      || (macro.Variables?.Count > 0) || (macro.Watchers?.Count > 0);
         UsesIntent = steps.OfType<MouseClickStep>().Any(c => c.UseSmartIntent && c.HasTargetIntent);
@@ -139,6 +153,8 @@ public sealed class MacroListItemViewModel : ObservableObject
         OnPropertyChanged(string.Empty);
     }
 
+    public void RaiseNameReverted() => OnPropertyChanged(nameof(Name));
+
     /// <summary>True when the card matches a search (name, description or a category word like "ocr").</summary>
     public bool Matches(string term)
     {
@@ -149,12 +165,13 @@ public sealed class MacroListItemViewModel : ObservableObject
 
         return term.ToLowerInvariant() switch
         {
+            "pinned" or "star" or "favorite" or "favorites" => IsPinned,
             "vision" or "image" or "color" or "colour" => UsesVision,
             "ocr" or "text" => UsesOcr,
             "feedback" or "loop" or "minigame" => UsesFeedback,
             "input" or "click" or "mouse" or "key" => UsesInput,
-            "logic" or "if" or "repeat" => UsesLogic || UsesMemory,
-            "brain" or "memory" or "variable" or "variables" or "watcher" or "checkpoint" => UsesMemory,
+            "logic" or "if" or "repeat" or "break" or "continue" or "flow" => UsesLogic || UsesMemory,
+            "brain" or "memory" or "variable" or "variables" or "watcher" or "checkpoint" or "formula" => UsesMemory,
             "intent" or "smart" => UsesIntent,
             "trigger" or "triggers" or "hotkey" => HasTriggerSummary,
             "error" or "errors" or "problem" or "problems" => HasErrors,
@@ -189,6 +206,41 @@ public sealed class LibraryViewModel : ObservableObject
     private string _searchText = string.Empty;
     private bool _isLoading;
     private string? _loadProblemText;
+    private LibrarySortMode _sortMode = LibrarySortMode.PinnedAndName;
+    private bool _isTrashOpen;
+
+    public static IReadOnlyList<Steps.Choice<LibrarySortMode>> SortChoices { get; } = new[]
+    {
+        new Steps.Choice<LibrarySortMode>(LibrarySortMode.PinnedAndName, "⭐ Pinned + Name (A–Z)"),
+        new Steps.Choice<LibrarySortMode>(LibrarySortMode.RecentlyModified, "🕒 Recently Modified"),
+        new Steps.Choice<LibrarySortMode>(LibrarySortMode.RecentlyCreated, "🆕 Recently Created"),
+        new Steps.Choice<LibrarySortMode>(LibrarySortMode.MostSteps, "🔢 Most Steps"),
+    };
+
+    public IReadOnlyList<Steps.Choice<LibrarySortMode>> SortModes => SortChoices;
+
+    public ObservableCollection<TrashedMacroItem> TrashItems { get; } = new();
+
+    public bool HasTrashItems => TrashItems.Count > 0;
+
+    public string TrashButtonText => TrashItems.Count > 0 ? $"🗑 Trash ({TrashItems.Count})" : "🗑 Trash";
+
+    public bool IsTrashOpen
+    {
+        get => _isTrashOpen;
+        set => SetProperty(ref _isTrashOpen, value);
+    }
+
+    public LibrarySortMode SortMode
+    {
+        get => _sortMode;
+        set
+        {
+            if (!SetProperty(ref _sortMode, value)) return;
+            ApplySortDescriptions();
+            ItemsView.Refresh();
+        }
+    }
 
     public LibraryViewModel(
         IMacroRepository repository,
@@ -213,22 +265,61 @@ public sealed class LibraryViewModel : ObservableObject
 
         ItemsView = CollectionViewSource.GetDefaultView(Items);
         ItemsView.Filter = FilterItem;
-        ItemsView.SortDescriptions.Add(new SortDescription(nameof(MacroListItemViewModel.Name), ListSortDirection.Ascending));
+        ApplySortDescriptions();
 
         NewCommand = new AsyncRelayCommand(CreateNewAsync, HandleError, () => !IsLoading);
         // Card buttons pass their own macro as the parameter; toolbar / keyboard use the selection.
         OpenCommand = new AsyncRelayCommand(p => OpenSelectedAsync(Target(p)), HandleError, HasTarget);
         DuplicateCommand = new AsyncRelayCommand(p => DuplicateSelectedAsync(Target(p)), HandleError, HasTarget);
         DeleteCommand = new AsyncRelayCommand(p => DeleteSelectedAsync(Target(p)), HandleError, HasTarget);
+        TogglePinCommand = new AsyncRelayCommand(p => TogglePinAsync(Target(p)), HandleError, HasTarget);
         ReloadCommand = new AsyncRelayCommand(LoadAsync, HandleError, () => !IsLoading);
         OpenFolderCommand = new RelayCommand(OpenFolder);
         ClearSearchCommand = new RelayCommand(() => SearchText = string.Empty);
         ImportCommand = new AsyncRelayCommand(ImportAsync, HandleError, () => !IsLoading);
         ExportCommand = new AsyncRelayCommand(p => ExportSelectedAsync(Target(p)), HandleError, HasTarget);
+        ToggleTrashCommand = new RelayCommand(() => IsTrashOpen = !IsTrashOpen);
+        RestoreTrashItemCommand = new AsyncRelayCommand(p => RestoreTrashItemAsync(p as TrashedMacroItem), HandleError, p => p is TrashedMacroItem);
+        DeleteTrashItemCommand = new AsyncRelayCommand(p => DeleteTrashItemAsync(p as TrashedMacroItem), HandleError, p => p is TrashedMacroItem);
+        EmptyTrashCommand = new AsyncRelayCommand(EmptyTrashAsync, HandleError, () => HasTrashItems);
         PlayItemCommand = new AsyncRelayCommand(
             p => PlayItemAsync(p as MacroListItemViewModel ?? SelectedItem),
             HandleError,
             p => _playMacro is not null && _canPlay() && (p is MacroListItemViewModel || SelectedItem is not null));
+        BeginRenameCommand = new RelayCommand(
+            p =>
+            {
+                Target(p);
+                FocusInspectorNameRequested?.Invoke(this, EventArgs.Empty);
+            },
+            HasTarget);
+    }
+
+    private void ApplySortDescriptions()
+    {
+        using (ItemsView.DeferRefresh())
+        {
+            ItemsView.SortDescriptions.Clear();
+            ItemsView.SortDescriptions.Add(new SortDescription(nameof(MacroListItemViewModel.IsPinned), ListSortDirection.Descending));
+            switch (_sortMode)
+            {
+                case LibrarySortMode.RecentlyModified:
+                    ItemsView.SortDescriptions.Add(new SortDescription(nameof(MacroListItemViewModel.ModifiedAt), ListSortDirection.Descending));
+                    ItemsView.SortDescriptions.Add(new SortDescription(nameof(MacroListItemViewModel.Name), ListSortDirection.Ascending));
+                    break;
+                case LibrarySortMode.RecentlyCreated:
+                    ItemsView.SortDescriptions.Add(new SortDescription(nameof(MacroListItemViewModel.CreatedAt), ListSortDirection.Descending));
+                    ItemsView.SortDescriptions.Add(new SortDescription(nameof(MacroListItemViewModel.Name), ListSortDirection.Ascending));
+                    break;
+                case LibrarySortMode.MostSteps:
+                    ItemsView.SortDescriptions.Add(new SortDescription(nameof(MacroListItemViewModel.StepCount), ListSortDirection.Descending));
+                    ItemsView.SortDescriptions.Add(new SortDescription(nameof(MacroListItemViewModel.Name), ListSortDirection.Ascending));
+                    break;
+                default:
+                    ItemsView.SortDescriptions.Add(new SortDescription(nameof(MacroListItemViewModel.Name), ListSortDirection.Ascending));
+                    break;
+            }
+        }
     }
 
     /// <summary>The card a button belongs to (its parameter), or the selected macro. Selects it too.</summary>
@@ -248,8 +339,54 @@ public sealed class LibraryViewModel : ObservableObject
     public AsyncRelayCommand ImportCommand { get; }
     public AsyncRelayCommand ExportCommand { get; }
 
-    /// <summary>Plays a macro straight from the library (parameter: the row; defaults to the selection).</summary>
+    /// <summary>Optional callback invoked when a macro is renamed directly from the Library.</summary>
+    public Action<Macro>? MacroRenamed { get; set; }
+
+    /// <summary>Raised when the user presses F2 in the Library to focus the Inspector's editable macro name box.</summary>
+    public event EventHandler? FocusInspectorNameRequested;
+
+    public RelayCommand BeginRenameCommand { get; }
     public AsyncRelayCommand PlayItemCommand { get; }
+
+    /// <summary>
+    /// Renames the given (or selected) macro and saves it immediately to disk.
+    /// Returns true when the rename succeeded.
+    /// </summary>
+    public async Task<bool> RenameMacroAsync(MacroListItemViewModel? item, string? newName)
+    {
+        item ??= SelectedItem;
+        if (item is null) return false;
+
+        var trimmed = (newName ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(trimmed))
+        {
+            item.RaiseNameReverted();
+            return false;
+        }
+
+        if (string.Equals(item.Name, trimmed, StringComparison.Ordinal))
+            return true;
+
+        var clone = MacroJson.Clone(item.Macro);
+        var oldName = clone.Name;
+        clone.Name = trimmed;
+        try
+        {
+            await _repository.SaveAsync(clone);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or MacroValidationException)
+        {
+            _log.Error($"Renaming \"{oldName}\" failed.", ex);
+            _dialogs.ShowError("Could not rename macro", ex.Message);
+            item.RaiseNameReverted();
+            return false;
+        }
+
+        Upsert(MacroJson.Clone(clone));
+        MacroRenamed?.Invoke(MacroJson.Clone(clone));
+        _setStatus($"Renamed \"{oldName}\" → \"{trimmed}\".", StatusKind.Success);
+        return true;
+    }
 
     public ObservableCollection<MacroListItemViewModel> Items { get; } = new();
 
@@ -259,9 +396,14 @@ public sealed class LibraryViewModel : ObservableObject
     public AsyncRelayCommand OpenCommand { get; }
     public AsyncRelayCommand DuplicateCommand { get; }
     public AsyncRelayCommand DeleteCommand { get; }
+    public AsyncRelayCommand TogglePinCommand { get; }
     public AsyncRelayCommand ReloadCommand { get; }
     public RelayCommand OpenFolderCommand { get; }
     public RelayCommand ClearSearchCommand { get; }
+    public RelayCommand ToggleTrashCommand { get; }
+    public AsyncRelayCommand RestoreTrashItemCommand { get; }
+    public AsyncRelayCommand DeleteTrashItemCommand { get; }
+    public AsyncRelayCommand EmptyTrashCommand { get; }
 
     public MacroListItemViewModel? SelectedItem
     {
@@ -366,6 +508,7 @@ public sealed class LibraryViewModel : ObservableObject
                   + (result.Problems.Count > 3 ? "…" : "") + ". See Logs for details.";
 
             _log.Info($"Loaded {result.Macros.Count} macro(s) from {_repository.MacrosDirectory}.");
+            await RefreshTrashAsync();
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
@@ -475,7 +618,91 @@ public sealed class LibraryViewModel : ObservableObject
         RaiseStateChanged();
 
         _afterDelete(item.Id);
+        await RefreshTrashAsync();
         _setStatus($"Deleted \"{item.Name}\" (moved to Trash).", StatusKind.Success);
+    }
+
+    public async Task RefreshTrashAsync()
+    {
+        try
+        {
+            var trash = await _repository.LoadTrashAsync();
+            TrashItems.Clear();
+            foreach (var t in trash)
+                TrashItems.Add(t);
+            OnPropertyChanged(nameof(HasTrashItems));
+            OnPropertyChanged(nameof(TrashButtonText));
+            System.Windows.Input.CommandManager.InvalidateRequerySuggested();
+        }
+        catch (Exception ex)
+        {
+            _log.Warning("Could not list the Trash folder.", ex);
+        }
+    }
+
+    private async Task TogglePinAsync(MacroListItemViewModel? target)
+    {
+        if (target is not { } item) return;
+        var clone = MacroJson.Clone(item.Macro);
+        clone.IsPinned = !clone.IsPinned;
+        try
+        {
+            await _repository.SaveAsync(clone);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or MacroValidationException)
+        {
+            _log.Error($"Pinning \"{item.Name}\" failed.", ex);
+            _dialogs.ShowError("Could not update macro", ex.Message);
+            return;
+        }
+
+        Upsert(MacroJson.Clone(clone));
+        _setStatus(clone.IsPinned ? $"⭐ Pinned \"{clone.Name}\" to top of Library." : $"Unpinned \"{clone.Name}\".", StatusKind.Info);
+    }
+
+    private async Task RestoreTrashItemAsync(TrashedMacroItem? trashItem)
+    {
+        if (trashItem is null) return;
+        var restored = await _repository.RestoreFromTrashAsync(trashItem.TrashFileName, Names);
+        if (restored is null)
+        {
+            _setStatus($"Could not restore \"{trashItem.Name}\" (file missing or damaged).", StatusKind.Warning);
+            await RefreshTrashAsync();
+            return;
+        }
+
+        SearchText = string.Empty;
+        Upsert(MacroJson.Clone(restored));
+        await RefreshTrashAsync();
+        if (!HasTrashItems) IsTrashOpen = false;
+        _setStatus($"↩ Restored \"{restored.Name}\" from Trash.", StatusKind.Success);
+    }
+
+    private async Task DeleteTrashItemAsync(TrashedMacroItem? trashItem)
+    {
+        if (trashItem is null) return;
+        if (_confirmBeforeDelete()
+            && !_dialogs.Confirm("Delete permanently", $"Permanently delete \"{trashItem.Name}\" from Trash?\n\nThis cannot be undone."))
+            return;
+
+        if (await _repository.DeleteFromTrashAsync(trashItem.TrashFileName))
+        {
+            await RefreshTrashAsync();
+            if (!HasTrashItems) IsTrashOpen = false;
+            _setStatus($"Permanently deleted \"{trashItem.Name}\" from Trash.", StatusKind.Info);
+        }
+    }
+
+    private async Task EmptyTrashAsync()
+    {
+        if (!HasTrashItems) return;
+        if (!_dialogs.Confirm("Empty Trash", $"Permanently delete all {TrashItems.Count} macro(s) in Trash?\n\nThis cannot be undone."))
+            return;
+
+        var deleted = await _repository.EmptyTrashAsync();
+        await RefreshTrashAsync();
+        IsTrashOpen = false;
+        _setStatus($"Emptied Trash ({deleted} macro(s) permanently deleted).", StatusKind.Info);
     }
 
     private void OpenFolder()
@@ -507,6 +734,7 @@ public sealed class LibraryViewModel : ObservableObject
 
         var imported = new List<string>();
         var skipped = new List<string>();
+        var migratedNotes = new List<string>();
         MacroListItemViewModel? last = null;
 
         foreach (var file in files)
@@ -522,10 +750,15 @@ public sealed class LibraryViewModel : ObservableObject
                 }
 
                 var json = await File.ReadAllTextAsync(file);
-                if (!MacroFileFormat.TryParseBundle(json, out var macro, out var subMacros, out var error))
+                if (!MacroFileFormat.TryParseBundle(json, out var macro, out var subMacros, out var notes, out var error))
                 {
                     skipped.Add($"{name}: {error}");
                     continue;
+                }
+
+                if (notes.Count > 0)
+                {
+                    migratedNotes.AddRange(notes.Select(n => $"{name}: {n}"));
                 }
 
                 var (prepared, preparedSubs) = MacroFileFormat.PrepareBundleForImport(macro!, subMacros, Names);
@@ -568,9 +801,14 @@ public sealed class LibraryViewModel : ObservableObject
         }
 
         if (last is not null) SelectedItem = last;
+        foreach (var m in migratedNotes) _log.Info($"Import auto-migrated {m}");
         foreach (var s in skipped) _log.Warning($"Import skipped {s}");
 
         var summary = imported.Count == 1 ? $"Imported \"{imported[0]}\"." : $"Imported {imported.Count} macros.";
+        if (migratedNotes.Count > 0)
+        {
+            summary += $" ({migratedNotes.Count} legacy setting(s) auto-updated for this version.)";
+        }
         if (skipped.Count == 0)
         {
             _setStatus(summary, StatusKind.Success);
@@ -578,7 +816,7 @@ public sealed class LibraryViewModel : ObservableObject
         else
         {
             _setStatus($"{summary} {skipped.Count} file(s) skipped (see Logs).", imported.Count > 0 ? StatusKind.Warning : StatusKind.Error);
-            _dialogs.ShowWarning("Import", $"{summary}\n\nThese files were skipped:\n\n{string.Join("\n", skipped.Take(10).Select(s => "• " + s))}");
+            _dialogs.ShowWarning("Import — Incompatible or Outdated .smacro File", $"{summary}\n\nThese files could not be opened in this version of SmartMacro:\n\n{string.Join("\n", skipped.Take(10).Select(s => "• " + s))}");
         }
     }
 

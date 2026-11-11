@@ -59,6 +59,24 @@ public interface IInputSimulator
     /// The default does nothing (simulators that don't track what they pressed, e.g. test fakes).
     /// </summary>
     string? ReleaseAllHeldInputs() => null;
+
+    /// <summary>
+    /// Sends a mouse click directly to a background / inactive window via <c>PostMessage</c> without moving the physical cursor
+    /// or stealing foreground focus. Returns <c>true</c> if the target window was found and the message was posted.
+    /// </summary>
+    bool SendBackgroundMouseClick(string windowTitle, MacroMouseButton button, MouseClickAction action, int screenX, int screenY, int holdMs) => false;
+
+    /// <summary>
+    /// Sends a key press/down/up directly to a background / inactive window via <c>PostMessage</c> without stealing focus.
+    /// Returns <c>true</c> if the target window was found and the message was posted.
+    /// </summary>
+    bool SendBackgroundKey(string windowTitle, int virtualKey, KeyAction action, int holdMs, KeyModifiers modifiers) => false;
+
+    /// <summary>
+    /// Sends Unicode characters directly to a background / inactive window via <c>PostMessage(WM_CHAR)</c> without stealing focus.
+    /// Returns <c>true</c> if the target window was found and the characters were posted.
+    /// </summary>
+    bool SendBackgroundText(string windowTitle, string text, int characterDelayMs) => false;
 }
 
 /// <summary>Thrown by an input simulator when Windows refuses the input.</summary>

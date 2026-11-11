@@ -121,6 +121,7 @@ public static class MacroFactory
         StepKind.SetVariable => new SetVariableStep(),
         StepKind.Checkpoint => new CheckpointStep { Name = "Main" },
         StepKind.CallMacro => new CallMacroStep(),
+        StepKind.FlowControl => new FlowControlStep(),
         StepKind.InputSequence => throw new ArgumentException("Recorded input steps are created by recording in game mode, not added by hand.", nameof(kind)),
         _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unknown step type."),
     };

@@ -98,6 +98,90 @@ internal sealed class ReusableGdiSurface : IDisposable
         }
     }
 
+    /// <summary>
+    /// Renders <paramref name="hwnd"/> directly via DWM <c>PrintWindow(PW_RENDERFULLCONTENT)</c> (capturing hardware-accelerated
+    /// DirectX / Chromium / Electron windows even when occluded behind another window) and crops <paramref name="area"/>
+    /// (in virtual-screen coordinates). Returns false when the window refuses <c>PrintWindow</c> or produces a blank buffer,
+    /// allowing the caller to fall back to <c>BitBlt</c>.
+    /// </summary>
+    public bool TryCaptureWindow(IntPtr screenDc, IntPtr hwnd, ScreenRect area, out ScreenRect capturedBounds, out byte[] pixels)
+    {
+        capturedBounds = default;
+        pixels = Array.Empty<byte>();
+        if (hwnd == IntPtr.Zero || area.IsEmpty) return false;
+        if (!NativeMethods.GetWindowRect(hwnd, out var wr)) return false;
+        int winW = wr.Right - wr.Left;
+        int winH = wr.Bottom - wr.Top;
+        if (winW <= 0 || winH <= 0 || (long)winW * winH > Ocr.ScreenCapture.MaxLargeReusedPixels) return false;
+
+        var winScreenRect = new ScreenRect(wr.Left, wr.Top, winW, winH);
+        var clipped = area.Intersect(winScreenRect);
+        if (clipped.IsEmpty) return false;
+
+        lock (_gate)
+        {
+            try
+            {
+                EnsureSize(screenDc, winW, winH);
+                NativeMethods.RtlZeroMemory(_bits, (UIntPtr)((long)winW * winH * 4));
+                if (!NativeMethods.PrintWindow(hwnd, _memoryDc, NativeMethods.PW_RENDERFULLCONTENT))
+                    return false;
+
+                NativeMethods.GdiFlush();
+
+                int cropX = clipped.X - winScreenRect.X;
+                int cropY = clipped.Y - winScreenRect.Y;
+                int cropW = clipped.Width;
+                int cropH = clipped.Height;
+                var result = new byte[checked(cropW * cropH * 4)];
+
+                if (cropX == 0 && cropY == 0 && cropW == winW && cropH == winH)
+                {
+                    Marshal.Copy(_bits, result, 0, result.Length);
+                }
+                else
+                {
+                    int srcStride = winW * 4;
+                    int dstStride = cropW * 4;
+                    for (int row = 0; row < cropH; row++)
+                    {
+                        IntPtr srcRow = IntPtr.Add(_bits, (cropY + row) * srcStride + cropX * 4);
+                        Marshal.Copy(srcRow, result, row * dstStride, dstStride);
+                    }
+                }
+
+                // Verify the DWM buffer isn't completely empty/black (e.g. minimized or exclusive-fullscreen surface).
+                if (!HasAnyVisiblePixel(result))
+                    return false;
+
+                capturedBounds = clipped;
+                pixels = result;
+                return true;
+            }
+            catch
+            {
+                FreeLocked();
+                return false;
+            }
+        }
+    }
+
+    private static bool HasAnyVisiblePixel(ReadOnlySpan<byte> bgra)
+    {
+        // Check every 16th pixel (stride 64 bytes) first for speed, then full scan if needed.
+        for (int i = 0; i + 2 < bgra.Length; i += 64)
+        {
+            if ((bgra[i] | bgra[i + 1] | bgra[i + 2]) != 0) return true;
+        }
+
+        for (int i = 0; i + 2 < bgra.Length; i += 4)
+        {
+            if ((bgra[i] | bgra[i + 1] | bgra[i + 2]) != 0) return true;
+        }
+
+        return false;
+    }
+
     /// <summary>Frees the GDI handles (waits for a capture in progress to finish first).</summary>
     public void Dispose()
     {

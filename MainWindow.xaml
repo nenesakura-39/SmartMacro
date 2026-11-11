@@ -237,6 +237,21 @@
                             </Border>
                         </Popup>
 
+                        <!-- Live Recording Telemetry Pill -->
+                        <Border CornerRadius="6" Padding="8,4" Margin="0,0,6,0"
+                                Background="{DynamicResource ErrorSoftBrush}"
+                                BorderBrush="{DynamicResource ErrorBrush}" BorderThickness="1"
+                                VerticalAlignment="Center"
+                                ToolTip="Live recording telemetry: elapsed time and captured input events"
+                                Visibility="{Binding IsRecording, Converter={StaticResource BoolToVisibility}}">
+                            <StackPanel Orientation="Horizontal">
+                                <Ellipse Width="7" Height="7" Fill="{DynamicResource ErrorBrush}" VerticalAlignment="Center" />
+                                <TextBlock Text="{Binding RecordingTelemetryText}" FontFamily="{StaticResource MonoFont}"
+                                           FontSize="11" FontWeight="SemiBold" Foreground="{DynamicResource ErrorBrush}"
+                                           Margin="6,0,0,0" VerticalAlignment="Center" />
+                            </StackPanel>
+                        </Border>
+
                         <!-- Stop Recording -->
                         <Button Style="{StaticResource DangerButton}" Height="28" Padding="10,0" Margin="0,0,6,0"
                                 WindowChrome.IsHitTestVisibleInChrome="True"
@@ -434,8 +449,8 @@
                         <RowDefinition Height="Auto" />
                     </Grid.RowDefinitions>
 
-                    <!-- Animated Page Host (160ms CubicEase fade + 8px vertical slide) -->
-                    <ctrl:TransitionContentControl Grid.Row="0" Content="{Binding CurrentPageViewModel}"
+                    <!-- Animated Page Host (cached views + 140ms CubicEase fade + 6px vertical slide) -->
+                    <ctrl:TransitionContentControl x:Name="PageHost" Grid.Row="0" ActivePage="{Binding CurrentPageViewModel}"
                                                    Focusable="False" Margin="14,10,14,8" />
 
                     <!-- Compact Activity Log Drawer (outside Editor page; Editor has its own tabbed bottom dock) -->
@@ -488,9 +503,18 @@
                     BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,1,0,0"
                     Padding="14,0">
                 <DockPanel>
-                    <!-- Right: Shortcuts + Library count + Unsaved indicator -->
+                    <!-- Right: Shortcuts + Hardware Acceleration Badge + Library count + Unsaved indicator -->
                     <TextBlock DockPanel.Dock="Right" Foreground="{DynamicResource MutedTextBrush}" FontSize="11.5"
                                Text="{Binding Library.CountText}" VerticalAlignment="Center" />
+
+                    <Border DockPanel.Dock="Right" Width="1" Height="12" Background="{DynamicResource BorderBrush}" Margin="12,0" />
+
+                    <Border DockPanel.Dock="Right" CornerRadius="5" Padding="6,1" VerticalAlignment="Center"
+                            Background="{DynamicResource VisionSoftBrush}" BorderBrush="{DynamicResource VisionAccentBrush}" BorderThickness="0.8"
+                            ToolTip="{Binding HardwareAccelerationStatus}">
+                        <TextBlock Text="{Binding HardwareBadgeText}" FontFamily="{StaticResource MonoFont}" FontSize="10.5"
+                                   FontWeight="SemiBold" Foreground="{DynamicResource VisionAccentBrush}" />
+                    </Border>
 
                     <Border DockPanel.Dock="Right" Width="1" Height="12" Background="{DynamicResource BorderBrush}" Margin="12,0" />
 

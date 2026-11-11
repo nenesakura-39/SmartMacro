@@ -41,20 +41,37 @@ internal static class NativeMethods
 
     public const int WM_KEYDOWN = 0x0100;
     public const int WM_KEYUP = 0x0101;
+    public const int WM_CHAR = 0x0102;
     public const int WM_SYSKEYDOWN = 0x0104;
     public const int WM_SYSKEYUP = 0x0105;
     public const int WM_MOUSEMOVE = 0x0200;
     public const int WM_LBUTTONDOWN = 0x0201;
     public const int WM_LBUTTONUP = 0x0202;
+    public const int WM_LBUTTONDBLCLK = 0x0203;
     public const int WM_RBUTTONDOWN = 0x0204;
     public const int WM_RBUTTONUP = 0x0205;
+    public const int WM_RBUTTONDBLCLK = 0x0206;
     public const int WM_MBUTTONDOWN = 0x0207;
     public const int WM_MBUTTONUP = 0x0208;
+    public const int WM_MBUTTONDBLCLK = 0x0209;
     public const int WM_MOUSEWHEEL = 0x020A;
     public const int WM_XBUTTONDOWN = 0x020B;
     public const int WM_XBUTTONUP = 0x020C;
     public const int WM_MOUSEHWHEEL = 0x020E;
     public const int WM_HOTKEY = 0x0312;
+
+    public const uint MK_LBUTTON = 0x0001;
+    public const uint MK_RBUTTON = 0x0002;
+    public const uint MK_SHIFT = 0x0004;
+    public const uint MK_CONTROL = 0x0008;
+    public const uint MK_MBUTTON = 0x0010;
+    public const uint MK_XBUTTON1 = 0x0020;
+    public const uint MK_XBUTTON2 = 0x0040;
+
+    public const uint PW_RENDERFULLCONTENT = 0x00000002;
+    public const uint CWP_SKIPINVISIBLE = 0x0001;
+    public const uint CWP_SKIPDISABLED = 0x0002;
+    public const uint CWP_SKIPTRANSPARENT = 0x0004;
 
     public const uint LLKHF_EXTENDED = 0x01;
     public const uint LLKHF_INJECTED = 0x10;
@@ -324,6 +341,24 @@ internal static class NativeMethods
     [DllImport("gdi32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     public static extern bool DeleteDC(IntPtr hdc);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool PrintWindow(IntPtr hwnd, IntPtr hdcBlt, uint nFlags);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool ScreenToClient(IntPtr hWnd, ref POINT lpPoint);
+
+    [DllImport("user32.dll")]
+    public static extern IntPtr ChildWindowFromPointEx(IntPtr hwndParent, POINT pt, uint uFlags);
+
+    public static IntPtr MakeLParam(int lowWord, int highWord) =>
+        new(((highWord & 0xFFFF) << 16) | (lowWord & 0xFFFF));
 
     // ---- Window helpers ----
     public const uint WDA_NONE = 0x00000000;
@@ -609,6 +644,9 @@ internal static class NativeMethods
     [DllImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     public static extern bool CloseHandle(IntPtr hObject);
+
+    [DllImport("kernel32.dll", EntryPoint = "RtlZeroMemory", SetLastError = false)]
+    public static extern void RtlZeroMemory(IntPtr dest, UIntPtr size);
 
     [DllImport("winmm.dll")]
     public static extern uint timeBeginPeriod(uint uPeriod);

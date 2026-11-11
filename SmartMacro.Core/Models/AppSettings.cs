@@ -142,6 +142,13 @@ public sealed class AppSettings
     public bool SmartTimingOnRecord { get; set; } = true;
 
     /// <summary>
+    /// Smart Typing Coalescer: when converting Smart / Desktop recordings, runs of 2+ printable keystrokes separated by
+    /// short pauses (&lt;= 600 ms) are grouped into a single editable "Type text" step (while single keys like WASD and
+    /// shortcuts like Ctrl+C remain individual KeyPress steps). On by default.
+    /// </summary>
+    public bool CoalesceTypedTextOnRecord { get; set; } = true;
+
+    /// <summary>
     /// Playback: a cursor jump right after a Delay glides there smoothly (~120 updates per second) during the end of
     /// that Delay instead of teleporting, so menus, sliders and games see real movement. Total timing is unchanged.
     /// On by default (also for settings files made before it existed).
@@ -180,6 +187,12 @@ public sealed class AppSettings
     /// instead of exiting, so per-macro hotkeys, schedules, and window triggers keep running in the background.
     /// </summary>
     public bool MinimizeToTrayOnClose { get; set; }
+
+    /// <summary>
+    /// Evergreen Upgrade: when enabled, registers SmartMacro in Windows Startup (<c>HKCU\...\Run</c>) with <c>--tray</c>
+    /// so it starts quietly in the system tray when the user signs in to Windows.
+    /// </summary>
+    public bool StartWithWindows { get; set; }
 
     /// <summary>
     /// v1.5 "Context": when enabled (default), macros assigned to a Profile only arm their triggers when a matching

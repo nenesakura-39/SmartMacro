@@ -198,7 +198,7 @@
                                    Grid.Column="1"
                                    Text="INITIALIZING CORE SUBSYSTEMS"
                                    Foreground="#94A3B8"
-                                   FontFamily="Consolas, Segoe UI"
+                                   FontFamily="Consolas, Segoe UI, Segoe UI Emoji, Segoe UI Symbol"
                                    FontSize="10.5"
                                    FontWeight="SemiBold"
                                    VerticalAlignment="Center" />
@@ -207,7 +207,7 @@
                                    Grid.Column="2"
                                    Text="0%"
                                    Foreground="#E2E8F0"
-                                   FontFamily="Consolas, Segoe UI"
+                                   FontFamily="Consolas, Segoe UI, Segoe UI Emoji, Segoe UI Symbol"
                                    FontSize="11"
                                    FontWeight="Bold"
                                    VerticalAlignment="Center" />

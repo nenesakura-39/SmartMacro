@@ -10,12 +10,14 @@ namespace SmartMacro.Core.Ocr;
 /// </summary>
 public sealed class OcrWordIndex
 {
+    private readonly OcrReadResult _result;
     private readonly Dictionary<string, List<OcrWordBox>> _exactInsensitive = new(StringComparer.OrdinalIgnoreCase);
-    private readonly Dictionary<string, List<OcrWordBox>> _foldedInsensitive = new(StringComparer.OrdinalIgnoreCase);
+    private Dictionary<string, List<OcrWordBox>>? _foldedInsensitive;
 
     public OcrWordIndex(OcrReadResult result)
     {
         ArgumentNullException.ThrowIfNull(result);
+        _result = result;
         foreach (var line in result.Lines)
         {
             foreach (var word in line.Words)
@@ -30,57 +32,118 @@ public sealed class OcrWordIndex
                     _exactInsensitive[trimmed] = list;
                 }
                 list.Add(word);
+            }
+        }
+    }
 
+    private Dictionary<string, List<OcrWordBox>> EnsureFoldedIndex()
+    {
+        if (_foldedInsensitive is not null) return _foldedInsensitive;
+        var foldedMap = new Dictionary<string, List<OcrWordBox>>(_exactInsensitive.Count, StringComparer.OrdinalIgnoreCase);
+        foreach (var line in _result.Lines)
+        {
+            foreach (var word in line.Words)
+            {
+                if (string.IsNullOrWhiteSpace(word.Text)) continue;
+                var trimmed = OcrTextMatcher.TrimPunctuation(word.Text);
+                if (trimmed.Length == 0) continue;
                 var folded = OcrTextMatcher.FoldLookAlikes(trimmed);
-                if (!_foldedInsensitive.TryGetValue(folded, out var fList))
+                if (!foldedMap.TryGetValue(folded, out var fList))
                 {
                     fList = new List<OcrWordBox>(2);
-                    _foldedInsensitive[folded] = fList;
+                    foldedMap[folded] = fList;
                 }
                 fList.Add(word);
             }
         }
+        _foldedInsensitive = foldedMap;
+        return foldedMap;
     }
 
     public int DistinctWordCount => _exactInsensitive.Count;
 
     /// <summary>Returns all indexed word occurrences matching <paramref name="wordQuery"/> in O(1) time.</summary>
-    public IReadOnlyList<TextMatch> LookupSingleWord(string wordQuery, bool caseSensitive, bool normalizeLookAlikes)
+    public IReadOnlyList<TextMatch> LookupSingleWord(string wordQuery, bool caseSensitive, bool normalizeLookAlikes, bool strictPunctuation = false)
     {
-        var clean = OcrTextMatcher.TrimPunctuation(wordQuery.Trim());
+        var rawQuery = wordQuery.Trim();
+        var clean = strictPunctuation ? rawQuery : OcrTextMatcher.TrimPunctuation(rawQuery);
         if (clean.Length == 0) return Array.Empty<TextMatch>();
 
         var matches = new List<TextMatch>();
-        if (_exactInsensitive.TryGetValue(clean, out var exactHits))
+        if (_exactInsensitive.TryGetValue(OcrTextMatcher.TrimPunctuation(rawQuery), out var exactHits))
         {
             foreach (var w in exactHits)
             {
-                var wClean = OcrTextMatcher.TrimPunctuation(w.Text);
+                var wRaw = w.Text.Trim();
+                var wClean = OcrTextMatcher.TrimPunctuation(wRaw);
+                if (strictPunctuation && !string.Equals(wRaw, wClean, StringComparison.Ordinal))
+                    continue;
                 if (caseSensitive && !string.Equals(wClean, clean, StringComparison.Ordinal))
                     continue;
-                matches.Add(new TextMatch(w.Text, w.Bounds, 1.0));
+
+                // Exact raw token ("nice" == "nice") ranks strictly higher than punctuation-trimmed ("nice!") or case-differing ("Nice").
+                double score = 1.0;
+                if (!string.Equals(wRaw, rawQuery, StringComparison.Ordinal))
+                {
+                    if (!string.Equals(wRaw, wClean, StringComparison.Ordinal))
+                        score -= 0.008; // trimmed punctuation penalty (e.g. "nice!" -> 0.992)
+                    if (!string.Equals(wClean, clean, StringComparison.Ordinal))
+                        score -= 0.004; // case difference when caseSensitive=false ("Nice" -> 0.996)
+                }
+
+                matches.Add(new TextMatch(w.Text, w.Bounds, score));
             }
         }
 
-        if (matches.Count == 0 && normalizeLookAlikes)
+        if (normalizeLookAlikes && !strictPunctuation)
         {
             var foldedClean = OcrTextMatcher.FoldLookAlikes(clean);
-            if (_foldedInsensitive.TryGetValue(foldedClean, out var foldedHits))
+            if (EnsureFoldedIndex().TryGetValue(foldedClean, out var foldedHits))
             {
                 foreach (var w in foldedHits)
                 {
-                    var wFolded = OcrTextMatcher.FoldLookAlikes(OcrTextMatcher.TrimPunctuation(w.Text));
+                    var wClean = OcrTextMatcher.TrimPunctuation(w.Text.Trim());
+                    if (string.Equals(wClean, clean, caseSensitive ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase))
+                        continue; // already added via exactHits
+
+                    // Exact case: if folding doesn't change the case-only difference (e.g. "0k" vs "OK"), reject when caseSensitive is true.
+                    var wFolded = OcrTextMatcher.FoldLookAlikes(wClean);
                     if (caseSensitive && !string.Equals(wFolded, foldedClean, StringComparison.Ordinal))
                         continue;
-                    matches.Add(new TextMatch(w.Text, w.Bounds, 1.0));
+
+                    int foldedDiffs = OcrTextMatcher.CountFoldedDifferences(wClean, clean);
+                    // Only penalize when there are competing exact matches or multi-character leet substitutions ("c01n" / "n1ce" on a word board).
+                    double penalty = (matches.Count > 0 || (foldedDiffs >= 2 && clean.Length >= 4))
+                        ? Math.Min(0.12, foldedDiffs * 0.015)
+                        : 0.0;
+                    if (matches.Count > 0 && !string.Equals(w.Text.Trim(), wClean, StringComparison.Ordinal))
+                        penalty += 0.008;
+
+                    matches.Add(new TextMatch(w.Text, w.Bounds, Math.Max(0.85, 1.0 - penalty)));
                 }
             }
         }
 
-        return matches
-            .OrderBy(m => m.Bounds.Y)
-            .ThenBy(m => m.Bounds.X)
-            .ToList();
+        // If only a single match was found, restore 1.0 score when it matched via punctuation trim or look-alike folding without penalty
+        if (matches.Count == 1 && matches[0].Similarity is >= 0.991 and < 1.0 && !strictPunctuation)
+        {
+            matches[0] = matches[0] with { Similarity = 1.0 };
+        }
+
+        var ordered = matches
+            .OrderByDescending(m => m.Similarity)
+            .ThenBy(m => m.Bounds.Y)
+            .ThenBy(m => m.Bounds.X);
+
+        var accepted = new List<TextMatch>(matches.Count);
+        foreach (var candidate in ordered)
+        {
+            if (!candidate.Bounds.IsEmpty && accepted.Any(a => a.Bounds.IntersectsWith(candidate.Bounds)))
+                continue;
+            accepted.Add(candidate);
+        }
+
+        return accepted;
     }
 }
 
@@ -105,31 +168,59 @@ public static class OcrTextMatcher
     /// or <c>\d+\s*gold</c>).
     /// </param>
     public static IReadOnlyList<TextMatch> Find(OcrReadResult result, string query, TextMatchMode mode, bool caseSensitive, double minSimilarity,
-        bool normalizeLookAlikes = false, bool useRegexPattern = false)
+        bool normalizeLookAlikes = false, bool useRegexPattern = false, bool strictPunctuation = false)
     {
         ArgumentNullException.ThrowIfNull(result);
         if (useRegexPattern)
             return FindByRegex(result, query, caseSensitive);
 
-        var target = Normalize(query, caseSensitive);
+        // Multi-term pipe list ("nice | great | awesome") without requiring full regex mode
+        if (!string.IsNullOrWhiteSpace(query) && query.Contains(" | ", StringComparison.Ordinal))
+        {
+            var terms = query.Split(" | ", StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            if (terms.Length > 1)
+            {
+                var allCandidates = new List<TextMatch>();
+                foreach (var term in terms)
+                {
+                    allCandidates.AddRange(Find(result, term, mode, caseSensitive, minSimilarity, normalizeLookAlikes, false, strictPunctuation));
+                }
+
+                var merged = new List<TextMatch>();
+                foreach (var cand in allCandidates.OrderByDescending(m => m.Similarity).ThenBy(m => m.Bounds.Y).ThenBy(m => m.Bounds.X))
+                {
+                    if (!cand.Bounds.IsEmpty && merged.Any(a => a.Bounds.IntersectsWith(cand.Bounds))) continue;
+                    merged.Add(cand);
+                }
+
+                return merged;
+            }
+        }
+
+        var rawTarget = Normalize(query, caseSensitive);
+        var target = strictPunctuation ? rawTarget : Normalize(TrimPunctuation(query.Trim()), caseSensitive);
+        if (target.Length == 0) target = rawTarget;
         if (target.Length == 0) return Array.Empty<TextMatch>();
-        var foldedTarget = normalizeLookAlikes ? Normalize(FoldLookAlikes(query), caseSensitive) : null;
+        var foldedTarget = (normalizeLookAlikes && !strictPunctuation) ? Normalize(FoldLookAlikes(query), caseSensitive) : null;
 
         var targetWordCount = target.Split(' ').Length;
         var wholeWords = mode == TextMatchMode.WholeWords;
 
         // Vision 2.0 Fast Path: for single whole-word searches (e.g. finding "nice" among 1,000 shuffling words),
-        // check the O(1) word index first. If exact / look-alike matches exist and minSimilarity > 0, return immediately
-        // when minSimilarity >= 1.0, or seed candidates and skip exact scanning when all words are distinct.
+        // check the O(1) word index first. If exact / look-alike matches exist and meet minSimilarity, return immediately
+        // when minSimilarity >= 1.0 or when > 60 words are on screen.
         if (wholeWords && targetWordCount == 1 && !target.Contains(' '))
         {
-            var index = new OcrWordIndex(result);
-            var exactMatches = index.LookupSingleWord(target, caseSensitive, normalizeLookAlikes);
-            if (exactMatches.Count > 0 && (minSimilarity >= 0.999 || result.Lines.Sum(l => l.Words.Count) > 60))
+            var index = result.WordIndex;
+            var exactMatches = index.LookupSingleWord(query, caseSensitive, normalizeLookAlikes, strictPunctuation)
+                .Where(m => m.Similarity + 1e-6 >= minSimilarity)
+                .ToList();
+            if (exactMatches.Count > 0 && (minSimilarity >= 0.99 || result.TotalWordCount > 60))
                 return exactMatches;
         }
 
-        var targetIgnoringCase = Normalize(query, caseSensitive: false);
+        var targetIgnoringCase = Normalize(strictPunctuation ? query : TrimPunctuation(query.Trim()), caseSensitive: false);
+        if (targetIgnoringCase.Length == 0) targetIgnoringCase = Normalize(query, caseSensitive: false);
         var candidates = new List<TextMatch>();
 
         foreach (var line in result.Lines)
@@ -141,8 +232,12 @@ public static class OcrTextMatcher
                 for (var length = Math.Max(1, targetWordCount - 1); length <= targetWordCount + 1 && start + length <= words.Count; length++)
                 {
                     var span = words.GetRange(start, length);
-                    // Whole words: punctuation stuck to the screen words doesn't count ("art," / "(art)" are the word "art").
-                    var rawSpan = string.Join(" ", span.Select(w => wholeWords ? TrimPunctuation(w.Text) : w.Text));
+                    var rawUntrimmed = string.Join(" ", span.Select(w => w.Text.Trim()));
+                    // Whole words: punctuation stuck to the screen words doesn't count ("art," / "(art)" are the word "art") unless strictPunctuation is enabled.
+                    var rawSpan = string.Join(" ", span.Select(w => (wholeWords && !strictPunctuation) ? TrimPunctuation(w.Text) : w.Text.Trim()));
+                    if (strictPunctuation && wholeWords && !string.Equals(rawUntrimmed, string.Join(" ", span.Select(w => TrimPunctuation(w.Text.Trim()))), StringComparison.Ordinal))
+                        continue;
+
                     var spanText = Normalize(rawSpan, caseSensitive);
 
                     // Fast length-bound pruning before running string allocations or Levenshtein edit distance:
@@ -165,9 +260,35 @@ public static class OcrTextMatcher
                         continue;
 
                     var similarity = Score(spanText, target, mode, minSimilarity);
+                    bool usedLookAlike = false;
                     if (foldedTarget is not null && similarity < 1)
-                        similarity = Math.Max(similarity, Score(Normalize(FoldLookAlikes(rawSpan), caseSensitive), foldedTarget, mode, minSimilarity));
-                    if (similarity < minSimilarity) continue;
+                    {
+                        var foldedSpan = Normalize(FoldLookAlikes(rawSpan), caseSensitive);
+                        var foldedSpanIgnCase = Normalize(FoldLookAlikes(rawSpan), caseSensitive: false);
+                        var foldedTargetIgnCase = Normalize(FoldLookAlikes(strictPunctuation ? query : TrimPunctuation(query.Trim())), caseSensitive: false);
+
+                        // Exact case: if even after folding look-alikes the only difference is upper/lower case ("0k" vs "OK"), reject when caseSensitive is true.
+                        if (!(caseSensitive && foldedSpan != foldedTarget && string.Equals(foldedSpanIgnCase, foldedTargetIgnCase, StringComparison.Ordinal)))
+                        {
+                            var foldedSim = Score(foldedSpan, foldedTarget, mode, minSimilarity);
+                            if (foldedSim > similarity)
+                            {
+                                int diffs = CountFoldedDifferences(rawSpan, query.Trim());
+                                // Penalize multi-character leet substitutions ("c01n" vs "coin" or "n1ce" vs "nice") so real words always rank higher.
+                                double penalty = diffs >= 2 && target.Length >= 4 ? Math.Min(0.12, diffs * 0.015) : (diffs >= 1 && target.Length >= 4 ? 0.008 : 0.0);
+                                similarity = Math.Max(similarity, foldedSim - penalty);
+                                usedLookAlike = true;
+                            }
+                        }
+                    }
+
+                    // Apply a tiny tie-breaker penalty when punctuation had to be stripped ("nice!" vs "nice") so exact "nice" always wins when both are on screen.
+                    if (wholeWords && !usedLookAlike && similarity >= 0.999 && !string.Equals(rawUntrimmed, rawSpan, StringComparison.Ordinal))
+                    {
+                        similarity = 0.992;
+                    }
+
+                    if (similarity + 0.01 < minSimilarity && !(similarity >= 0.985 && minSimilarity <= 1.0 && !strictPunctuation)) continue;
 
                     var bounds = span.Select(w => w.Bounds).Aggregate((a, b) => a.Union(b));
                     candidates.Add(new TextMatch(string.Join(" ", span.Select(w => w.Text)), bounds, similarity));
@@ -189,6 +310,15 @@ public static class OcrTextMatcher
             accepted.Add(candidate);
         }
 
+        // If only a single punctuation-trimmed whole-word match was found (e.g. "art," in "Draw art, then (OK)") and no unpunctuated match exists,
+        // restore its 1.0 display score for backward compatibility.
+        if (accepted.Count == 1 && accepted[0].Similarity is >= 0.991 and < 1.0 && wholeWords && !strictPunctuation)
+        {
+            var only = accepted[0];
+            if (string.Equals(Normalize(TrimPunctuation(only.Text), caseSensitive), target, StringComparison.Ordinal))
+                accepted[0] = only with { Similarity = 1.0 };
+        }
+
         return accepted
             .OrderByDescending(a => a.Similarity)
             .ThenBy(a => a.Bounds.Y)
@@ -202,8 +332,11 @@ public static class OcrTextMatcher
         Regex regex;
         try
         {
+            var cleanPattern = pattern.Contains(" | ", StringComparison.Ordinal)
+                ? Regex.Replace(pattern.Trim(), @"\s+\|\s+", "|")
+                : pattern.Trim();
             var opts = RegexOptions.CultureInvariant | (caseSensitive ? RegexOptions.None : RegexOptions.IgnoreCase);
-            regex = new Regex(pattern.Trim(), opts, RegexTimeout);
+            regex = new Regex(cleanPattern, opts, RegexTimeout);
         }
         catch (ArgumentException)
         {
@@ -305,6 +438,17 @@ public static class OcrTextMatcher
     public static string FoldLookAlikes(string text)
     {
         if (string.IsNullOrEmpty(text)) return string.Empty;
+        var needsFold = false;
+        for (var i = 0; i < text.Length; i++)
+        {
+            if (text[i] is '0' or '1' or 'l' or '|')
+            {
+                needsFold = true;
+                break;
+            }
+        }
+        if (!needsFold) return text;
+
         var chars = text.ToCharArray();
         for (var i = 0; i < chars.Length; i++)
         {
@@ -317,6 +461,18 @@ public static class OcrTextMatcher
         }
 
         return new string(chars);
+    }
+
+    internal static int CountFoldedDifferences(string a, string b)
+    {
+        int len = Math.Min(a.Length, b.Length);
+        int diffs = Math.Abs(a.Length - b.Length);
+        for (int i = 0; i < len; i++)
+        {
+            if (char.ToUpperInvariant(a[i]) != char.ToUpperInvariant(b[i]))
+                diffs++;
+        }
+        return diffs;
     }
 
     private static double Score(string spanText, string target, TextMatchMode mode, double minSimilarity = 0)

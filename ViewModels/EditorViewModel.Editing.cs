@@ -472,6 +472,60 @@ public sealed partial class EditorViewModel : ObservableObject
     }
 
     /// <summary>
+    /// "⌨ Merge keys → Type Text": coalesces runs of 2 or more printable <see cref="KeyPressStep"/> taps (including Shift
+    /// casing and Backspace corrections) separated by short delays (&lt;= 600 ms) into a single <see cref="TypeTextStep"/>.
+    /// With several steps selected, only those are merged; otherwise the whole macro.
+    /// </summary>
+    private void MergeKeystrokesToText()
+    {
+        if (!HasMacro) return;
+        var selected = SelectedInOrder();
+        var models = Steps.Select(s => s.Model).ToList();
+        var first = 0;
+        var last = models.Count - 1;
+        var scope = "the macro";
+        if (selected.Count > 1)
+        {
+            first = Steps.IndexOf(selected[0]);
+            last = Steps.IndexOf(selected[^1]);
+            scope = "the selected steps";
+        }
+
+        var before = Snapshot();
+        var result = StepCleanup.CoalesceKeystrokesToTypeText(models, first, last);
+        if (result.CreatedTypeSteps <= 0)
+        {
+            _setStatus($"Nothing to merge in {scope}: no runs of 2+ consecutive printable KeyPress steps.", StatusKind.Info);
+            return;
+        }
+
+        _history.Record(before);
+        RaiseHistoryChanged();
+
+        var existing = new Dictionary<MacroStep, StepViewModel>(ReferenceEqualityComparer.Instance);
+        foreach (var vm in Steps) existing[vm.Model] = vm;
+        var keepSelected = SelectedStep is { } current && result.Steps.Contains(current.Model) ? current : null;
+        foreach (var old in Steps) old.Modified -= OnStepModified;
+        _suspendStepsChanged = true;
+        try
+        {
+            Steps.Clear();
+            foreach (var step in result.Steps)
+                Steps.Add(existing.TryGetValue(step, out var kept) ? kept : CreateStepViewModel(step));
+        }
+        finally
+        {
+            _suspendStepsChanged = false;
+        }
+        OnStepsChanged(Steps, new NotifyCollectionChangedEventArgs(NotifyCollectionChangedAction.Reset));
+
+        _selection.Clear();
+        SelectedStep = keepSelected ?? Steps.ElementAtOrDefault(Math.Min(first, Steps.Count - 1));
+        Touch();
+        _setStatus($"⌨ Merged keystrokes into {result.CreatedTypeSteps} Type text step(s) in {scope} ({result.RemovedSteps:N0} fewer steps). Ctrl+Z undoes it.", StatusKind.Success);
+    }
+
+    /// <summary>
     /// Deletes the selected steps. Deleting an If / Repeat (or its End If / End Repeat) also removes the other markers
     /// of that block (If, Else, End If / Repeat, End Repeat) but keeps the steps that were inside, so a delete can
     /// never leave an orphan End If / Else / End Repeat behind (see <see cref="StepListEditing.PlanDelete"/>).

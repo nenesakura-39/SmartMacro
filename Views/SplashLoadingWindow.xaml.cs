@@ -71,11 +71,24 @@ public partial class SplashLoadingWindow : Window
 
         fadeOut.Completed += (_, _) =>
         {
-            if (Resources["ReactorSpinStoryboard"] is Storyboard sb)
-                sb.Stop(this);
-            Close();
-            tcs.TrySetResult();
+            try
+            {
+                if (Resources["ReactorSpinStoryboard"] is Storyboard sb)
+                    sb.Stop(this);
+                if (IsLoaded)
+                    Close();
+            }
+            catch
+            {
+                // Window was already closed before the fade-out animation finished.
+            }
+            finally
+            {
+                tcs.TrySetResult();
+            }
         };
+
+        Closed += (_, _) => tcs.TrySetResult();
 
         BeginAnimation(OpacityProperty, fadeOut);
         RootScale.BeginAnimation(System.Windows.Media.ScaleTransform.ScaleXProperty, scaleOut);

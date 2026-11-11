@@ -117,7 +117,7 @@ public static class FeedbackPresets
             "Moves instantly at steady speed with minimal coasting"),
         new FeedbackBehaviorCard(
             FeedbackQuickPreset.FloatyBar,
-            "🪶",
+            "🍃",
             "Floaty Bar",
             "Slow acceleration and soft damping for delicate drift bars"),
     };
@@ -127,11 +127,11 @@ public static class FeedbackPresets
     {
         FeedbackGamePreset.FischMomentumBar => "🧲 Momentum Bar (Smart PD + Hover Pulse)",
         FeedbackGamePreset.FastReflexTracker => "⚡ Snap Bar (Fast Reflex Tracker)",
-        FeedbackGamePreset.SmoothBalanceBar => "🪶 Floaty Bar (Smooth Balance)",
-        FeedbackGamePreset.Slayers2HorizontalBar => "🪶 Floaty Bar (Gentle Drift)",
+        FeedbackGamePreset.SmoothBalanceBar => "🍃 Floaty Bar (Smooth Balance)",
+        FeedbackGamePreset.Slayers2HorizontalBar => "🍃 Floaty Bar (Gentle Drift)",
         FeedbackGamePreset.VerticalBarStardewGpo => "⬇️ Gravity Bar (Hold to Rise)",
         FeedbackGamePreset.InstantBinaryZeroGravity => "⚡ Snap Bar (Zero Gravity)",
-        _ => "🪶 Floaty Bar (Smooth Balance)",
+        _ => "🍃 Floaty Bar (Smooth Balance)",
     };
 
     /// <summary>The label of a quick tuning preset, as shown in the Behavior Card Selector.</summary>
@@ -140,7 +140,7 @@ public static class FeedbackPresets
         FeedbackQuickPreset.MomentumBar => "🧲 Momentum Bar (Heavy Glide)",
         FeedbackQuickPreset.GravityBar => "⬇️ Gravity Bar (Hold to Rise)",
         FeedbackQuickPreset.SnapBar => "⚡ Snap Bar (Instant Response)",
-        FeedbackQuickPreset.FloatyBar => "🪶 Floaty Bar (Gentle Drift)",
+        FeedbackQuickPreset.FloatyBar => "🍃 Floaty Bar (Gentle Drift)",
         _ => "🧲 Momentum Bar (Heavy Glide)",
     };
 
@@ -348,6 +348,18 @@ public static class FeedbackPresets
                 step.FinishWhenInZone = true;
                 step.ControlMode = FeedbackControlMode.ClassicSimpleHold; // a timing click, not tracking
                 step.MaxRuntimeMs = ZoneClickMaxRuntimeMs;
+                step.WhenTimeUp = LoopLimitBehavior.ExitLoop;
+                step.WhenTargetLost = FeedbackLostAction.ReleaseAndWait;
+                break;
+
+            case FeedbackPreset.CastingHoldRelease:
+                SetZoneEntryAction(step, releaseHeldInput: true);
+                step.DeadBandPercent = 0;
+                step.FinishWhenInZone = true;
+                step.ControlMode = FeedbackControlMode.ClassicSimpleHold;
+                step.MaxCapturesPerSecond = SmartCapturesPerSecond;
+                step.MinInputChangeMs = SmartMinInputChangeMs;
+                step.MaxRuntimeMs = 6_000;
                 step.WhenTimeUp = LoopLimitBehavior.ExitLoop;
                 step.WhenTargetLost = FeedbackLostAction.ReleaseAndWait;
                 break;

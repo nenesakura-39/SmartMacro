@@ -124,6 +124,47 @@ public sealed partial class PlaybackEngine
                 var onFoundTarget = false;     // clicking something vision found (last found spot / Smart-Aim match)
                 // Humanize moves real clicks a few pixels (never a plain Down / Up, which may belong to a recorded drag).
                 var jitters = c.Action is MouseClickAction.Click or MouseClickAction.DoubleClick or MouseClickAction.Hold;
+                if (c.SendInBackground && c.Action != MouseClickAction.Drag)
+                {
+                    var bgTitle = InterpolateActive(c.BackgroundWindowTitle);
+                    (int X, int Y) bgSpot = (c.X, c.Y);
+                    if (c.UseLastFoundText)
+                    {
+                        if (_lastFound is not { } center)
+                        {
+                            Message?.Invoke(this, SkippedClickNoTarget);
+                            break;
+                        }
+                        bgSpot = (center.X + c.OffsetX, center.Y + c.OffsetY);
+                    }
+                    else if (!c.UseCurrentPosition)
+                    {
+                        if (c.UseSmartIntent)
+                        {
+                            (bgSpot, _) = await SmartIntentAsync(c, token).ConfigureAwait(false);
+                            SyncTimelineToNow();
+                        }
+                        else if (c.SmartAimAtTarget && c.HasTargetThumbnail)
+                        {
+                            (bgSpot, _) = await SmartAimAsync(c, token).ConfigureAwait(false);
+                            SyncTimelineToNow();
+                        }
+                    }
+                    else if (_input.TryGetCursorPosition(out var cx, out var cy))
+                    {
+                        bgSpot = (cx, cy);
+                    }
+
+                    var bgHold = c.HoldMs > 0 ? (int)Math.Round(ScaledHoldMs(c.HoldMs, speed)) : 0;
+                    if (!_input.SendBackgroundMouseClick(bgTitle, c.Button, c.Action, bgSpot.X, bgSpot.Y, bgHold))
+                    {
+                        Message?.Invoke(this, $"👻 Background click: window \"{bgTitle}\" was not found.");
+                    }
+                    await WaitAfterClickAsync(c, speed, token).ConfigureAwait(false);
+                    SyncTimelineToNow();
+                    break;
+                }
+
                 if (c.UseLastFoundText)
                 {
                     // "On the last found spot": its center plus the step's offset (e.g. a cell 100 px right of a board).
@@ -256,6 +297,18 @@ public sealed partial class PlaybackEngine
 
             case KeyPressStep k:
             {
+                if (k.SendInBackground)
+                {
+                    var bgTitle = InterpolateActive(k.BackgroundWindowTitle);
+                    var bgHold = k.HoldMs > 0 ? (int)Math.Round(ScaledHoldMs(k.HoldMs, speed)) : 0;
+                    if (!_input.SendBackgroundKey(bgTitle, k.VirtualKey, k.Action, bgHold, k.Modifiers))
+                    {
+                        Message?.Invoke(this, $"👻 Background key: window \"{bgTitle}\" was not found.");
+                    }
+                    SyncTimelineToNow();
+                    break;
+                }
+
                 var mainKey = new HeldKey(k.VirtualKey, k.ScanCode, k.Extended);
                 switch (k.Action)
                 {
@@ -333,6 +386,18 @@ public sealed partial class PlaybackEngine
             }
 
             case TypeTextStep t:
+                if (t.SendInBackground)
+                {
+                    var bgTitle = InterpolateActive(t.BackgroundWindowTitle);
+                    var bgText = InterpolateActive(t.Text);
+                    var bgDelay = t.CharacterDelayMs > 0 ? (int)Math.Round(t.CharacterDelayMs / Math.Max(0.1, speed)) : 0;
+                    if (!_input.SendBackgroundText(bgTitle, bgText, bgDelay))
+                    {
+                        Message?.Invoke(this, $"👻 Background type: window \"{bgTitle}\" was not found.");
+                    }
+                    SyncTimelineToNow();
+                    break;
+                }
                 await TypeTextAsync(t, speed, token).ConfigureAwait(false);
                 SyncTimelineToNow(); // typing takes as long as it takes; start timing again from here
                 break;

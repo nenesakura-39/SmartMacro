@@ -288,6 +288,12 @@ public sealed class SetVariableStepViewModel : StepViewModel
         ShowRegionCommand = new RelayCommand(() =>
             ScreenHighlightOverlay.ShowResult(_step.Region, null, found: true, $"Variable screen area · {_step.RegionWidth}×{_step.RegionHeight}",
                 TimeSpan.FromMilliseconds(1600)), () => UsesScreenRegion && _step.RegionWidth > 0 && _step.RegionHeight > 0);
+        InsertFormulaTokenCommand = new RelayCommand(p =>
+        {
+            if (p is not string token || string.IsNullOrEmpty(token)) return;
+            var current = ValueText;
+            ValueText = string.IsNullOrWhiteSpace(current) ? token : $"{current} {token}";
+        });
     }
 
     public static IReadOnlyList<Choice<VariableOperation>> Operations { get; } = new[]
@@ -295,6 +301,10 @@ public sealed class SetVariableStepViewModel : StepViewModel
         new Choice<VariableOperation>(VariableOperation.Set, "Set (=) — store new value"),
         new Choice<VariableOperation>(VariableOperation.Add, "Add (+=) — add to number"),
         new Choice<VariableOperation>(VariableOperation.Subtract, "Subtract (-=) — subtract from number"),
+        new Choice<VariableOperation>(VariableOperation.Multiply, "Multiply (×=) — multiply number"),
+        new Choice<VariableOperation>(VariableOperation.Divide, "Divide (÷=) — divide number"),
+        new Choice<VariableOperation>(VariableOperation.Modulo, "Modulo (%=) — remainder of division"),
+        new Choice<VariableOperation>(VariableOperation.Round, "Round — round number to whole integer"),
         new Choice<VariableOperation>(VariableOperation.AppendText, "Append text — add to end of text"),
         new Choice<VariableOperation>(VariableOperation.TrimText, "✂ Trim & collapse spaces"),
         new Choice<VariableOperation>(VariableOperation.ExtractDigits, "🔢 Extract digits only (0–9)"),
@@ -305,13 +315,20 @@ public sealed class SetVariableStepViewModel : StepViewModel
     public static IReadOnlyList<Choice<VariableSourceKind>> Sources { get; } = new[]
     {
         new Choice<VariableSourceKind>(VariableSourceKind.Constant, "Constant value or {variable} text"),
+        new Choice<VariableSourceKind>(VariableSourceKind.Formula, "🧮 Math formula expression (e.g. ({gold} * 1.15) + 50)"),
         new Choice<VariableSourceKind>(VariableSourceKind.ScreenOcrNumber, "🔢 Read number from screen area (OCR)"),
         new Choice<VariableSourceKind>(VariableSourceKind.ScreenOcrText, "🔤 Read text from screen area (OCR)"),
         new Choice<VariableSourceKind>(VariableSourceKind.ScreenGaugePercent, "📊 Read bar / gauge fill % (0–100)"),
         new Choice<VariableSourceKind>(VariableSourceKind.LineAtLoopIndex, "📄 N-th line or CSV item (by loop turn)"),
+        new Choice<VariableSourceKind>(VariableSourceKind.RandomNumber, "🎲 Random integer in range (min..max)"),
+        new Choice<VariableSourceKind>(VariableSourceKind.ActiveWindowTitle, "🖥 Active foreground window title"),
+        new Choice<VariableSourceKind>(VariableSourceKind.CurrentTimeText, "🕒 Current date / time text"),
+        new Choice<VariableSourceKind>(VariableSourceKind.SystemAudioPeakPercent, "🔊 System master audio peak % (0–100)"),
         new Choice<VariableSourceKind>(VariableSourceKind.ClipboardText, "📋 Clipboard text"),
         new Choice<VariableSourceKind>(VariableSourceKind.LastFoundX, "🎯 Last found X coordinate"),
         new Choice<VariableSourceKind>(VariableSourceKind.LastFoundY, "🎯 Last found Y coordinate"),
+        new Choice<VariableSourceKind>(VariableSourceKind.LastMatchCount, "🎯 Last vision match count (how many found)"),
+        new Choice<VariableSourceKind>(VariableSourceKind.LastOcrWordCount, "📄 Last OCR total word count on screen"),
         new Choice<VariableSourceKind>(VariableSourceKind.LoopCounter, "🔁 Current loop / run counter"),
         new Choice<VariableSourceKind>(VariableSourceKind.ElapsedSeconds, "⏱ Elapsed run time (seconds)"),
     };
@@ -337,6 +354,7 @@ public sealed class SetVariableStepViewModel : StepViewModel
     public AsyncRelayCommand PickRegionCommand { get; }
     public AsyncRelayCommand PickGaugeColorCommand { get; }
     public RelayCommand ShowRegionCommand { get; }
+    public RelayCommand InsertFormulaTokenCommand { get; }
 
     public string? StatusText
     {
@@ -355,11 +373,18 @@ public sealed class SetVariableStepViewModel : StepViewModel
         VariableSourceKind.ScreenOcrText => $"text read via OCR at ({_step.RegionX}, {_step.RegionY}) {_step.RegionWidth}×{_step.RegionHeight}",
         VariableSourceKind.ScreenGaugePercent => $"bar/gauge fill % ({_step.EffectiveGaugeColor}) at ({_step.RegionX}, {_step.RegionY}) {_step.RegionWidth}×{_step.RegionHeight}",
         VariableSourceKind.LineAtLoopIndex => $"item #turn from list \"{_step.Value}\"",
+        VariableSourceKind.RandomNumber => $"a random integer in range \"{(string.IsNullOrWhiteSpace(_step.Value) ? "1..100" : _step.Value)}\"",
+        VariableSourceKind.ActiveWindowTitle => "the active foreground window title",
+        VariableSourceKind.CurrentTimeText => "the current local date/time",
+        VariableSourceKind.SystemAudioPeakPercent => "the Windows master audio peak % (0–100)",
         VariableSourceKind.ClipboardText => "the Windows clipboard",
         VariableSourceKind.LastFoundX => "the X coordinate of the last found target",
         VariableSourceKind.LastFoundY => "the Y coordinate of the last found target",
+        VariableSourceKind.LastMatchCount => "how many matches the last Find step / condition found on screen",
+        VariableSourceKind.LastOcrWordCount => "the total number of words read on screen by the last OCR scan",
         VariableSourceKind.LoopCounter => "the current Repeat / Run counter",
         VariableSourceKind.ElapsedSeconds => "elapsed seconds since the run started",
+        VariableSourceKind.Formula => $"formula \"{_step.Value}\"",
         _ => $"\"{_step.Value}\"",
     };
 
@@ -395,6 +420,9 @@ public sealed class SetVariableStepViewModel : StepViewModel
             _step.Source = value;
             NotifyChanged();
             OnPropertyChanged(nameof(UsesConstantValue));
+            OnPropertyChanged(nameof(IsFormulaSource));
+            OnPropertyChanged(nameof(FormulaPreviewText));
+            OnPropertyChanged(nameof(IsFormulaValid));
             OnPropertyChanged(nameof(UsesScreenRegion));
             OnPropertyChanged(nameof(IsScreenGauge));
             OnPropertyChanged(nameof(SourceHelp));
@@ -402,9 +430,35 @@ public sealed class SetVariableStepViewModel : StepViewModel
         }
     }
 
-    public bool UsesConstantValue => _step.Source is VariableSourceKind.Constant or VariableSourceKind.LineAtLoopIndex;
+    public bool UsesConstantValue => _step.Source is VariableSourceKind.Constant or VariableSourceKind.Formula or VariableSourceKind.LineAtLoopIndex or VariableSourceKind.RandomNumber or VariableSourceKind.CurrentTimeText;
+    public bool IsFormulaSource => _step.Source == VariableSourceKind.Formula;
     public bool UsesScreenRegion => _step.UsesScreenRegion;
     public bool IsScreenGauge => _step.Source == VariableSourceKind.ScreenGaugePercent;
+
+    public bool IsFormulaValid =>
+        !IsFormulaSource || FormulaEvaluator.TryEvaluate(_step.Value, _ => 1.0, out _, out _);
+
+    public string FormulaPreviewText
+    {
+        get
+        {
+            if (!IsFormulaSource) return string.Empty;
+            if (FormulaEvaluator.TryEvaluate(_step.Value, _ => 10.0, out var sampleResult, out var error))
+                return $"✓ Valid formula · Sample result (when variables = 10): {sampleResult:0.###}";
+            return $"⚠ {error}";
+        }
+    }
+
+    public bool CopyResultToClipboard
+    {
+        get => _step.CopyResultToClipboard;
+        set
+        {
+            if (_step.CopyResultToClipboard == value) return;
+            _step.CopyResultToClipboard = value;
+            NotifyChanged();
+        }
+    }
 
     public string GaugeColor
     {
@@ -461,6 +515,11 @@ public sealed class SetVariableStepViewModel : StepViewModel
             if (_step.Value == v) return;
             _step.Value = v;
             NotifyChanged();
+            if (IsFormulaSource)
+            {
+                OnPropertyChanged(nameof(FormulaPreviewText));
+                OnPropertyChanged(nameof(IsFormulaValid));
+            }
         }
     }
 
@@ -494,11 +553,18 @@ public sealed class SetVariableStepViewModel : StepViewModel
         VariableSourceKind.ScreenOcrText => "Reads all visible words inside the box with Windows OCR and stores them as text.",
         VariableSourceKind.ScreenGaugePercent => "Measures how full a progress bar, HP/MP bar, or stamina gauge is (0 to 100%) by scanning the bar area for the fill color. Works even when text or icons sit in the middle of the bar.",
         VariableSourceKind.LineAtLoopIndex => "Extracts the N-th line or comma/semicolon-separated item from the text box above (or {listVar}), where N is the current Repeat loop turn (1, 2, 3…). Stores empty text once past the last item.",
+        VariableSourceKind.RandomNumber => "Generates a random whole number in the inclusive range entered above (e.g. \"1..100\", \"1-6\", or \"500, 1500\"). Defaults to 1..100 when left empty.",
+        VariableSourceKind.ActiveWindowTitle => "Reads the title of the currently focused Windows application window.",
+        VariableSourceKind.CurrentTimeText => "Formats the current local date/time using the pattern above (e.g. \"yyyy-MM-dd HH:mm:ss\" or \"HH:mm\"). Defaults to yyyy-MM-dd HH:mm:ss.",
+        VariableSourceKind.SystemAudioPeakPercent => "Reads the live Windows master audio output peak level (0 to 100%) via WASAPI. Great for reacting to game audio cues, fish-bite splashes, or silence.",
         VariableSourceKind.ClipboardText => "Reads the current plain text on the Windows clipboard.",
         VariableSourceKind.LastFoundX => "Stores the X pixel coordinate of the latest Find step / condition match (0 if nothing has matched yet).",
         VariableSourceKind.LastFoundY => "Stores the Y pixel coordinate of the latest Find step / condition match (0 if nothing has matched yet).",
+        VariableSourceKind.LastMatchCount => "Stores how many occurrences of the target word, image, or color the last Find step or condition detected on screen (e.g. 14 occurrences of 'nice' in a 1,500-word screen).",
+        VariableSourceKind.LastOcrWordCount => "Stores the total number of words recognized on screen during the latest Find text step or OCR condition.",
         VariableSourceKind.LoopCounter => "Stores the current Repeat turn (1, 2, 3…) or overall macro run number when outside a Repeat block.",
         VariableSourceKind.ElapsedSeconds => "Stores how many seconds this macro run has been playing (excluding paused time).",
+        VariableSourceKind.Formula => "Evaluates a safe math formula (+, -, *, /, %, parentheses) with {variables} and functions: min, max, abs, round, floor, ceil, clamp, sqrt, pow.",
         _ => "Enter a number (e.g. 0 or 1), true/false, or text. You can also include {otherVar} placeholders.",
     };
 
@@ -1078,7 +1144,7 @@ public sealed class TriggerItemViewModel : ObservableObject
     {
         new Choice<TriggerKind>(TriggerKind.Hotkey, "⌨ Keyboard shortcut"),
         new Choice<TriggerKind>(TriggerKind.Schedule, "⏰ Schedule / Timer"),
-        new Choice<TriggerKind>(TriggerKind.WindowEvent, "🪟 Window opened / focused"),
+        new Choice<TriggerKind>(TriggerKind.WindowEvent, "🖥 Window opened / focused"),
     };
 
     public static IReadOnlyList<Choice<HotkeyTriggerMode>> HotkeyModeChoices { get; } = new[]

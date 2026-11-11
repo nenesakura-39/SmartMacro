@@ -1042,7 +1042,8 @@ public class VisionValidationAndFileTests
     }
 
     [Theory]
-    [InlineData(49, true)]
+    [InlineData(9, true)]
+    [InlineData(20, false)]
     [InlineData(50, false)]
     public void Image_steps_may_check_every_50_ms(int interval, bool expectError)
     {

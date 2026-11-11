@@ -96,6 +96,7 @@ public sealed class AutomationViewModel : ObservableObject, IDisposable
     private string _runCounterText = string.Empty;
     private string _stepCounterText = string.Empty;
     private string _visionTelemetryText = string.Empty;
+    private string _recordingTelemetryText = "00:00 · 0 events";
     private string _elapsedText = "00:00";
     private string _activeStepDetailText = "Ready — press Play to run.";
 
@@ -383,6 +384,13 @@ public sealed class AutomationViewModel : ObservableObject, IDisposable
         private set => SetProperty(ref _progressText, value);
     }
 
+    /// <summary>Live telemetry pill text shown in the Title Bar while recording ("00:05 · 42 events").</summary>
+    public string RecordingTelemetryText
+    {
+        get => _recordingTelemetryText;
+        private set => SetProperty(ref _recordingTelemetryText, value);
+    }
+
     /// <summary>0..1 through the current run (or current loop when repeating forever).</summary>
     public double ProgressValue
     {
@@ -560,6 +568,7 @@ public sealed class AutomationViewModel : ObservableObject, IDisposable
         _runStartedUtc = DateTime.UtcNow;
         _pausedTotal = TimeSpan.Zero;
         _pausedSinceUtc = null;
+        RecordingTelemetryText = "00:00 · 0 events";
         _host.Enter(OverlayKind.Recording, _recordingHudText);
 
         // Give the window a moment to minimize so that isn't recorded.
@@ -646,6 +655,7 @@ public sealed class AutomationViewModel : ObservableObject, IDisposable
             // The fidelity selector (Exact 1:1 / Smart Optimized / Clicks & Keys Only) decides sampling, simplification and holds.
             Fidelity = settings.RecordingFidelity,
             SmartTiming = settings.SmartTimingOnRecord,
+            CoalesceTypedText = settings.CoalesceTypedTextOnRecord,
             RelativeMouse = settings.RelativeMouseMode,
             SimplifyMousePath = true, // a few meaningful Move steps instead of one every 30 ms
             CollapseMousePaths = false, // Desktop-only mode keeps simplified mouse paths so pure movements & oscillations work
@@ -730,6 +740,7 @@ public sealed class AutomationViewModel : ObservableObject, IDisposable
             IgnoredHotkeys = RecordingHotkeys(settings),
             Fidelity = isRhythm ? null : settings.RecordingFidelity,
             SmartTiming = !isRhythm && settings.SmartTimingOnRecord,
+            CoalesceTypedText = !isRhythm && settings.CoalesceTypedTextOnRecord,
             RelativeMouse = isRhythm ? RelativeMouseMode.Off : settings.RelativeMouseMode,
             RecordMouseMoves = isRhythm || settings.RecordMouseMovement,
             KeepHoldTime = isRhythm || settings.KeepTapHoldTime,
@@ -1185,7 +1196,8 @@ public sealed class AutomationViewModel : ObservableObject, IDisposable
     {
         if (IsRecording)
         {
-            var seconds = (DateTime.UtcNow - _runStartedUtc).TotalSeconds;
+            var elapsed = DateTime.UtcNow - _runStartedUtc;
+            var seconds = elapsed.TotalSeconds;
             var count = _recordingMode switch
             {
                 RecordingMode.Game => _gameRecorder.EventCount,
@@ -1193,8 +1205,9 @@ public sealed class AutomationViewModel : ObservableObject, IDisposable
                 _ => _recorder.EventCount,
             };
             ProgressText = $"{count:N0} input events · {seconds:0} s";
+            RecordingTelemetryText = $"{FormatElapsed(elapsed)} · {count:N0} event{(count == 1 ? "" : "s")}";
             _host.UpdateHud(new RunHud(OverlayKind.Recording, _recordingHudText, null, $"Recording · {count:N0} input events", 0,
-                DateTime.UtcNow - _runStartedUtc, PauseShortcut));
+                elapsed, PauseShortcut));
             return;
         }
 

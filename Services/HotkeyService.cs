@@ -47,6 +47,12 @@ public sealed class HotkeyService : IDisposable
         _holdPollTimer.Tick += OnHoldPollTick;
     }
 
+    /// <summary>
+    /// True while the user is actively typing a new keybind inside a Settings shortcut box so pressing an existing
+    /// global shortcut (like F5) updates the setting instead of starting recording or playback.
+    /// </summary>
+    public static bool SuppressGlobalHotkeys { get; set; }
+
     public event EventHandler<HotkeyAction>? Pressed;
 
     /// <summary>Raised when a registered per-macro shortcut is pressed down.</summary>
@@ -212,6 +218,11 @@ public sealed class HotkeyService : IDisposable
     {
         if (msg == WM_HOTKEY)
         {
+            if (SuppressGlobalHotkeys)
+            {
+                return IntPtr.Zero;
+            }
+
             var id = wParam.ToInt32();
             if (Enum.IsDefined(typeof(HotkeyAction), id))
             {

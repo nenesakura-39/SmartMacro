@@ -28,6 +28,14 @@ public enum ConditionKind
     VariableCompare,
 }
 
+/// <summary>v1.8 "Evergreen": logical combinator for compound conditions (<c>If A AND B</c>, <c>Repeat Until A OR B</c>).</summary>
+public enum ConditionCombinator
+{
+    None = 0,
+    And = 1,
+    Or = 2,
+}
+
 /// <summary>
 /// A yes/no question about the screen ("is this text / image / colour on screen?") or about a variable ("is gold &gt;= 500?"),
 /// optionally turned around ("is NOT").
@@ -51,6 +59,18 @@ public sealed class Condition
 
     /// <summary>True = the condition's result is inverted ("is NOT").</summary>
     public bool Negate { get; set; }
+
+    /// <summary>v1.8 "Evergreen": optional logical combinator joining <see cref="SecondCondition"/> to this condition.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public ConditionCombinator SecondCombinator { get; set; }
+
+    /// <summary>v1.8 "Evergreen": optional second condition evaluated with <see cref="SecondCombinator"/> (<c>AND</c> / <c>OR</c>).</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public Condition? SecondCondition { get; set; }
+
+    /// <summary>True when a compound second condition is active (<see cref="SecondCombinator"/> is <c>And</c> or <c>Or</c> and <see cref="SecondCondition"/> is set).</summary>
+    [JsonIgnore]
+    public bool HasSecondCondition => SecondCombinator != ConditionCombinator.None && SecondCondition is not null;
 
     /// <summary>The search settings as a search step, or null if this is a variable comparison or missing.</summary>
     [JsonIgnore]
@@ -85,6 +105,14 @@ public sealed class Condition
     {
         get => (Check as FindTextStep)?.MatchCase ?? true;
         set { if (Check is FindTextStep text) text.MatchCase = value; }
+    }
+
+    /// <summary>Screen conditions: minimum number of matches that must be visible on screen (default 1).</summary>
+    [JsonIgnore]
+    public int MinMatchCount
+    {
+        get => Search?.EffectiveMinMatchCount ?? 1;
+        set { if (Search is { } s) s.MinMatchCount = value <= 1 ? 0 : value; }
     }
 
     /// <summary>A new condition of the given kind with sensible defaults (look once, no click).</summary>
@@ -339,6 +367,35 @@ public sealed class EndRepeatStep : MacroStep
     public override StepKind Kind => StepKind.EndRepeat;
 }
 
+/// <summary>What a <see cref="FlowControlStep"/> does when reached during playback.</summary>
+public enum FlowControlAction
+{
+    /// <summary>Exits the innermost active <see cref="RepeatStep"/> immediately and continues after its <see cref="EndRepeatStep"/>.</summary>
+    ExitLoop,
+
+    /// <summary>Skips the rest of the current turn in the innermost active <see cref="RepeatStep"/> and jumps to its <see cref="EndRepeatStep"/>.</summary>
+    ContinueLoop,
+
+    /// <summary>Cleanly stops the current macro run immediately.</summary>
+    StopMacro,
+}
+
+/// <summary>
+/// Structured loop / macro flow control: exits the innermost loop (<c>Break</c>), skips to the next loop turn (<c>Continue</c>),
+/// or stops the macro cleanly with an optional status note.
+/// </summary>
+public sealed class FlowControlStep : MacroStep
+{
+    public FlowControlAction Action { get; set; } = FlowControlAction.ExitLoop;
+
+    /// <summary>Optional status message shown in Mission Control / logs when this flow-control action triggers.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Message { get; set; }
+
+    [JsonIgnore]
+    public override StepKind Kind => StepKind.FlowControl;
+}
+
 /// <summary>Small helpers for the screen checks inside steps (used by validation, file versions and the app).</summary>
 public static class WorkflowSteps
 {
@@ -359,11 +416,25 @@ public static class WorkflowSteps
     /// </summary>
     public static IEnumerable<Condition> ConditionsOf(MacroStep? step)
     {
-        if (ConditionOf(step) is { } condition) yield return condition;
+        if (ConditionOf(step) is { } condition)
+        {
+            yield return condition;
+            if (condition.HasSecondCondition) yield return condition.SecondCondition!;
+        }
+
         if (step is FeedbackLoopStep feedback)
         {
-            if (feedback.CompleteWhen is { } complete) yield return complete;
-            if (feedback.FailWhen is { } fail) yield return fail;
+            if (feedback.CompleteWhen is { } complete)
+            {
+                yield return complete;
+                if (complete.HasSecondCondition) yield return complete.SecondCondition!;
+            }
+
+            if (feedback.FailWhen is { } fail)
+            {
+                yield return fail;
+                if (fail.HasSecondCondition) yield return fail.SecondCondition!;
+            }
         }
     }
 

@@ -38,6 +38,7 @@ public sealed class JsonMacroRepository : IMacroRepository
             var needsRewrite = new List<Macro>();
 
             Directory.CreateDirectory(MacrosDirectory);
+            PruneOldTrash(TrashDirectory, DefaultMaxRetainedTrashDays);
 
             var files = Directory.EnumerateFiles(MacrosDirectory)
                 .Where(f => string.Equals(Path.GetExtension(f), Extension, StringComparison.OrdinalIgnoreCase))
@@ -151,6 +152,197 @@ public sealed class JsonMacroRepository : IMacroRepository
 
             _fileById.Remove(id);
             return true;
+        }
+        finally
+        {
+            _lock.Release();
+        }
+    }
+
+    public const int DefaultMaxRetainedTrashDays = 30;
+
+    /// <summary>
+    /// Removes trashed macro files older than <paramref name="maxDays"/> days so the Trash folder stays clean over long-term use.
+    /// </summary>
+    public static int PruneOldTrash(string? trashDirectory, int maxDays = DefaultMaxRetainedTrashDays, DateTimeOffset? referenceUtcNow = null)
+    {
+        if (string.IsNullOrWhiteSpace(trashDirectory) || maxDays < 1 || !Directory.Exists(trashDirectory))
+            return 0;
+
+        var deleted = 0;
+        var cutoffUtc = (referenceUtcNow ?? DateTimeOffset.UtcNow).UtcDateTime.AddDays(-maxDays);
+        try
+        {
+            foreach (var file in new DirectoryInfo(trashDirectory).GetFiles("*"))
+            {
+                if (file.LastWriteTimeUtc < cutoffUtc)
+                {
+                    try
+                    {
+                        file.Delete();
+                        deleted++;
+                    }
+                    catch
+                    {
+                        // Ignore locked files.
+                    }
+                }
+            }
+        }
+        catch
+        {
+            // Ignore cleanup errors.
+        }
+
+        return deleted;
+    }
+
+    public async Task<IReadOnlyList<TrashedMacroItem>> LoadTrashAsync(CancellationToken cancellationToken = default)
+    {
+        await _lock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            if (!Directory.Exists(TrashDirectory))
+                return Array.Empty<TrashedMacroItem>();
+
+            var items = new List<TrashedMacroItem>();
+            var files = Directory.EnumerateFiles(TrashDirectory)
+                .Where(f => string.Equals(Path.GetExtension(f), Extension, StringComparison.OrdinalIgnoreCase))
+                .Where(f => !Path.GetFileName(f).StartsWith('.'))
+                .ToList();
+
+            foreach (var file in files)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var (macro, problem) = await TryReadFileAsync(file, cancellationToken).ConfigureAwait(false);
+                if (problem is not null || macro is null) continue;
+
+                var info = new FileInfo(file);
+                var deletedAt = new DateTimeOffset(info.LastWriteTimeUtc, TimeSpan.Zero);
+                items.Add(new TrashedMacroItem(
+                    Path.GetFileName(file),
+                    string.IsNullOrWhiteSpace(macro.Name) ? "Untitled Macro" : macro.Name.Trim(),
+                    macro.Steps?.Count ?? 0,
+                    deletedAt,
+                    macro.ProfileName));
+            }
+
+            return items
+                .OrderByDescending(i => i.DeletedAt)
+                .ThenBy(i => i.Name, StringComparer.CurrentCultureIgnoreCase)
+                .ToList();
+        }
+        finally
+        {
+            _lock.Release();
+        }
+    }
+
+    public async Task<Macro?> RestoreFromTrashAsync(string trashFileName, IEnumerable<string>? existingNames = null, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(trashFileName)) return null;
+        var safeFileName = Path.GetFileName(trashFileName);
+
+        Macro? restored;
+        await _lock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            var trashPath = Path.Combine(TrashDirectory, safeFileName);
+            if (!File.Exists(trashPath)) return null;
+
+            var (macro, problem) = await TryReadFileAsync(trashPath, cancellationToken).ConfigureAwait(false);
+            if (problem is not null || macro is null) return null;
+
+            Normalize(macro, safeFileName, new List<string>());
+            if (macro.Id == Guid.Empty || _fileById.ContainsKey(macro.Id))
+                macro.Id = Guid.NewGuid();
+
+            if (existingNames is not null)
+            {
+                var taken = new HashSet<string>(existingNames, StringComparer.CurrentCultureIgnoreCase);
+                var baseName = string.IsNullOrWhiteSpace(macro.Name) ? "Restored Macro" : macro.Name.Trim();
+                var candidate = baseName;
+                for (var n = 2; taken.Contains(candidate); n++)
+                    candidate = $"{baseName} ({n})";
+                macro.Name = candidate;
+            }
+
+            Directory.CreateDirectory(MacrosDirectory);
+            var targetPath = Path.Combine(MacrosDirectory, macro.Id.ToString("N") + Extension);
+            macro.ModifiedAt = DateTimeOffset.Now;
+            await WriteAsync(macro, targetPath, cancellationToken).ConfigureAwait(false);
+            _fileById[macro.Id] = targetPath;
+
+            try { File.Delete(trashPath); }
+            catch (IOException) { /* Best-effort delete */ }
+
+            var bakPath = trashPath + ".bak";
+            if (File.Exists(bakPath))
+            {
+                try { File.Delete(bakPath); }
+                catch (IOException) { }
+            }
+
+            restored = macro;
+        }
+        finally
+        {
+            _lock.Release();
+        }
+
+        return restored;
+    }
+
+    public async Task<bool> DeleteFromTrashAsync(string trashFileName, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(trashFileName)) return false;
+        var safeFileName = Path.GetFileName(trashFileName);
+
+        await _lock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            var trashPath = Path.Combine(TrashDirectory, safeFileName);
+            if (!File.Exists(trashPath)) return false;
+
+            File.Delete(trashPath);
+            var bakPath = trashPath + ".bak";
+            if (File.Exists(bakPath))
+            {
+                try { File.Delete(bakPath); }
+                catch (IOException) { }
+            }
+
+            return true;
+        }
+        finally
+        {
+            _lock.Release();
+        }
+    }
+
+    public async Task<int> EmptyTrashAsync(CancellationToken cancellationToken = default)
+    {
+        await _lock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            if (!Directory.Exists(TrashDirectory)) return 0;
+            var deleted = 0;
+            foreach (var file in Directory.EnumerateFiles(TrashDirectory))
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                try
+                {
+                    if (string.Equals(Path.GetExtension(file), Extension, StringComparison.OrdinalIgnoreCase))
+                        deleted++;
+                    File.Delete(file);
+                }
+                catch (IOException)
+                {
+                    // Ignore locked file.
+                }
+            }
+
+            return deleted;
         }
         finally
         {

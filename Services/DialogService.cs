@@ -92,23 +92,23 @@ public sealed class DarkMessageBox : Window
         BorderBrush = ThemeBrush("BorderBrush", Color.FromRgb(0x26, 0x32, 0x4A));
         BorderThickness = new Thickness(1);
         Foreground = ThemeBrush("TextBrush", Colors.White);
-        FontFamily = TryFindResource("UiFont") as FontFamily ?? new FontFamily("Segoe UI");
+        FontFamily = TryFindResource("UiFont") as FontFamily ?? new FontFamily("Segoe UI Variable Text, Segoe UI, Segoe Fluent Icons, Segoe MDL2 Assets, Segoe UI Emoji, Segoe UI Symbol");
         FontSize = 13;
         _choice = buttons.Length - 1; // closing the window = last button (Cancel / No / OK)
 
         var (glyph, color) = kind switch
         {
-            DialogKind.Error => ("", ThemeBrush("ErrorBrush", Colors.IndianRed)),
-            DialogKind.Warning => ("", ThemeBrush("WarningBrush", Colors.Orange)),
-            DialogKind.Question => ("", ThemeBrush("AccentBrush", Colors.DodgerBlue)),
-            _ => ("", ThemeBrush("AccentBrush", Colors.DodgerBlue)),
+            DialogKind.Error => ("\uEA39", ThemeBrush("ErrorBrush", Colors.IndianRed)),
+            DialogKind.Warning => ("\uE7BA", ThemeBrush("WarningBrush", Colors.Orange)),
+            DialogKind.Question => ("\uE9CE", ThemeBrush("AccentBrush", Colors.DodgerBlue)),
+            _ => ("\uE946", ThemeBrush("AccentBrush", Colors.DodgerBlue)),
         };
 
         var header = new DockPanel { Margin = new Thickness(0, 0, 0, 12) };
         header.Children.Add(new TextBlock
         {
             Text = glyph,
-            FontFamily = TryFindResource("IconFont") as FontFamily ?? new FontFamily("Segoe MDL2 Assets"),
+            FontFamily = TryFindResource("IconFont") as FontFamily ?? new FontFamily("Segoe UI, Segoe Fluent Icons, Segoe MDL2 Assets, Segoe UI Emoji, Segoe UI Symbol"),
             FontSize = 20,
             Foreground = color,
             VerticalAlignment = VerticalAlignment.Center,

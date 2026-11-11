@@ -390,7 +390,8 @@ public static partial class MacroValidator
         if (Math.Abs((long)f.OffsetX) > MaxOffset || Math.Abs((long)f.OffsetY) > MaxOffset)
             issues.Add(Error($"Offsets must be between -{MaxOffset} and {MaxOffset} pixels.", "Offset"));
         if (!Enum.IsDefined(f.Action) || !Enum.IsDefined(f.WhenNotFound) || !Enum.IsDefined(f.Goal)
-            || !Enum.IsDefined(f.Scenario) || !Enum.IsDefined(f.Strategy))
+            || !Enum.IsDefined(f.Scenario) || !Enum.IsDefined(f.Strategy)
+            || !Enum.IsDefined(f.TargetSelection) || !Enum.IsDefined(f.MatchOrder))
             issues.Add(Error("This step has an unknown option value."));
         else if (f.Goal == WaitGoal.Disappear && f.Action != FoundTextAction.None)
             issues.Add(Warning("The \"when found\" action isn't used while waiting for something to disappear.", nameof(ScreenSearchStep.Action)));
@@ -402,6 +403,16 @@ public static partial class MacroValidator
             issues.Add(Error("The predictive click lead time must be 0 to 1,000 ms.", nameof(ScreenSearchStep.PredictiveLeadMs)));
         if (f.ConfirmFrames is < 0 or > 10)
             issues.Add(Error("Confirm frames must be 0 (single check) to 10.", nameof(ScreenSearchStep.ConfirmFrames)));
+        if (f.TargetMatchIndex is < 0 or > 10_000)
+            issues.Add(Error("Match number (#N) must be between 1 and 10,000.", nameof(ScreenSearchStep.TargetMatchIndex)));
+        if (f.MinMatchCount is < 0 or > 10_000)
+            issues.Add(Error("Minimum match count must be between 1 and 10,000.", nameof(ScreenSearchStep.MinMatchCount)));
+        if (f.MaxMatchesToActOn is < 0 or > 10_000)
+            issues.Add(Error("Maximum matches to act on must be 0 (all) to 10,000.", nameof(ScreenSearchStep.MaxMatchesToActOn)));
+        if (f.BetweenMatchesDelayMs is < 0 or > 60_000)
+            issues.Add(Error("Delay between matches must be 0 to 60,000 ms.", nameof(ScreenSearchStep.BetweenMatchesDelayMs)));
+        if (!string.IsNullOrWhiteSpace(f.CountVariableName) && !MacroVariableDefinition.IsValidName(f.CountVariableName.Trim()))
+            issues.Add(Error("The count variable name must start with a letter or underscore and use only letters, digits, or underscores.", nameof(ScreenSearchStep.CountVariableName)));
         ValidateFailurePolicy(issues, f.FailurePolicy);
     }
 

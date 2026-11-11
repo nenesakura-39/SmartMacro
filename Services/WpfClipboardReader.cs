@@ -36,4 +36,33 @@ public sealed class WpfClipboardReader : IClipboardReader
             return string.Empty;
         }
     }
+
+    public void WriteText(string text)
+    {
+        try
+        {
+            var dispatcher = Application.Current?.Dispatcher;
+            if (dispatcher is null) return;
+            if (dispatcher.CheckAccess())
+                WriteCore(text);
+            else
+                dispatcher.Invoke(() => WriteCore(text));
+        }
+        catch (Exception ex) when (ex is COMException or ExternalException or InvalidOperationException or TaskCanceledException)
+        {
+            // Ignore clipboard contention during playback.
+        }
+    }
+
+    private static void WriteCore(string text)
+    {
+        try
+        {
+            Clipboard.SetText(text ?? string.Empty);
+        }
+        catch (Exception ex) when (ex is COMException or ExternalException)
+        {
+            // Ignore clipboard lock errors.
+        }
+    }
 }

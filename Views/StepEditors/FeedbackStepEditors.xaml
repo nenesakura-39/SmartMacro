@@ -3,6 +3,7 @@
                     xmlns:models="clr-namespace:SmartMacro.Core.Models;assembly=SmartMacro.Core"
                     xmlns:steps="clr-namespace:SmartMacro.ViewModels.Steps"
                     xmlns:vision="clr-namespace:SmartMacro.Services.Vision"
+                    xmlns:controls="clr-namespace:SmartMacro.Controls"
                     xmlns:conv="clr-namespace:SmartMacro.Converters">
 
     <ResourceDictionary.MergedDictionaries>
@@ -17,15 +18,17 @@
         <StackPanel>
             <ContentControl Content="{Binding}" ContentTemplate="{StaticResource StepHeaderTemplate}" Focusable="False" />
 
+            <!-- SETUP TAB: Guided setup, Behavior Cards & Bar/Marker/Zone pickers -->
+            <StackPanel Visibility="{Binding ShowSetupSection, Converter={StaticResource BoolToVisibility}}">
             <!-- Guided setup, Step 1: choose the minigame type (visual preset cards) -->
             <Border Style="{StaticResource SetupCard}">
                 <StackPanel>
                     <DockPanel>
                         <Border DockPanel.Dock="Right" CornerRadius="6" Padding="7,2" Background="{DynamicResource SurfaceAltBrush}"
-                                BorderBrush="{DynamicResource StepCardBorderBrush}" BorderThickness="1" VerticalAlignment="Center">
+                                BorderBrush="{DynamicResource StepCardBorderBrush}" BorderThickness="1" VerticalAlignment="Center" Margin="6,0,0,0">
                             <TextBlock Text="MODE SELECT" FontSize="9.5" FontWeight="Bold" Foreground="{DynamicResource MutedTextBrush}" />
                         </Border>
-                        <TextBlock Text="STEP 1: CHOOSE THE MINIGAME TYPE" Style="{StaticResource SetupCardTitle}" VerticalAlignment="Center"
+                        <TextBlock Text="STEP 1: CHOOSE THE MINIGAME TYPE" Style="{StaticResource SetupCardTitle}" VerticalAlignment="Center" TextWrapping="Wrap"
                                    ToolTip="Pick the kind of minigame. SmartMacro fills in the rules; you only pick the bar and two colors." />
                     </DockPanel>
                     <ListBox ItemsSource="{x:Static steps:FeedbackLoopStepViewModel.MinigameCards}"
@@ -41,18 +44,18 @@
                         </ListBox.Template>
                         <ListBox.ItemTemplate>
                             <DataTemplate DataType="{x:Type steps:MinigameCard}">
-                                <Grid ToolTip="{Binding Description}" Margin="0,0,18,0">
+                                <Grid ToolTip="{Binding Description}" Margin="0,0,4,0">
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="Auto" />
                                         <ColumnDefinition Width="*" />
                                     </Grid.ColumnDefinitions>
-                                    <Border MinWidth="98" Padding="8,6" CornerRadius="6" Background="{DynamicResource SurfaceBrush}"
-                                            BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" VerticalAlignment="Center">
-                                        <TextBlock Text="{Binding Picture}" FontFamily="Consolas, Segoe UI Emoji" FontSize="13" HorizontalAlignment="Center" />
+                                    <Border MinWidth="68" Padding="6,5" CornerRadius="6" Background="{DynamicResource SurfaceBrush}"
+                                            BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" VerticalAlignment="Top">
+                                        <TextBlock Text="{Binding Picture}" FontFamily="{StaticResource MonoFont}" FontSize="12" HorizontalAlignment="Center" />
                                     </Border>
-                                    <StackPanel Grid.Column="1" Margin="12,0,0,0" VerticalAlignment="Center">
-                                        <TextBlock Text="{Binding Title}" FontWeight="SemiBold" FontSize="12.5" TextWrapping="Wrap" />
-                                        <TextBlock Text="{Binding Description}" Style="{StaticResource MutedText}" FontSize="11" Margin="0,2,0,0" />
+                                    <StackPanel Grid.Column="1" Margin="10,0,0,0" VerticalAlignment="Center">
+                                        <TextBlock Text="{Binding Title}" FontWeight="SemiBold" FontSize="12" TextWrapping="Wrap" />
+                                        <TextBlock Text="{Binding Description}" Style="{StaticResource MutedText}" FontSize="11" Margin="0,2,0,0" TextWrapping="Wrap" />
                                     </StackPanel>
                                 </Grid>
                             </DataTemplate>
@@ -62,20 +65,20 @@
             </Border>
 
             <!-- Feedback Loop 3.0: Behavior Cards + Adaptive Stopping-Distance Servo Controller -->
-            <Border Style="{StaticResource SetupCard}">
+            <Border Style="{StaticResource SetupCard}" Visibility="{Binding IsFollowPreset, Converter={StaticResource BoolToVisibility}}">
                 <StackPanel>
                     <DockPanel>
                         <Border DockPanel.Dock="Right" CornerRadius="6" Padding="7,2" Background="{DynamicResource FeedbackBadgeBrush}"
-                                BorderBrush="{DynamicResource FeedbackAccentBrush}" BorderThickness="1" VerticalAlignment="Center">
+                                BorderBrush="{DynamicResource FeedbackAccentBrush}" BorderThickness="1" VerticalAlignment="Center" Margin="6,0,0,0">
                             <TextBlock Text="ADAPTIVE SERVO 3.0" FontSize="9.5" FontWeight="Bold" Foreground="{DynamicResource FeedbackAccentBrush}" />
                         </Border>
-                        <TextBlock Text="BAR PHYSICS &amp; ADAPTIVE SERVO CONTROLLER" Style="{StaticResource SetupCardTitle}" VerticalAlignment="Center"
+                        <TextBlock Text="BAR PHYSICS &amp; ADAPTIVE SERVO" Style="{StaticResource SetupCardTitle}" VerticalAlignment="Center" TextWrapping="Wrap"
                                    ToolTip="Choose the bar physics behavior that matches your minigame. Your bar area, orientation, and colors are kept." />
                     </DockPanel>
                     <TextBlock Text="Select how your bar accelerates and coasts (works for both Horizontal and Vertical bars):"
                                Style="{StaticResource MutedText}" FontSize="11" Margin="0,4,0,6" TextWrapping="Wrap" />
 
-                    <!-- Single clean 2x2 Behavior Card Selector -->
+                    <!-- Clean full-width stacked Behavior Card Selector so narrow inspector widths never crush text -->
                     <ListBox ItemsSource="{x:Static steps:FeedbackLoopStepViewModel.BehaviorCards}"
                              SelectedItem="{Binding SelectedBehaviorCard}"
                              ItemContainerStyle="{StaticResource SelectableCardItemStyle}"
@@ -85,27 +88,22 @@
                                 <ItemsPresenter />
                             </ControlTemplate>
                         </ListBox.Template>
-                        <ListBox.ItemsPanel>
-                            <ItemsPanelTemplate>
-                                <UniformGrid Columns="2" />
-                            </ItemsPanelTemplate>
-                        </ListBox.ItemsPanel>
                         <ListBox.ItemTemplate>
                             <DataTemplate DataType="{x:Type models:FeedbackBehaviorCard}">
-                                <Grid ToolTip="{Binding Subtitle}" Margin="0,0,14,0">
+                                <Grid ToolTip="{Binding Subtitle}" Margin="0,0,4,0">
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="Auto" />
                                         <ColumnDefinition Width="*" />
                                     </Grid.ColumnDefinitions>
-                                    <Border Width="36" Height="36" CornerRadius="8" Background="{DynamicResource SurfaceBrush}"
-                                            BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" VerticalAlignment="Top">
-                                        <TextBlock Text="{Binding Icon}" FontFamily="Segoe UI Emoji" FontSize="17"
+                                    <Border Width="34" Height="34" CornerRadius="8" Background="{DynamicResource SurfaceBrush}"
+                                            BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" VerticalAlignment="Center">
+                                        <TextBlock Text="{Binding Icon}" FontFamily="{StaticResource UiFont}" FontSize="16"
                                                    HorizontalAlignment="Center" VerticalAlignment="Center" />
                                     </Border>
-                                    <StackPanel Grid.Column="1" Margin="10,0,0,0">
+                                    <StackPanel Grid.Column="1" Margin="10,0,0,0" VerticalAlignment="Center">
                                         <TextBlock Text="{Binding Title}" FontWeight="SemiBold" FontSize="12" TextWrapping="Wrap" />
-                                        <TextBlock Text="{Binding Subtitle}" Style="{StaticResource MutedText}" FontSize="10.5"
-                                                   Margin="0,2,0,0" TextWrapping="Wrap" />
+                                        <TextBlock Text="{Binding Subtitle}" Style="{StaticResource MutedText}" FontSize="11"
+                                                   Margin="0,1,0,0" TextWrapping="Wrap" />
                                     </StackPanel>
                                 </Grid>
                             </DataTemplate>
@@ -116,13 +114,8 @@
                     <Border Margin="0,10,0,0" Padding="12,10" CornerRadius="8" Background="{DynamicResource SurfaceBrush}"
                             BorderBrush="{DynamicResource StepCardBorderBrush}" BorderThickness="1">
                         <StackPanel>
-                            <Grid>
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="Auto" />
-                                    <ColumnDefinition Width="12" />
-                                    <ColumnDefinition Width="*" />
-                                </Grid.ColumnDefinitions>
-                                <Button Grid.Column="0" Command="{Binding AutoTuneCommand}" Padding="11,6" VerticalAlignment="Center"
+                            <WrapPanel VerticalAlignment="Center">
+                                <Button Command="{Binding AutoTuneCommand}" Padding="11,6" Margin="0,0,12,6" VerticalAlignment="Center"
                                         ToolTip="Arms automatic bar calibration so SmartMacro learns your bar's rise/fall speed, hover duty cycle, and stopping distance during play."
                                         AutomationProperties.Name="Auto-Tune (Learn my bar)">
                                     <StackPanel Orientation="Horizontal">
@@ -130,48 +123,43 @@
                                         <TextBlock Text="Auto-Tune (Learn my bar)" Margin="6,0,0,0" FontWeight="SemiBold" />
                                     </StackPanel>
                                 </Button>
-                                <CheckBox Grid.Column="2"
-                                          Style="{StaticResource ToggleSwitchCheckBoxStyle}"
+                                <CheckBox Style="{StaticResource ToggleSwitchCheckBoxStyle}"
                                           Content="Auto-adapt braking &amp; hover while playing"
                                           IsChecked="{Binding AutoCalibrate}"
                                           VerticalAlignment="Center"
+                                          Margin="0,0,0,6"
                                           ToolTip="Automatically trims stopping distance and hover balance online whenever overshoot or lag is detected."
                                           AutomationProperties.Name="Auto-adapt braking and hover while playing" />
-                            </Grid>
-                            <Border Margin="0,8,0,0" Padding="8,5" CornerRadius="6" Background="{DynamicResource SurfaceAltBrush}">
-                                <StackPanel Orientation="Horizontal">
+                            </WrapPanel>
+                            <Border Margin="0,4,0,0" Padding="8,5" CornerRadius="6" Background="{DynamicResource SurfaceAltBrush}">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
                                     <Ellipse Width="7" Height="7" Fill="{DynamicResource FeedbackAccentBrush}" VerticalAlignment="Center" Margin="0,0,8,0" />
-                                    <TextBlock Text="{Binding LearnedProfileSummary}" Style="{StaticResource MutedText}"
+                                    <TextBlock Grid.Column="1" Text="{Binding LearnedProfileSummary}" Style="{StaticResource MutedText}"
                                                FontSize="11" VerticalAlignment="Center" TextWrapping="Wrap" />
-                                </StackPanel>
+                                </Grid>
                             </Border>
                         </StackPanel>
                     </Border>
 
                     <!-- Orientation & Control Mode -->
-                    <Grid Margin="0,8,0,0">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="*" />
-                            <ColumnDefinition Width="12" />
-                            <ColumnDefinition Width="*" />
-                        </Grid.ColumnDefinitions>
-                        <StackPanel Grid.Column="0">
-                            <TextBlock Text="Orientation" Style="{StaticResource FieldLabel}" />
-                            <ComboBox ItemsSource="{x:Static steps:FeedbackLoopStepViewModel.Orientations}"
-                                      DisplayMemberPath="Label"
-                                      SelectedValuePath="Value"
-                                      SelectedValue="{Binding Orientation}"
-                                      AutomationProperties.Name="Bar orientation" />
-                        </StackPanel>
-                        <StackPanel Grid.Column="2">
-                            <TextBlock Text="Control mode" Style="{StaticResource FieldLabel}" />
-                            <ComboBox ItemsSource="{x:Static steps:FeedbackLoopStepViewModel.ControlModes}"
-                                      DisplayMemberPath="Label"
-                                      SelectedValuePath="Value"
-                                      SelectedValue="{Binding ControlMode}"
-                                      AutomationProperties.Name="Control mode" />
-                        </StackPanel>
-                    </Grid>
+                    <StackPanel Margin="0,8,0,0">
+                        <TextBlock Text="Orientation" Style="{StaticResource FieldLabel}" />
+                        <ComboBox ItemsSource="{x:Static steps:FeedbackLoopStepViewModel.Orientations}"
+                                  DisplayMemberPath="Label"
+                                  SelectedValuePath="Value"
+                                  SelectedValue="{Binding Orientation}"
+                                  AutomationProperties.Name="Bar orientation" />
+                        <TextBlock Text="Control mode" Style="{StaticResource FieldLabel}" Margin="0,8,0,4" />
+                        <ComboBox ItemsSource="{x:Static steps:FeedbackLoopStepViewModel.ControlModes}"
+                                  DisplayMemberPath="Label"
+                                  SelectedValuePath="Value"
+                                  SelectedValue="{Binding ControlMode}"
+                                  AutomationProperties.Name="Control mode" />
+                    </StackPanel>
 
                     <StackPanel Visibility="{Binding IsSmartMode, Converter={StaticResource BoolToVisibility}}">
                         <!-- Responsiveness Slider (Calm <-> Aggressive) -->
@@ -183,7 +171,7 @@
                                         <ColumnDefinition Width="*" />
                                         <ColumnDefinition Width="Auto" />
                                     </Grid.ColumnDefinitions>
-                                    <TextBlock Text="Tracking responsiveness" FontWeight="SemiBold" FontSize="12" VerticalAlignment="Center" />
+                                    <TextBlock Text="Tracking responsiveness" FontWeight="SemiBold" FontSize="12" VerticalAlignment="Center" TextWrapping="Wrap" />
                                     <Border Grid.Column="1" CornerRadius="6" Padding="8,2" Background="{DynamicResource AccentSoftBrush}"
                                             BorderBrush="{DynamicResource AccentBrush}" BorderThickness="1">
                                         <TextBlock Text="{Binding ResponsivenessLabel}" FontSize="11" FontWeight="SemiBold"
@@ -237,17 +225,17 @@
                                 <Grid>
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="12" />
+                                        <ColumnDefinition Width="10" />
                                         <ColumnDefinition Width="*" />
                                     </Grid.ColumnDefinitions>
-                                    <StackPanel Grid.Column="0">
-                                        <TextBlock Text="Comfort zone margin (% per side)" Style="{StaticResource FieldLabel}"
+                                    <StackPanel Grid.Column="0" VerticalAlignment="Bottom">
+                                        <TextBlock Text="Comfort margin (%)" Style="{StaticResource FieldLabel}" TextWrapping="Wrap"
                                                    ToolTip="Safety margin inside each edge of your bar (default 20 %). The controller hovers smoothly while the target is inside the comfort zone and brakes before crossing its edge." />
                                         <TextBox Text="{Binding ComfortZonePercent, UpdateSourceTrigger=LostFocus, ValidatesOnExceptions=True}"
                                                  AutomationProperties.Name="Comfort zone margin percent" />
                                     </StackPanel>
-                                    <StackPanel Grid.Column="2">
-                                        <TextBlock Text="Min pulse duration (ms)" Style="{StaticResource FieldLabel}"
+                                    <StackPanel Grid.Column="2" VerticalAlignment="Bottom">
+                                        <TextBlock Text="Min pulse (ms)" Style="{StaticResource FieldLabel}" TextWrapping="Wrap"
                                                    ToolTip="Minimum hold or release time (default 17 ms = 1 frame at 60 FPS) so sub-frame pulses are never ignored by the game." />
                                         <TextBox Text="{Binding MinPulseMs, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}"
                                                  AutomationProperties.Name="Minimum pulse duration in milliseconds" />
@@ -257,17 +245,17 @@
                                 <Grid Margin="0,6,0,0">
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="12" />
+                                        <ColumnDefinition Width="10" />
                                         <ColumnDefinition Width="*" />
                                     </Grid.ColumnDefinitions>
-                                    <StackPanel Grid.Column="0">
-                                        <TextBlock Text="Neutral hover duty (0–1)" Style="{StaticResource FieldLabel}"
+                                    <StackPanel Grid.Column="0" VerticalAlignment="Bottom">
+                                        <TextBlock Text="Hover duty (0–1)" Style="{StaticResource FieldLabel}" TextWrapping="Wrap"
                                                    ToolTip="Baseline hold ratio required to counteract gravity and hover stationary when error == 0 (default 0.45)." />
                                         <TextBox Text="{Binding NeutralHoverDutyCycle, UpdateSourceTrigger=LostFocus, ValidatesOnExceptions=True}"
                                                  AutomationProperties.Name="Neutral hover duty cycle" />
                                     </StackPanel>
-                                    <StackPanel Grid.Column="2">
-                                        <TextBlock Text="Wall lock zone (%)" Style="{StaticResource FieldLabel}"
+                                    <StackPanel Grid.Column="2" VerticalAlignment="Bottom">
+                                        <TextBlock Text="Wall lock (%)" Style="{StaticResource FieldLabel}" TextWrapping="Wrap"
                                                    ToolTip="Boundary lock zone (0–25 %) where output clamps to full release or full hold to prevent wall-bounces." />
                                         <TextBox Text="{Binding BoundaryLockThresholdPercent, UpdateSourceTrigger=LostFocus, ValidatesOnExceptions=True}"
                                                  AutomationProperties.Name="Boundary lock threshold percent" />
@@ -277,16 +265,16 @@
                                 <Grid Margin="0,6,0,0">
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="12" />
+                                        <ColumnDefinition Width="10" />
                                         <ColumnDefinition Width="*" />
                                     </Grid.ColumnDefinitions>
-                                    <StackPanel Grid.Column="0">
-                                        <TextBlock Text="Kp (Proportional gain)" Style="{StaticResource FieldLabel}" />
+                                    <StackPanel Grid.Column="0" VerticalAlignment="Bottom">
+                                        <TextBlock Text="Kp (Position gain)" Style="{StaticResource FieldLabel}" TextWrapping="Wrap" />
                                         <TextBox Text="{Binding Kp, UpdateSourceTrigger=LostFocus, ValidatesOnExceptions=True}"
                                                  AutomationProperties.Name="Proportional gain Kp" />
                                     </StackPanel>
-                                    <StackPanel Grid.Column="2">
-                                        <TextBlock Text="Kd (Relative velocity damping)" Style="{StaticResource FieldLabel}" />
+                                    <StackPanel Grid.Column="2" VerticalAlignment="Bottom">
+                                        <TextBlock Text="Kd (Velocity damping)" Style="{StaticResource FieldLabel}" TextWrapping="Wrap" />
                                         <TextBox Text="{Binding Kd, UpdateSourceTrigger=LostFocus, ValidatesOnExceptions=True}"
                                                  AutomationProperties.Name="Derivative gain Kd" />
                                     </StackPanel>
@@ -295,16 +283,16 @@
                                 <Grid Margin="0,6,0,0">
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="12" />
+                                        <ColumnDefinition Width="10" />
                                         <ColumnDefinition Width="*" />
                                     </Grid.ColumnDefinitions>
-                                    <StackPanel Grid.Column="0">
-                                        <TextBlock Text="Kv (Target velocity feed-forward)" Style="{StaticResource FieldLabel}" />
+                                    <StackPanel Grid.Column="0" VerticalAlignment="Bottom">
+                                        <TextBlock Text="Kv (Target tracking)" Style="{StaticResource FieldLabel}" TextWrapping="Wrap" />
                                         <TextBox Text="{Binding DerivativeTargetGain, UpdateSourceTrigger=LostFocus, ValidatesOnExceptions=True}"
                                                  AutomationProperties.Name="Target velocity feed-forward gain Kv" />
                                     </StackPanel>
-                                    <StackPanel Grid.Column="2">
-                                        <TextBlock Text="Stopping brake multiplier (×)" Style="{StaticResource FieldLabel}"
+                                    <StackPanel Grid.Column="2" VerticalAlignment="Bottom">
+                                        <TextBlock Text="Brake multiplier (×)" Style="{StaticResource FieldLabel}" TextWrapping="Wrap"
                                                    ToolTip="Scales the kinematic stopping-distance braking when rushing toward the target or when the target reverses direction (default 1.65)." />
                                         <TextBox Text="{Binding AnkleBreakBrakingMultiplier, UpdateSourceTrigger=LostFocus, ValidatesOnExceptions=True}"
                                                  AutomationProperties.Name="Ankle-break braking multiplier" />
@@ -322,17 +310,12 @@
                 <!-- Step 2: the bar area -->
                 <Border Style="{StaticResource SetupCard}">
                     <StackPanel>
-                        <DockPanel>
-                            <Border DockPanel.Dock="Right" CornerRadius="6" Padding="8,2" Background="{DynamicResource SurfaceBrush}"
-                                    BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" VerticalAlignment="Center">
-                                <TextBlock FontSize="10.5" FontFamily="Cascadia Mono, Consolas, Segoe UI" Foreground="{DynamicResource MutedTextBrush}">
-                                    <Run Text="(" /><Run Text="{Binding RegionX, Mode=OneWay}" /><Run Text=", " /><Run Text="{Binding RegionY, Mode=OneWay}" /><Run Text=") · " /><Run Text="{Binding RegionWidth, Mode=OneWay}" /><Run Text="×" /><Run Text="{Binding RegionHeight, Mode=OneWay}" /><Run Text=" px" />
-                                </TextBlock>
-                            </Border>
-                            <TextBlock Text="{Binding AreaStepTitle, Converter={StaticResource UpperCase}}" Style="{StaticResource SetupCardTitle}" VerticalAlignment="Center"
-                                       ToolTip="The part of the screen the loop watches: drag a box tightly around the minigame's bar or track." />
-                        </DockPanel>
-                        <WrapPanel Margin="0,10,0,0">
+                        <TextBlock Text="{Binding AreaStepTitle, Converter={StaticResource UpperCase}}" Style="{StaticResource SetupCardTitle}" TextWrapping="Wrap"
+                                   ToolTip="The part of the screen the loop watches: drag a box tightly around the minigame's bar or track." />
+                        <controls:SearchRegionRadar Scope="CustomArea"
+                                                    RegionX="{Binding RegionX}" RegionY="{Binding RegionY}"
+                                                    RegionWidth="{Binding RegionWidth}" RegionHeight="{Binding RegionHeight}" />
+                        <WrapPanel Margin="0,8,0,0">
                             <Button Command="{Binding PickAreaCommand}" Margin="0,0,8,6" Style="{StaticResource PrimaryButton}"
                                     ToolTip="SmartMacro hides and the screen freezes; drag a box tightly around the minigame's bar or track. With a countdown you have time to start the minigame first."
                                     AutomationProperties.Name="Pick minigame bar area">
@@ -357,7 +340,7 @@
                 <!-- Step 3: the moving target / marker color -->
                 <Border Style="{StaticResource SetupCard}">
                     <StackPanel>
-                        <TextBlock Text="{Binding MarkerStepTitle, Converter={StaticResource UpperCase}}" Style="{StaticResource SetupCardTitle}"
+                        <TextBlock Text="{Binding MarkerStepTitle, Converter={StaticResource UpperCase}}" Style="{StaticResource SetupCardTitle}" TextWrapping="Wrap"
                                    ToolTip="The color of the thing that moves on its own (the fish, the indicator, the moving marker)." />
                         <WrapPanel Margin="0,8,0,0" VerticalAlignment="Center">
                             <Border Width="32" Height="32" CornerRadius="6" Background="{Binding MarkerBrush}" BorderBrush="{DynamicResource InputBorderBrush}" BorderThickness="1.5"
@@ -412,8 +395,8 @@
                 <!-- Step 4: your control bar / the target zone -->
                 <Border Style="{StaticResource SetupCard}">
                     <StackPanel>
-                        <TextBlock Text="{Binding ZoneStepTitle, Converter={StaticResource UpperCase}}" Style="{StaticResource SetupCardTitle}"
-                                   ToolTip="The bar you move with the mouse (follow minigames), or the zone the marker must reach (timing minigames)." />
+                        <TextBlock Text="{Binding ZoneStepTitle, Converter={StaticResource UpperCase}}" Style="{StaticResource SetupCardTitle}" TextWrapping="Wrap"
+                                   ToolTip="The bar you move with the mouse (follow minigames), or the zone the marker must reach (timing / casting minigames)." />
                         <StackPanel Visibility="{Binding IsDetectedZone, Converter={StaticResource BoolToVisibility}}">
                             <WrapPanel Margin="0,8,0,0" VerticalAlignment="Center">
                                 <Border Width="32" Height="32" CornerRadius="6" Background="{Binding ZoneBrush}" BorderBrush="{DynamicResource InputBorderBrush}" BorderThickness="1.5"
@@ -465,20 +448,39 @@
                         </StackPanel>
                         <TextBlock Style="{StaticResource MutedText}" FontSize="11" Margin="0,6,0,0" TextWrapping="Wrap"
                                    Visibility="{Binding IsFixedZone, Converter={StaticResource BoolToVisibility}}">
-                            <Run Text="The target zone is a fixed part of the bar, " /><Run Text="{Binding ZoneStartPercent, Mode=OneWay}" /><Run Text="–" /><Run Text="{Binding ZoneEndPercent, Mode=OneWay}" /><Run Text=" % (change it under all settings, or switch the zone to &quot;found by its color&quot;)." />
+                            <Run Text="The target zone is a fixed part of the bar, " /><Run Text="{Binding ZoneStartPercent, Mode=OneWay}" /><Run Text="–" /><Run Text="{Binding ZoneEndPercent, Mode=OneWay}" /><Run Text=" % (change it below or switch the zone to &quot;found by its color&quot;)." />
                         </TextBlock>
 
-                        <StackPanel Visibility="{Binding IsZoneClickPreset, Converter={StaticResource BoolToVisibility}}">
-                            <TextBlock Text="When the marker enters the zone" Style="{StaticResource FieldLabel}"
-                                       ToolTip="Click once (timing bars, skill checks) or let go of a held button (casting meters)." />
+                        <StackPanel Visibility="{Binding IsZoneClickPreset, Converter={StaticResource BoolToVisibility}}" Margin="0,8,0,0">
+                            <TextBlock Text="Target zone mode" Style="{StaticResource FieldLabel}" />
+                            <ComboBox ItemsSource="{x:Static steps:FeedbackLoopStepViewModel.ZoneModes}" DisplayMemberPath="Label" SelectedValuePath="Value"
+                                      SelectedValue="{Binding ZoneMode}" AutomationProperties.Name="Target zone mode" />
+                            <Grid Margin="0,6,0,0" Visibility="{Binding IsFixedZone, Converter={StaticResource BoolToVisibility}}">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="10" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Grid.Column="0">
+                                    <TextBlock Text="Zone start (%)" Style="{StaticResource FieldLabel}" />
+                                    <TextBox Text="{Binding ZoneStartPercent, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}" AutomationProperties.Name="Zone start percent" />
+                                </StackPanel>
+                                <StackPanel Grid.Column="2">
+                                    <TextBlock Text="Zone end (%)" Style="{StaticResource FieldLabel}" />
+                                    <TextBox Text="{Binding ZoneEndPercent, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}" AutomationProperties.Name="Zone end percent" />
+                                </StackPanel>
+                            </Grid>
+                            <TextBlock Text="When the marker enters the zone" Style="{StaticResource FieldLabel}" Margin="0,8,0,4"
+                                       ToolTip="Click once (timing bars, skill checks) or let go of a held button (casting Hold &amp; Release meters)." />
                             <ComboBox ItemsSource="{x:Static steps:FeedbackLoopStepViewModel.ZoneEntryActions}" DisplayMemberPath="Label" SelectedValuePath="Value"
                                       SelectedValue="{Binding ZoneEntryReleases}" AutomationProperties.Name="What to do when the marker enters the zone"
                                       ToolTip="Click once (timing bars, skill checks) or let go of a held button (casting meters)." />
                         </StackPanel>
 
-                        <TextBlock Text="Max runtime (ms)" Style="{StaticResource FieldLabel}" ToolTip="The loop always stops after this long (safety limit)." />
-                        <TextBox Text="{Binding MaxRuntimeMs, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}" Width="120" HorizontalAlignment="Left"
-                                 AutomationProperties.Name="Max runtime in milliseconds" ToolTip="The loop always stops after this long (safety limit). Paused time doesn't count." />
+                        <TextBlock Text="Max runtime" Style="{StaticResource FieldLabel}" ToolTip="The loop always stops after this long (safety limit)." />
+                        <controls:StudioNumberBox Value="{Binding MaxRuntimeMs}" Unit="ms" Step="500" Minimum="500" Maximum="3600000"
+                                                  Presets="5000,10000,15000,30000"
+                                                  AutomationProperties.Name="Max runtime in milliseconds" />
                         <TextBlock Text="{Binding MaxRuntimeText}" Style="{StaticResource MutedText}" FontSize="11" Margin="0,4,0,0" />
                     </StackPanel>
                 </Border>
@@ -494,33 +496,47 @@
                     <TextBlock Text="{Binding PlainSummary}" TextWrapping="Wrap" FontSize="12" Margin="0,3,0,0" />
                 </StackPanel>
             </Border>
+            </StackPanel>
 
-            <StackPanel Visibility="{Binding ShowAdvanced, Converter={StaticResource BoolToVisibility}}">
+            <StackPanel>
+                <StackPanel.Style>
+                    <Style TargetType="StackPanel">
+                        <Setter Property="Visibility" Value="Collapsed" />
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding ShowAdvanced}" Value="True">
+                                <Setter Property="Visibility" Value="Visible" />
+                            </DataTrigger>
+                            <DataTrigger Binding="{Binding ShowTuneSection}" Value="True">
+                                <Setter Property="Visibility" Value="Visible" />
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </StackPanel.Style>
             <!-- 1. The bar and the marker -->
             <TextBlock Text="1. The bar and the moving marker" Style="{StaticResource SectionTitle}" FontSize="13" Margin="0,18,0,0" />
             <Grid Margin="0,4,0,0">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*" />
-                    <ColumnDefinition Width="6" />
-                    <ColumnDefinition Width="*" />
-                    <ColumnDefinition Width="6" />
-                    <ColumnDefinition Width="*" />
-                    <ColumnDefinition Width="6" />
+                    <ColumnDefinition Width="8" />
                     <ColumnDefinition Width="*" />
                 </Grid.ColumnDefinitions>
-                <StackPanel Grid.Column="0">
-                    <TextBlock Text="X" Style="{StaticResource FieldLabel}" Margin="0,4,0,2" />
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+                <StackPanel Grid.Row="0" Grid.Column="0">
+                    <TextBlock Text="Left (X)" Style="{StaticResource FieldLabel}" Margin="0,4,0,2" />
                     <TextBox Text="{Binding RegionX, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}" Padding="6,5" AutomationProperties.Name="Bar area left" />
                 </StackPanel>
-                <StackPanel Grid.Column="2">
-                    <TextBlock Text="Y" Style="{StaticResource FieldLabel}" Margin="0,4,0,2" />
+                <StackPanel Grid.Row="0" Grid.Column="2">
+                    <TextBlock Text="Top (Y)" Style="{StaticResource FieldLabel}" Margin="0,4,0,2" />
                     <TextBox Text="{Binding RegionY, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}" Padding="6,5" AutomationProperties.Name="Bar area top" />
                 </StackPanel>
-                <StackPanel Grid.Column="4">
+                <StackPanel Grid.Row="1" Grid.Column="0" Margin="0,4,0,0">
                     <TextBlock Text="Width" Style="{StaticResource FieldLabel}" Margin="0,4,0,2" />
                     <TextBox Text="{Binding RegionWidth, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}" Padding="6,5" AutomationProperties.Name="Bar area width" />
                 </StackPanel>
-                <StackPanel Grid.Column="6">
+                <StackPanel Grid.Row="1" Grid.Column="2" Margin="0,4,0,0">
                     <TextBlock Text="Height" Style="{StaticResource FieldLabel}" Margin="0,4,0,2" />
                     <TextBox Text="{Binding RegionHeight, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}" Padding="6,5" AutomationProperties.Name="Bar area height" />
                 </StackPanel>

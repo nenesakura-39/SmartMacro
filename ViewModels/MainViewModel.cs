@@ -116,7 +116,11 @@ public sealed class MainViewModel : ObservableObject, IDisposable
             canPlay: () => Automation?.IsIdle ?? false);
 
         Settings = new SettingsViewModel(settingsStore, log, dialogs, paths, ApplySettings, SetStatus,
-            automation.Ocr.StatusText, automation.Ocr.IsAvailable, () => BuildDiagnostics(paths, automation.Ocr, log));
+            automation.Ocr.StatusText, automation.Ocr.IsAvailable, () => BuildDiagnostics(paths, automation.Ocr, log))
+        {
+            ExportStudioBackupHandler = ExportStudioBackupAsync,
+            RestoreStudioBackupHandler = RestoreStudioBackupAsync,
+        };
         ShowLogsCommand = new RelayCommand(() => CurrentPage = AppPage.Logs);
         OpenCommandPaletteCommand = new RelayCommand(OpenCommandPalette);
         OpenMissionControlCommand = new RelayCommand(() => MissionControlRequested?.Invoke(this, EventArgs.Empty));
@@ -178,6 +182,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
                 Automation.SetLiveSpeed(Editor.MacroId, Editor.Speed);
         };
 
+        Library.MacroRenamed = renamed => Editor.SyncExternalRename(renamed.Id, renamed.Name);
         Library.PropertyChanged += (_, e) =>
         {
             if (e.PropertyName is nameof(LibraryViewModel.SelectedItem) or nameof(LibraryViewModel.CountText) or "")
@@ -607,7 +612,22 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     {
         var macro = MacroFactory.CreateNew(Library.Names, $"Recording {DateTime.Now:yyyy-MM-dd HH:mm}");
         macro.Steps = steps;
-        macro.Description = "Recorded with SmartMacro.";
+
+        var dominantWindow = steps
+            .OfType<MouseClickStep>()
+            .Select(c => c.Target?.WindowTitle)
+            .Concat(steps.OfType<InputSequenceStep>()
+                .SelectMany(s => s.ClickTargets ?? Enumerable.Empty<SequenceClickTarget>())
+                .Select(t => t.Target?.WindowTitle))
+            .Where(t => !string.IsNullOrWhiteSpace(t))
+            .GroupBy(t => t!.Trim(), StringComparer.OrdinalIgnoreCase)
+            .OrderByDescending(g => g.Count())
+            .Select(g => g.Key)
+            .FirstOrDefault();
+
+        macro.Description = !string.IsNullOrWhiteSpace(dominantWindow)
+            ? $"Recorded in {dominantWindow} with SmartMacro."
+            : "Recorded with SmartMacro.";
 
         try
         {
@@ -644,7 +664,8 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         Library.Upsert(MacroJson.Clone(macro));
         Editor.Load(macro);
         CurrentPage = AppPage.Editor;
-        SetStatus($"Recorded {steps.Count:N0} steps into \"{macro.Name}\". Review them, then press Play.", StatusKind.Success);
+        Editor.RequestFocusMacroName();
+        SetStatus($"Recorded {steps.Count:N0} steps into \"{macro.Name}\". Type a name and press Enter to save, or press Play.", StatusKind.Success);
     }
 
     /// <summary>
@@ -723,6 +744,17 @@ public sealed class MainViewModel : ObservableObject, IDisposable
 
     public string OwnerText => $"by {Services.AppInfo.Owner}";
 
+    /// <summary>Live SIMD &amp; CPU worker telemetry shown in the Studio status bar.</summary>
+    public string HardwareAccelerationStatus => SmartMacro.Core.Vision.HardwareAccelerationInfo.StatusText;
+
+    /// <summary>Short badge for the Studio status bar (e.g. "AVX2 · 4w").</summary>
+    public string HardwareBadgeText =>
+        SmartMacro.Core.Vision.HardwareAccelerationInfo.IsAvx2Supported
+            ? $"⚡ AVX2 · {SmartMacro.Core.Vision.HardwareAccelerationInfo.MaxVisionWorkers}w"
+            : SmartMacro.Core.Vision.HardwareAccelerationInfo.IsSse2Supported
+                ? $"⚡ SSE2 · {SmartMacro.Core.Vision.HardwareAccelerationInfo.MaxVisionWorkers}w"
+                : $"CPU · {SmartMacro.Core.Vision.HardwareAccelerationInfo.MaxVisionWorkers}w";
+
     /// <summary>Plain-text system info for bug reports (no macro contents, no screenshots).</summary>
     private static string BuildDiagnostics(AppPaths paths, IOcrService ocr, ILogService log)
     {
@@ -742,5 +774,63 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         if (CrashReporter.GetLatestCrashSummary(paths.LogsDirectory) is { } latestCrash)
             text.AppendLine().AppendLine(latestCrash);
         return text.ToString();
+    }
+
+    private const string BackupFileFilter = "SmartMacro Studio Backup (*.smbackup;*.zip)|*.smbackup;*.zip|All files (*.*)|*.*";
+
+    private async Task ExportStudioBackupAsync()
+    {
+        var path = _dialogs.PickSaveFile("Export Full Studio Backup", BackupFileFilter, StudioBackupService.DefaultBackupFileName());
+        if (string.IsNullOrWhiteSpace(path)) return;
+
+        try
+        {
+            var macros = Library.Items.Select(i => MacroJson.Clone(i.Macro)).ToList();
+            var manifest = await StudioBackupService.CreateBackupAsync(path, macros, _settings, Services.AppInfo.Version);
+            SetStatus($"📦 Exported full Studio backup ({manifest.MacroCount} macro(s) + settings) to {path}.", StatusKind.Success);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            _log.Error("Could not export Studio backup.", ex);
+            _dialogs.ShowError("Backup export failed", ex.Message);
+        }
+    }
+
+    private async Task RestoreStudioBackupAsync()
+    {
+        var files = _dialogs.PickFilesToOpen("Restore Studio Backup (.smbackup / .zip)", BackupFileFilter);
+        if (files is null || files.Length == 0 || string.IsNullOrWhiteSpace(files[0])) return;
+
+        var file = files[0];
+        try
+        {
+            var existingIds = Library.Items.Select(i => i.Id).ToList();
+            var result = await StudioBackupService.ReadBackupAsync(file, Library.Names, existingIds);
+
+            foreach (var macro in result.RestoredMacros)
+            {
+                await _repository.SaveAsync(macro);
+                Library.Upsert(MacroJson.Clone(macro));
+            }
+
+            if (result.RestoredSettings is not null
+                && _dialogs.Confirm("Restore Studio Settings?",
+                    "This backup archive also includes Studio Settings (theme, hotkeys, and defaults).\n\nWould you like to restore those settings as well?"))
+            {
+                await Settings.ApplyRestoredSettingsAsync(result.RestoredSettings);
+            }
+
+            Editor.RefreshSubMacroLinks();
+            MacroHotkeysChanged?.Invoke(this, EventArgs.Empty);
+            var msg = $"📥 Restored {result.RestoredMacros.Count} macro(s) from {Path.GetFileName(file)}.";
+            if (result.SkippedFiles.Count > 0)
+                msg += $" ({result.SkippedFiles.Count} entry/entries skipped.)";
+            SetStatus(msg, result.SkippedFiles.Count == 0 ? StatusKind.Success : StatusKind.Warning);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException)
+        {
+            _log.Error("Could not restore Studio backup.", ex);
+            _dialogs.ShowError("Backup restore failed", ex.Message);
+        }
     }
 }

@@ -237,7 +237,7 @@ public static class ManualCatalog
                         "3. 56×56 Image Snapshot (1:1 fast path + 75%–150% multi-scale pyramid).",
                         "4. Window-Relative anchor (window title + process name, so document title changes still match).",
                         "5. Recorded Coordinates fallback."),
-                    S("Diagnosing & Self-Healing", "Select any Mouse click step and press 🧭 Locate Target in Properties to test all 5 tiers live and flash a green reticle on the winner. When playback relocates a drifted click by 25+ px, the Editor offers an opt-in 🩹 Smart Self-Heal Suggestion banner (Ctrl+Z undoes it; macros are never rewritten silently)."),
+                    S("Diagnosing & Self-Healing", "Select any Mouse click step and press 🧭 Locate Target in Properties to test all 5 tiers live and flash a green reticle on the winner. When playback relocates a drifted click by 25+ px, the Editor offers an opt-in 🔧 Smart Self-Heal Suggestion banner (Ctrl+Z undoes it; macros are never rewritten silently)."),
                 },
                 "smart intent fingerprint relocate ui automation locate target self heal moved window"),
             new("adaptive-timing", ManualCategory.VisionAndSmartAim, "⏱", "Adaptive Timing & Multi-Scale Image Matching",
@@ -290,16 +290,25 @@ public static class ManualCatalog
                         "Zones with momentum (heavy physics) are hard for any bang-bang controller; expect a lower win rate there."),
                 },
                 "feedback loop minigame bar fishing marker zone hold release tap"),
-            new("variables-memory", ManualCategory.LogicAndLoops, "🧠", "Variables, {placeholders} & Reading Screen Numbers",
-                "Give your macro plain-data memory: counters, HUD numbers, clipboard text, and goal conditions.",
+            new("variables-memory", ManualCategory.LogicAndLoops, "🧠", "Variables, {placeholders}, Math Formulas & Screen Numbers",
+                "Give your macro plain-data memory: counters, math formulas, HUD numbers, clipboard text, and goal conditions.",
                 new[]
                 {
                     S("Declaring & inspecting variables", "Click 🧠 Variables in the Editor header to declare Number, Text, or Boolean variables with default values. While a macro plays (and right after it finishes), live runtime values appear next to each variable."),
-                    S("Set Variable & {name} placeholders", "Use the 🧠 Set variable step to Set, Add (+), Subtract (−), or Append text from a Constant, 🔢 Read number on screen (strips commas, currency symbols, and 0/O look-alikes automatically), Read text on screen, Clipboard, Last found X/Y, Loop counter, or Elapsed seconds.",
+                    S("Set Variable, Math Formulas & {name} placeholders", "Use the 🧠 Set variable step to Set, Add (+), Subtract (−), Multiply (×), Divide (÷), Modulo (%), Round, or Append text from a Constant, 🧮 Math formula (e.g. ({gold} * 1.15) + 50, clamp({hp}, 0, 100), min, max, abs, round, floor, ceil, sqrt, pow), 🔢 Read number on screen, Read text on screen, Clipboard, Last found X/Y, Loop counter, or Elapsed seconds.",
                         "Write {varName} inside Type text, Find text, Focus window, or Screenshot prefix fields to insert the current value.",
                         "Select 🧠 Variable comparison in any If, Repeat (While / Until), Feedback loop stop condition, or Watcher to branch on ==, !=, >, >=, <, <=, Contains, or StartsWith."),
                 },
-                "variables memory counter set variable placeholder screen number clipboard compare math"),
+                "variables memory counter set variable placeholder screen number clipboard compare math formula clamp min max round sqrt pow"),
+            new("background-and-flow-control", ManualCategory.LogicAndLoops, "👻", "Background Window Input & Loop Flow Control (Break / Continue / Stop)",
+                "Send clicks, keys, and text to inactive windows without moving your mouse, and exit or skip Repeat loop turns cleanly.",
+                new[]
+                {
+                    S("👻 Background / Inactive Window Input", "Turn on the 👻 Background chip (or enter a Background window title in Tune) on any Mouse click, Key press, or Type text step to send Win32 PostMessage input directly to a background window without moving your physical cursor or stealing focus.",
+                        "When a Find image or Find color step is scoped to a specific Window, SmartMacro uses DWM PrintWindow capture so it can still see inside that window even when another app is in front of it."),
+                    S("⏹ Exit Loop, Continue Loop & Stop Macro", "Add an Exit loop / Continue / Stop step inside an If block to break out of the innermost Repeat loop immediately (ExitLoop), skip the rest of the current turn and start the next turn (ContinueLoop), or stop the entire macro cleanly with an optional status note (StopMacro)."),
+                },
+                "background window inactive postmessage occluded printwindow flow control break continue exit loop stop macro"),
             new("checkpoints-watchers", ManualCategory.LogicAndLoops, "🛡", "Checkpoints, Failure Policies & Background Watchers",
                 "Recover automatically from lag spikes, missed buttons, surprise pop-ups, and disconnects.",
                 new[]
@@ -416,9 +425,11 @@ public static class ManualCatalog
                         "Turn on Humanize for long-running loops (±2 px, ±4 % timing).",
                         "Ctrl+K → type a few letters is the fastest way to add anything.",
                         "Use 📐 Compact view for long macros, and Ctrl+F to jump to steps by name or comment.",
-                        "Test vision steps with Ctrl+T before running a long loop."),
+                        "Test vision steps with Ctrl+T before running a long loop.",
+                        "Press Ctrl+M to open Mission Control: use ▾ Mini for a compact floating bar, switch macros from the dropdown, or Record directly from the floating pod.",
+                        "Run macros from Windows Task Scheduler, Stream Deck, or shortcuts with: SmartMacro.exe --run \"Macro Name\" --exit-after-run."),
                 },
-                "tips tricks best practice robust humanize comment compact search palette"),
+                "tips tricks best practice robust humanize comment compact search palette mission control cli command line run"),
         };
 
         // ---------------- 🎮 Macro Recipes (one card per blueprint) ----------------

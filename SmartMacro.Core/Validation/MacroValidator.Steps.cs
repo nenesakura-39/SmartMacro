@@ -90,6 +90,9 @@ public static partial class MacroValidator
                     if (!c.UseCurrentPosition && !c.UseLastFoundText && c.X == c.EndX && c.Y == c.EndY)
                         issues.Add(Warning("The drag starts and ends at the same spot, so nothing is dragged. Pick an end position.", "EndPosition"));
                 }
+
+                if (c.BackgroundWindowTitle is { } bgClickTitle && bgClickTitle.Trim().Length > SearchArea.MaxWindowTitleLength)
+                    issues.Add(Error($"The background window title can be at most {SearchArea.MaxWindowTitleLength} characters.", nameof(MouseClickStep.BackgroundWindowTitle)));
                 break;
 
             case MouseScrollStep s:
@@ -114,6 +117,8 @@ public static partial class MacroValidator
                 else if (k.Modifiers != KeyModifiers.None && k.Action != KeyAction.Press)
                     issues.Add(Warning("Modifier keys are only used with the Press action.", nameof(KeyPressStep.Modifiers)));
                 CheckHold(issues, k.HoldMs, k.Action == KeyAction.Press, nameof(KeyPressStep.HoldMs), "Press");
+                if (k.BackgroundWindowTitle is { } bgKeyTitle && bgKeyTitle.Trim().Length > SearchArea.MaxWindowTitleLength)
+                    issues.Add(Error($"The background window title can be at most {SearchArea.MaxWindowTitleLength} characters.", nameof(KeyPressStep.BackgroundWindowTitle)));
                 break;
 
             case InputSequenceStep q:
@@ -127,6 +132,8 @@ public static partial class MacroValidator
                     issues.Add(Error($"The text can be at most {MaxTextLength:N0} characters.", nameof(TypeTextStep.Text)));
                 if (t.CharacterDelayMs < 0 || t.CharacterDelayMs > MaxCharacterDelayMs)
                     issues.Add(Error($"The delay between characters must be 0 to {MaxCharacterDelayMs:N0} ms.", nameof(TypeTextStep.CharacterDelayMs)));
+                if (t.BackgroundWindowTitle is { } bgTypeTitle && bgTypeTitle.Trim().Length > SearchArea.MaxWindowTitleLength)
+                    issues.Add(Error($"The background window title can be at most {SearchArea.MaxWindowTitleLength} characters.", nameof(TypeTextStep.BackgroundWindowTitle)));
                 break;
 
             case FindTextStep f:
@@ -251,6 +258,13 @@ public static partial class MacroValidator
 
             case CallMacroStep call:
                 ValidateCallMacro(issues, call);
+                break;
+
+            case FlowControlStep fc:
+                if (!Enum.IsDefined(fc.Action))
+                    issues.Add(Error("Unknown flow control action.", nameof(FlowControlStep.Action)));
+                if (fc.Message is { Length: > MaxCommentLength })
+                    issues.Add(Error($"The status message can be at most {MaxCommentLength} characters.", nameof(FlowControlStep.Message)));
                 break;
 
             default:
@@ -395,6 +409,11 @@ public static partial class MacroValidator
             if (!Enum.IsDefined(v.GaugeDirection))
                 issues.Add(Error("Unknown bar fill direction.", nameof(SetVariableStep.GaugeDirection)));
         }
+        else if (v.Source == VariableSourceKind.Formula)
+        {
+            if (!Playback.FormulaEvaluator.TryEvaluate(v.Value, _ => 1.0, out _, out var formulaError))
+                issues.Add(Error(formulaError ?? "Invalid math formula.", nameof(SetVariableStep.Value)));
+        }
     }
 
     private static void ValidateCallMacro(List<ValidationIssue> issues, CallMacroStep call)
@@ -509,6 +528,17 @@ public static partial class MacroValidator
             issues.Add(Error($"The file name prefix can be at most {ScreenshotFiles.MaxPrefixLength} characters.", nameof(ScreenshotStep.FileNamePrefix)));
         else if (ScreenshotFiles.HasInvalidFileNameChars(s.FileNamePrefix))
             issues.Add(Warning("The file name prefix has characters a file name can't contain (< > : \" / \\ | ? *); they're replaced by _.", nameof(ScreenshotStep.FileNamePrefix)));
+
+        if (!Enum.IsDefined(s.SoundCue))
+            issues.Add(Error("Unknown sound cue option.", nameof(ScreenshotStep.SoundCue)));
+        if ((s.NotificationMessage?.Length ?? 0) > 500)
+            issues.Add(Error("The notification message can be at most 500 characters.", nameof(ScreenshotStep.NotificationMessage)));
+        if (!string.IsNullOrWhiteSpace(s.WebhookUrl))
+        {
+            var url = s.WebhookUrl.Trim();
+            if (url.Length > 500 || !Uri.TryCreate(url, UriKind.Absolute, out var uri) || !string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase))
+                issues.Add(Error("Enter a valid https:// webhook URL (or leave it empty).", nameof(ScreenshotStep.WebhookUrl)));
+        }
     }
 
     /// <summary>
@@ -552,6 +582,29 @@ public static partial class MacroValidator
     /// </summary>
     private static void ValidateCondition(List<ValidationIssue> issues, Condition? condition, ScreenBounds? screen,
         string label = "Condition", string property = "Condition")
+    {
+        if (condition is null)
+        {
+            issues.Add(Error($"{label}: choose what the condition checks.", property));
+            return;
+        }
+
+        ValidateSingleCondition(issues, condition, screen, label, property);
+
+        if (!Enum.IsDefined(condition.SecondCombinator))
+        {
+            issues.Add(Error($"{label}: unknown condition combinator.", property + ".SecondCombinator"));
+            return;
+        }
+
+        if (condition.SecondCombinator != ConditionCombinator.None)
+        {
+            ValidateSingleCondition(issues, condition.SecondCondition, screen, label + " (2nd)", property + ".SecondCondition");
+        }
+    }
+
+    private static void ValidateSingleCondition(List<ValidationIssue> issues, Condition? condition, ScreenBounds? screen,
+        string label, string property)
     {
         if (condition is null)
         {

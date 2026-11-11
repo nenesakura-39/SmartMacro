@@ -25,6 +25,12 @@ public static class MousePathSimplifier
     /// <summary>While a button is held, a point is kept at least this often (ms), so drags never turn into jumps.</summary>
     public const int DragKeepEveryMs = 50;
 
+    /// <summary>Time window (ms) before a MouseDown in which tiny 1–2 px hand tremor moves are absorbed into the click.</summary>
+    public const int PreClickJitterWindowMs = 35;
+
+    /// <summary>Maximum distance (px per axis) from the MouseDown spot for pre-click tremor absorption.</summary>
+    public const int PreClickJitterMaxPx = 2;
+
     public static List<RawInputEvent> Simplify(List<RawInputEvent> events, int tolerancePx, int restMs)
     {
         ArgumentNullException.ThrowIfNull(events);
@@ -47,8 +53,26 @@ public static class MousePathSimplifier
             while (i < events.Count && events[i].Kind == RawInputKind.MouseMove) i++;
             var dragging = held.Count > 0;
             var tolerance = Math.Max(0, tolerancePx);
-            MarkStretch(events, start, i - 1, keep, dragging ? Math.Min(tolerance, DragTolerancePx) : tolerance, restMs,
-                dragging ? DragKeepEveryMs : 0);
+            var last = i - 1;
+
+            // Absorb 1–2 px hand tremor in the final 35 ms right before pressing a mouse button.
+            if (!dragging && tolerance > 0 && i < events.Count && events[i].Kind == RawInputKind.MouseDown)
+            {
+                var click = events[i];
+                while (last >= start
+                       && click.TimeMs - events[last].TimeMs <= PreClickJitterWindowMs
+                       && Math.Abs(events[last].X - click.X) <= PreClickJitterMaxPx
+                       && Math.Abs(events[last].Y - click.Y) <= PreClickJitterMaxPx)
+                {
+                    last--;
+                }
+            }
+
+            if (last >= start)
+            {
+                MarkStretch(events, start, last, keep, dragging ? Math.Min(tolerance, DragTolerancePx) : tolerance, restMs,
+                    dragging ? DragKeepEveryMs : 0);
+            }
         }
 
         var result = new List<RawInputEvent>(events.Count);

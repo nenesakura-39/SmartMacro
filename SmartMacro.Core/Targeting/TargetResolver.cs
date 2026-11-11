@@ -88,7 +88,7 @@ public sealed class TargetResolver
         var diagnostics = new List<StrategyDiagnostic>(5);
         var target = step.Target;
 
-        var liveWindow = FindLiveWindow(target, _layout);
+        var liveWindow = FindLiveWindow(target, _layout, step.X, step.Y);
         var (expectedX, expectedY, scaleX, scaleY) = ComputeExpectedPoint(step, target, liveWindow);
         StrategyDiagnostic? winner = null;
 
@@ -514,8 +514,14 @@ public sealed class TargetResolver
 
     /// <summary>
     /// Finds the best live top-level window matching <paramref name="target"/> by title and/or process name.
+    /// When multiple windows share the same title/process (e.g. two Roblox windows side-by-side), prefers the window
+    /// that contains or is closest to <paramref name="preferredX"/>, <paramref name="preferredY"/>.
     /// </summary>
-    public static WindowInfo? FindLiveWindow(TargetFingerprint? target, IScreenLayout? layout)
+    public static WindowInfo? FindLiveWindow(
+        TargetFingerprint? target,
+        IScreenLayout? layout,
+        int? preferredX = null,
+        int? preferredY = null)
     {
         if (target is null || layout is null) return null;
         var wantedTitle = target.WindowTitle?.Trim() ?? string.Empty;
@@ -525,6 +531,8 @@ public sealed class TargetResolver
         var windows = layout.GetWindows();
         WindowInfo? best = null;
         var bestRank = int.MaxValue;
+        var bestContains = false;
+        var bestDistanceSq = long.MaxValue;
 
         foreach (var w in windows)
         {
@@ -549,11 +557,27 @@ public sealed class TargetResolver
                 _ => int.MaxValue,
             };
 
-            if (rank < bestRank)
+            if (rank == int.MaxValue || rank > bestRank) continue;
+
+            var contains = false;
+            var distSq = long.MaxValue;
+            if (preferredX is int px && preferredY is int py)
+            {
+                contains = w.Bounds.Contains(px, py);
+                distSq = DistanceSquared(w.Bounds.CenterX, w.Bounds.CenterY, px, py);
+            }
+
+            var isBetter = rank < bestRank
+                || (preferredX is not null && preferredY is not null
+                    && ((contains && !bestContains) || (contains == bestContains && distSq < bestDistanceSq)));
+
+            if (isBetter)
             {
                 bestRank = rank;
                 best = w;
-                if (rank == 0) break;
+                bestContains = contains;
+                bestDistanceSq = distSq;
+                if (rank == 0 && (preferredX is null || preferredY is null)) break;
             }
         }
 

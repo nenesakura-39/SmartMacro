@@ -3,155 +3,220 @@
                     xmlns:models="clr-namespace:SmartMacro.Core.Models;assembly=SmartMacro.Core"
                     xmlns:steps="clr-namespace:SmartMacro.ViewModels.Steps"
                     xmlns:vision="clr-namespace:SmartMacro.Services.Vision"
+                    xmlns:controls="clr-namespace:SmartMacro.Controls"
                     xmlns:conv="clr-namespace:SmartMacro.Converters">
 
     <ResourceDictionary.MergedDictionaries>
         <ResourceDictionary Source="/SmartMacro;component/Views/StepEditors/StepEditorsShared.xaml" />
     </ResourceDictionary.MergedDictionaries>
 
-    <!-- Focus window (UTILITY & GAME) -->
+    <!-- ===================================== 1. FOCUS / WAIT FOR WINDOW ===================================== -->
     <DataTemplate DataType="{x:Type steps:FocusWindowStepViewModel}">
         <StackPanel>
             <ContentControl Content="{Binding}" ContentTemplate="{StaticResource StepHeaderTemplate}" Focusable="False" />
             <ContentControl Content="{Binding}" ContentTemplate="{StaticResource SummaryBannerTemplate}" Focusable="False" />
 
-            <Border Style="{StaticResource SetupCard}">
-                <StackPanel>
-                    <TextBlock Text="1 · TARGET WINDOW &amp; SNAP LAYOUT" Style="{StaticResource SetupCardTitle}" />
-                    <TextBlock Text="Open windows" Style="{StaticResource FieldLabel}" Margin="0,8,0,4" />
-                    <Grid>
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="*" />
-                            <ColumnDefinition Width="Auto" />
-                        </Grid.ColumnDefinitions>
-                        <ComboBox ItemsSource="{Binding WindowTitles}" SelectedItem="{Binding SelectedWindowTitle}" AutomationProperties.Name="Window to focus"
-                                  ToolTip="The app windows open right now. Choosing one fills in the title below. Open your game first, then click Refresh windows." />
-                        <Button Grid.Column="1" Command="{Binding RefreshWindowsCommand}" Margin="8,0,0,0" Padding="10,6"
-                                ToolTip="Read the list of open windows again." AutomationProperties.Name="Refresh windows">
-                            <StackPanel Orientation="Horizontal">
-                                <TextBlock Text="&#xE72C;" Style="{StaticResource IconText}" FontSize="12" />
-                                <TextBlock Text="Refresh windows" Margin="6,0,0,0" FontSize="12" />
+            <!-- SETUP TAB: Target Window & Snap Layout -->
+            <StackPanel Visibility="{Binding ShowSetupSection, Converter={StaticResource BoolToVisibility}}">
+                <Border Style="{StaticResource SetupCard}">
+                    <StackPanel>
+                        <TextBlock Text="🪟 1. WHICH WINDOW" Style="{StaticResource SetupCardTitle}" />
+                        <TextBlock Text="Open windows" Style="{StaticResource FieldLabel}" Margin="0,8,0,4" />
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <ComboBox ItemsSource="{Binding WindowTitles}" SelectedItem="{Binding SelectedWindowTitle}"
+                                      AutomationProperties.Name="Open windows" />
+                            <Button Grid.Column="1" Command="{Binding RefreshWindowsCommand}" Margin="8,0,0,0" Padding="10,6"
+                                    ToolTip="Read the list of open windows again." AutomationProperties.Name="Refresh windows">
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock Text="&#xE72C;" Style="{StaticResource IconText}" FontSize="12" />
+                                    <TextBlock Text="Refresh" Margin="6,0,0,0" FontSize="12" />
+                                </StackPanel>
+                            </Button>
+                        </Grid>
+                        <TextBlock Text="Window title or app name contains" Style="{StaticResource FieldLabel}" Margin="0,8,0,4" />
+                        <TextBox Text="{Binding WindowTitle, UpdateSourceTrigger=PropertyChanged}" Tag="e.g. Roblox or Notepad" MaxLength="260"
+                                 AutomationProperties.Name="Window title" />
+                        <CheckBox Content="Restore window if minimized" IsChecked="{Binding RestoreIfMinimized}" Margin="0,8,0,0"
+                                  AutomationProperties.Name="Restore if minimized" />
+                    </StackPanel>
+                </Border>
+
+                <Border Style="{StaticResource SetupCard}">
+                    <StackPanel>
+                        <TextBlock Text="⚡ 2. WINDOW POSITION &amp; SNAP LAYOUT" Style="{StaticResource SetupCardTitle}" />
+                        <ComboBox ItemsSource="{x:Static steps:FocusWindowStepViewModel.SnapChoices}" DisplayMemberPath="Label" SelectedValuePath="Value"
+                                  SelectedValue="{Binding SnapLayout}" Margin="0,8,0,0" AutomationProperties.Name="Window snap layout" />
+                    </StackPanel>
+                </Border>
+            </StackPanel>
+
+            <!-- RECOVERY & TIMING TAB: Wait Timeout & Failure Policy -->
+            <StackPanel Visibility="{Binding ShowRecoverySection, Converter={StaticResource BoolToVisibility}}">
+                <Border Style="{StaticResource SetupCard}">
+                    <StackPanel>
+                        <TextBlock Text="🛡 3. TIMING &amp; SELF-HEALING" Style="{StaticResource SetupCardTitle}" />
+                        <Grid Margin="0,8,0,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="10" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Grid.Column="0" VerticalAlignment="Bottom">
+                                <TextBlock Text="Wait for window" Style="{StaticResource FieldLabel}" />
+                                <controls:StudioNumberBox Value="{Binding WaitForWindowMs}" Unit="ms" Step="250" Minimum="0" Maximum="3600000"
+                                                          Presets="0,1000,3000,5000,10000"
+                                                          AutomationProperties.Name="Wait up to in milliseconds" />
                             </StackPanel>
-                        </Button>
-                    </Grid>
-                    <TextBlock Text="Window title or app name contains" Style="{StaticResource FieldLabel}"
-                               ToolTip="Part of the window's title (e.g. Roblox) or of the app's name (e.g. RobloxPlayerBeta). Case doesn't matter. A title match wins over an app-name match." />
-                    <TextBox Text="{Binding WindowTitle, UpdateSourceTrigger=PropertyChanged}" Tag="e.g. Roblox" MaxLength="260" AutomationProperties.Name="Window title or app name contains" />
-
-                    <CheckBox Content="Restore it if it's minimized" IsChecked="{Binding RestoreIfMinimized}" Margin="0,12,0,0"
-                              AutomationProperties.Name="Restore it if it's minimized" />
-
-                    <TextBlock Text="Window layout / snap (optional)" Style="{StaticResource FieldLabel}" Margin="0,10,0,4" />
-                    <ComboBox ItemsSource="{x:Static steps:FocusWindowStepViewModel.SnapChoices}" DisplayMemberPath="Label" SelectedValuePath="Value"
-                              SelectedValue="{Binding SnapLayout}" AutomationProperties.Name="Window snap layout" />
-                </StackPanel>
-            </Border>
-
-            <Border Style="{StaticResource SetupCard}">
-                <StackPanel>
-                    <TextBlock Text="2 · TIMING &amp; FAILURE RECOVERY" Style="{StaticResource SetupCardTitle}" />
-                    <Grid Margin="0,4,0,0">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="*" />
-                            <ColumnDefinition Width="12" />
-                            <ColumnDefinition Width="*" />
-                        </Grid.ColumnDefinitions>
-                        <StackPanel>
-                            <TextBlock Text="Wait for it to open (ms)" Style="{StaticResource FieldLabel}"
-                                       ToolTip="If the window isn't open yet (the game is still starting), keep looking this long. 0 = look once." />
-                            <TextBox Text="{Binding WaitForWindowMs, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}" AutomationProperties.Name="Wait for the window in milliseconds" />
-                        </StackPanel>
-                        <StackPanel Grid.Column="2">
-                            <TextBlock Text="Pause after (ms)" Style="{StaticResource FieldLabel}"
-                                       ToolTip="A short pause after the window comes to the front, so the game is ready for the next key or click." />
-                            <TextBox Text="{Binding SettleMs, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}" AutomationProperties.Name="Pause after focusing in milliseconds" />
-                        </StackPanel>
-                    </Grid>
-
-                    <TextBlock Text="If the window isn't found" Style="{StaticResource FieldLabel}" />
-                    <ContentControl Content="{Binding FailurePolicy}" ContentTemplate="{StaticResource FailurePolicyEditorTemplate}" Focusable="False" />
-                    <TextBlock Style="{StaticResource MutedText}" FontSize="11" Margin="0,6,0,0" TextWrapping="Wrap"
-                               Text="Windows sometimes refuses to switch windows for another app (e.g. a game started as administrator while SmartMacro isn't). The log says so when that happens." />
-                </StackPanel>
-            </Border>
+                            <StackPanel Grid.Column="2" VerticalAlignment="Bottom">
+                                <TextBlock Text="Settle pause" Style="{StaticResource FieldLabel}" />
+                                <controls:StudioNumberBox Value="{Binding SettleMs}" Unit="ms" Step="25" Minimum="0" Maximum="60000"
+                                                          Presets="0,100,250,500"
+                                                          AutomationProperties.Name="Settle pause in milliseconds" />
+                            </StackPanel>
+                        </Grid>
+                        <TextBlock Text="When the window isn't found in time" Style="{StaticResource FieldLabel}" Margin="0,10,0,4" />
+                        <ContentControl Content="{Binding FailurePolicy}" ContentTemplate="{StaticResource FailurePolicyEditorTemplate}" Focusable="False" />
+                    </StackPanel>
+                </Border>
+            </StackPanel>
 
             <ContentControl Content="{Binding}" ContentTemplate="{StaticResource StepFooterTemplate}" Focusable="False" />
         </StackPanel>
     </DataTemplate>
 
-    <!-- Take screenshot (UTILITY & GAME) -->
+    <!-- ===================================== 2. SAVE SCREENSHOT ===================================== -->
     <DataTemplate DataType="{x:Type steps:ScreenshotStepViewModel}">
         <StackPanel>
             <ContentControl Content="{Binding}" ContentTemplate="{StaticResource StepHeaderTemplate}" Focusable="False" />
             <ContentControl Content="{Binding}" ContentTemplate="{StaticResource SummaryBannerTemplate}" Focusable="False" />
 
-            <Border Style="{StaticResource SetupCard}">
-                <StackPanel>
-                    <TextBlock Text="1 · CAPTURE REGION OR WINDOW" Style="{StaticResource SetupCardTitle}" />
-                    <TextBlock Text="What to capture" Style="{StaticResource FieldLabel}" Margin="0,8,0,4" />
-                    <ComboBox ItemsSource="{x:Static steps:ScreenshotStepViewModel.Areas}" DisplayMemberPath="Label" SelectedValuePath="Value"
-                              SelectedValue="{Binding Area}" AutomationProperties.Name="What to capture" />
+            <StackPanel Visibility="{Binding ShowSetupSection, Converter={StaticResource BoolToVisibility}}">
+                <Border Style="{StaticResource SetupCard}">
+                    <StackPanel>
+                        <TextBlock Text="📸 1. WHAT TO CAPTURE" Style="{StaticResource SetupCardTitle}" />
+                        <ComboBox ItemsSource="{x:Static steps:ScreenshotStepViewModel.Areas}" DisplayMemberPath="Label" SelectedValuePath="Value"
+                                  SelectedValue="{Binding Area}" Margin="0,8,0,0" AutomationProperties.Name="What to capture" />
 
-                    <StackPanel Visibility="{Binding UsesWindow, Converter={StaticResource BoolToVisibility}}">
-                        <Grid Margin="0,8,0,0">
+                        <StackPanel Visibility="{Binding UsesWindow, Converter={StaticResource BoolToVisibility}}" Margin="0,8,0,0">
+                            <TextBlock Text="Open windows" Style="{StaticResource FieldLabel}" />
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <ComboBox ItemsSource="{Binding WindowTitles}" SelectedItem="{Binding SelectedWindowTitle}"
+                                          AutomationProperties.Name="Window to capture" />
+                                <Button Grid.Column="1" Command="{Binding RefreshWindowsCommand}" Margin="8,0,0,0" Padding="10,6"
+                                        AutomationProperties.Name="Refresh windows">
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock Text="&#xE72C;" Style="{StaticResource IconText}" FontSize="12" />
+                                        <TextBlock Text="Refresh" Margin="6,0,0,0" FontSize="12" />
+                                    </StackPanel>
+                                </Button>
+                            </Grid>
+                            <TextBlock Text="Window title contains" Style="{StaticResource FieldLabel}" Margin="0,6,0,4" />
+                            <TextBox Text="{Binding WindowTitle, UpdateSourceTrigger=PropertyChanged}" Tag="e.g. Roblox" MaxLength="260"
+                                     AutomationProperties.Name="Window title" />
+                        </StackPanel>
+
+                        <StackPanel Visibility="{Binding UsesRegion, Converter={StaticResource BoolToVisibility}}" Margin="0,6,0,0">
+                            <controls:SearchRegionRadar Scope="CustomArea"
+                                                        RegionX="{Binding RegionX}" RegionY="{Binding RegionY}"
+                                                        RegionWidth="{Binding RegionWidth}" RegionHeight="{Binding RegionHeight}" />
+
+                            <WrapPanel Margin="0,8,0,0">
+                                <Button Command="{Binding PickAreaCommand}" Margin="0,0,8,6" Style="{StaticResource PrimaryButton}"
+                                        AutomationProperties.Name="Pick screenshot area">
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock Text="&#xE8B0;" Style="{StaticResource IconText}" />
+                                        <TextBlock Text="Pick area" Margin="8,0,0,0" />
+                                    </StackPanel>
+                                </Button>
+                                <ComboBox Style="{StaticResource FreezeComboBox}" Margin="0,0,0,6" />
+                            </WrapPanel>
+                            <Grid Margin="0,4,0,0">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="8" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                </Grid.RowDefinitions>
+                                <StackPanel Grid.Row="0" Grid.Column="0">
+                                    <TextBlock Text="Left (X)" Style="{StaticResource FieldLabel}" />
+                                    <controls:StudioNumberBox Value="{Binding RegionX}" Unit="px" Step="10" ShowStepper="False"
+                                                              AutomationProperties.Name="Area X" />
+                                </StackPanel>
+                                <StackPanel Grid.Row="0" Grid.Column="2">
+                                    <TextBlock Text="Top (Y)" Style="{StaticResource FieldLabel}" />
+                                    <controls:StudioNumberBox Value="{Binding RegionY}" Unit="px" Step="10" ShowStepper="False"
+                                                              AutomationProperties.Name="Area Y" />
+                                </StackPanel>
+                                <StackPanel Grid.Row="1" Grid.Column="0" Margin="0,4,0,0">
+                                    <TextBlock Text="Width" Style="{StaticResource FieldLabel}" />
+                                    <controls:StudioNumberBox Value="{Binding RegionWidth}" Unit="px" Step="10" Minimum="0" ShowStepper="False"
+                                                              AutomationProperties.Name="Area width" />
+                                </StackPanel>
+                                <StackPanel Grid.Row="1" Grid.Column="2" Margin="0,4,0,0">
+                                    <TextBlock Text="Height" Style="{StaticResource FieldLabel}" />
+                                    <controls:StudioNumberBox Value="{Binding RegionHeight}" Unit="px" Step="10" Minimum="0" ShowStepper="False"
+                                                              AutomationProperties.Name="Area height" />
+                                </StackPanel>
+                            </Grid>
+                        </StackPanel>
+                    </StackPanel>
+                </Border>
+
+                <Border Style="{StaticResource SetupCard}">
+                    <StackPanel>
+                        <TextBlock Text="📁 2. WHERE TO SAVE IT &amp; SOUND CUE" Style="{StaticResource SetupCardTitle}" />
+                        <TextBlock Text="File name starts with" Style="{StaticResource FieldLabel}" Margin="0,8,0,4" />
+                        <TextBox Text="{Binding FileNamePrefix, UpdateSourceTrigger=PropertyChanged}" Tag="screenshot" MaxLength="80"
+                                 AutomationProperties.Name="File name prefix" />
+                        <TextBlock Text="Folder (leave blank for SmartMacro Screenshots)" Style="{StaticResource FieldLabel}" Margin="0,8,0,4" />
+                        <TextBox Text="{Binding FolderPath, UpdateSourceTrigger=PropertyChanged}" Tag="e.g. C:\Users\You\Pictures\SmartMacro" MaxLength="260"
+                                 AutomationProperties.Name="Folder path" />
+                        <WrapPanel Margin="0,8,0,0">
+                            <Button Command="{Binding ChooseFolderCommand}" Margin="0,0,8,6" AutomationProperties.Name="Browse for folder">
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock Text="&#xE8B7;" Style="{StaticResource IconText}" />
+                                    <TextBlock Text="Choose folder…" Margin="8,0,0,0" />
+                                </StackPanel>
+                            </Button>
+                            <Button Command="{Binding OpenFolderCommand}" Margin="0,0,8,6" AutomationProperties.Name="Open screenshots folder">
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock Text="&#xE8DA;" Style="{StaticResource IconText}" />
+                                    <TextBlock Text="Open folder" Margin="8,0,0,0" />
+                                </StackPanel>
+                            </Button>
+                        </WrapPanel>
+                        <TextBlock Text="{Binding EffectiveFolder}" Style="{StaticResource MutedText}" FontSize="11" TextWrapping="Wrap" />
+
+                        <TextBlock Text="Audio feedback cue when captured" Style="{StaticResource FieldLabel}" Margin="0,8,0,4" />
+                        <Grid>
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="*" />
                                 <ColumnDefinition Width="Auto" />
                             </Grid.ColumnDefinitions>
-                            <ComboBox ItemsSource="{Binding WindowTitles}" SelectedItem="{Binding SelectedWindowTitle}" AutomationProperties.Name="Window to capture" />
-                            <Button Grid.Column="1" Command="{Binding RefreshWindowsCommand}" Margin="8,0,0,0" Padding="10,6"
-                                    ToolTip="Read the list of open windows again." AutomationProperties.Name="Refresh windows">
-                                <StackPanel Orientation="Horizontal">
-                                    <TextBlock Text="&#xE72C;" Style="{StaticResource IconText}" FontSize="12" />
-                                    <TextBlock Text="Refresh windows" Margin="6,0,0,0" FontSize="12" />
-                                </StackPanel>
+                            <ComboBox ItemsSource="{x:Static steps:ScreenshotStepViewModel.SoundCueChoices}" DisplayMemberPath="Label" SelectedValuePath="Value"
+                                      SelectedValue="{Binding SoundCue}" AutomationProperties.Name="Audio feedback cue" />
+                            <Button Grid.Column="1" Command="{Binding TestSoundCueCommand}" Margin="8,0,0,0" Padding="10,6"
+                                    AutomationProperties.Name="Preview sound cue">
+                                <TextBlock Text="🔊 Preview" FontSize="12" />
                             </Button>
                         </Grid>
-                        <TextBlock Text="Window title contains" Style="{StaticResource FieldLabel}" />
-                        <TextBox Text="{Binding WindowTitle, UpdateSourceTrigger=PropertyChanged}" Tag="e.g. Roblox" MaxLength="260" AutomationProperties.Name="Window title contains" />
                     </StackPanel>
+                </Border>
+            </StackPanel>
 
-                    <StackPanel Visibility="{Binding UsesRegion, Converter={StaticResource BoolToVisibility}}">
-                        <WrapPanel Margin="0,8,0,0">
-                            <Button Command="{Binding PickAreaCommand}" Margin="0,0,8,6" Style="{StaticResource PrimaryButton}"
-                                    ToolTip="SmartMacro hides and the screen freezes; drag a box around the part to capture." AutomationProperties.Name="Pick screenshot area">
-                                <StackPanel Orientation="Horizontal">
-                                    <TextBlock Text="&#xE8B0;" Style="{StaticResource IconText}" />
-                                    <TextBlock Text="Pick area" Margin="8,0,0,0" />
-                                </StackPanel>
-                            </Button>
-                            <ComboBox Style="{StaticResource FreezeComboBox}" Margin="0,0,0,6" />
-                        </WrapPanel>
-                        <TextBlock Style="{StaticResource MutedText}" FontSize="11" TextWrapping="Wrap">
-                            <Run Text="Area: (" /><Run Text="{Binding RegionX, Mode=OneWay}" /><Run Text=", " /><Run Text="{Binding RegionY, Mode=OneWay}" /><Run Text="), " /><Run Text="{Binding RegionWidth, Mode=OneWay}" /><Run Text=" × " /><Run Text="{Binding RegionHeight, Mode=OneWay}" /><Run Text=" px" />
-                        </TextBlock>
-                    </StackPanel>
-                </StackPanel>
-            </Border>
-
-            <Border Style="{StaticResource SetupCard}">
-                <StackPanel>
-                    <TextBlock Text="2 · OUTPUT FOLDER &amp; FILE NAMING" Style="{StaticResource SetupCardTitle}" />
-                    <TextBlock Text="Save in folder" Style="{StaticResource FieldLabel}" Margin="0,8,0,4" />
-                    <TextBox Text="{Binding FolderPath, UpdateSourceTrigger=LostFocus}" Tag="Pictures\SmartMacro Screenshots" AutomationProperties.Name="Screenshot folder"
-                             ToolTip="Leave empty for Pictures\SmartMacro Screenshots. The folder is created when it doesn't exist." />
-                    <WrapPanel Margin="0,6,0,0">
-                        <Button Content="Choose folder…" Command="{Binding ChooseFolderCommand}" Padding="10,5" Margin="0,0,6,6" AutomationProperties.Name="Choose folder" />
-                        <Button Content="Use default" Command="{Binding UseDefaultFolderCommand}" Padding="10,5" Margin="0,0,6,6" AutomationProperties.Name="Use the default folder" />
-                        <Button Content="Open folder" Command="{Binding OpenFolderCommand}" Padding="10,5" Margin="0,0,6,6" AutomationProperties.Name="Open the screenshot folder" />
-                    </WrapPanel>
-
-                    <TextBlock Text="File name starts with" Style="{StaticResource FieldLabel}" />
-                    <TextBox Text="{Binding FileNamePrefix, UpdateSourceTrigger=PropertyChanged}" Tag="SmartMacro" MaxLength="60" AutomationProperties.Name="File name prefix" />
-                    <TextBlock Style="{StaticResource MutedText}" FontSize="11" Margin="0,4,0,0" TextWrapping="Wrap">
-                        <Run Text="Example: " /><Run Text="{Binding ExampleFileName, Mode=OneWay}" />
-                    </TextBlock>
-
-                    <TextBlock Text="{Binding TestResult}" Style="{StaticResource MutedText}" FontSize="11" Margin="0,8,0,0" TextWrapping="Wrap"
-                               Visibility="{Binding TestResult, Converter={StaticResource NullToVisibility}}" />
-                </StackPanel>
-            </Border>
-
+            <TextBlock Text="{Binding TestResult}" Style="{StaticResource MutedText}" FontSize="11" Margin="0,8,0,0" TextWrapping="Wrap"
+                       Visibility="{Binding TestResult, Converter={StaticResource NullToVisibility}}" />
             <ContentControl Content="{Binding}" ContentTemplate="{StaticResource StepFooterTemplate}" Focusable="False" />
         </StackPanel>
     </DataTemplate>

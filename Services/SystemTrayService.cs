@@ -43,6 +43,7 @@ public sealed class SystemTrayService : IDisposable
 
     private IntPtr _hwnd;
     private HwndSource? _source;
+    private IntPtr _ownedIcon;
     private bool _iconAdded;
     private bool _disposed;
 
@@ -90,9 +91,7 @@ public sealed class SystemTrayService : IDisposable
 
     private NOTIFYICONDATAW CreateNotifyIconData(uint flags, string tooltip)
     {
-        var icon = GetClassLongPtr(_hwnd, GCLP_HICONSM);
-        if (icon == IntPtr.Zero) icon = GetClassLongPtr(_hwnd, GCLP_HICON);
-        if (icon == IntPtr.Zero) icon = LoadIconW(IntPtr.Zero, (IntPtr)IDI_APPLICATION);
+        var icon = EnsureTrayIcon();
 
         var tip = tooltip ?? "SmartMacro Studio";
         if (tip.Length > 120) tip = tip[..120];
@@ -107,6 +106,35 @@ public sealed class SystemTrayService : IDisposable
             hIcon = icon,
             szTip = tip,
         };
+    }
+
+    private IntPtr EnsureTrayIcon()
+    {
+        if (_ownedIcon != IntPtr.Zero) return _ownedIcon;
+
+        try
+        {
+            var exePath = Environment.ProcessPath;
+            if (!string.IsNullOrWhiteSpace(exePath) && File.Exists(exePath))
+            {
+                ushort iconIndex = 0;
+                var extracted = ExtractAssociatedIconW(IntPtr.Zero, exePath, ref iconIndex);
+                if (extracted != IntPtr.Zero)
+                {
+                    _ownedIcon = extracted;
+                    return _ownedIcon;
+                }
+            }
+        }
+        catch
+        {
+            // Fall back to window/class/default icon below.
+        }
+
+        var icon = GetClassLongPtr(_hwnd, GCLP_HICONSM);
+        if (icon == IntPtr.Zero) icon = GetClassLongPtr(_hwnd, GCLP_HICON);
+        if (icon == IntPtr.Zero) icon = LoadIconW(IntPtr.Zero, (IntPtr)IDI_APPLICATION);
+        return icon;
     }
 
     private IntPtr WndProc(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
@@ -138,7 +166,7 @@ public sealed class SystemTrayService : IDisposable
         {
             var armed = _areTriggersArmed();
             AppendMenuW(hMenu, MF_STRING, CmdOpenStudio, "Open SmartMacro Studio");
-            AppendMenuW(hMenu, MF_STRING | (armed ? MF_CHECKED : 0), CmdToggleTriggers, "⚡ Macro Triggers Armed");
+            AppendMenuW(hMenu, MF_STRING | (armed ? MF_CHECKED : 0), CmdToggleTriggers, "Macro Triggers Armed");
             AppendMenuW(hMenu, MF_STRING, CmdStopPlayback, "■ Stop Playback");
             AppendMenuW(hMenu, MF_SEPARATOR, 0, null);
             AppendMenuW(hMenu, MF_STRING, CmdExitApp, "Exit SmartMacro");
@@ -146,6 +174,7 @@ public sealed class SystemTrayService : IDisposable
             GetCursorPos(out var pt);
             SetForegroundWindow(_hwnd);
             var cmd = TrackPopupMenuEx(hMenu, TPM_RIGHTBUTTON | TPM_RETURNCMD | TPM_NONOTIFY, pt.X, pt.Y, _hwnd, IntPtr.Zero);
+            PostMessageW(_hwnd, WM_NULL, IntPtr.Zero, IntPtr.Zero);
             switch (cmd)
             {
                 case CmdOpenStudio:
@@ -184,6 +213,11 @@ public sealed class SystemTrayService : IDisposable
             Shell_NotifyIconW(NIM_DELETE, ref data);
             _iconAdded = false;
         }
+        if (_ownedIcon != IntPtr.Zero)
+        {
+            DestroyIcon(_ownedIcon);
+            _ownedIcon = IntPtr.Zero;
+        }
     }
 
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
@@ -209,6 +243,12 @@ public sealed class SystemTrayService : IDisposable
     [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
     private static extern bool Shell_NotifyIconW(uint dwMessage, ref NOTIFYICONDATAW lpData);
 
+    [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
+    private static extern IntPtr ExtractAssociatedIconW(IntPtr hInst, string lpIconPath, ref ushort lpiIcon);
+
+    [DllImport("user32.dll")]
+    private static extern bool DestroyIcon(IntPtr hIcon);
+
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     private static extern IntPtr LoadIconW(IntPtr hInstance, IntPtr lpIconName);
 
@@ -230,6 +270,11 @@ public sealed class SystemTrayService : IDisposable
     [DllImport("user32.dll")]
     private static extern bool GetCursorPos(out POINT lpPoint);
 
+    private const uint WM_NULL = 0x0000;
+
     [DllImport("user32.dll")]
     private static extern bool SetForegroundWindow(IntPtr hWnd);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    private static extern bool PostMessageW(IntPtr hWnd, uint Msg, IntPtr wParam, IntPtr lParam);
 }

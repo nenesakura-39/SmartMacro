@@ -453,7 +453,8 @@ public sealed partial class PlaybackEngine
     }
 
     /// <summary>Tells the overlay what was found (bounds may be empty: then a small square around the spot is used).</summary>
-    private void ReportTarget(int x, int y, ScreenRect bounds, double confidence, string label, double elapsedMs = 0, bool fromHotSpot = false)
+    private void ReportTarget(int x, int y, ScreenRect bounds, double confidence, string label, double elapsedMs = 0, bool fromHotSpot = false,
+        IReadOnlyList<ScreenRect>? allMatches = null)
     {
         RecordVisionLock(elapsedMs);
         // Never flash the reticle from inside a feedback loop: at 120 looks per second it would sit on the bar it watches
@@ -461,7 +462,13 @@ public sealed partial class PlaybackEngine
         if (_inFeedbackLoop) return;
         if (TargetDetected is not { } handler) return;
         var box = bounds.IsEmpty ? new ScreenRect(x - 12, y - 12, 24, 24) : bounds;
-        try { handler(this, new TargetDetection(box, Math.Clamp(confidence, 0, 1), label, x, y, Math.Max(0, elapsedMs), fromHotSpot)); }
+        try
+        {
+            handler(this, new TargetDetection(box, Math.Clamp(confidence, 0, 1), label, x, y, Math.Max(0, elapsedMs), fromHotSpot)
+            {
+                AllMatches = allMatches,
+            });
+        }
         catch (Exception ex) { Message?.Invoke(this, $"Target overlay error: {ex.Message}"); }
     }
 
@@ -580,6 +587,7 @@ public sealed partial class PlaybackEngine
             _lastFound = null;
             _lastFoundBounds = default;
             LastFoundRect = null;
+            LastFailureSnapshotPath = null;
             _pendingSpeed = double.NaN;
             _smartAimLastNote.Clear();
             _sessionSuggestions.Clear();
@@ -618,7 +626,11 @@ public sealed partial class PlaybackEngine
         var held = new HeldInput();
         _held = held;
         var rootVariables = new VariableStore(macro.Variables);
-        _probes = new ScreenProbes(_ocr, _capture, _clock, _layout, _hotSpots, rootVariables);
+        _probes = new ScreenProbes(_ocr, _capture, _clock, _layout, _hotSpots, rootVariables)
+        {
+            CursorPositionProvider = () => _cursor ?? _lastActionSpot,
+            RandomGenerator = HumanizeRandom,
+        };
         var iterationsCompleted = 0;
         var token = cts.Token;
 
@@ -712,6 +724,10 @@ public sealed partial class PlaybackEngine
 
             result = new PlaybackResult(PlaybackOutcome.Completed, iterationsCompleted, current.StepsExecuted);
         }
+        catch (MacroStopRequestedSignal)
+        {
+            result = new PlaybackResult(PlaybackOutcome.Completed, iterationsCompleted, run?.StepsExecuted ?? 0);
+        }
         catch (OperationCanceledException) when (token.IsCancellationRequested)
         {
             result = new PlaybackResult(PlaybackOutcome.Stopped, iterationsCompleted, run?.StepsExecuted ?? 0);
@@ -774,6 +790,8 @@ public sealed partial class PlaybackEngine
             Stats = stats,
             Suggestions = suggestions,
             FinalVariables = finalVars,
+            StepStats = run?.StepStats,
+            FailureSnapshotPath = LastFailureSnapshotPath,
         };
         return releaseError is null ? result : result with { Warning = releaseError };
     }

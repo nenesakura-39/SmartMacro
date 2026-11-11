@@ -80,12 +80,13 @@ public static class OcrImagePreprocessor
     }
 
     /// <summary>
-    /// Computes Otsu's optimal global threshold and binarizes the image into clean black text on a white background,
-    /// stripping mid-tone particle/scene clutter.
+    /// Computes adaptive block thresholding combined with Otsu's global threshold and 3x3 noise filtering to binarize
+    /// the image into clean black text on a white background, stripping busy background textures and mid-tone particle clutter.
     /// </summary>
     public static BgraImage BinarizeOtsu(BgraImage image)
     {
         int w = image.Width, h = image.Height, n = w * h;
+        if (n == 0) return image;
         var src = image.Pixels;
         var lum = new byte[n];
         var hist = new int[256];
@@ -103,7 +104,7 @@ public static class OcrImagePreprocessor
         double sumB = 0;
         int wB = 0;
         double maxVar = -1;
-        int threshold = 128;
+        int globalThreshold = 128;
 
         for (int t = 0; t < 256; t++)
         {
@@ -119,27 +120,136 @@ public static class OcrImagePreprocessor
             if (betweenVar > maxVar)
             {
                 maxVar = betweenVar;
-                threshold = t;
+                globalThreshold = t;
             }
         }
 
         // Count how many pixels are above vs below threshold so the background becomes white (255) and text becomes black (0).
         int brightCount = 0;
         for (int i = 0; i < n; i++)
-            if (lum[i] > threshold) brightCount++;
+            if (lum[i] > globalThreshold) brightCount++;
         bool invertPolarity = brightCount < n / 2; // dark background with bright text -> invert so text is black on white
 
-        var dst = new byte[src.Length];
-        for (int i = 0, k = 0; i < n; i++, k += 4)
+        // Build an integral image for fast local 25x25 window mean to handle uneven/busy background gradients.
+        var integral = new long[(w + 1) * (h + 1)];
+        int strideI = w + 1;
+        for (int y = 0; y < h; y++)
         {
-            bool isBright = lum[i] > threshold;
-            byte v = (invertPolarity ? !isBright : isBright) ? (byte)255 : (byte)0;
-            dst[k] = v;
-            dst[k + 1] = v;
-            dst[k + 2] = v;
-            dst[k + 3] = 255;
+            long rowSum = 0;
+            int srcRow = y * w;
+            int dstRow = (y + 1) * strideI;
+            int prevRow = y * strideI;
+            for (int x = 0; x < w; x++)
+            {
+                rowSum += lum[srcRow + x];
+                integral[dstRow + x + 1] = integral[prevRow + x + 1] + rowSum;
+            }
+        }
+
+        int radius = Math.Clamp(Math.Min(w, h) / 8, 6, 18);
+        var bin = new byte[n];
+        for (int y = 0; y < h; y++)
+        {
+            int y0 = Math.Max(0, y - radius);
+            int y1 = Math.Min(h, y + radius + 1);
+            int rowOffset = y * w;
+            for (int x = 0; x < w; x++)
+            {
+                int x0 = Math.Max(0, x - radius);
+                int x1 = Math.Min(w, x + radius + 1);
+                int area = (x1 - x0) * (y1 - y0);
+                long sum = integral[y1 * strideI + x1] - integral[y0 * strideI + x1] - integral[y1 * strideI + x0] + integral[y0 * strideI + x0];
+                int localMean = (int)(sum / Math.Max(1, area));
+
+                // Blend Otsu global threshold with local adaptive threshold so both uniform and busy backgrounds segment cleanly.
+                int blendedThreshold = (globalThreshold + localMean) / 2;
+                int bias = invertPolarity ? 8 : -8;
+                bool isForeground = invertPolarity
+                    ? lum[rowOffset + x] > Math.Max(globalThreshold, localMean + bias)
+                    : lum[rowOffset + x] < Math.Min(globalThreshold, localMean + bias);
+
+                bin[rowOffset + x] = isForeground ? (byte)0 : (byte)255;
+            }
+        }
+
+        // Remove isolated 1-pixel background speckle noise while preserving character strokes.
+        var dst = new byte[src.Length];
+        for (int y = 0; y < h; y++)
+        {
+            for (int x = 0; x < w; x++)
+            {
+                int idx = y * w + x;
+                byte v = bin[idx];
+                if (v == 0 && x > 0 && x < w - 1 && y > 0 && y < h - 1)
+                {
+                    // Count black neighbors in 3x3 window; if completely isolated (0 neighbors), clear speckle.
+                    int blackNeighbors = 0;
+                    for (int dy = -1; dy <= 1; dy++)
+                    {
+                        for (int dx = -1; dx <= 1; dx++)
+                        {
+                            if ((dx != 0 || dy != 0) && bin[(y + dy) * w + (x + dx)] == 0)
+                                blackNeighbors++;
+                        }
+                    }
+                    if (blackNeighbors == 0) v = 255;
+                }
+
+                int k = idx * 4;
+                dst[k] = v;
+                dst[k + 1] = v;
+                dst[k + 2] = v;
+                dst[k + 3] = 255;
+            }
         }
 
         return new BgraImage(w, h, dst);
+    }
+
+    /// <summary>Smooth 2x bilinear upscaling with mild unsharp mask for small or stylized fonts.</summary>
+    public static BgraImage UpscaleBilinear2x(BgraImage image)
+    {
+        ArgumentNullException.ThrowIfNull(image);
+        int sw = image.Width, sh = image.Height;
+        if (sw <= 0 || sh <= 0) return image;
+        int dw = sw * 2, dh = sh * 2;
+        var src = image.Pixels;
+        var dst = new byte[dw * dh * 4];
+
+        for (int dy = 0; dy < dh; dy++)
+        {
+            float fy = (dy + 0.5f) * 0.5f - 0.5f;
+            int y0 = Math.Clamp((int)MathF.Floor(fy), 0, sh - 1);
+            int y1 = Math.Clamp(y0 + 1, 0, sh - 1);
+            float wy = fy - MathF.Floor(fy);
+            if (fy < 0) wy = 0;
+
+            for (int dx = 0; dx < dw; dx++)
+            {
+                float fx = (dx + 0.5f) * 0.5f - 0.5f;
+                int x0 = Math.Clamp((int)MathF.Floor(fx), 0, sw - 1);
+                int x1 = Math.Clamp(x0 + 1, 0, sw - 1);
+                float wx = fx - MathF.Floor(fx);
+                if (fx < 0) wx = 0;
+
+                int i00 = (y0 * sw + x0) * 4;
+                int i10 = (y0 * sw + x1) * 4;
+                int i01 = (y1 * sw + x0) * 4;
+                int i11 = (y1 * sw + x1) * 4;
+
+                float w00 = (1 - wx) * (1 - wy);
+                float w10 = wx * (1 - wy);
+                float w01 = (1 - wx) * wy;
+                float w11 = wx * wy;
+
+                int di = (dy * dw + dx) * 4;
+                dst[di] = (byte)Math.Clamp((int)(src[i00] * w00 + src[i10] * w10 + src[i01] * w01 + src[i11] * w11), 0, 255);
+                dst[di + 1] = (byte)Math.Clamp((int)(src[i00 + 1] * w00 + src[i10 + 1] * w10 + src[i01 + 1] * w01 + src[i11 + 1] * w11), 0, 255);
+                dst[di + 2] = (byte)Math.Clamp((int)(src[i00 + 2] * w00 + src[i10 + 2] * w10 + src[i01 + 2] * w01 + src[i11 + 2] * w11), 0, 255);
+                dst[di + 3] = 255;
+            }
+        }
+
+        return new BgraImage(dw, dh, dst);
     }
 }

@@ -65,6 +65,7 @@ public sealed class Win32InputSimulator : IInputSimulator
     private int _movesSinceButtonCount;
     private double _lastMoveStepDistPx;
     private long _lastMoveTimestamp;
+    private long _lastButtonTimestamp;
     private int _lastMoveX;
     private int _lastMoveY;
 
@@ -116,10 +117,21 @@ public sealed class Win32InputSimulator : IInputSimulator
             throw new InputSimulationException(
                 $"Windows refused to move the mouse (error {Marshal.GetLastWin32Error()}). This can happen when the screen is locked or a secure window is open.");
 
+        var stepDistPx = Math.Sqrt((double)(x - _lastMoveX) * (x - _lastMoveX) + (double)(y - _lastMoveY) * (y - _lastMoveY));
         if (_movedSinceButton)
         {
             _movesSinceButtonCount++;
-            _lastMoveStepDistPx = Math.Sqrt((double)(x - _lastMoveX) * (x - _lastMoveX) + (double)(y - _lastMoveY) * (y - _lastMoveY));
+            _lastMoveStepDistPx = stepDistPx;
+        }
+        else if (stepDistPx <= 4.0 && _lastButtonTimestamp != 0
+                 && (Stopwatch.GetTimestamp() - _lastButtonTimestamp) * 1000.0 / Stopwatch.Frequency <= 350.0)
+        {
+            // Stationary repeat click at the same spot (autoclick / spam click): cursor is already hovering here,
+            // so don't flag a fresh cursor jump that would add a 35 ms hover-nudge + settle before the next click.
+            _lastMoveTimestamp = Stopwatch.GetTimestamp();
+            _lastMoveX = x;
+            _lastMoveY = y;
+            return;
         }
         else
         {
@@ -257,6 +269,7 @@ public sealed class Win32InputSimulator : IInputSimulator
             _ => throw new ArgumentOutOfRangeException(nameof(button)),
         };
         var jumped = SettleBeforeButton(hoverNudge: down);
+        _lastButtonTimestamp = Stopwatch.GetTimestamp();
         if (down)
         {
             // Second click of a double-click on a jumped-to spot: leave a real gap between the clicks.
@@ -267,6 +280,7 @@ public sealed class Win32InputSimulator : IInputSimulator
                 jumped = true; // this press belongs to the same "click on a spot", so it is held long enough too
             }
 
+            EnsureTargetWindowActivated(button);
             DiagnoseClickTarget(button);
             Send(MouseInput(flags, mouseData));
             _jumpClickDown[button] = jumped ? Stopwatch.GetTimestamp() : 0;
@@ -286,6 +300,36 @@ public sealed class Win32InputSimulator : IInputSimulator
 
         Send(MouseInput(flags, mouseData));
         _jumpClickUp[button] = 0;
+    }
+
+    /// <summary>
+    /// When clicking into an unfocused top-level window (e.g. switching between two side-by-side Roblox windows),
+    /// activates that window first so the click itself and any subsequent key presses (like Space to jump) are
+    /// received by the newly focused game window instead of being swallowed as a focus-only click.
+    /// </summary>
+    private static void EnsureTargetWindowActivated(MacroMouseButton button)
+    {
+        if (button is not (MacroMouseButton.Left or MacroMouseButton.Right)) return;
+        try
+        {
+            if (!GetCursorPos(out var point)) return;
+            var root = GetAncestor(WindowFromPoint(point), GA_ROOT);
+            if (root == IntPtr.Zero) return;
+            var foreground = GetForegroundWindow();
+            if (root == foreground) return;
+
+            GetWindowThreadProcessId(root, out var pid);
+            if (pid == 0 || pid == OwnProcessId) return;
+
+            if (ScreenInfoProvider.FocusWindowHandle(root, restoreIfMinimized: false))
+            {
+                PreciseSleep(18);
+            }
+        }
+        catch
+        {
+            // Activation is best-effort; never block the click itself.
+        }
     }
 
     /// <summary>
@@ -338,6 +382,12 @@ public sealed class Win32InputSimulator : IInputSimulator
         if (hwnd == IntPtr.Zero) return "no window";
         GetWindowThreadProcessId(hwnd, out var pid);
         if (pid == OwnProcessId) return "SmartMacro";
+        return ProcessNameById(pid);
+    }
+
+    private static string ProcessNameById(uint pid)
+    {
+        if (pid == 0) return string.Empty;
         try
         {
             using var process = Process.GetProcessById((int)pid);
@@ -529,6 +579,253 @@ public sealed class Win32InputSimulator : IInputSimulator
         if (sent != inputs.Length)
             throw new InputSimulationException(
                 $"Windows blocked the simulated input (error {Marshal.GetLastWin32Error()}). Another program may be blocking input, or the screen is locked.");
+    }
+
+    // ---------------- Background / Inactive Window Input (PostMessage) ----------------
+
+    /// <summary>
+    /// Finds a visible top-level window matching <paramref name="windowTitle"/>, ranking exact title matches above
+    /// substring title matches, and only querying process names if no title matched. Non-minimized windows are preferred.
+    /// </summary>
+    private static IntPtr FindBackgroundTargetWindow(string? windowTitle)
+    {
+        if (string.IsNullOrWhiteSpace(windowTitle)) return IntPtr.Zero;
+        var wanted = windowTitle.Trim();
+        IntPtr exactTitleMatch = IntPtr.Zero;
+        IntPtr substringTitleMatch = IntPtr.Zero;
+        IntPtr minimizedTitleMatch = IntPtr.Zero;
+        var candidatesForProcess = new List<(IntPtr Hwnd, uint Pid, bool Minimized)>(16);
+
+        WindowApi.EnumWindows((hwnd, _) =>
+        {
+            if (!WindowApi.IsWindowVisible(hwnd)) return true;
+            GetWindowThreadProcessId(hwnd, out var pid);
+            if (pid == 0 || pid == OwnProcessId) return true;
+
+            var minimized = WindowApi.IsIconic(hwnd);
+            var len = WindowApi.GetWindowTextLength(hwnd);
+            if (len > 0)
+            {
+                var sb = new System.Text.StringBuilder(len + 1);
+                WindowApi.GetWindowText(hwnd, sb, sb.Capacity);
+                var title = sb.ToString();
+                if (string.Equals(title, wanted, StringComparison.OrdinalIgnoreCase))
+                {
+                    if (!minimized)
+                    {
+                        exactTitleMatch = hwnd;
+                        return false; // best possible match found immediately
+                    }
+                    if (minimizedTitleMatch == IntPtr.Zero)
+                        minimizedTitleMatch = hwnd;
+                }
+                else if (title.Contains(wanted, StringComparison.OrdinalIgnoreCase))
+                {
+                    if (!minimized && substringTitleMatch == IntPtr.Zero)
+                        substringTitleMatch = hwnd;
+                    else if (minimized && minimizedTitleMatch == IntPtr.Zero)
+                        minimizedTitleMatch = hwnd;
+                }
+
+                if (candidatesForProcess.Count < 64)
+                    candidatesForProcess.Add((hwnd, pid, minimized));
+            }
+
+            return true;
+        }, IntPtr.Zero);
+
+        if (exactTitleMatch != IntPtr.Zero) return exactTitleMatch;
+        if (substringTitleMatch != IntPtr.Zero) return substringTitleMatch;
+        if (minimizedTitleMatch != IntPtr.Zero) return minimizedTitleMatch;
+
+        IntPtr substringProcessMatch = IntPtr.Zero;
+        var pidCache = new Dictionary<uint, string>();
+        foreach (var (hwnd, pid, _) in candidatesForProcess)
+        {
+            if (!pidCache.TryGetValue(pid, out var procName))
+            {
+                procName = ProcessNameById(pid);
+                pidCache[pid] = procName;
+            }
+
+            if (string.IsNullOrEmpty(procName)) continue;
+            if (string.Equals(procName, wanted, StringComparison.OrdinalIgnoreCase))
+                return hwnd;
+            if (substringProcessMatch == IntPtr.Zero && procName.Contains(wanted, StringComparison.OrdinalIgnoreCase))
+                substringProcessMatch = hwnd;
+        }
+
+        return substringProcessMatch;
+    }
+
+    /// <summary>
+    /// Resolves the inner child window at the center of <paramref name="rootHwnd"/> so background keyboard and text
+    /// messages reach the active canvas or edit control (e.g. Notepad's inner editor) while falling back to <paramref name="rootHwnd"/>
+    /// for single-HWND game windows.
+    /// </summary>
+    private static IntPtr ResolveKeyboardTargetWindow(IntPtr rootHwnd)
+    {
+        if (rootHwnd == IntPtr.Zero || WindowApi.IsIconic(rootHwnd)) return rootHwnd;
+        if (!GetWindowRect(rootHwnd, out var wr)) return rootHwnd;
+        var w = wr.Right - wr.Left;
+        var h = wr.Bottom - wr.Top;
+        if (w <= 0 || h <= 0) return rootHwnd;
+        var centerX = wr.Left + w / 2;
+        var centerY = wr.Top + h / 2;
+        return ResolveChildClientPoint(rootHwnd, centerX, centerY, out _);
+    }
+
+    /// <summary>
+    /// Resolves the deepest visible child window at screen coordinates (<paramref name="screenX"/>, <paramref name="screenY"/>)
+    /// inside <paramref name="rootHwnd"/> and converts the point into that window's client coordinates.
+    /// </summary>
+    private static IntPtr ResolveChildClientPoint(IntPtr rootHwnd, int screenX, int screenY, out POINT clientPt)
+    {
+        var current = rootHwnd;
+        var pt = new POINT { X = screenX, Y = screenY };
+        if (!ScreenToClient(current, ref pt))
+        {
+            clientPt = new POINT { X = screenX, Y = screenY };
+            return rootHwnd;
+        }
+
+        const uint skipFlags = CWP_SKIPINVISIBLE | CWP_SKIPDISABLED | CWP_SKIPTRANSPARENT;
+        for (var depth = 0; depth < 16; depth++)
+        {
+            var child = ChildWindowFromPointEx(current, pt, skipFlags);
+            if (child == IntPtr.Zero || child == current)
+                break;
+
+            var childPt = new POINT { X = screenX, Y = screenY };
+            if (!ScreenToClient(child, ref childPt))
+                break;
+
+            current = child;
+            pt = childPt;
+        }
+
+        clientPt = pt;
+        return current;
+    }
+
+    public bool SendBackgroundMouseClick(string windowTitle, MacroMouseButton button, MouseClickAction action, int screenX, int screenY, int holdMs)
+    {
+        var root = FindBackgroundTargetWindow(windowTitle);
+        if (root == IntPtr.Zero) return false;
+
+        var target = ResolveChildClientPoint(root, screenX, screenY, out var clientPt);
+        var lParam = MakeLParam(clientPt.X, clientPt.Y);
+
+        var (downMsg, upMsg, dblMsg, wParamDown) = button switch
+        {
+            MacroMouseButton.Right => ((uint)WM_RBUTTONDOWN, (uint)WM_RBUTTONUP, (uint)WM_RBUTTONDBLCLK, (IntPtr)MK_RBUTTON),
+            MacroMouseButton.Middle => ((uint)WM_MBUTTONDOWN, (uint)WM_MBUTTONUP, (uint)WM_MBUTTONDBLCLK, (IntPtr)MK_MBUTTON),
+            _ => ((uint)WM_LBUTTONDOWN, (uint)WM_LBUTTONUP, (uint)WM_LBUTTONDBLCLK, (IntPtr)MK_LBUTTON),
+        };
+
+        PostMessage(target, WM_MOUSEMOVE, IntPtr.Zero, lParam);
+
+        var clampHold = Math.Clamp(holdMs, 0, 60_000);
+        switch (action)
+        {
+            case MouseClickAction.Down:
+                PostMessage(target, downMsg, wParamDown, lParam);
+                break;
+
+            case MouseClickAction.Up:
+                PostMessage(target, upMsg, IntPtr.Zero, lParam);
+                break;
+
+            case MouseClickAction.DoubleClick:
+                PostMessage(target, downMsg, wParamDown, lParam);
+                if (clampHold > 0) PreciseSleep(Math.Min(clampHold, 150));
+                PostMessage(target, upMsg, IntPtr.Zero, lParam);
+                PreciseSleep(35);
+                PostMessage(target, dblMsg, wParamDown, lParam);
+                if (clampHold > 0) PreciseSleep(Math.Min(clampHold, 150));
+                PostMessage(target, upMsg, IntPtr.Zero, lParam);
+                break;
+
+            default:
+                PostMessage(target, downMsg, wParamDown, lParam);
+                if (clampHold > 0) PreciseSleep(clampHold);
+                PostMessage(target, upMsg, IntPtr.Zero, lParam);
+                break;
+        }
+
+        return true;
+    }
+
+    public bool SendBackgroundKey(string windowTitle, int virtualKey, KeyAction action, int holdMs, KeyModifiers modifiers)
+    {
+        var root = FindBackgroundTargetWindow(windowTitle);
+        if (root == IntPtr.Zero) return false;
+        var target = ResolveKeyboardTargetWindow(root);
+
+        var scan = MapVirtualKey((uint)virtualKey, MAPVK_VK_TO_VSC);
+        var downLParam = new IntPtr(1 | ((int)scan << 16));
+        var upLParam = new IntPtr(1 | ((int)scan << 16) | (unchecked((int)0xC0000000)));
+        var vkPtr = new IntPtr(virtualKey);
+
+        static void PostMod(IntPtr hwnd, KeyModifiers mods, bool down)
+        {
+            var msg = down ? (uint)WM_KEYDOWN : (uint)WM_KEYUP;
+            if (mods.HasFlag(KeyModifiers.Control)) PostMessage(hwnd, msg, new IntPtr(0x11), IntPtr.Zero);
+            if (mods.HasFlag(KeyModifiers.Shift)) PostMessage(hwnd, msg, new IntPtr(0x10), IntPtr.Zero);
+            if (mods.HasFlag(KeyModifiers.Alt)) PostMessage(hwnd, msg, new IntPtr(0x12), IntPtr.Zero);
+        }
+
+        switch (action)
+        {
+            case KeyAction.Down:
+                PostMessage(target, WM_KEYDOWN, vkPtr, downLParam);
+                break;
+
+            case KeyAction.Up:
+                PostMessage(target, WM_KEYUP, vkPtr, upLParam);
+                break;
+
+            default:
+                if (modifiers != KeyModifiers.None) PostMod(target, modifiers, down: true);
+                PostMessage(target, WM_KEYDOWN, vkPtr, downLParam);
+                if (holdMs > 0) PreciseSleep(Math.Clamp(holdMs, 0, 60_000));
+                PostMessage(target, WM_KEYUP, vkPtr, upLParam);
+                if (modifiers != KeyModifiers.None) PostMod(target, modifiers, down: false);
+                break;
+        }
+
+        return true;
+    }
+
+    public bool SendBackgroundText(string windowTitle, string text, int characterDelayMs)
+    {
+        var root = FindBackgroundTargetWindow(windowTitle);
+        if (root == IntPtr.Zero) return false;
+        if (string.IsNullOrEmpty(text)) return true;
+        var target = ResolveKeyboardTargetWindow(root);
+
+        var delay = Math.Clamp(characterDelayMs, 0, 10_000);
+        for (var i = 0; i < text.Length; i++)
+        {
+            var ch = text[i];
+            if (ch == '\r' && i + 1 < text.Length && text[i + 1] == '\n')
+                continue; // handle \r\n on the \n
+
+            if (ch is '\n' or '\r')
+            {
+                PostMessage(target, WM_KEYDOWN, new IntPtr(VK_RETURN), IntPtr.Zero);
+                PostMessage(target, WM_KEYUP, new IntPtr(VK_RETURN), IntPtr.Zero);
+            }
+            else
+            {
+                PostMessage(target, WM_CHAR, new IntPtr(ch), IntPtr.Zero);
+            }
+
+            if (delay > 0 && i < text.Length - 1)
+                PreciseSleep(delay);
+        }
+
+        return true;
     }
 }
 

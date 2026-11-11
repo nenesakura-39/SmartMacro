@@ -41,6 +41,34 @@ public partial class MissionControlWindow : Window
         }
     }
 
+    private bool _isCompactMode;
+    private double _expandedHeight = 515;
+
+    private void CompactToggle_Click(object sender, RoutedEventArgs e)
+    {
+        _isCompactMode = !_isCompactMode;
+        if (_isCompactMode)
+        {
+            if (ActualHeight >= 200)
+                _expandedHeight = ActualHeight;
+            TelemetryScrollViewer.Visibility = Visibility.Collapsed;
+            MiniStatusMacroText.Visibility = Visibility.Visible;
+            MinHeight = 96;
+            MaxHeight = 96;
+            Height = 96;
+            CompactModeLabel.Text = "▴ Full";
+        }
+        else
+        {
+            TelemetryScrollViewer.Visibility = Visibility.Visible;
+            MiniStatusMacroText.Visibility = Visibility.Collapsed;
+            MaxHeight = double.PositiveInfinity;
+            MinHeight = 380;
+            Height = Math.Max(380, _expandedHeight);
+            CompactModeLabel.Text = "▾ Mini";
+        }
+    }
+
     private void CloseButton_Click(object sender, RoutedEventArgs e) => Close();
 
     [DllImport("dwmapi.dll")]

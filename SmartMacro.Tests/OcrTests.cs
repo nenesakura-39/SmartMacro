@@ -25,6 +25,12 @@ internal sealed class FakeOcr : IOcrService
         return this;
     }
 
+    public FakeOcr ThenResult(OcrReadResult result)
+    {
+        _screens.Enqueue(result);
+        return this;
+    }
+
     public FakeOcr ThenNothing()
     {
         _screens.Enqueue(new OcrReadResult(new ScreenRect(0, 0, 1920, 1080), Array.Empty<OcrLineBox>()));
@@ -260,7 +266,8 @@ public class FindTextValidationTests
     [InlineData("OK", 49, 1000, 500, true)]
     [InlineData("OK", 100, 1000, 500, false)]
     [InlineData("OK", 85, -1, 500, true)]
-    [InlineData("OK", 85, 0, 99, true)]
+    [InlineData("OK", 85, 0, 9, true)]
+    [InlineData("OK", 85, 0, 20, false)]
     public void Rules(string text, int similarity, int timeout, int interval, bool expectError)
     {
         var step = new FindTextStep { Text = text, MinSimilarityPercent = similarity, TimeoutMs = timeout, CheckIntervalMs = interval };
@@ -295,5 +302,254 @@ public class FindTextValidationTests
         Assert.False(copy.SearchFullScreen);
         Assert.Equal(FoundTextAction.RightClick, copy.Action);
         Assert.Equal(TextNotFoundBehavior.Continue, copy.WhenNotFound);
+    }
+}
+
+public class MultiMatchFindTextAndCountingTests
+{
+    /// <summary>
+    /// Generates a dense 1,500-word screen (50 lines × 30 words per line) with "nice" (in mixed casing:
+    /// "nice", "Nice", "NICE") placed at exact word indices, plus optional duplicate boxes along a tile seam.
+    /// </summary>
+    private static OcrReadResult Build1500WordScreenWithNice(IReadOnlyList<int> niceWordIndices, bool includeTileSeamDuplicates = false)
+    {
+        var niceSet = new HashSet<int>(niceWordIndices);
+        var filler = new[] { "alpha", "bravo", "charlie", "delta", "echo", "foxtrot", "golf", "hotel", "india", "juliet" };
+        var lines = new List<OcrLineBox>(50);
+        var wordIdx = 0;
+
+        for (var row = 0; row < 50; row++)
+        {
+            var y = 10 + row * 20;
+            var words = new List<OcrWordBox>(32);
+            for (var col = 0; col < 30; col++)
+            {
+                var x = 10 + col * 60;
+                string text;
+                if (niceSet.Contains(wordIdx))
+                {
+                    text = (wordIdx % 3) switch
+                    {
+                        0 => "nice",
+                        1 => "Nice",
+                        _ => "NICE",
+                    };
+                }
+                else
+                {
+                    text = filler[wordIdx % filler.Length];
+                }
+
+                var rect = new ScreenRect(x, y, 40, 16);
+                words.Add(new OcrWordBox(text, rect));
+
+                // Simulate a 120 px tile overlap seam duplicate shifted by 1 px
+                if (includeTileSeamDuplicates && niceSet.Contains(wordIdx) && col is 14 or 15)
+                {
+                    words.Add(new OcrWordBox(text, new ScreenRect(x + 1, y, 40, 16)));
+                }
+
+                wordIdx++;
+            }
+
+            lines.Add(new OcrLineBox(words));
+        }
+
+        var deduplicated = includeTileSeamDuplicates ? OcrWordDeduplicator.DeduplicateLines(lines) : lines;
+        return new OcrReadResult(new ScreenRect(0, 0, 1920, 1080), deduplicated);
+    }
+
+    [Fact]
+    public void Dense_1500_word_screen_detects_and_counts_all_occurrences_of_nice_with_tile_seam_deduplication()
+    {
+        // Place "nice" at 14 positions across the 1,500-word screen (including columns 14 & 15 where tile seams overlap)
+        var targetIndices = new[] { 0, 14, 15, 75, 134, 299, 450, 614, 777, 915, 1044, 1200, 1364, 1499 };
+        var screen = Build1500WordScreenWithNice(targetIndices, includeTileSeamDuplicates: true);
+
+        Assert.Equal(1500, screen.TotalWordCount);
+
+        var matches = OcrTextMatcher.Find(screen, "nice", TextMatchMode.WholeWords, caseSensitive: false, minSimilarity: 0.85);
+        Assert.Equal(14, matches.Count);
+
+        // Case-sensitive search for "Nice" (only indices where idx % 3 == 1: 1, 4, 7, 10, 13 -> here 75%3=0, 14%3=2, 134%3=2, 777%3=0, etc.)
+        var expectedExactNice = targetIndices.Count(i => i % 3 == 1);
+        var exactMatches = OcrTextMatcher.Find(screen, "Nice", TextMatchMode.WholeWords, caseSensitive: true, minSimilarity: 1.0);
+        Assert.Equal(expectedExactNice, exactMatches.Count);
+    }
+
+    [Fact]
+    public async Task Find_One_vs_Find_All_counts_occurrences_and_stores_in_variables()
+    {
+        var targetIndices = new[] { 5, 44, 120, 350, 780, 1100, 1450 }; // 7 occurrences of "nice" in 1,500 words
+        var screen = Build1500WordScreenWithNice(targetIndices, includeTileSeamDuplicates: true);
+        var ocr = new FakeOcr().ThenResult(screen);
+        var input = new FakeInput();
+        var clock = new FakeClock();
+        var engine = new PlaybackEngine(input, clock, ocr);
+        IReadOnlyList<VariableSnapshot> latestVars = Array.Empty<VariableSnapshot>();
+        engine.VariablesChanged += (_, snap) => latestVars = snap;
+
+        var macro = new Macro
+        {
+            Name = "Count Nice in 1500 Words",
+            Steps =
+            {
+                new FindTextStep
+                {
+                    Text = "nice",
+                    MatchCase = false,
+                    TargetSelection = SearchMatchMode.AllMatches,
+                    Action = FoundTextAction.None,
+                    CountVariableName = "niceCount",
+                },
+                new SetVariableStep
+                {
+                    VariableName = "lastCount",
+                    Source = VariableSourceKind.LastMatchCount,
+                },
+                new SetVariableStep
+                {
+                    VariableName = "screenWords",
+                    Source = VariableSourceKind.LastOcrWordCount,
+                },
+            }
+        };
+
+        var result = await engine.RunAsync(macro);
+        Assert.Equal(PlaybackOutcome.Completed, result.Outcome);
+        Assert.Equal("7", latestVars.First(v => v.Name == "niceCount").Value);
+        Assert.Equal("7", latestVars.First(v => v.Name == "lastCount").Value);
+        Assert.Equal("1500", latestVars.First(v => v.Name == "screenWords").Value);
+        Assert.Empty(input.Calls); // Action == None only counts/highlights without clicking
+    }
+
+    [Fact]
+    public async Task Find_All_clicks_every_occurrence_in_configured_order_and_respects_MaxMatchesToActOn()
+    {
+        // 4 occurrences of "nice" at known positions:
+        // #1 at (100, 100), #2 at (300, 100), #3 at (100, 300), #4 at (500, 300)
+        var ocr = new FakeOcr().Then(
+            ("nice", 100, 100),
+            ("other", 200, 100),
+            ("Nice", 300, 100),
+            ("nice", 100, 300),
+            ("NICE", 500, 300));
+        var input = new FakeInput();
+        var clock = new FakeClock();
+        var engine = new PlaybackEngine(input, clock, ocr);
+        IReadOnlyList<VariableSnapshot> latestVars = Array.Empty<VariableSnapshot>();
+        engine.VariablesChanged += (_, snap) => latestVars = snap;
+
+        // 1) ReadingOrder with MaxMatchesToActOn = 3
+        var stepReading = new FindTextStep
+        {
+            Text = "nice",
+            MatchCase = false,
+            TargetSelection = SearchMatchMode.AllMatches,
+            MatchOrder = MultiMatchOrder.ReadingOrder,
+            MaxMatchesToActOn = 3,
+            BetweenMatchesDelayMs = 50,
+            Action = FoundTextAction.Click,
+            CountVariableName = "totalFound",
+        };
+
+        var result = await engine.RunAsync(new Macro { Name = "Batch Click", Steps = { stepReading } });
+        Assert.Equal(PlaybackOutcome.Completed, result.Outcome);
+        // Even though MaxMatchesToActOn capped actions at 3, totalFound still records all 4 matches on screen!
+        Assert.Equal("4", latestVars.First(v => v.Name == "totalFound").Value);
+
+        var moveCalls = input.Calls.Where(c => c.StartsWith("move ")).ToList();
+        Assert.Equal(new[] { "move 120,110", "move 320,110", "move 120,310" }, moveCalls);
+
+        // 2) BottomToTop order clicks bottom row before top row
+        input.Calls.Clear();
+        var stepBottomUp = new FindTextStep
+        {
+            Text = "nice",
+            MatchCase = false,
+            TargetSelection = SearchMatchMode.AllMatches,
+            MatchOrder = MultiMatchOrder.BottomToTop,
+            Action = FoundTextAction.Click,
+        };
+        await engine.RunAsync(new Macro { Name = "Bottom Up", Steps = { stepBottomUp } });
+        var bottomUpMoves = input.Calls.Where(c => c.StartsWith("move ")).ToList();
+        Assert.Equal(new[] { "move 520,310", "move 120,310", "move 320,110", "move 120,110" }, bottomUpMoves);
+    }
+
+    [Fact]
+    public async Task ReadingOrderNth_and_MinMatchCount_gate_work_accurately()
+    {
+        var ocr = new FakeOcr().Then(
+            ("nice", 100, 100),
+            ("nice", 250, 100),
+            ("nice", 400, 100));
+        var input = new FakeInput();
+        var engine = new PlaybackEngine(input, new FakeClock(), ocr);
+
+        // Pick 2nd match in reading order (center of (250, 100, 40, 20) is (270, 110))
+        var pickSecond = new FindTextStep
+        {
+            Text = "nice",
+            TargetSelection = SearchMatchMode.ReadingOrderNth,
+            TargetMatchIndex = 2,
+            MinMatchCount = 3,
+            Action = FoundTextAction.Click,
+        };
+        var ok = await engine.RunAsync(new Macro { Name = "Nth", Steps = { pickSecond } });
+        Assert.Equal(PlaybackOutcome.Completed, ok.Outcome);
+        Assert.Contains("move 270,110", input.Calls);
+
+        // Requiring MinMatchCount = 5 when only 3 exist should fail on timeout=0
+        var requireFive = new FindTextStep
+        {
+            Text = "nice",
+            MinMatchCount = 5,
+            TimeoutMs = 0,
+            WhenNotFound = TextNotFoundBehavior.StopMacro,
+        };
+        var fail = await engine.RunAsync(new Macro { Name = "Need 5", Steps = { requireFive } });
+        Assert.Equal(PlaybackOutcome.Failed, fail.Outcome);
+    }
+
+    [Fact]
+    public void Pipe_separated_multi_term_query_finds_all_variants_without_regex_flag()
+    {
+        var line = new OcrLineBox(new[]
+        {
+            new OcrWordBox("nice", new ScreenRect(10, 10, 40, 20)),
+            new OcrWordBox("skip", new ScreenRect(60, 10, 40, 20)),
+            new OcrWordBox("great", new ScreenRect(110, 10, 50, 20)),
+            new OcrWordBox("awesome", new ScreenRect(170, 10, 70, 20)),
+        });
+        var screen = new OcrReadResult(new ScreenRect(0, 0, 500, 200), new[] { line });
+
+        var matches = OcrTextMatcher.Find(screen, "nice | great | awesome", TextMatchMode.WholeWords, caseSensitive: false, minSimilarity: 0.9, useRegexPattern: false);
+        Assert.Equal(3, matches.Count);
+        Assert.Equal(new[] { "nice", "great", "awesome" }, matches.Select(m => m.Text).ToArray());
+    }
+
+    [Fact]
+    public async Task StepTester_reports_all_matches_and_total_words_on_1500_word_screen()
+    {
+        var targetIndices = new[] { 10, 20, 30, 40, 50 };
+        var screen = Build1500WordScreenWithNice(targetIndices, includeTileSeamDuplicates: true);
+        var ocr = new FakeOcr().ThenResult(screen);
+        var probes = new ScreenProbes(ocr, null);
+
+        var step = new FindTextStep
+        {
+            Text = "nice",
+            MatchCase = false,
+            TargetSelection = SearchMatchMode.AllMatches,
+        };
+
+        var testResult = await StepTester.TestAsync(probes, step);
+        Assert.True(testResult.Passed);
+        Assert.Equal(5, testResult.MatchCount);
+        Assert.NotNull(testResult.AllMatches);
+        Assert.Equal(5, testResult.AllMatches!.Count);
+        Assert.Equal(1500, testResult.TotalWordsOnScreen);
+        Assert.Contains("5 matches", testResult.Text);
+        Assert.Contains("words", testResult.Text);
     }
 }

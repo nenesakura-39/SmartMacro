@@ -224,7 +224,7 @@ public sealed class TriggerEvaluator
                                 playingId,
                                 now,
                                 isHold: false,
-                                $"🪟 Window trigger \"{trigger.Name}\" ({reason}) triggered \"{macro.Name}\".");
+                                $"🖥 Window trigger \"{trigger.Name}\" ({reason}) triggered \"{macro.Name}\".");
                             if (decision.Kind != TriggerDecisionKind.None)
                             {
                                 results.Add(decision);

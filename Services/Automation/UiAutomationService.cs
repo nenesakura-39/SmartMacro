@@ -38,15 +38,67 @@ public sealed class UiAutomationService : IUiElementLocator
         "DataItem",
     };
 
+    private int _inspectInFlight;
+
     public bool IsAvailable => true;
 
     public UiElementSnapshot? InspectPoint(int x, int y, CancellationToken cancellationToken = default)
     {
+        // Guard against ThreadPool starvation if a previous UIA COM call is still hung inside an unresponsive target window.
+        if (Interlocked.CompareExchange(ref _inspectInFlight, 1, 0) != 0)
+        {
+            return TryInspectWindowOnly(x, y);
+        }
+
         try
         {
-            var task = Task.Run(() => InspectPointCore(x, y, cancellationToken), cancellationToken);
-            if (!task.Wait(InspectTimeout, cancellationToken)) return null;
+            var task = Task.Run(() =>
+            {
+                try
+                {
+                    return InspectPointCore(x, y, cancellationToken);
+                }
+                finally
+                {
+                    Interlocked.Exchange(ref _inspectInFlight, 0);
+                }
+            }, cancellationToken);
+
+            if (!task.Wait(InspectTimeout, cancellationToken))
+                return TryInspectWindowOnly(x, y);
+
             return task.GetAwaiter().GetResult();
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static UiElementSnapshot? TryInspectWindowOnly(int x, int y)
+    {
+        try
+        {
+            using var dpi = NativeMethods.PhysicalPixelsScope.Enter();
+            var rootHwnd = FindRootWindowAt(x, y);
+            if (rootHwnd == IntPtr.Zero) return null;
+
+            NativeMethods.GetWindowThreadProcessId(rootHwnd, out var pid);
+            if (pid == (uint)OwnProcessId) return null;
+
+            var windowProcess = ReadProcessName(pid);
+            var windowBounds = ReadVisibleBounds(rootHwnd);
+            if (string.IsNullOrWhiteSpace(windowProcess)) return null;
+
+            return new UiElementSnapshot(
+                ElementName: null,
+                AutomationId: null,
+                ControlType: null,
+                ClassName: null,
+                ElementBounds: default,
+                WindowTitle: null,
+                WindowProcessName: windowProcess,
+                WindowBounds: windowBounds);
         }
         catch
         {

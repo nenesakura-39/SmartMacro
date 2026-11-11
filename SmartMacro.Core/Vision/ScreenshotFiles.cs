@@ -61,6 +61,7 @@ public static class ScreenshotFiles
     {
         ArgumentNullException.ThrowIfNull(image);
         ArgumentException.ThrowIfNullOrWhiteSpace(folder);
+        Storage.DiskSpaceGuard.EnsureEnoughFreeSpace(folder, "saving screenshot");
         Directory.CreateDirectory(folder);
         var name = FileName(prefix, time);
         var path = Path.Combine(folder, name);

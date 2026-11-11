@@ -189,15 +189,18 @@ internal sealed class ForegroundModel
 /// The foreground mask of a template at one size. The score of a spot is the correlation between the mask (1 on the
 /// foreground, 0 elsewhere) and the screen's grey levels there, signed so "foreground brighter" (or darker) is
 /// positive, divided by the template's own score (so the template itself scores 100 %).
+/// Stores horizontal runs <c>(Row, ColStart, Length)</c> in addition to pixel coordinates so summing a grey patch
+/// uses contiguous slices instead of per-pixel 2D address arithmetic.
 /// </summary>
 internal sealed class ForegroundLevel
 {
-    private ForegroundLevel(int width, int height, int[] rows, int[] cols, double maskVariance, int sign)
+    private ForegroundLevel(int width, int height, int[] rows, int[] cols, (int Row, int ColStart, int Length)[] runs, double maskVariance, int sign)
     {
         Width = width;
         Height = height;
         Rows = rows;
         Cols = cols;
+        Runs = runs;
         MaskVariance = maskVariance;
         Sign = sign;
     }
@@ -206,6 +209,7 @@ internal sealed class ForegroundLevel
     public int Height { get; }
     public int[] Rows { get; }
     public int[] Cols { get; }
+    public (int Row, int ColStart, int Length)[] Runs { get; }
     public int Count => Rows.Length;
 
     /// <summary>Σ(mask − mean)² = Count − Count² / n.</summary>
@@ -220,21 +224,32 @@ internal sealed class ForegroundLevel
     {
         var rows = new List<int>();
         var cols = new List<int>();
+        var runs = new List<(int Row, int ColStart, int Length)>();
         for (var y = 0; y < height; y++)
         {
+            var runStart = -1;
             for (var x = 0; x < width; x++)
             {
                 if (sign * (gray[y * width + x] - threshold) > 0)
                 {
                     rows.Add(y);
                     cols.Add(x);
+                    if (runStart < 0) runStart = x;
+                }
+                else if (runStart >= 0)
+                {
+                    runs.Add((y, runStart, x - runStart));
+                    runStart = -1;
                 }
             }
+
+            if (runStart >= 0)
+                runs.Add((y, runStart, width - runStart));
         }
 
         var n = width * height;
         if (rows.Count == 0 || rows.Count == n) return null;
-        var level = new ForegroundLevel(width, height, rows.ToArray(), cols.ToArray(),
+        var level = new ForegroundLevel(width, height, rows.ToArray(), cols.ToArray(), runs.ToArray(),
             rows.Count - rows.Count * (double)rows.Count / n, sign);
 
         // Score of the template against itself.
@@ -258,9 +273,14 @@ internal sealed class ForegroundLevel
     public double RawScore(float[] hay, int hayWidth, int x, int y, double boxSum, double boxSumSq)
     {
         double foreground = 0;
-        var rows = Rows;
-        var cols = Cols;
-        for (var k = 0; k < rows.Length; k++) foreground += hay[(y + rows[k]) * hayWidth + x + cols[k]];
+        var runs = Runs;
+        for (var r = 0; r < runs.Length; r++)
+        {
+            var (row, colStart, len) = runs[r];
+            var idx = (y + row) * hayWidth + x + colStart;
+            for (var k = 0; k < len; k++)
+                foreground += hay[idx + k];
+        }
         return RawFromSums(foreground, boxSum, boxSumSq);
     }
 
@@ -345,7 +365,7 @@ internal static class ForegroundSearch
     /// <see cref="TemplateMatcher.MinRefineCandidates"/> spots are checked at full size.
     /// </summary>
     private static TemplateMatchResult FindLarge(BgraImage image, ForegroundModel model, TemplateMatchOptions options,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken, float[]? precomputedShrunkHay = null)
     {
         int tw = model.Width, th = model.Height;
         var minSide = Math.Min(tw, th);
@@ -359,7 +379,11 @@ internal static class ForegroundSearch
 
         level ??= model.Full;
 
-        var shrunk = TemplateMatcher.GrayDownscaled(image, scale, out var aw, out var ah);
+        var aw = image.Width / scale;
+        var ah = image.Height / scale;
+        var shrunk = precomputedShrunkHay is not null && precomputedShrunkHay.Length == aw * ah
+            ? precomputedShrunkHay
+            : TemplateMatcher.GrayDownscaled(image, scale, out aw, out ah);
         float[] hay = shrunk;
         int cw = aw, ch = ah;
         if (scale > 1 && aw - 1 >= level.Width && ah - 1 >= level.Height)
@@ -387,7 +411,7 @@ internal static class ForegroundSearch
             }
         }
 
-        var candidateLimit = Math.Max(TemplateMatcher.MinRefineCandidates, options.MaxResults * 2);
+        var candidateLimit = Math.Max(12, options.MaxResults * 2);
         var candidates = TemplateMatcher.PickPeaks(scores, px, py, level.Width, level.Height, candidateLimit);
 
         // A coarse spot (cx, cy) covers full-size positions cx·scale … cx·scale + scale − 1; check one more on each side.
@@ -401,6 +425,7 @@ internal static class ForegroundSearch
         IEnumerable<(int X, int Y)> spots, int radius, int scale, CancellationToken cancellationToken)
     {
         int tw = model.Width, th = model.Height;
+        var isLarge = tw > TemplateMatcher.LargeTemplateThreshold || th > TemplateMatcher.LargeTemplateThreshold;
         var found = new List<VisualMatch>();
         var checkedSpots = new HashSet<(int, int)>();
         double best = 0;
@@ -419,7 +444,14 @@ internal static class ForegroundSearch
             }
 
             if (score > best) best = score;
-            if (score >= options.MinScore) found.Add(new VisualMatch(new ScreenRect(x, y, tw, th), score));
+            if (score >= options.MinScore)
+            {
+                found.Add(new VisualMatch(new ScreenRect(x, y, tw, th), score));
+                // Large templates: if the top coarse FFT peak already yields a near-exact full-resolution foreground match,
+                // stop refining distant coarse peaks when only the primary match is needed.
+                if (isLarge && score >= Math.Max(0.95, options.MinScore) && found.Count >= 1)
+                    break;
+            }
         }
 
         var kept = found.OrderByDescending(m => m.Score).ToList();

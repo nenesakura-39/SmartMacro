@@ -116,6 +116,16 @@ public sealed class BlockStructure
                     Close<RepeatStep>(steps, result, open, problems, i, "End Repeat", "Repeat");
                     break;
 
+                case FlowControlStep { Action: FlowControlAction.ExitLoop or FlowControlAction.ContinueLoop } fc:
+                    result._depth[i] = open.Count;
+                    if (!open.Any(idx => steps[idx] is RepeatStep))
+                    {
+                        var label = fc.Action == FlowControlAction.ExitLoop ? "Break loop" : "Continue loop";
+                        problems.Add(new BlockProblem(i,
+                            $"This \"{label}\" step must be placed inside a Repeat block (or switch its action to \"Stop macro\")."));
+                    }
+                    break;
+
                 default:
                     result._depth[i] = open.Count;
                     break;

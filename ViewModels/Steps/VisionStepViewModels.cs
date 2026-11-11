@@ -79,6 +79,122 @@ public abstract class ScreenSearchStepViewModel : StepViewModel
         new Choice<VisionSearchStrategy>(VisionSearchStrategy.Deadline, "Strict Time Budget"),
     };
 
+    public static IReadOnlyList<Choice<SearchMatchMode>> TargetSelectionOptions { get; } = new[]
+    {
+        new Choice<SearchMatchMode>(SearchMatchMode.FirstOrBest, "Find One (Best / First Match)"),
+        new Choice<SearchMatchMode>(SearchMatchMode.AllMatches, "Find All (Count & Act on Every Match)"),
+        new Choice<SearchMatchMode>(SearchMatchMode.ReadingOrderNth, "Find Specific # (N-th Match in Reading Order)"),
+        new Choice<SearchMatchMode>(SearchMatchMode.RandomMatch, "Find One (Random Match)"),
+        new Choice<SearchMatchMode>(SearchMatchMode.NearestToCursor, "Find One (Nearest to Mouse Cursor)"),
+    };
+
+    public static IReadOnlyList<Choice<MultiMatchOrder>> MatchOrderOptions { get; } = new[]
+    {
+        new Choice<MultiMatchOrder>(MultiMatchOrder.ReadingOrder, "Reading Order (Top → Bottom, Left → Right)"),
+        new Choice<MultiMatchOrder>(MultiMatchOrder.BottomToTop, "Bottom → Top (Safe when clicking removes items)"),
+        new Choice<MultiMatchOrder>(MultiMatchOrder.NearestNeighbor, "Shortest Path (Nearest Neighbor)"),
+    };
+
+    public SearchMatchMode TargetSelection
+    {
+        get => _search.TargetSelection;
+        set
+        {
+            if (_search.TargetSelection == value) return;
+            _search.TargetSelection = value;
+            NotifyChanged();
+            OnPropertyChanged(nameof(IsAllMatches));
+            OnPropertyChanged(nameof(IsReadingOrderNth));
+            OnPropertyChanged(nameof(TargetSelectionHelp));
+        }
+    }
+
+    public bool IsAllMatches => _search.TargetSelection == SearchMatchMode.AllMatches;
+
+    public bool IsReadingOrderNth => _search.TargetSelection == SearchMatchMode.ReadingOrderNth;
+
+    public MultiMatchOrder MatchOrder
+    {
+        get => _search.MatchOrder;
+        set
+        {
+            if (_search.MatchOrder == value) return;
+            _search.MatchOrder = value;
+            NotifyChanged();
+        }
+    }
+
+    public int TargetMatchIndex
+    {
+        get => _search.EffectiveTargetMatchIndex;
+        set
+        {
+            var clamped = Math.Clamp(value, 1, 9999);
+            var stored = clamped == 1 ? 0 : clamped;
+            if (_search.TargetMatchIndex == stored) return;
+            _search.TargetMatchIndex = stored;
+            NotifyChanged();
+        }
+    }
+
+    public int MinMatchCount
+    {
+        get => _search.EffectiveMinMatchCount;
+        set
+        {
+            var clamped = Math.Clamp(value, 1, 9999);
+            var stored = clamped == 1 ? 0 : clamped;
+            if (_search.MinMatchCount == stored) return;
+            _search.MinMatchCount = stored;
+            NotifyChanged();
+        }
+    }
+
+    public int MaxMatchesToActOn
+    {
+        get => _search.MaxMatchesToActOn;
+        set
+        {
+            var clamped = Math.Clamp(value, 0, 9999);
+            if (_search.MaxMatchesToActOn == clamped) return;
+            _search.MaxMatchesToActOn = clamped;
+            NotifyChanged();
+        }
+    }
+
+    public int BetweenMatchesDelayMs
+    {
+        get => _search.BetweenMatchesDelayMs;
+        set
+        {
+            var clamped = Math.Clamp(value, 0, 60_000);
+            if (_search.BetweenMatchesDelayMs == clamped && _search.BetweenMatchesDelayOverride is not null) return;
+            _search.BetweenMatchesDelayMs = clamped;
+            NotifyChanged();
+        }
+    }
+
+    public string CountVariableName
+    {
+        get => _search.CountVariableName ?? string.Empty;
+        set
+        {
+            var normalized = string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+            if (_search.CountVariableName == normalized) return;
+            _search.CountVariableName = normalized;
+            NotifyChanged();
+        }
+    }
+
+    public string TargetSelectionHelp => _search.TargetSelection switch
+    {
+        SearchMatchMode.AllMatches => "Finds every occurrence on screen (even across 1,500+ words), counts how many times it appears, highlights all of them, and either just counts (When found = Do nothing) or acts on each match in order.",
+        SearchMatchMode.ReadingOrderNth => $"Picks match #{_search.EffectiveTargetMatchIndex} in reading order (top-to-bottom, left-to-right).",
+        SearchMatchMode.RandomMatch => "Counts all occurrences on screen and picks one at random.",
+        SearchMatchMode.NearestToCursor => "Counts all occurrences on screen and picks the one closest to the current mouse cursor.",
+        _ => "Finds the single best / first match on screen, while still counting how many times it appears.",
+    };
+
     public VisionScenario Scenario
     {
         get => _search.Scenario;
@@ -348,11 +464,20 @@ public abstract class ScreenSearchStepViewModel : StepViewModel
     {
         new Choice<FoundTextAction>(FoundTextAction.None, "Do nothing (just continue)"),
         new Choice<FoundTextAction>(FoundTextAction.Click, "Click its center (left click)"),
+        new Choice<FoundTextAction>(FoundTextAction.HoverThenClick, "Hover briefly, then left-click (for game buttons)"),
         new Choice<FoundTextAction>(FoundTextAction.DoubleClick, "Double-click its center"),
         new Choice<FoundTextAction>(FoundTextAction.RightClick, "Right-click its center"),
+        new Choice<FoundTextAction>(FoundTextAction.MiddleClick, "Middle-click its center"),
         new Choice<FoundTextAction>(FoundTextAction.Move, "Move the mouse to it (no click)"),
         new Choice<FoundTextAction>(FoundTextAction.Hold, "Hold the left button on it for…"),
+        new Choice<FoundTextAction>(FoundTextAction.PressKey, "Press a keyboard key (no mouse click)…"),
+        new Choice<FoundTextAction>(FoundTextAction.ClickAndPressKey, "Left-click it, then press a keyboard key…"),
+        new Choice<FoundTextAction>(FoundTextAction.ClickAndTypeText, "Left-click it, then type text…"),
+        new Choice<FoundTextAction>(FoundTextAction.ScrollUp, "Scroll mouse wheel UP at its center…"),
+        new Choice<FoundTextAction>(FoundTextAction.ScrollDown, "Scroll mouse wheel DOWN at its center…"),
     };
+
+    public static IReadOnlyList<KeyInfo> FoundKeys => VirtualKeys.All;
 
     public static IReadOnlyList<Choice<TextNotFoundBehavior>> NotFoundOptions { get; } = new[]
     {
@@ -367,11 +492,24 @@ public abstract class ScreenSearchStepViewModel : StepViewModel
     /// <summary>True when the last test found something (the "Show me" button is enabled).</summary>
     public bool HasTestMatch => _testMatch is not null;
 
+    public bool HasTestResult => !string.IsNullOrEmpty(_testResult);
+
+    public string TestStatusBadgeText => _testFound switch
+    {
+        true => "✓ MATCH VERIFIED",
+        false => "✕ NO MATCH",
+        _ => "ℹ LIVE TEST",
+    };
+
     /// <summary>Whether the last test found it (null before any test). Conditions turn this into "true / false right now".</summary>
     public bool? TestFound
     {
         get => _testFound;
-        private set => SetProperty(ref _testFound, value);
+        private set
+        {
+            if (SetProperty(ref _testFound, value))
+                OnPropertyChanged(nameof(TestStatusBadgeText));
+        }
     }
 
     /// <summary>Moves the cursor with this step's own screen tools.</summary>
@@ -403,7 +541,11 @@ public abstract class ScreenSearchStepViewModel : StepViewModel
     public string? TestResult
     {
         get => _testResult;
-        protected set => SetProperty(ref _testResult, value);
+        protected set
+        {
+            if (SetProperty(ref _testResult, value))
+                OnPropertyChanged(nameof(HasTestResult));
+        }
     }
 
     /// <summary>The old "whole screen" switch (all monitors on / custom area off). The editor now uses <see cref="Scope"/>.</summary>
@@ -488,13 +630,43 @@ public abstract class ScreenSearchStepViewModel : StepViewModel
             NotifyChanged();
             OnPropertyChanged(nameof(HasPointerAction));
             OnPropertyChanged(nameof(IsHoldAction));
+            OnPropertyChanged(nameof(IsFoundKeyAction));
+            OnPropertyChanged(nameof(IsFoundTextAction));
+            OnPropertyChanged(nameof(IsFoundScrollAction));
         }
     }
 
-    public bool HasPointerAction => _search.Goal == WaitGoal.Appear && _search.Action != FoundTextAction.None;
+    public bool HasPointerAction => _search.Goal == WaitGoal.Appear && _search.Action is not (FoundTextAction.None or FoundTextAction.PressKey);
 
     /// <summary>Shows the hold time box for "hold the left button on it".</summary>
     public bool IsHoldAction => _search.Goal == WaitGoal.Appear && _search.Action == FoundTextAction.Hold;
+
+    public bool IsFoundKeyAction => _search.Goal == WaitGoal.Appear
+        && _search.Action is FoundTextAction.PressKey or FoundTextAction.ClickAndPressKey;
+
+    public bool IsFoundTextAction => _search.Goal == WaitGoal.Appear
+        && _search.Action == FoundTextAction.ClickAndTypeText;
+
+    public bool IsFoundScrollAction => _search.Goal == WaitGoal.Appear
+        && _search.Action is FoundTextAction.ScrollUp or FoundTextAction.ScrollDown;
+
+    public int FoundVirtualKey
+    {
+        get => _search.FoundVirtualKey <= 0 ? 0x20 : _search.FoundVirtualKey;
+        set { if (_search.FoundVirtualKey == value) return; _search.FoundVirtualKey = value; NotifyChanged(); }
+    }
+
+    public string FoundTextToType
+    {
+        get => _search.FoundTextToType ?? string.Empty;
+        set { if (_search.FoundTextToType == value) return; _search.FoundTextToType = string.IsNullOrEmpty(value) ? null : value; NotifyChanged(); }
+    }
+
+    public int FoundScrollClicks
+    {
+        get => _search.FoundScrollClicks <= 0 ? 3 : _search.FoundScrollClicks;
+        set { var c = Math.Clamp(value, 1, 50); if (_search.FoundScrollClicks == c) return; _search.FoundScrollClicks = c; NotifyChanged(); }
+    }
 
     /// <summary>How long "hold the left button on it" holds, in ms.</summary>
     public int ActionHoldMs
@@ -596,12 +768,24 @@ public sealed class FindTextStepViewModel : ScreenSearchStepViewModel
 {
     private readonly FindTextStep _step;
     private IFindTextTools? _tools;
+    private int _currentMatchPreviewIndex;
 
     public FindTextStepViewModel(FindTextStep step) : base(step)
     {
         _step = step;
         TestCommand = new AsyncRelayCommand(TestAsync, ex => TestResult = ex.Message, () => _tools is not null && !IsBusy);
+        InspectScreenTextCommand = new AsyncRelayCommand(InspectScreenTextAsync, ex => TestResult = ex.Message, () => _tools is not null && !IsBusy);
+        ShowNextMatchCommand = new RelayCommand(ShowNextMatch, () => HasMultipleTestMatches && !IsBusy);
+        InsertVariableTokenCommand = new RelayCommand(p =>
+        {
+            var token = p as string;
+            if (string.IsNullOrWhiteSpace(token)) token = "{value}";
+            else if (!token.StartsWith('{')) token = $"{{{token}}}";
+            Text = string.IsNullOrEmpty(Text) ? token : $"{Text}{token}";
+        });
     }
+
+    public RelayCommand InsertVariableTokenCommand { get; }
 
     public static IReadOnlyList<Choice<TextMatchMode>> MatchModes { get; } = new[]
     {
@@ -618,6 +802,18 @@ public sealed class FindTextStepViewModel : ScreenSearchStepViewModel
     };
 
     public AsyncRelayCommand TestCommand { get; }
+    public AsyncRelayCommand InspectScreenTextCommand { get; }
+    public RelayCommand ShowNextMatchCommand { get; }
+
+    public int LastTestMatchCount => _tools?.LastTestMatchCount ?? 0;
+
+    public int LastTestTotalWordCount => _tools?.LastTestTotalWordCount ?? 0;
+
+    public bool HasMultipleTestMatches => (_tools?.LastTestMatches.Count ?? 0) > 1;
+
+    public string? MatchCountBadgeText => LastTestMatchCount > 0
+        ? $"🎯 {LastTestMatchCount} match{(LastTestMatchCount == 1 ? "" : "es")} found{(LastTestTotalWordCount > 0 ? $" · {LastTestTotalWordCount} words on screen" : "")}"
+        : (LastTestTotalWordCount > 0 && TestFound == false ? $"0 matches · {LastTestTotalWordCount} words read on screen" : null);
 
     /// <summary>Screen tools from the editor (set right after creation).</summary>
     public IFindTextTools? Tools
@@ -703,6 +899,12 @@ public sealed class FindTextStepViewModel : ScreenSearchStepViewModel
         set { if (_step.NormalizeLookAlikes == value) return; _step.NormalizeLookAlikes = value; NotifyChanged(); }
     }
 
+    public bool StrictPunctuation
+    {
+        get => _step.StrictPunctuation;
+        set { if (_step.StrictPunctuation == value) return; _step.StrictPunctuation = value; NotifyChanged(); }
+    }
+
     public int MinSimilarityPercent
     {
         get => _step.MinSimilarityPercent;
@@ -744,9 +946,37 @@ public sealed class FindTextStepViewModel : ScreenSearchStepViewModel
     {
         if (_tools is null) return;
         TestResult = "Reading the screen…";
+        _currentMatchPreviewIndex = 0;
         var text = await _tools.TestAsync(_step);
         SetTestResult(text, _tools.LastTestMatch, _tools.LastTestMatch is not null);
+        RaiseMatchCountProperties();
     });
+
+    private Task InspectScreenTextAsync() => RunBusyAsync(async () =>
+    {
+        if (_tools is null) return;
+        TestResult = "Capturing and reading all words on screen…";
+        _currentMatchPreviewIndex = 0;
+        var text = await _tools.InspectScreenTextAsync(_step, selectedWord => Text = selectedWord);
+        SetTestResult(text, _tools.LastTestMatch, _tools.LastTestMatch is not null);
+        RaiseMatchCountProperties();
+    });
+
+    private void ShowNextMatch()
+    {
+        if (_tools is not { LastTestMatches.Count: > 0 } tools) return;
+        _currentMatchPreviewIndex = (_currentMatchPreviewIndex + 1) % tools.LastTestMatches.Count;
+        var pt = tools.LastTestMatches[_currentMatchPreviewIndex];
+        ShowSpot(pt);
+    }
+
+    private void RaiseMatchCountProperties()
+    {
+        OnPropertyChanged(nameof(LastTestMatchCount));
+        OnPropertyChanged(nameof(LastTestTotalWordCount));
+        OnPropertyChanged(nameof(HasMultipleTestMatches));
+        OnPropertyChanged(nameof(MatchCountBadgeText));
+    }
 
     protected override void ShowSpot(ScreenPoint point) => _tools?.ShowSpot(point);
 }

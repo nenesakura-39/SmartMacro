@@ -149,6 +149,12 @@ public sealed class RecordingOptions
     /// Off by default here for programmatic callers; enabled by default in app settings for Smart/Desktop recordings.
     /// </summary>
     public bool SmartTiming { get; init; }
+
+    /// <summary>
+    /// Smart Typing Coalescer: merges consecutive printable <see cref="KeyPressStep"/> taps (separated by short delays
+    /// &lt;= 600 ms) into a single <see cref="TypeTextStep"/>. Off by default for programmatic callers.
+    /// </summary>
+    public bool CoalesceTypedText { get; init; }
 }
 
 /// <summary>
@@ -208,9 +214,26 @@ public static class RecordingConverter
         (int X, int Y)? lastMovePosition = null;
         RawInputEvent? pendingMove = null; // last thinned-out move, kept if the cursor rests there
         var awaitingPostClickSettle = false;
+        long? lastClickTimeMs = null;
+        (int X, int Y)? lastClickPosition = null;
 
         void Emit(MacroStep step, long time, long endTime)
         {
+            var isRapidSpamClick = step is MouseClickStep { Action: MouseClickAction.Click } nextClick
+                && lastClickPosition is { } prevPos
+                && lastClickTimeMs is long prevClickMs
+                && Math.Abs(nextClick.X - prevPos.X) <= 12
+                && Math.Abs(nextClick.Y - prevPos.Y) <= 12
+                && time - prevClickMs <= 450;
+
+            if (isRapidSpamClick && step is MouseClickStep spamClick)
+            {
+                // Consecutive rapid clicks on the same spot (autoclick / roll spam): skip per-click Smart Intent /
+                // Smart-Aim vision lookups and adaptive screen-settle waits so the click cadence stays exact.
+                spamClick.UseSmartIntent = false;
+                spamClick.SmartAimAtTarget = false;
+            }
+
             if (accounted is long acc)
             {
                 // Out-of-order or equal times give gap <= 0: never a negative Delay (and never more than the 1 h maximum).
@@ -219,7 +242,13 @@ public static class RecordingConverter
                 if (gap >= minDelay)
                 {
                     var durationMs = (int)Math.Min(gap, MacroValidator.MaxDelayMs);
-                    if (options.SmartTiming && awaitingPostClickSettle && durationMs >= MinSmartSettleDelayMs && keysDown.Count == 0 && buttonsDown.Count == 0)
+                    if (options.SmartTiming
+                        && awaitingPostClickSettle
+                        && !isRapidSpamClick
+                        && step is not MouseClickStep
+                        && durationMs >= MinSmartSettleDelayMs
+                        && keysDown.Count == 0
+                        && buttonsDown.Count == 0)
                     {
                         var minWait = Math.Clamp(durationMs / 4, 60, 250);
                         var maxWait = (int)Math.Clamp(Math.Max((long)durationMs, (long)durationMs * 3), 600, Math.Max(durationMs, 15_000));
@@ -247,10 +276,16 @@ public static class RecordingConverter
 
             steps.Add(step);
 
-            if (step is MouseClickStep { Action: MouseClickAction.Click })
-                awaitingPostClickSettle = true;
+            if (step is MouseClickStep { Action: MouseClickAction.Click } emittedClick)
+            {
+                awaitingPostClickSettle = !isRapidSpamClick;
+                lastClickTimeMs = endTime;
+                lastClickPosition = (emittedClick.X, emittedClick.Y);
+            }
             else if (step is not MouseMoveStep)
+            {
                 awaitingPostClickSettle = false;
+            }
 
             // A Click / Press covers the time until its release: either it's played (HoldMs) or,
             // with KeepHoldTime off, deliberately skipped like before.
@@ -491,6 +526,9 @@ public static class RecordingConverter
         }
         foreach (var button in buttonsDown)
             steps.Add(new MouseClickStep { Button = button, Action = MouseClickAction.Up, UseCurrentPosition = true });
+
+        if (options.CoalesceTypedText && steps.Count > 1)
+            steps = Workflow.StepCleanup.CoalesceKeystrokesToTypeText(steps, 0, steps.Count - 1).Steps;
 
         return steps;
     }

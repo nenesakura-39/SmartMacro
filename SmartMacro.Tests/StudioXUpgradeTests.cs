@@ -106,4 +106,25 @@ public sealed class StudioXUpgradeTests
             Assert.NotEmpty(steps);
         }
     }
+
+    [Fact]
+    public void InspectorDeck_SupportsStickySubTabMemoryAndStepStepperNavigation()
+    {
+        var repoRoot = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", ".."));
+        var editorVm = File.ReadAllText(Path.Combine(repoRoot, "ViewModels", "EditorViewModel.cs"));
+        var stepVms = File.ReadAllText(Path.Combine(repoRoot, "ViewModels", "Steps", "StepViewModels.cs"));
+        var editorXaml = File.ReadAllText(Path.Combine(repoRoot, "Views", "EditorView.xaml"));
+
+        Assert.Contains("SelectPreviousStepCommand", editorVm);
+        Assert.Contains("SelectNextStepCommand", editorVm);
+        Assert.Contains("FocusFirstErrorCommand", editorVm);
+        Assert.Contains("FocusFirstErrorStepAndOpenProblems", editorVm);
+        Assert.Contains("Fix errors before saving", editorVm);
+        Assert.Contains("ApplyPreferredInspectorTab", stepVms);
+        Assert.Contains("HasComment ? $\"{baseTitle} · 💬\" : baseTitle", stepVms);
+        Assert.Contains("Command=\"{Binding SelectPreviousStepCommand}\"", editorXaml);
+        Assert.Contains("Command=\"{Binding SelectNextStepCommand}\"", editorXaml);
+        Assert.Contains("Command=\"{Binding FocusFirstErrorCommand}\"", editorXaml);
+        Assert.DoesNotContain("QUICK PATTERNS", editorXaml);
+    }
 }

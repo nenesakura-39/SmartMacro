@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Runtime.InteropServices;
+using SmartMacro.Core.Models;
 using SmartMacro.Core.Ocr;
 using SmartMacro.Core.Vision;
 using SmartMacro.Services.Input;
@@ -19,10 +20,10 @@ public sealed class WindowsOcrService : IOcrService
     // Overlap between tiles when a big area must be split, so words on a tile edge aren't cut in half.
     private const int TileOverlap = 120;
 
-    // Extra margin captured around the search area, and when to enlarge small areas before OCR.
+    // Extra margin captured around the search area, and when to enlarge areas before OCR so small/mixed fonts are crisp.
     private const int CapturePadding = 48;
-    private const int SmallAreaWidth = 600;
-    private const int SmallAreaHeight = 200;
+    private const int SmallAreaWidth = 2200;
+    private const int SmallAreaHeight = 1400;
     private const int UpscaleFactor = 2;
 
     private readonly OcrEngine? _engine;
@@ -46,12 +47,17 @@ public sealed class WindowsOcrService : IOcrService
 
     public bool IsAvailable => _engine is not null;
 
+    public bool SupportsPreprocessing => true;
+
     public string StatusText { get; }
 
     /// <summary>All monitors (physical pixels); shared with the image capture, re-read at most every 500 ms.</summary>
     public ScreenRect GetVirtualScreen() => ScreenCapture.VirtualScreen();
 
-    public async Task<OcrReadResult> ReadAsync(ScreenRect region, CancellationToken cancellationToken)
+    public Task<OcrReadResult> ReadAsync(ScreenRect region, CancellationToken cancellationToken) =>
+        ReadAsync(region, OcrPreprocessMode.Auto, cancellationToken);
+
+    public async Task<OcrReadResult> ReadAsync(ScreenRect region, OcrPreprocessMode preprocess, CancellationToken cancellationToken)
     {
         var engine = _engine ?? throw new OcrUnavailableException(StatusText);
         var screen = GetVirtualScreen();
@@ -63,14 +69,90 @@ public sealed class WindowsOcrService : IOcrService
         // Windows OCR struggles with tightly cropped text, so capture a margin around the area...
         var area = new ScreenRect(requested.X - CapturePadding, requested.Y - CapturePadding,
             requested.Width + CapturePadding * 2, requested.Height + CapturePadding * 2).Intersect(screen);
-        var pixels = ScreenCapture.CaptureBgra(area);
+        var rawPixels = ScreenCapture.CaptureBgra(area);
+        return await RecognizeBufferAsync(engine, rawPixels, area, requested, preprocess, cancellationToken).ConfigureAwait(false);
+    }
 
-        // ...and enlarge small areas, since small text is read much more reliably when it's bigger.
-        var scale = area.Width < SmallAreaWidth || area.Height < SmallAreaHeight ? UpscaleFactor : 1;
-        var width = area.Width * scale;
-        var height = area.Height * scale;
-        if (scale > 1) pixels = Upscale(pixels, area.Width, area.Height, scale);
+    /// <summary>
+    /// Multi-pass OCR read: runs the requested preprocess mode first, and if <paramref name="accept"/> returns false,
+    /// retries on the same captured screenshot with HighContrast and Adaptive BinarizeOtsu (for mixed fonts, faint glyphs,
+    /// or busy/dirty backgrounds) plus slight ±5° deskew for tilted words, merging any newly recognized words.
+    /// </summary>
+    public async Task<OcrReadResult> ReadMultiPassAsync(
+        ScreenRect region,
+        OcrPreprocessMode primaryPreprocess,
+        Func<OcrReadResult, bool> accept,
+        CancellationToken cancellationToken)
+    {
+        var engine = _engine ?? throw new OcrUnavailableException(StatusText);
+        var screen = GetVirtualScreen();
+        var requested = region.Intersect(screen);
+        if (requested.IsEmpty)
+            throw new ArgumentException($"The search area {region} is outside the screen. Pick the area again.");
 
+        var area = new ScreenRect(requested.X - CapturePadding, requested.Y - CapturePadding,
+            requested.Width + CapturePadding * 2, requested.Height + CapturePadding * 2).Intersect(screen);
+        var rawPixels = ScreenCapture.CaptureBgra(area);
+
+        var first = await RecognizeBufferAsync(engine, rawPixels, area, requested, primaryPreprocess, cancellationToken).ConfigureAwait(false);
+        if (accept(first)) return first;
+
+        var combinedLines = new List<OcrLineBox>(first.Lines);
+
+        // Fallback Pass 2: HighContrast or BinarizeOtsu (strips noisy/busy background textures or boosts small mixed-font contrast)
+        var fallbackModes = primaryPreprocess switch
+        {
+            OcrPreprocessMode.BinarizeOtsu => new[] { OcrPreprocessMode.HighContrast, OcrPreprocessMode.Auto },
+            OcrPreprocessMode.HighContrast => new[] { OcrPreprocessMode.BinarizeOtsu, OcrPreprocessMode.InvertLightOnDark },
+            _ => new[] { OcrPreprocessMode.HighContrast, OcrPreprocessMode.BinarizeOtsu },
+        };
+
+        foreach (var mode in fallbackModes)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var pass = await RecognizeBufferAsync(engine, rawPixels, area, requested, mode, cancellationToken).ConfigureAwait(false);
+            if (pass.Lines.Count > 0)
+            {
+                combinedLines.AddRange(pass.Lines);
+                var merged = new OcrReadResult(requested, OcrWordDeduplicator.DeduplicateLines(combinedLines));
+                if (accept(merged)) return merged;
+            }
+        }
+
+        // Fallback Pass 3: Slight deskew (-5° and +5°) for tilted/rotated words in mixed-font boards
+        foreach (var angleDeg in new[] { -5, 5 })
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var rotatedPass = await RecognizeRotatedBufferAsync(engine, rawPixels, area, requested, angleDeg, cancellationToken).ConfigureAwait(false);
+            if (rotatedPass.Lines.Count > 0)
+            {
+                combinedLines.AddRange(rotatedPass.Lines);
+                var merged = new OcrReadResult(requested, OcrWordDeduplicator.DeduplicateLines(combinedLines));
+                if (accept(merged)) return merged;
+            }
+        }
+
+        return new OcrReadResult(requested, OcrWordDeduplicator.DeduplicateLines(combinedLines));
+    }
+
+    private static async Task<OcrReadResult> RecognizeBufferAsync(
+        OcrEngine engine,
+        byte[] rawPixels,
+        ScreenRect area,
+        ScreenRect requested,
+        OcrPreprocessMode preprocess,
+        CancellationToken cancellationToken)
+    {
+        var img = new BgraImage(area.Width, area.Height, rawPixels);
+        var scale = area.Width <= SmallAreaWidth && area.Height <= SmallAreaHeight ? UpscaleFactor : 1;
+        if (scale > 1)
+            img = OcrImagePreprocessor.UpscaleBilinear2x(img);
+        if (preprocess != OcrPreprocessMode.Auto)
+            img = OcrImagePreprocessor.Apply(img, preprocess);
+
+        var pixels = img.Pixels;
+        var width = img.Width;
+        var height = img.Height;
         var maxTile = (int)Math.Min(OcrEngine.MaxImageDimension, 4000u);
         var lines = new List<OcrLineBox>();
 
@@ -101,7 +183,65 @@ public sealed class WindowsOcrService : IOcrService
             }
         }
 
-        return new OcrReadResult(requested, lines);
+        return new OcrReadResult(requested, OcrWordDeduplicator.DeduplicateLines(lines));
+    }
+
+    private static async Task<OcrReadResult> RecognizeRotatedBufferAsync(
+        OcrEngine engine,
+        byte[] rawPixels,
+        ScreenRect area,
+        ScreenRect requested,
+        int angleDeg,
+        CancellationToken cancellationToken)
+    {
+        var baseImg = new BgraImage(area.Width, area.Height, rawPixels);
+        var rotated = EdgeShapeMatcher.Rotate(baseImg, angleDeg);
+        var scale = rotated.Width <= SmallAreaWidth && rotated.Height <= SmallAreaHeight ? UpscaleFactor : 1;
+        if (scale > 1)
+            rotated = OcrImagePreprocessor.UpscaleBilinear2x(rotated);
+
+        var pixels = rotated.Pixels;
+        var width = rotated.Width;
+        var height = rotated.Height;
+        var maxTile = (int)Math.Min(OcrEngine.MaxImageDimension, 4000u);
+        var lines = new List<OcrLineBox>();
+        double rad = -angleDeg * Math.PI / 180.0;
+        double cos = Math.Cos(rad), sin = Math.Sin(rad);
+        double cx = area.Width * 0.5, cy = area.Height * 0.5;
+
+        foreach (var tile in Tiles(width, height, maxTile))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var tileBytes = CopyTile(pixels, width, tile);
+            using var bitmap = SoftwareBitmap.CreateCopyFromBuffer(
+                CryptographicBuffer.CreateFromByteArray(tileBytes),
+                BitmapPixelFormat.Bgra8, tile.Width, tile.Height, BitmapAlphaMode.Ignore);
+
+            var result = await engine.RecognizeAsync(bitmap);
+            foreach (var line in result.Lines)
+            {
+                var words = new List<OcrWordBox>();
+                foreach (var w in line.Words)
+                {
+                    double rx = (tile.X + w.BoundingRect.X + w.BoundingRect.Width * 0.5) / scale - cx;
+                    double ry = (tile.Y + w.BoundingRect.Y + w.BoundingRect.Height * 0.5) / scale - cy;
+                    double ux = rx * cos - ry * sin + cx;
+                    double uy = rx * sin + ry * cos + cy;
+                    int ww = Math.Max(1, (int)Math.Round(w.BoundingRect.Width / scale));
+                    int wh = Math.Max(1, (int)Math.Round(w.BoundingRect.Height / scale));
+                    var box = new ScreenRect(
+                        area.X + (int)Math.Round(ux - ww * 0.5),
+                        area.Y + (int)Math.Round(uy - wh * 0.5),
+                        ww,
+                        wh);
+                    if (box.IntersectsWith(requested))
+                        words.Add(new OcrWordBox(w.Text, box));
+                }
+                if (words.Count > 0) lines.Add(new OcrLineBox(words));
+            }
+        }
+
+        return new OcrReadResult(requested, OcrWordDeduplicator.DeduplicateLines(lines));
     }
 
     /// <summary>
@@ -147,7 +287,7 @@ public sealed class WindowsOcrService : IOcrService
             }
         }
 
-        return new OcrReadResult(area, lines);
+        return new OcrReadResult(area, OcrWordDeduplicator.DeduplicateLines(lines));
     }
 
     /// <summary>
@@ -360,6 +500,41 @@ internal static class ScreenCapture
         {
             NativeMethods.ReleaseDC(IntPtr.Zero, screenDc);
         }
+    }
+
+    /// <summary>
+    /// Attempts to capture <paramref name="area"/> from <paramref name="hwnd"/> using DWM <c>PrintWindow(PW_RENDERFULLCONTENT)</c>
+    /// when the target window is occluded behind other windows (or when a direct window surface read is requested),
+    /// falling back to standard desktop <c>BitBlt</c> if the window doesn't support <c>PrintWindow</c>.
+    /// </summary>
+    public static ScreenFrame CaptureWindowOrScreen(IntPtr hwnd, ScreenRect area)
+    {
+        if (area.IsEmpty) throw new ArgumentException("The capture area is empty.", nameof(area));
+        Vision.CaptureShield.BeforeCapture();
+
+        using var dpi = NativeMethods.PhysicalPixelsScope.Enter();
+        if (hwnd != IntPtr.Zero && NativeMethods.GetForegroundWindow() != hwnd)
+        {
+            var screenDc = NativeMethods.GetDC(IntPtr.Zero);
+            if (screenDc != IntPtr.Zero)
+            {
+                try
+                {
+                    if (LargeSurface.TryCaptureWindow(screenDc, hwnd, area, out var capturedBounds, out var winPixels))
+                        return new ScreenFrame(capturedBounds, new BgraImage(capturedBounds.Width, capturedBounds.Height, winPixels));
+                }
+                finally
+                {
+                    NativeMethods.ReleaseDC(IntPtr.Zero, screenDc);
+                }
+            }
+        }
+
+        var clipped = area.Intersect(VirtualScreen());
+        if (clipped.IsEmpty)
+            throw new ArgumentException($"The search area {area} is outside the screen. Pick the area again.");
+        var pixels = CaptureBgra(clipped, shield: false);
+        return new ScreenFrame(clipped, new BgraImage(clipped.Width, clipped.Height, pixels));
     }
 
     /// <summary>

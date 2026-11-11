@@ -20,6 +20,9 @@ public enum StudioCommandKind
     /// <summary>"🧹 Clean up": merges redundant Delay / Move mouse steps (same total timing).</summary>
     CleanUp,
 
+    /// <summary>"⌨ Merge Keystrokes into Type Text": coalesces runs of printable KeyPress steps into TypeTextStep.</summary>
+    MergeKeysToText,
+
     /// <summary>Compact step view on / off.</summary>
     ToggleCompactView,
 
@@ -90,6 +93,7 @@ public static class StudioCommandCatalog
             new("play-from-selected", "▶ Play From Selected Step", StudioCommandKind.PlayFromSelected, "run start here partial", Shortcut: "Shift+F5"),
             new("auto-fix", "✨ Auto-Fix Block Structure", StudioCommandKind.AutoFixBlocks, "repair end if repeat orphan broken blocks"),
             new("clean-up", "🧹 Clean Up Redundant Steps", StudioCommandKind.CleanUp, "tidy merge mouse paths delays simplify"),
+            new("merge-keys", "⌨ Merge Keystrokes into Type Text", StudioCommandKind.MergeKeysToText, "type text keyboard coalesce combine keys words string"),
             new("compact", "📐 Toggle Compact Step View", StudioCommandKind.ToggleCompactView, "dense list rows view"),
             new("humanize", "🎲 Toggle Humanize Mode", StudioCommandKind.ToggleHumanize, "random jitter human natural"),
             new("test-step", "🧪 Test Selected Step", StudioCommandKind.TestStep, "try check detect diagnose near miss accuracy", Shortcut: "Ctrl+T"),

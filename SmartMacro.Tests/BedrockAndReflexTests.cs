@@ -544,4 +544,55 @@ public sealed class BedrockAndReflexTests
         Assert.Contains(ManualCatalog.FilterShortcuts(shortcuts, "breakpoint"), s => s.Keys == "F9");
         Assert.Contains(ManualCatalog.FilterShortcuts(shortcuts, "step over"), s => s.Keys == "F10");
     }
+
+    [Fact]
+    public void NoBakemoji_QuickPatternsAndPresetsAndCatalogs_UseWin10CompatibleGlyphsAndFonts()
+    {
+        // 1. Every StepCatalog entry uses a Segoe MDL2 / Fluent PUA icon in U+E700..U+EAFF:
+        foreach (var entry in StepCatalog.All)
+        {
+            Assert.False(string.IsNullOrEmpty(entry.Glyph));
+            var ch = (int)entry.Glyph[0];
+            Assert.InRange(ch, 0xE700, 0xEAFF);
+        }
+
+        // 2. No Windows 10 missing-glyph Unicode 13.0+ emojis (🪶 U+1FAB6, 🪟 U+1FA9F, 🩹 U+1FA79) in QuickPatterns, presets, or manuals:
+        string[] bannedWin10Tofu = ["\uD83E\uDEB6", "\uD83E\uDE9F", "\uD83E\uDE79"];
+        foreach (var pattern in SmartMacro.Core.Workflow.QuickPatterns.All)
+        {
+            Assert.False(string.IsNullOrEmpty(pattern.Glyph));
+            foreach (var tofu in bannedWin10Tofu)
+                Assert.DoesNotContain(tofu, pattern.Glyph);
+        }
+        foreach (var card in FeedbackPresets.BehaviorCards)
+        {
+            foreach (var tofu in bannedWin10Tofu)
+                Assert.DoesNotContain(tofu, card.Icon);
+        }
+
+        foreach (var preset in Enum.GetValues<FeedbackGamePreset>())
+        {
+            var label = FeedbackPresets.Label(preset);
+            foreach (var tofu in bannedWin10Tofu)
+                Assert.DoesNotContain(tofu, label);
+        }
+
+        foreach (var article in ManualCatalog.Filter(""))
+        {
+            foreach (var tofu in bannedWin10Tofu)
+            {
+                Assert.DoesNotContain(tofu, article.Glyph);
+                Assert.DoesNotContain(tofu, article.Title);
+                foreach (var sec in article.Sections)
+                    Assert.DoesNotContain(tofu, sec.Body);
+            }
+        }
+
+        // 3. In WPF, Segoe Fluent Icons and Segoe MDL2 Assets have GlyphTypeface.Symbol == true, which disables
+        //    Unicode font fallback when placed first in a FontFamily. Verify IconFont starts with Segoe UI first.
+        var repoRoot = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", ".."));
+        var colorsXaml = File.ReadAllText(Path.Combine(repoRoot, "Themes", "Colors.xaml"));
+        Assert.Contains("<FontFamily x:Key=\"IconFont\">Segoe UI, Segoe Fluent Icons, Segoe MDL2 Assets, Segoe UI Emoji, Segoe UI Symbol</FontFamily>", colorsXaml);
+        Assert.Contains("<FontFamily x:Key=\"UiFont\">Segoe UI Variable Text, Segoe UI, Segoe Fluent Icons, Segoe MDL2 Assets, Segoe UI Emoji, Segoe UI Symbol</FontFamily>", colorsXaml);
+    }
 }

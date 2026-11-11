@@ -18,6 +18,18 @@ public sealed partial class PlaybackEngine
     /// <summary>Optional clipboard text reader used by <see cref="VariableSourceKind.ClipboardText"/>.</summary>
     public IClipboardReader? Clipboard { get; set; }
 
+    /// <summary>Optional system master audio peak reader (0–100%) used by <see cref="VariableSourceKind.SystemAudioPeakPercent"/>.</summary>
+    public Func<double>? AudioPeakReader { get; set; }
+
+    /// <summary>Optional sound cue player used by <see cref="ScreenshotStep.SoundCue"/>.</summary>
+    public Action<SoundCueKind>? SoundCuePlayer { get; set; }
+
+    /// <summary>Optional directory where <c>last-failure-snapshot.png</c> is saved when a vision/wait step times out and stops playback.</summary>
+    public string? FailureSnapshotDirectory { get; set; }
+
+    /// <summary>Path to the most recent failure snapshot saved during the current playback run, if any.</summary>
+    public string? LastFailureSnapshotPath { get; private set; }
+
     /// <summary>
     /// Resolves a sub-macro from the library by ID or case-insensitive name (used by <see cref="CallMacroStep"/>,
     /// <see cref="StepFailureAction.RunRecoveryMacro"/>, and <see cref="WatcherActionKind.RunSubMacro"/>).
@@ -44,6 +56,11 @@ public sealed partial class PlaybackEngine
 
         public int TargetIndex { get; }
         public string CheckpointName { get; }
+    }
+
+    /// <summary>Internal control-flow signal thrown by <see cref="FlowControlAction.StopMacro"/> to end the macro cleanly.</summary>
+    private sealed class MacroStopRequestedSignal : Exception
+    {
     }
 
     private string InterpolateActive(string? template) =>
@@ -162,12 +179,76 @@ public sealed partial class PlaybackEngine
                 break;
             }
 
+            case VariableSourceKind.LastMatchCount:
+                rawValue = (_probes?.LastMatchCount ?? 0).ToString(CultureInfo.InvariantCulture);
+                inferredType = MacroVariableType.Number;
+                break;
+
+            case VariableSourceKind.LastOcrWordCount:
+                rawValue = (_probes?.LastOcrWordCount ?? 0).ToString(CultureInfo.InvariantCulture);
+                inferredType = MacroVariableType.Number;
+                break;
+
+            case VariableSourceKind.RandomNumber:
+            {
+                var (min, max) = VariableStore.ParseRandomRange(run.Variables.Interpolate(step.Value));
+                var next = min >= max ? min : (int)HumanizeRandom.NextInt64(min, (long)max + 1);
+                rawValue = next.ToString(CultureInfo.InvariantCulture);
+                inferredType = MacroVariableType.Number;
+                break;
+            }
+
+            case VariableSourceKind.ActiveWindowTitle:
+            {
+                rawValue = _layout?.GetForegroundWindowTitle()
+                    ?? _layout?.GetWindows().FirstOrDefault()?.Title
+                    ?? string.Empty;
+                inferredType = MacroVariableType.Text;
+                break;
+            }
+
+            case VariableSourceKind.CurrentTimeText:
+            {
+                var fmt = run.Variables.Interpolate(step.Value).Trim();
+                if (string.IsNullOrEmpty(fmt)) fmt = "HH:mm:ss";
+                try
+                {
+                    rawValue = DateTime.Now.ToString(fmt, CultureInfo.InvariantCulture);
+                }
+                catch (FormatException)
+                {
+                    rawValue = DateTime.Now.ToString("HH:mm:ss", CultureInfo.InvariantCulture);
+                }
+                inferredType = MacroVariableType.Text;
+                break;
+            }
+
+            case VariableSourceKind.SystemAudioPeakPercent:
+            {
+                var peak = Math.Clamp(AudioPeakReader?.Invoke() ?? 0.0, 0.0, 100.0);
+                rawValue = peak.ToString("0.#", CultureInfo.InvariantCulture);
+                inferredType = MacroVariableType.Number;
+                break;
+            }
+
+            case VariableSourceKind.Formula:
+            {
+                var formulaVal = FormulaEvaluator.Evaluate(step.Value, run.Variables);
+                rawValue = formulaVal.ToString("G15", CultureInfo.InvariantCulture);
+                inferredType = MacroVariableType.Number;
+                break;
+            }
+
             default:
                 rawValue = string.Empty;
                 break;
         }
 
         var updated = run.Variables.Apply(step.VariableName, inferredType ?? MacroVariableType.Text, step.Operation, rawValue);
+        if (step.CopyResultToClipboard)
+        {
+            Clipboard?.WriteText(updated);
+        }
         Message?.Invoke(this, $"🧠 Variable {{{step.VariableName}}} = \"{TruncateLog(updated)}\"");
     }
 
@@ -251,7 +332,42 @@ public sealed partial class PlaybackEngine
             }
 
             default:
+                await TrySaveFailureSnapshotAsync(token).ConfigureAwait(false);
                 throw new DetectionTimeoutException(message);
+        }
+    }
+
+    private async Task TrySaveFailureSnapshotAsync(CancellationToken token)
+    {
+        var dir = FailureSnapshotDirectory;
+        if (string.IsNullOrWhiteSpace(dir)) return;
+        if (!Storage.DiskSpaceGuard.HasEnoughFreeSpace(dir, out _)) return;
+
+        try
+        {
+            BgraImage? image = _probes?.LastCapturedImage;
+            if (image is null && _capture is { } cap)
+            {
+                var vs = cap.GetVirtualScreen();
+                if (!vs.IsEmpty)
+                {
+                    var frame = await cap.CaptureAsync(vs, token).ConfigureAwait(false);
+                    image = frame.Image;
+                }
+            }
+
+            if (image is null || image.Width <= 0 || image.Height <= 0) return;
+
+            Directory.CreateDirectory(dir);
+            var snapshotPath = Path.Combine(dir, "last-failure-snapshot.png");
+            var pngBytes = PngCodec.Encode(image);
+            await File.WriteAllBytesAsync(snapshotPath, pngBytes, CancellationToken.None).ConfigureAwait(false);
+            LastFailureSnapshotPath = snapshotPath;
+            Message?.Invoke(this, $"🔍 Saved failure snapshot: {snapshotPath}");
+        }
+        catch
+        {
+            // Never mask the original timeout exception if saving the diagnostic snapshot fails.
         }
     }
 

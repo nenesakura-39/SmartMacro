@@ -7,6 +7,9 @@ namespace SmartMacro.Core.Workflow;
 /// <summary>What "Clean up mouse paths" did.</summary>
 public sealed record MousePathCleanupResult(List<MacroStep> Steps, int RemovedSteps, int CollapsedRuns);
 
+/// <summary>What "⌨ Merge Keystrokes into Type Text" did.</summary>
+public sealed record KeystrokeCoalesceResult(List<MacroStep> Steps, int RemovedSteps, int CreatedTypeSteps);
+
 /// <summary>
 /// What "✨ Auto-Fix block structure" changed. <see cref="Repairs"/> has one plain sentence per kind of fix (e.g.
 /// "Removed 2 orphan 'End If' steps."). <see cref="FirstChangedIndex"/> is where the first change landed in the new list
@@ -106,6 +109,297 @@ public static class StepCleanup
         }
 
         return new MousePathCleanupResult(result, removed, runs);
+    }
+
+    // ---------------- ⌨ Merge Keystrokes into Type Text ----------------
+
+    /// <summary>Maximum fixed delay (ms) between consecutive keystrokes in the same typing burst.</summary>
+    public const int MaxTypingPauseMs = 600;
+
+    public static KeystrokeCoalesceResult CoalesceKeystrokesToTypeText(IReadOnlyList<MacroStep> steps) =>
+        CoalesceKeystrokesToTypeText(steps, 0, steps.Count - 1);
+
+    /// <summary>
+    /// Scans <paramref name="steps"/> between <paramref name="first"/> and <paramref name="last"/> for runs of 2 or more
+    /// printable <see cref="KeyPressStep"/> taps (including Shift casing and in-word Backspace corrections) separated by
+    /// short fixed delays (&lt;= <see cref="MaxTypingPauseMs"/>), and merges each run into a single <see cref="TypeTextStep"/>.
+    /// Single isolated key presses, hotkeys (Ctrl / Alt / Win), and commented or disabled steps are left untouched.
+    /// </summary>
+    public static KeystrokeCoalesceResult CoalesceKeystrokesToTypeText(IReadOnlyList<MacroStep> steps, int first, int last)
+    {
+        ArgumentNullException.ThrowIfNull(steps);
+        first = Math.Max(0, first);
+        last = Math.Min(steps.Count - 1, last);
+
+        var result = new List<MacroStep>(steps.Count);
+        var nonShiftModifiers = new HashSet<int>();
+        var removed = 0;
+        var created = 0;
+        var i = 0;
+
+        while (i < steps.Count)
+        {
+            var step = steps[i];
+            if (i < first || i > last || nonShiftModifiers.Count > 0 || !CanStartTypingBurst(step))
+            {
+                TrackNonShiftModifiers(step, nonShiftModifiers);
+                result.Add(step);
+                i++;
+                continue;
+            }
+
+            if (TryConsumeTypingBurst(steps, i, last, out var endIndex, out var typeStep))
+            {
+                result.Add(typeStep);
+                removed += (endIndex - i + 1) - 1;
+                created++;
+                i = endIndex + 1;
+            }
+            else
+            {
+                TrackNonShiftModifiers(step, nonShiftModifiers);
+                result.Add(step);
+                i++;
+            }
+        }
+
+        return new KeystrokeCoalesceResult(result, removed, created);
+    }
+
+    private static bool CanStartTypingBurst(MacroStep step)
+    {
+        if (step is not KeyPressStep { Enabled: true, Comment: null or "" } kp)
+            return false;
+
+        if (kp.Action == KeyAction.Down && IsShiftVirtualKey(kp.VirtualKey) && kp.Modifiers == KeyModifiers.None)
+            return true;
+
+        if (kp.Action == KeyAction.Press && (kp.Modifiers == KeyModifiers.None || kp.Modifiers == KeyModifiers.Shift))
+            return TryMapPrintableKey(kp.VirtualKey, kp.Modifiers == KeyModifiers.Shift, out _);
+
+        return false;
+    }
+
+    private static bool TryConsumeTypingBurst(
+        IReadOnlyList<MacroStep> steps,
+        int start,
+        int last,
+        out int bestEndIndex,
+        out TypeTextStep typeStep)
+    {
+        bestEndIndex = -1;
+        typeStep = null!;
+
+        var sb = new System.Text.StringBuilder();
+        var shiftHeld = false;
+        var printableKeys = 0;
+        long pendingDelayMs = 0;
+        long totalInterKeyDelayMs = 0;
+        var interKeyDelayIntervals = 0;
+
+        var bestText = string.Empty;
+        var bestPrintableKeys = 0;
+        long bestTotalDelayMs = 0;
+        var bestDelayIntervals = 0;
+
+        for (var k = start; k <= last; k++)
+        {
+            var s = steps[k];
+            if (!s.Enabled || !string.IsNullOrEmpty(s.Comment))
+                break;
+
+            if (s is DelayStep { Mode: DelayMode.Fixed } d)
+            {
+                if (pendingDelayMs + d.DurationMs > MaxTypingPauseMs)
+                    break;
+                pendingDelayMs += Math.Max(0, d.DurationMs);
+                continue;
+            }
+
+            if (s is not KeyPressStep kp)
+                break;
+
+            // Shift hold / release inside the burst.
+            if (IsShiftVirtualKey(kp.VirtualKey) && kp.Modifiers == KeyModifiers.None)
+            {
+                if (kp.Action == KeyAction.Down)
+                {
+                    shiftHeld = true;
+                    continue;
+                }
+                if (kp.Action == KeyAction.Up && shiftHeld)
+                {
+                    shiftHeld = false;
+                    if (printableKeys >= 2 && sb.Length >= 2)
+                    {
+                        bestEndIndex = k;
+                        bestText = sb.ToString();
+                        bestPrintableKeys = printableKeys;
+                        bestTotalDelayMs = totalInterKeyDelayMs;
+                        bestDelayIntervals = interKeyDelayIntervals;
+                    }
+                    continue;
+                }
+                break;
+            }
+
+            if (kp.Action != KeyAction.Press)
+                break;
+
+            if (kp.Modifiers is not (KeyModifiers.None or KeyModifiers.Shift))
+                break;
+
+            // Backspace inside a typing burst edits the typed text buffer.
+            if (kp.VirtualKey == 0x08 && kp.Modifiers == KeyModifiers.None && !shiftHeld)
+            {
+                if (sb.Length == 0)
+                    break;
+
+                sb.Length--;
+                if (printableKeys > 0)
+                {
+                    totalInterKeyDelayMs += pendingDelayMs;
+                    interKeyDelayIntervals++;
+                }
+                pendingDelayMs = 0;
+
+                if (printableKeys >= 2 && sb.Length >= 2)
+                {
+                    bestEndIndex = k;
+                    bestText = sb.ToString();
+                    bestPrintableKeys = printableKeys;
+                    bestTotalDelayMs = totalInterKeyDelayMs;
+                    bestDelayIntervals = interKeyDelayIntervals;
+                }
+                continue;
+            }
+
+            var effectiveShift = shiftHeld || kp.Modifiers == KeyModifiers.Shift;
+            if (!TryMapPrintableKey(kp.VirtualKey, effectiveShift, out var ch))
+                break;
+
+            if (printableKeys > 0)
+            {
+                totalInterKeyDelayMs += pendingDelayMs;
+                interKeyDelayIntervals++;
+            }
+            pendingDelayMs = 0;
+
+            sb.Append(ch);
+            printableKeys++;
+
+            if (!shiftHeld && printableKeys >= 2 && sb.Length >= 2)
+            {
+                bestEndIndex = k;
+                bestText = sb.ToString();
+                bestPrintableKeys = printableKeys;
+                bestTotalDelayMs = totalInterKeyDelayMs;
+                bestDelayIntervals = interKeyDelayIntervals;
+            }
+        }
+
+        if (bestEndIndex < 0 || bestPrintableKeys < 2 || bestText.Length < 2)
+            return false;
+
+        var avgDelay = bestDelayIntervals > 0
+            ? Math.Clamp((int)Math.Round((double)bestTotalDelayMs / bestDelayIntervals), 0, 200)
+            : TypeTextStep.DefaultCharacterDelayMs;
+
+        typeStep = new TypeTextStep
+        {
+            Text = bestText,
+            CharacterDelayMs = avgDelay,
+        };
+        return true;
+    }
+
+    private static bool IsShiftVirtualKey(int vk) => vk is 0x10 or 0xA0 or 0xA1;
+
+    private static void TrackNonShiftModifiers(MacroStep step, HashSet<int> held)
+    {
+        if (step is not KeyPressStep { Enabled: true } kp) return;
+        if (kp.VirtualKey is 0x11 or 0xA2 or 0xA3 or 0x12 or 0xA4 or 0xA5 or 0x5B or 0x5C)
+        {
+            if (kp.Action == KeyAction.Down) held.Add(kp.VirtualKey);
+            else if (kp.Action == KeyAction.Up) held.Remove(kp.VirtualKey);
+        }
+    }
+
+    private static bool TryMapPrintableKey(int vk, bool shift, out char ch)
+    {
+        ch = '\0';
+        if (vk is >= 0x41 and <= 0x5A)
+        {
+            ch = shift ? (char)vk : char.ToLowerInvariant((char)vk);
+            return true;
+        }
+
+        if (vk is >= 0x30 and <= 0x39)
+        {
+            if (!shift)
+            {
+                ch = (char)vk;
+                return true;
+            }
+            ch = (vk - 0x30) switch
+            {
+                0 => ')',
+                1 => '!',
+                2 => '@',
+                3 => '#',
+                4 => '$',
+                5 => '%',
+                6 => '^',
+                7 => '&',
+                8 => '*',
+                9 => '(',
+                _ => '\0',
+            };
+            return ch != '\0';
+        }
+
+        if (vk == 0x20)
+        {
+            ch = ' ';
+            return true;
+        }
+
+        if (!shift && vk is >= 0x60 and <= 0x69)
+        {
+            ch = (char)('0' + (vk - 0x60));
+            return true;
+        }
+
+        if (!shift)
+        {
+            ch = vk switch
+            {
+                0x6A => '*',
+                0x6B => '+',
+                0x6D => '-',
+                0x6E => '.',
+                0x6F => '/',
+                _ => '\0',
+            };
+            if (ch != '\0') return true;
+        }
+
+        ch = vk switch
+        {
+            0xBA => shift ? ':' : ';',
+            0xBB => shift ? '+' : '=',
+            0xBC => shift ? '<' : ',',
+            0xBD => shift ? '_' : '-',
+            0xBE => shift ? '>' : '.',
+            0xBF => shift ? '?' : '/',
+            0xC0 => shift ? '~' : '`',
+            0xDB => shift ? '{' : '[',
+            0xDC => shift ? '|' : '\\',
+            0xDD => shift ? '}' : ']',
+            0xDE => shift ? '"' : '\'',
+            _ => '\0',
+        };
+        return ch != '\0';
     }
 
     // ---------------- ✂ Break recorded input into steps ----------------

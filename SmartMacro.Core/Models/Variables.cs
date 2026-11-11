@@ -72,6 +72,18 @@ public enum VariableOperation
 
     /// <summary>v1.7 "Workbench": converts the source text to lowercase.</summary>
     ToLower,
+
+    /// <summary>v1.8 "Evergreen": multiplies the variable by a numeric value.</summary>
+    Multiply,
+
+    /// <summary>v1.8 "Evergreen": divides the variable by a numeric value (0 when dividing by 0).</summary>
+    Divide,
+
+    /// <summary>v1.8 "Evergreen": stores the remainder of dividing the variable by a numeric value (0 when dividing by 0).</summary>
+    Modulo,
+
+    /// <summary>v1.8 "Evergreen": rounds the numeric variable to N decimal places (0–6).</summary>
+    Round,
 }
 
 /// <summary>Where a <see cref="SetVariableStep"/> reads its input value from.</summary>
@@ -112,6 +124,27 @@ public enum VariableSourceKind
     /// (where N is the 1-based current Repeat loop turn), or empty string when past the end of the list.
     /// </summary>
     LineAtLoopIndex,
+
+    /// <summary>Number of matches found on screen by the most recent Find step or screen condition (0 if none).</summary>
+    LastMatchCount,
+
+    /// <summary>Total number of words read on screen by the most recent Find text (OCR) step or condition.</summary>
+    LastOcrWordCount,
+
+    /// <summary>v1.8 "Evergreen": generates a random integer in the range specified in <see cref="SetVariableStep.Value"/> (e.g. "1..100").</summary>
+    RandomNumber,
+
+    /// <summary>v1.8 "Evergreen": reads the title of the currently active (foreground) window.</summary>
+    ActiveWindowTitle,
+
+    /// <summary>v1.8 "Evergreen": formats the current local date/time using <see cref="SetVariableStep.Value"/> (defaults to "HH:mm:ss").</summary>
+    CurrentTimeText,
+
+    /// <summary>v1.8 "Evergreen": reads the current system master audio peak level (0–100%) via WASAPI.</summary>
+    SystemAudioPeakPercent,
+
+    /// <summary>Evaluates a safe mathematical formula expression (e.g. <c>({gold} * 1.15) + 50</c> or <c>clamp({hp}, 0, 100)</c>).</summary>
+    Formula,
 }
 
 /// <summary>Comparison operators for <see cref="ConditionKind.VariableCompare"/>.</summary>
@@ -191,6 +224,10 @@ public sealed class SetVariableStep : MacroStep
     /// <summary>Fill direction of the HUD bar / progress bar for <see cref="VariableSourceKind.ScreenGaugePercent"/>.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public GaugeDirection GaugeDirection { get; set; } = GaugeDirection.LeftToRight;
+
+    /// <summary>v1.8 "Evergreen": when true, also copies the resulting variable value to the OS clipboard.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public bool CopyResultToClipboard { get; set; }
 
     [JsonIgnore]
     public string EffectiveGaugeColor => string.IsNullOrWhiteSpace(GaugeColor) ? "#22C55E" : GaugeColor.Trim();

@@ -49,10 +49,71 @@ public static class MacroFileFormat
         TryParseBundle(json, out macro, out _, out error);
 
     /// <summary>Parses a macro file along with any bundled sub-macros.</summary>
-    public static bool TryParseBundle(string json, out Macro? macro, out List<Macro> subMacros, out string? error)
+    public static bool TryParseBundle(string json, out Macro? macro, out List<Macro> subMacros, out string? error) =>
+        TryParseBundle(json, out macro, out subMacros, out _, out error);
+
+    /// <summary>
+    /// Parses a macro file along with any bundled sub-macros and returns any automatic migration / legacy-upgrade notes.
+    /// Pre-checks <c>schemaVersion</c> before step deserialization so files from newer or outdated incompatible versions
+    /// report a clear version warning instead of a generic "file is damaged" error.
+    /// </summary>
+    public static bool TryParseBundle(
+        string json,
+        out Macro? macro,
+        out List<Macro> subMacros,
+        out List<string> migrationNotes,
+        out string? error)
     {
         macro = null;
         subMacros = [];
+        migrationNotes = [];
+
+        if (string.IsNullOrWhiteSpace(json))
+        {
+            error = "The file is empty.";
+            return false;
+        }
+
+        int? rawSchemaVersion = null;
+        string? rawAppVersion = null;
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            if (doc.RootElement.ValueKind == JsonValueKind.Object)
+            {
+                if (doc.RootElement.TryGetProperty("schemaVersion", out var svProp) && svProp.TryGetInt32(out var sv))
+                    rawSchemaVersion = sv;
+                else if (doc.RootElement.TryGetProperty("SchemaVersion", out var svProp2) && svProp2.TryGetInt32(out var sv2))
+                    rawSchemaVersion = sv2;
+
+                if (doc.RootElement.TryGetProperty("appVersion", out var avProp) && avProp.ValueKind == JsonValueKind.String)
+                    rawAppVersion = avProp.GetString();
+                else if (doc.RootElement.TryGetProperty("AppVersion", out var avProp2) && avProp2.ValueKind == JsonValueKind.String)
+                    rawAppVersion = avProp2.GetString();
+            }
+        }
+        catch (JsonException ex)
+        {
+            error = $"The file is damaged or is not a SmartMacro macro ({ex.Message}).";
+            return false;
+        }
+
+        if (rawSchemaVersion is int earlyVersion)
+        {
+            if (earlyVersion > MacroDocument.CurrentSchemaVersion)
+            {
+                var appNote = !string.IsNullOrWhiteSpace(rawAppVersion) ? $" (SmartMacro {rawAppVersion})" : string.Empty;
+                error = $"This .smacro file was created by a newer version of SmartMacro{appNote} (format v{earlyVersion}, current supported is v{MacroDocument.CurrentSchemaVersion}). Please update SmartMacro to open it.";
+                return false;
+            }
+
+            if (earlyVersion < 1)
+            {
+                error = "This .smacro file is outdated or has no valid format version.";
+                return false;
+            }
+        }
+
         MacroDocument? document;
         try
         {
@@ -60,12 +121,19 @@ public static class MacroFileFormat
         }
         catch (JsonException ex)
         {
-            error = $"The file is damaged or is not a SmartMacro macro ({ex.Message}).";
+            if (rawSchemaVersion is int ver && ver < MacroDocument.CurrentSchemaVersion)
+            {
+                error = $"This .smacro file was made with an older, incompatible version of SmartMacro (format v{ver}) and could not be loaded ({ex.Message}).";
+            }
+            else
+            {
+                error = $"The file is damaged or is not a compatible SmartMacro macro ({ex.Message}).";
+            }
             return false;
         }
         catch (NotSupportedException ex)
         {
-            error = $"The file contains unsupported data ({ex.Message}).";
+            error = $"This .smacro file uses unsupported or outdated step data ({ex.Message}).";
             return false;
         }
 
@@ -94,13 +162,48 @@ public static class MacroFileFormat
         }
 
         macro = document.Macro;
+        MigrateLegacyMacro(macro, document.SchemaVersion, migrationNotes);
         if (document.SubMacros is { Count: > 0 } list)
         {
             subMacros = list.Where(m => m is not null).ToList();
+            foreach (var sub in subMacros)
+                MigrateLegacyMacro(sub, document.SchemaVersion, migrationNotes);
         }
 
         error = null;
         return true;
+    }
+
+    /// <summary>
+    /// Automatically upgrades older <c>.smacro</c> files so legacy fields or out-of-range check intervals remain playable
+    /// in newer SmartMacro versions, recording human-readable notes when adjustments are made.
+    /// </summary>
+    public static void MigrateLegacyMacro(Macro macro, int fromSchemaVersion, List<string>? notes = null)
+    {
+        if (macro.Steps is null) return;
+
+        var clampedIntervals = 0;
+        foreach (var step in macro.Steps)
+        {
+            if (step is ScreenSearchStep search)
+            {
+                if (search.CheckIntervalMs < Validation.MacroValidator.MinCheckIntervalMs)
+                {
+                    search.CheckIntervalMs = Validation.MacroValidator.MinCheckIntervalMs;
+                    clampedIntervals++;
+                }
+                else if (search.CheckIntervalMs > Validation.MacroValidator.MaxCheckIntervalMs)
+                {
+                    search.CheckIntervalMs = Validation.MacroValidator.MaxCheckIntervalMs;
+                    clampedIntervals++;
+                }
+            }
+        }
+
+        if (clampedIntervals > 0)
+        {
+            notes?.Add($"Updated {clampedIntervals} legacy check interval(s) in \"{macro.Name}\" to match current engine limits.");
+        }
     }
 
     /// <summary>

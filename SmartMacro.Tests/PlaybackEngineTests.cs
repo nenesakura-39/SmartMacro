@@ -30,6 +30,21 @@ internal sealed class FakeInput : IInputSimulator
     public void Scroll(int delta, bool horizontal) => Add($"scroll {delta}{(horizontal ? " h" : "")}");
     public void Key(int virtualKey, bool down) => Add($"key {virtualKey} {(down ? "down" : "up")}");
     public void TypeCharacters(string text) => Add($"type {text.Replace("\n", "\\n")}");
+    public bool SendBackgroundMouseClick(string windowTitle, MacroMouseButton button, MouseClickAction action, int screenX, int screenY, int holdMs)
+    {
+        Add($"bgclick \"{windowTitle}\" {screenX},{screenY} {button} {action}");
+        return true;
+    }
+    public bool SendBackgroundKey(string windowTitle, int virtualKey, KeyAction action, int holdMs, KeyModifiers modifiers)
+    {
+        Add($"bgkey \"{windowTitle}\" {virtualKey} {action}");
+        return true;
+    }
+    public bool SendBackgroundText(string windowTitle, string text, int charDelayMs)
+    {
+        Add($"bgtext \"{windowTitle}\" {text}");
+        return true;
+    }
     public string? ReleaseAllHeldInputs()
     {
         ReleaseAllCount++;

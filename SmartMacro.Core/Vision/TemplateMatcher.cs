@@ -1,4 +1,6 @@
 using System.Numerics;
+using System.Runtime.Intrinsics;
+using System.Runtime.Intrinsics.X86;
 using SmartMacro.Core.Models;
 using SmartMacro.Core.Ocr;
 
@@ -1323,11 +1325,40 @@ public static class TemplateMatcher
             var stride = image.Width * 4;
             var rowBytes = Width * 4;
             long difference = 0;
+            bool useAvx2 = Avx2.IsSupported && Width >= 8;
+            bool useSse2 = Sse2.IsSupported && Width >= 4;
+            Vector256<byte> rgbMask256 = useAvx2 ? Vector256.Create(0x00FFFFFFu).AsByte() : default;
+            Vector128<byte> rgbMask128 = useSse2 ? Vector128.Create(0x00FFFFFFu).AsByte() : default;
+
             for (var row = 0; row < Height; row++)
             {
                 var i = (y + row) * stride + x * 4;
                 var j = row * rowBytes;
-                for (var col = 0; col < Width; col++, i += 4, j += 4)
+                var col = 0;
+
+                if (useAvx2)
+                {
+                    for (; col <= Width - 8; col += 8, i += 32, j += 32)
+                    {
+                        var vp = Avx2.And(Vector256.Create<byte>(p.AsSpan(i, 32)), rgbMask256);
+                        var vt = Avx2.And(Vector256.Create<byte>(t.AsSpan(j, 32)), rgbMask256);
+                        var sad = Avx2.SumAbsoluteDifferences(vp, vt).AsUInt64();
+                        difference += (long)(sad.GetElement(0) + sad.GetElement(1) + sad.GetElement(2) + sad.GetElement(3));
+                    }
+                }
+
+                if (useSse2)
+                {
+                    for (; col <= Width - 4; col += 4, i += 16, j += 16)
+                    {
+                        var vp = Sse2.And(Vector128.Create<byte>(p.AsSpan(i, 16)), rgbMask128);
+                        var vt = Sse2.And(Vector128.Create<byte>(t.AsSpan(j, 16)), rgbMask128);
+                        var sad = Sse2.SumAbsoluteDifferences(vp, vt).AsUInt64();
+                        difference += (long)(sad.GetElement(0) + sad.GetElement(1));
+                    }
+                }
+
+                for (; col < Width; col++, i += 4, j += 4)
                     difference += Math.Abs(p[i] - t[j]) + Math.Abs(p[i + 1] - t[j + 1]) + Math.Abs(p[i + 2] - t[j + 2]);
                 if (difference >= _directBaseline) return 0; // already no better than a plain patch
             }

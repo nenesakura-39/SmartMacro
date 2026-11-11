@@ -78,6 +78,12 @@ public enum FeedbackPreset
     /// reach the zone, then click (or release the held button) once and end the loop.
     /// </summary>
     ClickWhenInZone,
+
+    /// <summary>
+    /// Casting Hold &amp; Release (power meters / charge bars): immediately presses and holds the input while the gauge charges,
+    /// watches the moving marker or charge fill reach the target zone, and immediately releases &amp; finishes.
+    /// </summary>
+    CastingHoldRelease,
 }
 
 /// <summary>How a feedback loop turns what it sees into hold / release.</summary>

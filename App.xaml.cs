@@ -61,11 +61,16 @@ public partial class App : Application
         AppDomain.CurrentDomain.UnhandledException += OnDomainUnhandledException;
         TaskScheduler.UnobservedTaskException += OnUnobservedTaskException;
 
+        var startInTray = WindowsStartupService.IsStartInTrayCommandLine(e.Args);
         ShutdownMode = ShutdownMode.OnExplicitShutdown;
-        var splash = new Views.SplashLoadingWindow();
-        splash.Show();
-        splash.ReportStage(0.18, "MOUNTING STORAGE & TELEMETRY");
-        await Task.Delay(75);
+        Views.SplashLoadingWindow? splash = null;
+        if (!startInTray)
+        {
+            splash = new Views.SplashLoadingWindow();
+            splash.Show();
+            splash.ReportStage(0.18, "MOUNTING STORAGE & TELEMETRY");
+            await Task.Delay(75);
+        }
 
         var dialogs = new DialogService();
         var repository = new JsonMacroRepository(paths.MacrosDirectory, paths.TrashDirectory);
@@ -74,12 +79,16 @@ public partial class App : Application
         var window = new MainWindow();
 
         // Recording / playback pieces. The run-mode host reads the current settings through the view model.
-        splash.ReportStage(0.45, "CALIBRATING HIGH-RES TIMELINE & VISION");
-        await Task.Delay(75);
+        if (splash is not null)
+        {
+            splash.ReportStage(0.45, "CALIBRATING HIGH-RES TIMELINE & VISION");
+            await Task.Delay(75);
+        }
         MainViewModel? viewModel = null;
         _runHost = new RunModeHost(window, () => viewModel?.CurrentSettings ?? new AppSettings());
         var ocr = new WindowsOcrService();
         _log.Info(ocr.StatusText);
+        _log.Info(Core.Vision.HardwareAccelerationInfo.StatusText);
         _playbackClock = new PrecisePlaybackClock();
         if (!_playbackClock.HasHighResolutionTimer)
             _log.Warning("High-resolution timer isn't available on this Windows version; playback timing falls back to 1 ms steps.");
@@ -91,6 +100,9 @@ public partial class App : Application
             new PlaybackEngine(new Win32InputSimulator(_log), _playbackClock, ocr, new OverlayAwareScreenCapture(screenCapture), screenInfo, uiAutomation)
             {
                 Clipboard = new WpfClipboardReader(),
+                AudioPeakReader = Services.Audio.WasapiAudioPeakReader.ReadMasterPeakPercent,
+                SoundCuePlayer = Services.Audio.StudioSoundCuePlayer.Play,
+                FailureSnapshotDirectory = paths.LogsDirectory,
             },
             new WindowsInputRecorder { UiLocator = uiAutomation, OcrService = ocr },
             new RawInputRecorder(),
@@ -101,8 +113,11 @@ public partial class App : Application
             new FindTextTools(window, ocr, Path.Combine(paths.LogsDirectory, "last-ocr-test.png"), screenInfo),
             new VisionTools(window, screenCapture, paths.LogsDirectory, screenInfo, ocr, uiAutomation));
 
-        splash.ReportStage(0.74, "BINDING INPUT HOOKS & WORKSPACE");
-        await Task.Delay(65);
+        if (splash is not null)
+        {
+            splash.ReportStage(0.74, "BINDING INPUT HOOKS & WORKSPACE");
+            await Task.Delay(65);
+        }
 
         var mainViewModel = new MainViewModel(repository, settingsStore, _log, dialogs, screenInfo, paths, Dispatcher, automation);
         viewModel = mainViewModel;
@@ -115,7 +130,7 @@ public partial class App : Application
 
         try
         {
-            splash.ReportStage(0.92, "LOADING MACRO LIBRARY");
+            splash?.ReportStage(0.92, "LOADING MACRO LIBRARY");
             await _mainViewModel.InitializeAsync();
             ThemeManager.Apply(mainViewModel.CurrentSettings);
             Services.Vision.OverlayCaptureService.AllowObsCapture = mainViewModel.CurrentSettings.ShowOverlaysInObsAndRecording;
@@ -126,16 +141,26 @@ public partial class App : Application
             _mainViewModel.SetStatus($"Startup problem: {ex.Message}", StatusKind.Error);
         }
 
-        window.Opacity = 0;
-        window.Show();
-        await splash.CompleteAndCloseAsync();
-
-        var mainFadeIn = new System.Windows.Media.Animation.DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(220))
+        if (startInTray)
         {
-            EasingFunction = new System.Windows.Media.Animation.CubicEase { EasingMode = System.Windows.Media.Animation.EasingMode.EaseOut },
-        };
-        window.BeginAnimation(UIElement.OpacityProperty, mainFadeIn);
-        window.Activate();
+            _ = new System.Windows.Interop.WindowInteropHelper(window).EnsureHandle();
+            window.Hide();
+            _log.Info("Started in system tray (--tray).");
+        }
+        else
+        {
+            window.Opacity = 0;
+            window.Show();
+            if (splash is not null)
+                await splash.CompleteAndCloseAsync();
+
+            var mainFadeIn = new System.Windows.Media.Animation.DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(220))
+            {
+                EasingFunction = new System.Windows.Media.Animation.CubicEase { EasingMode = System.Windows.Media.Animation.EasingMode.EaseOut },
+            };
+            window.BeginAnimation(UIElement.OpacityProperty, mainFadeIn);
+            window.Activate();
+        }
 
         _hotkeys = new HotkeyService(_log);
         _hotkeys.Pressed += (_, action) => mainViewModel.Automation.HandleHotkey(action);
@@ -173,10 +198,61 @@ public partial class App : Application
             ThemeManager.Apply(settings);
             // "🎥 Show overlays in OBS / Discord": re-applies the capture rule to every open overlay right away.
             Services.Vision.OverlayCaptureService.AllowObsCapture = settings.ShowOverlaysInObsAndRecording;
+            WindowsStartupService.Apply(settings.StartWithWindows, _log);
             var failed = _hotkeys.Apply(settings);
             if (failed.Count > 0)
                 mainViewModel.SetStatus($"These shortcuts are used by another program and won't work: {string.Join(", ", failed)}. Change them in Settings.", StatusKind.Warning);
         };
+
+        if (WindowsStartupService.TryParseCliRunRequest(e.Args, out var cliTarget, out var exitAfterRun))
+        {
+            await RunCliMacroAsync(mainViewModel, window, cliTarget, exitAfterRun);
+        }
+    }
+
+    private async Task RunCliMacroAsync(MainViewModel mainViewModel, MainWindow window, string cliTarget, bool exitAfterRun)
+    {
+        try
+        {
+            Macro? macroToRun = null;
+            var libraryMatch = mainViewModel.Library.Items.FirstOrDefault(item =>
+                string.Equals(item.Name, cliTarget, StringComparison.OrdinalIgnoreCase)
+                || (Guid.TryParse(cliTarget, out var parsedId) && item.Id == parsedId));
+
+            if (libraryMatch is not null)
+            {
+                macroToRun = libraryMatch.Macro.CopyWithSteps(libraryMatch.Macro.Steps);
+            }
+            else if (File.Exists(cliTarget))
+            {
+                var rawJson = await File.ReadAllTextAsync(cliTarget);
+                if (MacroFileFormat.TryParse(rawJson, out var parsed, out var parseError) && parsed is not null)
+                    macroToRun = parsed;
+                else
+                    _log?.Warning($"CLI --run could not parse '{cliTarget}': {parseError}");
+            }
+
+            if (macroToRun is null)
+            {
+                _log?.Warning($"CLI --run target not found: \"{cliTarget}\".");
+                mainViewModel.SetStatus($"CLI --run macro not found: \"{cliTarget}\".", StatusKind.Warning);
+            }
+            else
+            {
+                _log?.Info($"CLI --run starting macro \"{macroToRun.Name}\" (exitAfterRun={exitAfterRun}).");
+                await mainViewModel.Automation.PlayMacroAsync(macroToRun);
+            }
+        }
+        catch (Exception ex)
+        {
+            _log?.Error($"CLI --run failed for \"{cliTarget}\".", ex);
+        }
+
+        if (exitAfterRun)
+        {
+            window.ForceClose();
+            Shutdown(0);
+        }
     }
 
     protected override void OnExit(ExitEventArgs e)

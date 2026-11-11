@@ -116,11 +116,35 @@ public abstract class StepViewModel : ObservableObject
     private bool _hasWarning;
     private bool _isRunning;
     private bool _hasBreakpoint;
+    private int _inspectorTab;
+    private bool _isQuickEditOpen;
+    private bool _isInsertMenuOpen;
+
+    private static readonly System.Windows.Media.Brush InputCategoryBrush = CreateFrozenBrush(0x22, 0xD3, 0xEE);
+    private static readonly System.Windows.Media.Brush VisionCategoryBrush = CreateFrozenBrush(0x38, 0xBD, 0xF8);
+    private static readonly System.Windows.Media.Brush LogicCategoryBrush = CreateFrozenBrush(0xF5, 0x9E, 0x0B);
+    private static readonly System.Windows.Media.Brush BrainCategoryBrush = CreateFrozenBrush(0xA8, 0x55, 0xF7);
+    private static readonly System.Windows.Media.Brush UtilityCategoryBrush = CreateFrozenBrush(0x10, 0xB9, 0x81);
+
+    private static readonly System.Windows.Media.Brush InputGlowBrush = CreateFrozenBrush(0x24, 0x22, 0xD3, 0xEE);
+    private static readonly System.Windows.Media.Brush VisionGlowBrush = CreateFrozenBrush(0x24, 0x38, 0xBD, 0xF8);
+    private static readonly System.Windows.Media.Brush LogicGlowBrush = CreateFrozenBrush(0x24, 0xF5, 0x9E, 0x0B);
+    private static readonly System.Windows.Media.Brush BrainGlowBrush = CreateFrozenBrush(0x24, 0xA8, 0x55, 0xF7);
+    private static readonly System.Windows.Media.Brush UtilityGlowBrush = CreateFrozenBrush(0x24, 0x10, 0xB9, 0x81);
 
     protected StepViewModel(MacroStep model)
     {
         Model = model;
+        SelectInspectorTabCommand = new RelayCommand(p =>
+        {
+            if (p is int idx) InspectorTab = idx;
+            else if (p is string s && int.TryParse(s, out var parsed)) InspectorTab = parsed;
+        });
+        ToggleQuickEditCommand = new RelayCommand(() => IsQuickEditOpen = !IsQuickEditOpen);
     }
+
+    public RelayCommand SelectInspectorTabCommand { get; }
+    public RelayCommand ToggleQuickEditCommand { get; }
 
     public event EventHandler? Modified;
 
@@ -157,6 +181,21 @@ public abstract class StepViewModel : ObservableObject
         get => _hasBreakpoint;
         set => SetProperty(ref _hasBreakpoint, value);
     }
+
+    private string? _telemetryBadgeText;
+
+    /// <summary>v1.8 Evergreen Profiler: per-step execution count and average duration from the latest run (e.g. "×4 · 12 ms").</summary>
+    public string? TelemetryBadgeText
+    {
+        get => _telemetryBadgeText;
+        set
+        {
+            if (SetProperty(ref _telemetryBadgeText, value))
+                OnPropertyChanged(nameof(HasTelemetryBadge));
+        }
+    }
+
+    public bool HasTelemetryBadge => !string.IsNullOrEmpty(_telemetryBadgeText);
 
     // ---------------- Studio UI: folding, search and filter (view state only; never saved, never played) ----------------
 
@@ -265,6 +304,8 @@ public abstract class StepViewModel : ObservableObject
             if (!SetProperty(ref _indentLevel, value)) return;
             OnPropertyChanged(nameof(IndentMargin));
             OnPropertyChanged(nameof(IsInsideBlock));
+            OnPropertyChanged(nameof(BlockBracketGlyph));
+            OnPropertyChanged(nameof(HasBlockBracket));
         }
     }
 
@@ -400,6 +441,297 @@ public abstract class StepViewModel : ObservableObject
     /// </summary>
     public bool IsStandalone { get; internal set; } = true;
 
+    // ---------------- Studio X Ultra: Inspector Deck 2.0 Sub-Tabs & Category Ambient Identity ----------------
+
+    /// <summary>Active Inspector sub-tab: 0 = Setup, 1 = Tune &amp; Motion, 2 = Recovery &amp; Notes.</summary>
+    public int InspectorTab
+    {
+        get => _inspectorTab;
+        set
+        {
+            var clamped = Math.Clamp(value, 0, 2);
+            if (clamped == 1 && !HasTuneTab) clamped = 0;
+            if (!SetProperty(ref _inspectorTab, clamped)) return;
+            OnPropertyChanged(nameof(IsSetupTab));
+            OnPropertyChanged(nameof(IsTuneTab));
+            OnPropertyChanged(nameof(IsRecoveryTab));
+            OnPropertyChanged(nameof(ShowSetupSection));
+            OnPropertyChanged(nameof(ShowTuneSection));
+            OnPropertyChanged(nameof(ShowRecoverySection));
+        }
+    }
+
+    public bool IsSetupTab
+    {
+        get => _inspectorTab == 0;
+        set { if (value) InspectorTab = 0; }
+    }
+
+    public bool IsTuneTab
+    {
+        get => _inspectorTab == 1;
+        set { if (value) InspectorTab = 1; }
+    }
+
+    public bool IsRecoveryTab
+    {
+        get => _inspectorTab == 2;
+        set { if (value) InspectorTab = 2; }
+    }
+
+    /// <summary>True when the Setup section should be visible (always true when embedded inside an If/Repeat condition).</summary>
+    public bool ShowSetupSection => _inspectorTab == 0 || !IsStandalone;
+
+    /// <summary>True when the Tune &amp; Motion section should be visible.</summary>
+    public bool ShowTuneSection => _inspectorTab == 1 || (!IsStandalone && HasTuneTab);
+
+    /// <summary>True when the Recovery &amp; Notes section should be visible.</summary>
+    public bool ShowRecoverySection => _inspectorTab == 2;
+
+    /// <summary>True when this step has a dedicated Tune &amp; Motion sub-tab.</summary>
+    public virtual bool HasTuneTab => Model is MouseMoveStep or MouseClickStep or KeyPressStep or TypeTextStep or ScreenSearchStep or FeedbackLoopStep or WaitForChangeStep;
+
+    /// <summary>True when this step has a dedicated Recovery &amp; Notes sub-tab.</summary>
+    public virtual bool HasRecoveryTab => IsStandalone;
+
+    /// <summary>True when the segmented 3-tab switcher is shown in the Inspector header.</summary>
+    public bool HasInspectorTabs => IsStandalone && !(Model is ElseStep or EndIfStep or EndRepeatStep);
+
+    /// <summary>Applies the editor's sticky preferred tab (falling back to Setup when this step has no Tune tab).</summary>
+    internal void ApplyPreferredInspectorTab(int preferredTab)
+    {
+        var target = Math.Clamp(preferredTab, 0, 2);
+        if (target == 1 && !HasTuneTab) target = 0;
+        if (_inspectorTab == target) return;
+        _inspectorTab = target;
+        OnPropertyChanged(nameof(IsSetupTab));
+        OnPropertyChanged(nameof(IsTuneTab));
+        OnPropertyChanged(nameof(IsRecoveryTab));
+        OnPropertyChanged(nameof(ShowSetupSection));
+        OnPropertyChanged(nameof(ShowTuneSection));
+        OnPropertyChanged(nameof(ShowRecoverySection));
+    }
+
+    public string TuneTabTitle => Model switch
+    {
+        FeedbackLoopStep => "🎛 Servo & Physics",
+        ScreenSearchStep => "🎛 Match & Motion",
+        MouseMoveStep or MouseClickStep => "🎛 Motion & Aim",
+        _ => "🎛 Tune & Options",
+    };
+
+    public string RecoveryTabTitle
+    {
+        get
+        {
+            var baseTitle = Model is ScreenSearchStep or WaitForChangeStep or FocusWindowStep
+                ? "🛡 Timing & Retry"
+                : "📝 Notes & Meta";
+            return HasComment ? $"{baseTitle} · 💬" : baseTitle;
+        }
+    }
+
+    public StepCategory Category => StepCatalog.Get(Kind).Category;
+
+    public string CategoryLabel => Category switch
+    {
+        StepCategory.Input => "INPUT & MOTION",
+        StepCategory.Vision => "VISION & AI",
+        StepCategory.Logic => "FLOW & LOGIC",
+        StepCategory.Brain => "BRAIN & MEMORY",
+        StepCategory.Utility => "WINDOW & SYSTEM",
+        _ => "STUDIO STEP",
+    };
+
+    public System.Windows.Media.Brush CategoryAccentBrush => Category switch
+    {
+        StepCategory.Input => InputCategoryBrush,
+        StepCategory.Vision => VisionCategoryBrush,
+        StepCategory.Logic => LogicCategoryBrush,
+        StepCategory.Brain => BrainCategoryBrush,
+        StepCategory.Utility => UtilityCategoryBrush,
+        _ => InputCategoryBrush,
+    };
+
+    public System.Windows.Media.Brush CategoryGlowBrush => Category switch
+    {
+        StepCategory.Input => InputGlowBrush,
+        StepCategory.Vision => VisionGlowBrush,
+        StepCategory.Logic => LogicGlowBrush,
+        StepCategory.Brain => BrainGlowBrush,
+        StepCategory.Utility => UtilityGlowBrush,
+        _ => InputGlowBrush,
+    };
+
+    // ---------------- Connected Logic Block Brackets & Inline Card Quick-Edit ----------------
+
+    public bool IsBlockStart => Model is IfStep or RepeatStep;
+    public bool IsBlockMid => Model is ElseStep;
+    public bool IsBlockEnd => Model is EndIfStep or EndRepeatStep;
+
+    /// <summary>Connected bracket glyph drawn on the block rail for visual flow clarity.</summary>
+    public string BlockBracketGlyph => Model switch
+    {
+        IfStep or RepeatStep => "╭─",
+        ElseStep => "├─",
+        EndIfStep or EndRepeatStep => "╰─",
+        _ => IsInsideBlock ? "│" : string.Empty,
+    };
+
+    public bool HasBlockBracket => !string.IsNullOrEmpty(BlockBracketGlyph);
+
+    /// <summary>True when clicking PrimaryBadge on the step card opens an inline quick-edit popover.</summary>
+    public bool CanQuickEditBadge => Model is DelayStep
+        or MouseClickStep { UseCurrentPosition: false, UseLastFoundText: false }
+        or MouseMoveStep { UseRelativeDelta: false, TargetMode: ClickTargetMode.Coordinates }
+        or MouseScrollStep
+        or FindImageStep
+        or RepeatStep { Mode: RepeatMode.Times };
+
+    public bool IsQuickEditOpen
+    {
+        get => _isQuickEditOpen;
+        set => SetProperty(ref _isQuickEditOpen, value);
+    }
+
+    public bool IsInsertMenuOpen
+    {
+        get => _isInsertMenuOpen;
+        set => SetProperty(ref _isInsertMenuOpen, value);
+    }
+
+    public string QuickEditTitle => Model switch
+    {
+        DelayStep => "Wait Duration",
+        MouseClickStep => "Click Target (X, Y)",
+        MouseMoveStep => "Move Target (X, Y)",
+        MouseScrollStep => "Scroll Wheel Delta",
+        FindImageStep => "Match Confidence (%)",
+        RepeatStep => "Loop Count",
+        _ => "Quick Parameter",
+    };
+
+    public string QuickEditUnit => Model switch
+    {
+        DelayStep => "ms",
+        FindImageStep => "%",
+        RepeatStep => "×",
+        _ => "px",
+    };
+
+    public int QuickEditStep => Model switch
+    {
+        DelayStep => 50,
+        MouseScrollStep => 120,
+        FindImageStep => 1,
+        RepeatStep => 1,
+        _ => 10,
+    };
+
+    public int QuickEditMin => Model switch
+    {
+        DelayStep => 0,
+        FindImageStep => 50,
+        RepeatStep => 1,
+        _ => -32000,
+    };
+
+    public int QuickEditMax => Model switch
+    {
+        DelayStep => 3_600_000,
+        FindImageStep => 100,
+        RepeatStep => 100_000,
+        _ => 32000,
+    };
+
+    public string QuickEditPresets => Model switch
+    {
+        DelayStep => "-50,+50,+100,+500,+1000",
+        FindImageStep => "75,85,90,95",
+        RepeatStep => "2,3,5,10,50",
+        MouseScrollStep => "-360,-120,120,360",
+        _ => string.Empty,
+    };
+
+    public bool HasQuickEditSecondaryInt => Model is MouseClickStep { UseCurrentPosition: false, UseLastFoundText: false }
+        or MouseMoveStep { UseRelativeDelta: false, TargetMode: ClickTargetMode.Coordinates };
+
+    public int QuickEditPrimaryInt
+    {
+        get => Model switch
+        {
+            DelayStep d => d.DurationMs,
+            MouseClickStep c => c.X,
+            MouseMoveStep m => m.X,
+            MouseScrollStep s => s.Delta,
+            FindImageStep img => img.MinSimilarityPercent,
+            RepeatStep r => r.Count,
+            _ => 0,
+        };
+        set
+        {
+            switch (Model)
+            {
+                case DelayStep d when d.DurationMs != Math.Max(0, value):
+                    d.DurationMs = Math.Max(0, value);
+                    OnPropertyChanged(nameof(DelayStepViewModel.DurationMs));
+                    NotifyChanged();
+                    break;
+                case MouseClickStep c when c.X != value:
+                    c.X = value;
+                    OnPropertyChanged(nameof(MouseClickStepViewModel.X));
+                    NotifyChanged();
+                    break;
+                case MouseMoveStep m when m.X != value:
+                    m.X = value;
+                    OnPropertyChanged(nameof(MouseMoveStepViewModel.X));
+                    NotifyChanged();
+                    break;
+                case MouseScrollStep s when s.Delta != value:
+                    s.Delta = value;
+                    OnPropertyChanged(nameof(MouseScrollStepViewModel.Delta));
+                    NotifyChanged();
+                    break;
+                case FindImageStep img when img.MinSimilarityPercent != Math.Clamp(value, 50, 100):
+                    img.MinSimilarityPercent = Math.Clamp(value, 50, 100);
+                    OnPropertyChanged(nameof(FindImageStepViewModel.MinSimilarityPercent));
+                    NotifyChanged();
+                    break;
+                case RepeatStep r when r.Count != Math.Max(1, value):
+                    r.Count = Math.Max(1, value);
+                    OnPropertyChanged(nameof(RepeatStepViewModel.Count));
+                    NotifyChanged();
+                    break;
+            }
+        }
+    }
+
+    public int QuickEditSecondaryInt
+    {
+        get => Model switch
+        {
+            MouseClickStep c => c.Y,
+            MouseMoveStep m => m.Y,
+            _ => 0,
+        };
+        set
+        {
+            switch (Model)
+            {
+                case MouseClickStep c when c.Y != value:
+                    c.Y = value;
+                    OnPropertyChanged(nameof(MouseClickStepViewModel.Y));
+                    NotifyChanged();
+                    break;
+                case MouseMoveStep m when m.Y != value:
+                    m.Y = value;
+                    OnPropertyChanged(nameof(MouseMoveStepViewModel.Y));
+                    NotifyChanged();
+                    break;
+            }
+        }
+    }
+
     public bool Enabled
     {
         get => Model.Enabled;
@@ -421,6 +753,7 @@ public abstract class StepViewModel : ObservableObject
             Model.Comment = normalized;
             NotifyChanged();
             OnPropertyChanged(nameof(HasComment));
+            OnPropertyChanged(nameof(RecoveryTabTitle));
         }
     }
 
@@ -429,17 +762,27 @@ public abstract class StepViewModel : ObservableObject
     /// <summary>Compact inline metadata badge for Step Card v2 (Intent, Smart-Aim, Multi-Scale, Retry/Recovery, Brain).</summary>
     public string? SmartChipText => this switch
     {
+        MouseClickStepViewModel when Model is MouseClickStep { SendInBackground: true } => "👻 Background",
         MouseClickStepViewModel when Model is MouseClickStep { UseSmartIntent: true, HasTargetIntent: true } => "🧭 Intent",
         MouseClickStepViewModel when Model is MouseClickStep { SmartAimAtTarget: true, HasTargetThumbnail: true } => "✨ Smart-Aim",
+        KeyPressStepViewModel when Model is KeyPressStep { SendInBackground: true } => "👻 Background",
+        TypeTextStepViewModel when Model is TypeTextStep { SendInBackground: true } => "👻 Background",
         FindImageStepViewModel img => FormatPolicyOrChip(img.FailurePolicy, img.AllowMultiScale ? "🔍 Multi-Scale" : null),
         ScreenSearchStepViewModel search => FormatPolicyOrChip(search.FailurePolicy, null),
         WaitForChangeStepViewModel wait => FormatPolicyOrChip(wait.FailurePolicy, null),
         FocusWindowStepViewModel win => FormatPolicyOrChip(win.FailurePolicy, null),
         DelayStepViewModel { IsAdaptive: true } => "⚡ Adaptive",
         SetVariableStepViewModel { UsesScreenRegion: true } => "👁 OCR Read",
+        SetVariableStepViewModel { Source: VariableSourceKind.Formula } => "🧮 Formula",
         SetVariableStepViewModel v when !string.IsNullOrWhiteSpace(v.VariableName) => $"{{{v.VariableName}}}",
         CheckpointStepViewModel cp when !string.IsNullOrWhiteSpace(cp.CheckpointName) => $"📍 {cp.CheckpointName}",
         CallMacroStepViewModel => "↗ Sub-Macro",
+        FlowControlStepViewModel fc => fc.Action switch
+        {
+            FlowControlAction.ExitLoop => "⏹ Break",
+            FlowControlAction.ContinueLoop => "⏭ Continue",
+            _ => "🛑 Stop",
+        },
         _ => null,
     };
 
@@ -576,6 +919,10 @@ public abstract class StepViewModel : ObservableObject
         OnPropertyChanged(nameof(HasPrimaryBadge));
         OnPropertyChanged(nameof(SecondaryBadge));
         OnPropertyChanged(nameof(HasSecondaryBadge));
+        OnPropertyChanged(nameof(CanQuickEditBadge));
+        OnPropertyChanged(nameof(HasQuickEditSecondaryInt));
+        OnPropertyChanged(nameof(QuickEditPrimaryInt));
+        OnPropertyChanged(nameof(QuickEditSecondaryInt));
         Modified?.Invoke(this, EventArgs.Empty);
     }
 
@@ -609,6 +956,7 @@ public abstract class StepViewModel : ObservableObject
         SetVariableStep v => new SetVariableStepViewModel(v),
         CheckpointStep cp => new CheckpointStepViewModel(cp),
         CallMacroStep call => new CallMacroStepViewModel(call),
+        FlowControlStep fc => new FlowControlStepViewModel(fc),
         _ => throw new NotSupportedException($"No editor for step type {step.GetType().Name}."),
     };
 }

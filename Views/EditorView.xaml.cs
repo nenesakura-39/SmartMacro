@@ -17,6 +17,7 @@ public partial class EditorView : UserControl
     private bool _keepSelectionOnPress;
     private InsertionAdorner? _insertionMarker;
     private EditorViewModel? _editor;
+    private readonly Dictionary<TextBox, string> _headerOriginalValues = new();
 
     public EditorView()
     {
@@ -28,6 +29,7 @@ public partial class EditorView : UserControl
                 _editor.SelectStepsRequested -= OnSelectStepsRequested;
                 _editor.RunningStepChanged -= OnRunningStepChanged;
                 _editor.RevealStepRequested -= OnRevealStepRequested;
+                _editor.FocusMacroNameRequested -= OnFocusMacroNameRequested;
                 _editor.PropertyChanged -= OnEditorPropertyChanged;
             }
 
@@ -37,10 +39,99 @@ public partial class EditorView : UserControl
                 _editor.SelectStepsRequested += OnSelectStepsRequested;
                 _editor.RunningStepChanged += OnRunningStepChanged;
                 _editor.RevealStepRequested += OnRevealStepRequested;
+                _editor.FocusMacroNameRequested += OnFocusMacroNameRequested;
                 _editor.PropertyChanged += OnEditorPropertyChanged;
             }
         };
         PreviewKeyDown += Editor_PreviewKeyDown;
+    }
+
+    // ---------------- Header Rename & Quick-Commit (Enter saves, Esc reverts) ----------------
+
+    private void OnFocusMacroNameRequested(object? sender, EventArgs e)
+    {
+        Dispatcher.BeginInvoke(new Action(() =>
+        {
+            if (MacroNameBox is null || !MacroNameBox.IsVisible) return;
+            MacroNameBox.Focus();
+            Keyboard.Focus(MacroNameBox);
+            MacroNameBox.SelectAll();
+        }), System.Windows.Threading.DispatcherPriority.Input);
+    }
+
+    private void HeaderTextBox_GotKeyboardFocus(object sender, KeyboardFocusChangedEventArgs e)
+    {
+        if (sender is not TextBox tb) return;
+        _headerOriginalValues[tb] = tb.Text ?? string.Empty;
+
+        // If the macro still has a default "Recording …" or "Untitled …" name, select all text on focus for 1-keystroke rename.
+        if (ReferenceEquals(tb, MacroNameBox) && IsDefaultMacroName(tb.Text))
+            tb.SelectAll();
+    }
+
+    private void MacroNameBox_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        if (sender is TextBox tb && !tb.IsKeyboardFocusWithin && IsDefaultMacroName(tb.Text))
+        {
+            e.Handled = true;
+            tb.Focus();
+            Keyboard.Focus(tb);
+            tb.SelectAll();
+        }
+    }
+
+    private static bool IsDefaultMacroName(string? text) =>
+        !string.IsNullOrWhiteSpace(text)
+        && (text.StartsWith("Recording ", StringComparison.OrdinalIgnoreCase)
+            || text.StartsWith("Untitled", StringComparison.OrdinalIgnoreCase)
+            || text.StartsWith("New Macro", StringComparison.OrdinalIgnoreCase));
+
+    private async void HeaderTextBox_PreviewKeyDown(object sender, KeyEventArgs e)
+    {
+        if (sender is not TextBox tb || _editor is null) return;
+
+        if (e.Key == Key.Enter && Keyboard.Modifiers == ModifierKeys.None)
+        {
+            e.Handled = true;
+            tb.GetBindingExpression(TextBox.TextProperty)?.UpdateSource();
+            ExitHeaderTypingMode();
+            await _editor.CommitHeaderEditAsync();
+        }
+        else if (e.Key == Key.Escape && Keyboard.Modifiers == ModifierKeys.None)
+        {
+            e.Handled = true;
+            if (_headerOriginalValues.TryGetValue(tb, out var original))
+            {
+                tb.Text = original;
+                tb.GetBindingExpression(TextBox.TextProperty)?.UpdateSource();
+            }
+            ExitHeaderTypingMode();
+            if (_editor.HasMacro && _editor.IsDirty)
+                await _editor.CommitHeaderEditAsync();
+        }
+    }
+
+    private void ExitHeaderTypingMode()
+    {
+        if (_editor?.SelectedStep is not null && StepList.IsVisible)
+        {
+            FocusSelectedStep();
+        }
+        else if (StepList.IsVisible && StepList.Focusable)
+        {
+            StepList.Focus();
+            Keyboard.Focus(StepList);
+        }
+        else
+        {
+            Keyboard.ClearFocus();
+        }
+    }
+
+    private void RunSettingsPopup_Opened(object sender, EventArgs e)
+    {
+        if (_editor?.RefreshTargetWindowsCommand.CanExecute(null) == true)
+            _editor.RefreshTargetWindowsCommand.Execute(null);
     }
 
     // ---------------- Ctrl+K Command Palette ----------------
@@ -48,6 +139,12 @@ public partial class EditorView : UserControl
     /// <summary>The palette opened: put the cursor in its search box. Closed: back to the step list.</summary>
     private void OnEditorPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
     {
+        if (e.PropertyName == nameof(EditorViewModel.SelectedStep))
+        {
+            PropertiesScroll?.ScrollToTop();
+            return;
+        }
+
         if (e.PropertyName != nameof(EditorViewModel.IsCommandPaletteOpen) || _editor is null) return;
         if (_editor.IsCommandPaletteOpen)
         {
@@ -160,11 +257,55 @@ public partial class EditorView : UserControl
         }
 
         if (Keyboard.FocusedElement is TextBox { DataContext: TriggerItemViewModel }) return;
+        if (e.Key == Key.F2 && Keyboard.Modifiers == ModifierKeys.None && !IsTypingInto(e) && _editor?.HasMacro == true && MacroNameBox.IsVisible)
+        {
+            MacroNameBox.Focus();
+            Keyboard.Focus(MacroNameBox);
+            MacroNameBox.SelectAll();
+            e.Handled = true;
+            return;
+        }
         if (e.Key == Key.F && Keyboard.Modifiers == ModifierKeys.Control && SearchBox.IsVisible)
         {
             SearchBox.Focus();
             SearchBox.SelectAll();
             e.Handled = true;
+            return;
+        }
+
+        // Alt+1 / Alt+2 / Alt+3: quick-switch Inspector sub-tabs (Setup · Tune & Motion · Timing & Retry)
+        // Alt+[ / Alt+]: step backward / forward through visible workflow steps in the Inspector
+        if (Keyboard.Modifiers == ModifierKeys.Alt && _editor is not null)
+        {
+            var sysKey = e.Key == Key.System ? e.SystemKey : e.Key;
+            if (sysKey == Key.OemOpenBrackets && _editor.SelectPreviousStepCommand.CanExecute(null))
+            {
+                _editor.SelectPreviousStepCommand.Execute(null);
+                e.Handled = true;
+                return;
+            }
+            if (sysKey == Key.OemCloseBrackets && _editor.SelectNextStepCommand.CanExecute(null))
+            {
+                _editor.SelectNextStepCommand.Execute(null);
+                e.Handled = true;
+                return;
+            }
+
+            if (_editor.SelectedStep is { HasInspectorTabs: true } selectedStep)
+            {
+                var targetTab = sysKey switch
+                {
+                    Key.D1 or Key.NumPad1 => 0,
+                    Key.D2 or Key.NumPad2 => selectedStep.HasTuneTab ? 1 : -1,
+                    Key.D3 or Key.NumPad3 => 2,
+                    _ => -1,
+                };
+                if (targetTab >= 0)
+                {
+                    selectedStep.InspectorTab = targetTab;
+                    e.Handled = true;
+                }
+            }
         }
     }
 
@@ -442,6 +583,12 @@ public partial class EditorView : UserControl
     private void StepList_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
         _dragStart = null;
+        if (IsInteractiveRowElement(e.OriginalSource as DependencyObject))
+        {
+            _pressedItem = null;
+            return;
+        }
+
         _pressedItem = ItemUnder(e.OriginalSource as DependencyObject);
         if (_pressedItem is null) return;
 
@@ -452,6 +599,27 @@ public partial class EditorView : UserControl
         // on release.
         _keepSelectionOnPress = _pressedItem.IsSelected && StepList.SelectedItems.Count > 1 && Keyboard.Modifiers == ModifierKeys.None;
         if (_keepSelectionOnPress) e.Handled = true;
+    }
+
+    private static bool IsInteractiveRowElement(DependencyObject? element)
+    {
+        for (var current = element; current is not null; current = ParentOf(current))
+        {
+            switch (current)
+            {
+                case System.Windows.Controls.Primitives.ButtonBase:
+                case System.Windows.Controls.Primitives.TextBoxBase:
+                case System.Windows.Controls.Primitives.Thumb:
+                case System.Windows.Controls.Primitives.Popup:
+                case Controls.StudioNumberBox:
+                    return true;
+                case ListBoxItem:
+                case ListBox:
+                    return false;
+            }
+        }
+
+        return false;
     }
 
     private void StepList_PreviewMouseLeftButtonUp(object sender, MouseButtonEventArgs e)

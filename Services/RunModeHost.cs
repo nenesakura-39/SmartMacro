@@ -332,7 +332,7 @@ internal sealed class RunOverlayWindow : Window
         brush.Freeze();
         return brush;
     }
-    private static readonly FontFamily UiFont = new("Segoe UI Variable Text, Segoe UI");
+    private static readonly FontFamily UiFont = new("Segoe UI Variable Text, Segoe UI, Segoe Fluent Icons, Segoe MDL2 Assets, Segoe UI Emoji, Segoe UI Symbol");
 
     private readonly Ellipse _dot;
     private readonly System.Windows.Media.Effects.DropShadowEffect _dotGlow;
@@ -386,7 +386,7 @@ internal sealed class RunOverlayWindow : Window
             Child = _runText,
         };
         _timer = MakeText(12, FontWeights.SemiBold, TextColor);
-        _timer.FontFamily = new FontFamily("Cascadia Mono, Consolas");
+        _timer.FontFamily = new FontFamily("Cascadia Mono, Consolas, Segoe UI, Segoe UI Emoji, Segoe UI Symbol");
         _timer.Margin = new Thickness(9, 0, 0, 0);
         _telemetry = MakeText(11, FontWeights.SemiBold, Violet);
         _telemetry.Margin = new Thickness(9, 0, 0, 0);

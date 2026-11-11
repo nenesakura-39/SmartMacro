@@ -55,6 +55,9 @@ public interface IScreenLayout
 
     /// <summary>Visible top-level windows with a title (not SmartMacro's own), front to back.</summary>
     IReadOnlyList<WindowInfo> GetWindows();
+
+    /// <summary>Title of the current foreground window, or null when unavailable.</summary>
+    string? GetForegroundWindowTitle() => null;
 }
 
 /// <summary>
@@ -97,20 +100,27 @@ public static class SearchArea
     /// Without a layout (tests, or the layout isn't available) the main monitor falls back to the whole desktop.
     /// Throws <see cref="SearchAreaUnavailableException"/> when the chosen monitor / window isn't there right now.
     /// </summary>
-    public static ScreenRect Resolve(ScreenSearchStep step, ScreenRect virtualScreen, IScreenLayout? layout, string? windowTitleOverride = null)
+    public static ScreenRect Resolve(ScreenSearchStep step, ScreenRect virtualScreen, IScreenLayout? layout, string? windowTitleOverride = null) =>
+        ResolveWithWindow(step, virtualScreen, layout, windowTitleOverride).Area;
+
+    /// <summary>
+    /// Resolves the screen rectangle to search along with the matched window's native handle (or 0 when not searching a window),
+    /// querying <see cref="IScreenLayout.GetWindows"/> at most once per call.
+    /// </summary>
+    public static (ScreenRect Area, long WindowHandle) ResolveWithWindow(ScreenSearchStep step, ScreenRect virtualScreen, IScreenLayout? layout, string? windowTitleOverride = null)
     {
         ArgumentNullException.ThrowIfNull(step);
         switch (step.EffectiveScope)
         {
             case SearchScope.CustomArea:
-                return step.Region;
+                return (step.Region, 0);
 
             case SearchScope.PrimaryMonitor:
             {
-                if (layout is null) return virtualScreen;
+                if (layout is null) return (virtualScreen, 0);
                 var monitors = layout.GetMonitors();
                 var primary = monitors.FirstOrDefault(m => m.IsPrimary) ?? monitors.FirstOrDefault();
-                return primary is null ? virtualScreen : Clip(primary.Bounds, virtualScreen, "The main monitor");
+                return (primary is null ? virtualScreen : Clip(primary.Bounds, virtualScreen, "The main monitor"), 0);
             }
 
             case SearchScope.Monitor:
@@ -121,7 +131,7 @@ public static class SearchArea
                 var monitor = FindMonitor(monitors, step.MonitorNumber)
                               ?? throw new SearchAreaUnavailableException(
                                   $"Monitor {step.MonitorNumber} isn't connected ({monitors.Count} monitor{(monitors.Count == 1 ? " is" : "s are")} connected). Choose another monitor.");
-                return Clip(monitor.Bounds, virtualScreen, $"Monitor {step.MonitorNumber}");
+                return (Clip(monitor.Bounds, virtualScreen, $"Monitor {step.MonitorNumber}"), 0);
             }
 
             case SearchScope.Window:
@@ -135,11 +145,11 @@ public static class SearchArea
                              ?? throw new SearchAreaUnavailableException($"The window \"{title}\" isn't open.");
                 if (window.IsMinimized || window.Bounds.IsEmpty)
                     throw new SearchAreaUnavailableException($"The window \"{window.Title}\" is minimized.");
-                return Clip(window.Bounds, virtualScreen, $"The window \"{window.Title}\"");
+                return (Clip(window.Bounds, virtualScreen, $"The window \"{window.Title}\""), window.Handle);
             }
 
             default:
-                return virtualScreen;
+                return (virtualScreen, 0);
         }
     }
 

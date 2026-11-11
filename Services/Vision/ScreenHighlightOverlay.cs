@@ -39,17 +39,17 @@ public sealed class ScreenHighlightOverlay : Window
 
     private readonly ScreenRect _bounds;        // the window, physical screen pixels
     private readonly ScreenRect? _searchArea;
-    private readonly ScreenRect? _match;
+    private readonly IReadOnlyList<ScreenRect> _matches;
     private readonly bool _found;
     private readonly string? _label;
     private readonly Canvas _canvas = new() { IsHitTestVisible = false };
     private readonly TimeSpan _hold;
 
-    private ScreenHighlightOverlay(ScreenRect bounds, ScreenRect? searchArea, ScreenRect? match, bool found, string? label, TimeSpan hold)
+    private ScreenHighlightOverlay(ScreenRect bounds, ScreenRect? searchArea, IReadOnlyList<ScreenRect> matches, bool found, string? label, TimeSpan hold)
     {
         _bounds = bounds;
         _searchArea = searchArea;
-        _match = match;
+        _matches = matches;
         _found = found;
         _label = label;
         _hold = hold;
@@ -78,21 +78,33 @@ public sealed class ScreenHighlightOverlay : Window
     /// </summary>
     public static void ShowResult(ScreenRect? searchArea, ScreenRect? match, bool found, string? label, TimeSpan? hold = null)
     {
+        var list = match is { IsEmpty: false } hit ? new[] { hit } : Array.Empty<ScreenRect>();
+        ShowMatches(searchArea, list, found, label, hold);
+    }
+
+    /// <summary>
+    /// Shows the highlight for one or more matched rectangles on screen simultaneously, numbering each box (#1, #2, …)
+    /// when multiple occurrences are found.
+    /// </summary>
+    public static void ShowMatches(ScreenRect? searchArea, IReadOnlyList<ScreenRect>? matches, bool found, string? label, TimeSpan? hold = null)
+    {
         try
         {
+            var validMatches = matches?.Where(m => !m.IsEmpty).ToList() ?? new List<ScreenRect>();
             var boxes = new List<ScreenRect>();
             if (searchArea is { IsEmpty: false } area) boxes.Add(area);
-            if (match is { IsEmpty: false } hit) boxes.Add(hit);
+            boxes.AddRange(validMatches);
             if (boxes.Count == 0) return;
 
             var union = boxes.Aggregate((a, b) => a.Union(b));
             // Room for the label and the glow, but never bigger than the desktop.
-            var bounds = new ScreenRect(union.X - 12, union.Y - LabelRoom, union.Width + 24, union.Height + 2 * LabelRoom)
+            var bounds = new ScreenRect(union.X - 16, union.Y - LabelRoom, union.Width + 32, union.Height + 2 * LabelRoom)
                 .Intersect(VirtualScreen());
             if (bounds.IsEmpty) return;
 
+            var effectiveHold = hold ?? (validMatches.Count > 1 ? TimeSpan.FromMilliseconds(1400) : HoldTime);
             _current?.CloseNow();
-            var overlay = new ScreenHighlightOverlay(bounds, searchArea, match, found, label, hold ?? HoldTime);
+            var overlay = new ScreenHighlightOverlay(bounds, searchArea, validMatches, found, label, effectiveHold);
             _current = overlay;
             overlay.Show();
         }
@@ -175,28 +187,62 @@ public sealed class ScreenHighlightOverlay : Window
 
         if (_searchArea is { IsEmpty: false } area)
         {
-            var color = _match is null && !_found ? Red : Cyan;
-            var box = Box(area, color, thickness: 2, dashed: _found || _match is not null);
+            var color = _matches.Count == 0 && !_found ? Red : Cyan;
+            var box = Box(area, color, thickness: 2, dashed: _found || _matches.Count > 0);
             _canvas.Children.Add(box);
         }
 
-        if (_match is { IsEmpty: false } hit)
+        if (_matches.Count > 0)
         {
             var color = _found ? Green : Red;
-            _canvas.Children.Add(Box(Inflate(hit, 3), color, thickness: 3, dashed: false));
+            var maxDraw = Math.Min(_matches.Count, 150);
+            for (var i = 0; i < maxDraw; i++)
+            {
+                var hit = _matches[i];
+                if (hit.IsEmpty) continue;
+                _canvas.Children.Add(Box(Inflate(hit, 3), color, thickness: i == 0 ? 3 : 2.2, dashed: false));
 
-            // Crosshair through the centre of the match.
-            var cx = hit.CenterX - _bounds.X;
-            var cy = hit.CenterY - _bounds.Y;
-            var arm = Math.Clamp(Math.Max(hit.Width, hit.Height) / 2 + 10, 12, 60);
-            _canvas.Children.Add(MakeLine(cx - arm, cy, cx + arm, cy, color));
-            _canvas.Children.Add(MakeLine(cx, cy - arm, cx, cy + arm, color));
+                if (i == 0)
+                {
+                    // Crosshair through the centre of the primary match.
+                    var cx = hit.CenterX - _bounds.X;
+                    var cy = hit.CenterY - _bounds.Y;
+                    var arm = Math.Clamp(Math.Max(hit.Width, hit.Height) / 2 + 10, 12, 60);
+                    _canvas.Children.Add(MakeLine(cx - arm, cy, cx + arm, cy, color));
+                    _canvas.Children.Add(MakeLine(cx, cy - arm, cx, cy + arm, color));
+                }
+
+                if (_matches.Count > 1)
+                {
+                    var badge = new Border
+                    {
+                        Background = new SolidColorBrush(Color.FromArgb(0xE8, 0x0B, 0x0F, 0x17)),
+                        BorderBrush = new SolidColorBrush(color),
+                        BorderThickness = new Thickness(1),
+                        CornerRadius = new CornerRadius(4),
+                        Padding = new Thickness(4, 1, 4, 1),
+                        Child = new TextBlock
+                        {
+                            Text = $"#{i + 1}",
+                            Foreground = new SolidColorBrush(color),
+                            FontSize = 11 * dpi.DpiScaleY,
+                            FontWeight = FontWeights.Bold,
+                        },
+                    };
+                    badge.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+                    var bx = Math.Clamp(hit.X - _bounds.X - 2, 0, Math.Max(0, _bounds.Width - badge.DesiredSize.Width));
+                    var by = Math.Max(0, hit.Y - _bounds.Y - badge.DesiredSize.Height - 2);
+                    Canvas.SetLeft(badge, bx);
+                    Canvas.SetTop(badge, by);
+                    _canvas.Children.Add(badge);
+                }
+            }
         }
 
         if (!string.IsNullOrWhiteSpace(_label))
         {
-            var anchor = _match is { IsEmpty: false } m ? m : _searchArea ?? _bounds;
-            var color = _match is not null ? (_found ? Green : Red) : _found ? Cyan : Red;
+            var anchor = _matches.Count > 0 ? _matches[0] : _searchArea ?? _bounds;
+            var color = _matches.Count > 0 ? (_found ? Green : Red) : _found ? Cyan : Red;
             var label = new Border
             {
                 Background = new SolidColorBrush(Color.FromArgb(0xE6, 0x0B, 0x0F, 0x17)),

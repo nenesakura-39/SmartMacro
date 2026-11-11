@@ -1,15 +1,33 @@
 # SmartMacro – Project Status / Handoff
 
-_Last updated: 2026-11-05 (**SmartMacro 1.0.0 — Vision Pipeline 2.0 & Version Reset to 1.0.0** — FrameBus & Motion Mask, Partial-Occlusion Sub-Patch Matcher, Edge/Shape Gradient Detector, 2D Kalman Velocity TargetTracker with Predictive Lead Clicks, N-Frame Temporal Confirmation, O(1) 1,000-Word OCR Index + Find-Once-Then-Track, Color 2.0 HSV/CIE Lab + Shape Filtering, and 1-Click Scenario Presets + Auto-Tune:
-**built + tested with `tools\verify.cmd`: 0 warnings, 0 errors, 1252 / 1252 passed**.)
+_Last updated: 2026-11-09 (**SmartMacro 1.0.0 — Evergreen AAA Edition** — 30-Day Automatic Log & Trash Pruning, Zero-Install Portable Mode, In-App Trash Recovery Drawer, 1-Click `.smbackup` ZIP Backup & Restore, Launch on Windows Startup (`--tray`), Brain & Logic 2.0 (`Multiply`, `Divide`, `Modulo`, `Round`, `RandomNumber`, `ActiveWindowTitle`, `CurrentTimeText`, WASAPI `SystemAudioPeakPercent`, `CopyResultToClipboard`, Compound `AND`/`OR` Conditions), Synthesized WAV Sound Cues & Rate-Limited HTTPS Webhooks, Blackbox Failure Snapshot (`last-failure-snapshot.png`), Library Pinning (`⭐`) & Multi-Sort, and Per-Step Execution Telemetry Badges:
+**built + tested with `tools\verify.cmd`: 0 warnings, 0 errors, 1284 / 1284 passed**.)
 Developer: Riku (リク) · Brand: KuroLogic_
 
-## Current status at a glance (2026-11-05)
+## Current status at a glance (2026-11-09)
 | Area | Build + automated tests | User / tester feedback | Committed |
 |---|---|---|---|
 | Stages 1–4 & Editor UX | passed: 0 warnings, 0 errors | tried by owner; future user/tester feedback & bugs will be logged in one consolidated feedback document | yes |
-| SmartMacro 1.0.0 Vision Pipeline 2.0 | passed: 0 warnings, 0 errors, **1252 / 1252** (`tools\verify.cmd`) | ready for testing | pending |
+| SmartMacro 1.0.0 Evergreen AAA Edition + Vision Pipeline 2.0 | passed: 0 warnings, 0 errors, **1284 / 1284** (`tools\verify.cmd`) | ready for release | pending |
 | Release documents (`release-docs/`: EULA, LICENSE, notices, README) | passed marker & version checks (`1.0.0`, reset from internal 1.8.0) | – | pending |
+
+## SmartMacro 1.0.0 — Evergreen AAA Edition (2026-11-09): **built + tested** (`tools\verify.cmd`: 0 warnings, 0 errors, **1284 / 1284 passed**)
+1. **Pillar 1 — Evergreen Self-Service, Backup & OS Integration**:
+   - **Automatic Disk Hygiene (`LogService.PruneOldLogs`, `JsonMacroRepository.PruneOldTrash`)**: Automatically prunes diagnostic `.log` files and trashed macro files older than 30 days on startup so disk usage never grows unbounded over months of unattended use.
+   - **Portable Mode (`AppPaths.CreateDefault`, `portable.txt`, `PortableData/`)**: Placing `portable.txt` or a `PortableData` folder beside `SmartMacro.exe` switches all macros, settings, logs, and trash into `./PortableData/` for USB / cloud-folder portability.
+   - **In-App Trash Recovery Drawer (`IMacroRepository.LoadTrashAsync`, `RestoreFromTrashAsync`, `DeleteFromTrashAsync`, `EmptyTrashAsync`, `LibraryView.xaml`)**: Collapsible `🗑 Trash (N)` drawer in the Library with 1-click **Restore**, **Delete Forever**, and **Empty Trash**.
+   - **1-Click Full Studio Backup & Restore (`StudioBackupService.cs`, `.smbackup`)**: Packages all macros and `settings.json` into a single `.smbackup` ZIP archive with manifest validation and collision-safe restore in **Settings → Backup, Maintenance & Updates**.
+   - **Launch on Windows Startup (`WindowsStartupService.cs`, `AppSettings.StartWithWindows`, `--tray`)**: Per-user `HKCU\...\Run` registration (no UAC elevation required) with silent `--tray` / `--minimized` startup into the system tray.
+2. **Pillar 2 — Brain & Logic 2.0 Completeness**:
+   - **Complete Variable Math & Sources (`Variables.cs`, `VariableStore.cs`, `PlaybackEngine.Brain.cs`)**: Added `Multiply`, `Divide` (safe divide-by-zero), `Modulo`, and `Round` operations; added `RandomNumber` (`min..max`), `ActiveWindowTitle`, `CurrentTimeText`, and `SystemAudioPeakPercent` sources; and added `CopyResultToClipboard`.
+   - **Zero-Dependency WASAPI Audio Peak Meter (`WasapiAudioPeakReader.cs`)**: Reads Windows master audio output peak (`0–100%`) via lightweight COM vtable interop (`IMMDeviceEnumerator` + `IAudioMeterInformation`) so macros can react to game audio cues or silence.
+   - **Compound Conditions (`AND` / `OR` on `Condition`, `ConditionEvaluator.cs`, `StepEditorsShared.xaml`)**: Every `If` and `Repeat` condition supports combining a primary and secondary clause with `ConditionCombinator.And` or `ConditionCombinator.Or`.
+3. **Pillar 3 — AFK Audio, Notifications & Blackbox Flight Recorder**:
+   - **Synthesized Sound Cues & Rate-Limited Webhooks (`StudioSoundCuePlayer.cs`, `ScreenshotStep`)**: Pure in-memory 44.1 kHz 16-bit PCM WAV synthesis (`SuccessChime`, `SoftBell`, `DoubleBeep`), `{variable}`-interpolated notification messages, and rate-limited HTTPS webhook POSTs (1 per 5 s ceiling).
+   - **Blackbox Flight Recorder (`PlaybackEngine.TrySaveFailureSnapshotAsync`, `last-failure-snapshot.png`)**: Automatically saves the exact frame that caused a vision or `WaitForChange` step to time out and stop the macro, surfacing a 1-click **🔍 View Failure Snapshot** banner in the Editor.
+4. **Pillar 4 — Studio X Library & Profiler Polish**:
+   - **Macro Pinning (`⭐`) & Multi-Sort (`Macro.IsPinned`, `LibrarySortMode`)**: Pin favorite macros to the top of the Library and sort by `Pinned + Name (A–Z)`, `Recently Modified`, `Recently Created`, or `Most Steps`.
+   - **Per-Step Execution Telemetry Badges (`StepExecutionStat`, `PlaybackResult.StepStats`, `StepViewModel.TelemetryBadgeText`)**: Displays subtle `×N · X ms` execution count and average duration pills on step cards after a run, plus a manual **Check for Updates** button in Settings.
 
 ## SmartMacro 1.0.0 — Vision Pipeline 2.0 & Version Reset (2026-11-05): **built + tested** (`tools\verify.cmd`: 0 warnings, 0 errors, **1252 / 1252 passed**)
 1. **Version Reset to `1.0.0`**:

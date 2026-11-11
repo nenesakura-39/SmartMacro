@@ -20,6 +20,12 @@ public enum PlaybackOutcome
     Failed,
 }
 
+/// <summary>Per-step execution statistics recorded during a playback session.</summary>
+public readonly record struct StepExecutionStat(int ExecutionCount, double TotalElapsedMs)
+{
+    public double AverageMs => ExecutionCount > 0 ? TotalElapsedMs / ExecutionCount : 0.0;
+}
+
 public sealed record PlaybackResult(PlaybackOutcome Outcome, int IterationsCompleted, int StepsExecuted, string? Error = null, string? Warning = null)
 {
     /// <summary>How many whole runs (repeats) of the macro finished (same as <see cref="IterationsCompleted"/>).</summary>
@@ -33,6 +39,12 @@ public sealed record PlaybackResult(PlaybackOutcome Outcome, int IterationsCompl
 
     /// <summary>Final snapshot of runtime variables at the end of the run.</summary>
     public IReadOnlyList<VariableSnapshot> FinalVariables { get; init; } = Array.Empty<VariableSnapshot>();
+
+    /// <summary>Per-step execution counts and active durations keyed by step ID.</summary>
+    public IReadOnlyDictionary<Guid, StepExecutionStat>? StepStats { get; init; }
+
+    /// <summary>Path to the Blackbox Failure Snapshot PNG saved when a vision/wait step timed out and stopped the macro.</summary>
+    public string? FailureSnapshotPath { get; init; }
 }
 
 /// <summary>
@@ -96,13 +108,20 @@ public readonly record struct FoundRect(int X, int Y, int Width, int Height, int
 /// </summary>
 public sealed record TargetDetection(ScreenRect Bounds, double Confidence, string Label, int X, int Y, double ElapsedMs = 0, bool FromHotSpot = false)
 {
+    /// <summary>All matched rectangles when multiple occurrences were found on screen.</summary>
+    public IReadOnlyList<ScreenRect>? AllMatches { get; init; }
+
+    /// <summary>Total number of matches represented by this detection.</summary>
+    public int MatchCount => AllMatches is { Count: > 0 } list ? list.Count : 1;
+
     /// <summary>Short badge for the reticle / HUD, e.g. "🎯 99% · 0.6ms" (just "🎯 99%" when the time isn't known).</summary>
     public string Badge
     {
         get
         {
             var percent = (int)Math.Round(Math.Clamp(Confidence, 0, 1) * 100);
-            return ElapsedMs > 0 ? $"🎯 {percent}% · {FormatMs(ElapsedMs)}" : $"🎯 {percent}%";
+            var countPrefix = MatchCount > 1 ? $"{MatchCount}× · " : string.Empty;
+            return ElapsedMs > 0 ? $"🎯 {countPrefix}{percent}% · {FormatMs(ElapsedMs)}" : $"🎯 {countPrefix}{percent}%";
         }
     }
 

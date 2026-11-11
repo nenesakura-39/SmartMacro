@@ -18,6 +18,7 @@ rem   release\bundle-versions.txt                          (Microsoft parts insi
 rem The script also checks that THIRD-PARTY-NOTICES.txt names every one of those parts and versions,
 rem and stops a real release if it doesn't (for example after a .NET update).
 setlocal EnableDelayedExpansion
+chcp 65001 >nul
 cd /d "%~dp0.."
 
 set VERSION=

@@ -67,8 +67,8 @@ public static partial class MacroValidator
     public const int MaxScrollDelta = 12_000;      // 100 notches
     public const int MaxRepeatCount = 100_000;
     public const int MaxSearchTextLength = 200;
-    public const int MinCheckIntervalMs = 100;
-    public const int MinVisionCheckIntervalMs = 50;  // Find image / Find color (cheaper than OCR)
+    public const int MinCheckIntervalMs = 10;
+    public const int MinVisionCheckIntervalMs = 10;  // Supports Fast Reaction (20 ms) and Moving Text (30 ms) presets
     public const int MinTemplateSize = 6;            // pixels, each side
     public const int MaxTemplateSize = MaxRegionSize; // pixels, each side (no 400x400 cap; up to full monitor/region resolution)
     public const int MaxTemplateDataLength = 50_000_000; // characters of Base64
@@ -220,6 +220,16 @@ public static partial class MacroValidator
             {
                 issues.Add(new ValidationIssue(IssueSeverity.Error,
                     "A macro cannot call itself directly.", i, step.Id, nameof(CallMacroStep.TargetMacroId)));
+            }
+
+            if (step is MouseClickStep { Enabled: true, SendInBackground: true } bgClick
+                && (bgClick.Action == MouseClickAction.Drag || bgClick.UseCurrentPosition))
+            {
+                issues.Add(new ValidationIssue(IssueSeverity.Warning,
+                    bgClick.Action == MouseClickAction.Drag
+                        ? "\"Send in background\" does not support Drag paths, so this drag will use normal foreground cursor input."
+                        : "\"Send in background\" with \"Where the cursor is\" reads the current physical cursor position; pick a fixed position or \"Last found spot\" for true background clicking.",
+                    i, step.Id, nameof(MouseClickStep.BackgroundWindowTitle)));
             }
 
             if (step is MouseClickStep { UseLastFoundText: true } && !hasFindTextBefore)
@@ -612,7 +622,7 @@ public static partial class MacroValidator
     /// </summary>
     private static void ValidateBlocks(List<ValidationIssue> issues, List<MacroStep> steps)
     {
-        if (!steps.Any(WorkflowSteps.IsBlockStep)) return;
+        if (!steps.Any(s => WorkflowSteps.IsBlockStep(s) || s is FlowControlStep)) return;
 
         var blocks = BlockStructure.Analyze(steps);
         foreach (var problem in blocks.Problems)

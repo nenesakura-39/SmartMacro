@@ -59,6 +59,8 @@ public sealed partial class EditorViewModel : ObservableObject
     private int _currentMatch = -1;
     private bool _isCompactView;
     private bool _suspendTouch;
+    private bool _suspendStepsChanged;
+    private int _preferredInspectorTab;
 
     // Macro settings: target window + "auto-adjust coordinates", Humanize, Profile.
     private string? _targetWindowTitle;
@@ -107,15 +109,30 @@ public sealed partial class EditorViewModel : ObservableObject
         MoveDownCommand = new RelayCommand(() => MoveSelected(MoveDirection.Down), () => CanMove(up: false));
         MoveToTopCommand = new RelayCommand(() => MoveSelected(MoveDirection.ToTop), () => CanMove(up: true));
         MoveToBottomCommand = new RelayCommand(() => MoveSelected(MoveDirection.ToBottom), () => CanMove(up: false));
+        SelectPreviousStepCommand = new RelayCommand(() => SelectAdjacentStep(-1), () => GetAdjacentVisibleStep(-1) is not null);
+        SelectNextStepCommand = new RelayCommand(() => SelectAdjacentStep(+1), () => GetAdjacentVisibleStep(+1) is not null);
+        FocusFirstErrorCommand = new RelayCommand(FocusFirstErrorStepAndOpenProblems, () => HasMacro && HasErrors);
         AddToEndCommand = new RelayCommand(p => AddStep(p, InsertPosition.AtEnd, forcePosition: true), p => HasMacro && p is StepKind);
-        InsertAfterSelectedCommand = new RelayCommand(p => AddStep(p, InsertPosition.AfterSelected, forcePosition: true), p => HasMacro && p is StepKind);
+        InsertAfterSelectedCommand = new RelayCommand(p =>
+        {
+            foreach (var s in Steps) s.IsInsertMenuOpen = false;
+            AddStep(p, InsertPosition.AfterSelected, forcePosition: true);
+        }, p => HasMacro && p is StepKind);
         InsertQuickAfterRowCommand = new RelayCommand(InsertQuickAfterRow, p => HasMacro && p is StepViewModel);
+        OpenInsertMenuAfterRowCommand = new RelayCommand(p =>
+        {
+            if (!HasMacro || p is not StepViewModel row) return;
+            foreach (var s in Steps) s.IsInsertMenuOpen = false;
+            SelectedStep = row;
+            row.IsInsertMenuOpen = true;
+        }, p => HasMacro && p is StepViewModel);
         SaveCommand = new AsyncRelayCommand(async () => await SaveAsync(), HandleUnexpectedError, () => HasMacro && !_isSaving);
         RevertCommand = new RelayCommand(Revert, () => HasMacro && IsDirty);
         GoToLibraryCommand = new RelayCommand(goToLibrary);
         WrapInIfCommand = new RelayCommand(() => WrapSelection(StepKind.If), () => HasMacro && SelectedStep is not null);
         WrapInRepeatCommand = new RelayCommand(() => WrapSelection(StepKind.Repeat), () => HasMacro && SelectedStep is not null);
         CleanUpMousePathsCommand = new RelayCommand(CleanUpMousePaths, () => HasMacro && Steps.Any(s => s.Model is MouseMoveStep));
+        MergeKeysToTextCommand = new RelayCommand(MergeKeystrokesToText, () => HasMacro && Steps.Count(s => s.Model is KeyPressStep) >= 2);
         AddPatternCommand = new RelayCommand(p => AddPattern(p, AddAtEnd ? InsertPosition.AtEnd : InsertPosition.AfterSelected), p => HasMacro && p is QuickPattern);
 
         UndoCommand = new RelayCommand(Undo, () => HasMacro && _history.CanUndo);
@@ -169,6 +186,8 @@ public sealed partial class EditorViewModel : ObservableObject
         ApplySuggestionCommand = new RelayCommand(ApplySuggestion, p => HasMacro && p is SelfHealItemViewModel);
         ApplyAllSuggestionsCommand = new RelayCommand(ApplyAllSuggestions, () => HasMacro && PendingSuggestions.Count > 0);
         DismissSuggestionsCommand = new RelayCommand(() => { PendingSuggestions.Clear(); RaiseSelfHealChanged(); }, () => PendingSuggestions.Count > 0);
+        OpenFailureSnapshotCommand = new RelayCommand(OpenFailureSnapshot, () => HasFailureSnapshot);
+        DismissFailureSnapshotCommand = new RelayCommand(() => FailureSnapshotPath = null, () => HasFailureSnapshot);
 
         ClearToolboxFilterCommand = new RelayCommand(() => ToolboxFilter = string.Empty, () => HasToolboxFilter);
         OpenSubMacroCommand = new RelayCommand(p =>
@@ -327,20 +346,25 @@ public sealed partial class EditorViewModel : ObservableObject
     public string HumanizeTooltip =>
         $"🎲 Humanize: adds a subtle ±{ClickJitterPx} px random offset around click spots (kept inside what a Find step found), ±{DelayJitterPercent} % natural variation to delays of {PlaybackEngine.HumanizeMinDelayMs} ms or more and to glide times, and a slight natural arc to Smooth glides, so repeated game loops don't click the exact same pixel with robotic timing. Recorded input still plays exactly as recorded.";
 
-    private void RefreshTargetWindows()
+    private void RefreshTargetWindows() => RefreshTargetWindowsCore(enumerateOpenWindows: true);
+
+    private void RefreshTargetWindowsCore(bool enumerateOpenWindows)
     {
         var current = _targetWindowTitle;
         TargetWindowChoices.Clear();
         TargetWindowChoices.Add(AnyWindowLabel);
-        try
+        if (enumerateOpenWindows)
         {
-            if (_screen is Core.Vision.IScreenLayout layout)
-                foreach (var title in layout.GetWindows().Select(w => w.Title).Distinct(StringComparer.OrdinalIgnoreCase))
-                    TargetWindowChoices.Add(title);
-        }
-        catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception)
-        {
-            _log.Warning("Could not list the open windows.", ex);
+            try
+            {
+                if (_screen is Core.Vision.IScreenLayout layout)
+                    foreach (var title in layout.GetWindows().Select(w => w.Title).Distinct(StringComparer.OrdinalIgnoreCase))
+                        TargetWindowChoices.Add(title);
+            }
+            catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception)
+            {
+                _log.Warning("Could not list the open windows.", ex);
+            }
         }
 
         if (!string.IsNullOrEmpty(current) && !TargetWindowChoices.Contains(current)) TargetWindowChoices.Add(current);
@@ -468,6 +492,9 @@ public sealed partial class EditorViewModel : ObservableObject
     public RelayCommand MoveDownCommand { get; }
     public RelayCommand MoveToTopCommand { get; }
     public RelayCommand MoveToBottomCommand { get; }
+    public RelayCommand SelectPreviousStepCommand { get; }
+    public RelayCommand SelectNextStepCommand { get; }
+    public RelayCommand FocusFirstErrorCommand { get; }
 
     /// <summary>Adds the step kind given as parameter after the last step (whatever the toolbox setting is).</summary>
     public RelayCommand AddToEndCommand { get; }
@@ -477,6 +504,9 @@ public sealed partial class EditorViewModel : ObservableObject
 
     /// <summary>Inserts a default step right after the hovered row when the user clicks the between-step '+' rail.</summary>
     public RelayCommand InsertQuickAfterRowCommand { get; }
+
+    /// <summary>Opens the categorized quick-insert step popover right below the hovered row.</summary>
+    public RelayCommand OpenInsertMenuAfterRowCommand { get; }
 
     private void InsertQuickAfterRow(object? parameter)
     {
@@ -519,6 +549,9 @@ public sealed partial class EditorViewModel : ObservableObject
 
     /// <summary>"Clean up mouse paths": recorded Delay + Move runs become at most Delay + Move + Delay (see StepCleanup).</summary>
     public RelayCommand CleanUpMousePathsCommand { get; }
+
+    /// <summary>"⌨ Merge keys → Type Text": recorded printable KeyPress runs become TypeTextStep (see StepCleanup).</summary>
+    public RelayCommand MergeKeysToTextCommand { get; }
 
     public bool HasMacro => _saved is not null;
 
@@ -608,22 +641,69 @@ public sealed partial class EditorViewModel : ObservableObject
             var previous = _selectedStep;
             if (SetProperty(ref _selectedStep, value))
             {
+                if (previous is not null)
+                {
+                    previous.PropertyChanged -= OnSelectedStepPropertyChanged;
+                    previous.IsQuickEditOpen = false;
+                    previous.IsInsertMenuOpen = false;
+                }
                 if (previous is KeyPressStepViewModel { IsRecordingKey: true } prevKey)
                     prevKey.IsRecordingKey = false;
-                if (value is not null && (value.Model is IfStep or ElseStep or RepeatStep || value.IndentLevel > 0))
-                    AddAtEnd = false;
+                if (value is not null)
+                {
+                    if (value.HasInspectorTabs)
+                        value.ApplyPreferredInspectorTab(_preferredInspectorTab);
+                    value.PropertyChanged += OnSelectedStepPropertyChanged;
+                    if (value.Model is IfStep or ElseStep or RepeatStep || value.IndentLevel > 0)
+                        AddAtEnd = false;
+                }
                 UpdateBlockPartnerHighlights();
                 OnPropertyChanged(nameof(HasSelection));
             }
         }
     }
 
+    private void OnSelectedStepPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(StepViewModel.InspectorTab) && sender is StepViewModel step)
+            _preferredInspectorTab = step.InspectorTab;
+    }
+
+    private StepViewModel? GetAdjacentVisibleStep(int delta)
+    {
+        if (!HasMacro || Steps.Count == 0 || SelectedStep is null) return null;
+        var index = Steps.IndexOf(SelectedStep);
+        if (index < 0) return null;
+        for (var i = index + delta; i >= 0 && i < Steps.Count; i += delta)
+        {
+            if (Steps[i].IsVisibleInList) return Steps[i];
+        }
+        return null;
+    }
+
+    private void SelectAdjacentStep(int delta)
+    {
+        if (GetAdjacentVisibleStep(delta) is not { } target) return;
+        _selection = new List<StepViewModel> { target };
+        SelectedStep = target;
+        OnPropertyChanged(nameof(HasMultiSelection));
+        OnPropertyChanged(nameof(MultiSelectCountText));
+        SelectStepsRequested?.Invoke(this, _selection);
+        RevealStepRequested?.Invoke(this, target);
+    }
+
     public bool HasSelection => _selectedStep is not null;
+
+    public bool HasMultiSelection => _selection.Count > 1;
+
+    public string MultiSelectCountText => $"{_selection.Count} steps selected";
 
     /// <summary>Called by the view when the list's selection changes (several steps can be selected).</summary>
     public void SetSelection(IEnumerable<StepViewModel> selected)
     {
         _selection = selected.Where(s => Steps.Contains(s)).ToList();
+        OnPropertyChanged(nameof(HasMultiSelection));
+        OnPropertyChanged(nameof(MultiSelectCountText));
     }
 
     /// <summary>The selected steps in list order (falls back to the single selected step).</summary>
@@ -651,10 +731,13 @@ public sealed partial class EditorViewModel : ObservableObject
             if (SetProperty(ref _errorCount, value))
             {
                 OnPropertyChanged(nameof(HasErrors));
+                OnPropertyChanged(nameof(ErrorBadgeText));
                 OnPropertyChanged(nameof(ValidationSummary));
             }
         }
     }
+
+    public string ErrorBadgeText => ErrorCount == 1 ? "1 error · Fix to save" : $"{ErrorCount} errors · Fix to save";
 
     public int WarningCount
     {
@@ -700,8 +783,9 @@ public sealed partial class EditorViewModel : ObservableObject
         _clickJitterPx = copy.ClickJitterPx;
         _delayJitterPercent = copy.DelayJitterPercent;
         _history.Clear();
+        _preferredInspectorTab = 0;
         RaiseHistoryChanged();
-        RefreshTargetWindows();
+        RefreshTargetWindowsCore(enumerateOpenWindows: false);
         ResetViewState();
 
         Variables.Clear();
@@ -727,6 +811,7 @@ public sealed partial class EditorViewModel : ObservableObject
 
         PendingSuggestions.Clear();
         RaiseSelfHealChanged();
+        FailureSnapshotPath = null;
 
         ReplaceSteps(copy.Steps);
 
@@ -743,6 +828,7 @@ public sealed partial class EditorViewModel : ObservableObject
         _description = string.Empty;
         _profileName = null;
         _history.Clear();
+        _preferredInspectorTab = 0;
         RaiseHistoryChanged();
         ResetViewState();
         Variables.Clear();
@@ -750,6 +836,7 @@ public sealed partial class EditorViewModel : ObservableObject
         Triggers.Clear();
         PendingSuggestions.Clear();
         RaiseSelfHealChanged();
+        FailureSnapshotPath = null;
         ReplaceSteps(Array.Empty<MacroStep>());
         Issues.Clear();
         ErrorCount = 0;
@@ -786,12 +873,26 @@ public sealed partial class EditorViewModel : ObservableObject
         if (HasMacro && _id == id) Unload();
     }
 
+    /// <summary>Syncs the macro name if it was renamed from the Library while open in the Editor.</summary>
+    public void SyncExternalRename(Guid id, string newName)
+    {
+        if (!HasMacro || _id != id || string.IsNullOrWhiteSpace(newName)) return;
+        var trimmed = newName.Trim();
+        if (_saved is not null) _saved.Name = trimmed;
+        if (!IsDirty)
+        {
+            _name = trimmed;
+            OnPropertyChanged(nameof(Name));
+        }
+    }
+
     /// <summary>Builds a macro from the editor's current state (steps are the live objects, not copies).</summary>
     public Macro BuildMacro() => new()
     {
         Id = _id,
         Name = Name.Trim(),
         Description = string.IsNullOrWhiteSpace(Description) ? null : Description,
+        IsPinned = GetLibraryMacros?.Invoke().FirstOrDefault(m => m.Id == _id)?.IsPinned ?? (_saved?.IsPinned ?? false),
         CreatedAt = _createdAt,
         ModifiedAt = _saved?.ModifiedAt ?? default,
         Steps = Steps.Select(s => s.Model).ToList(),
@@ -813,6 +914,54 @@ public sealed partial class EditorViewModel : ObservableObject
         Triggers = Triggers.Count == 0 ? null : Triggers.Select(t => t.Model).ToList(),
     };
 
+    /// <summary>Opens the Problems dock and selects/scrolls to the first step with a validation error.</summary>
+    public void FocusFirstErrorStepAndOpenProblems()
+    {
+        SelectedBottomTab = 1;
+        IsBottomDockExpanded = true;
+
+        var errorStep = Steps.FirstOrDefault(s => s.HasError);
+        if (errorStep is not null)
+        {
+            Reveal(errorStep);
+            _selection = new List<StepViewModel> { errorStep };
+            SelectedStep = errorStep;
+            errorStep.InspectorTab = 0;
+            OnPropertyChanged(nameof(HasMultiSelection));
+            OnPropertyChanged(nameof(MultiSelectCountText));
+            SelectStepsRequested?.Invoke(this, _selection);
+            RevealStepRequested?.Invoke(this, errorStep);
+        }
+    }
+
+    /// <summary>
+    /// Raised when a new recording finishes loading so the view can focus and select the default "Recording …" name
+    /// for immediate 1-keypress renaming.
+    /// </summary>
+    public event EventHandler? FocusMacroNameRequested;
+
+    /// <summary>Requests the view to focus and select the Macro Name box (e.g. right after recording or pressing F2).</summary>
+    public void RequestFocusMacroName() => FocusMacroNameRequested?.Invoke(this, EventArgs.Empty);
+
+    /// <summary>
+    /// Commits a header field edit (Macro Name, Description, Repeat Count, Profile) when the user presses Enter:
+    /// if the macro has unsaved changes and no validation errors, saves immediately to disk and updates the Library.
+    /// </summary>
+    public async Task<bool> CommitHeaderEditAsync()
+    {
+        if (!HasMacro) return false;
+        if (string.IsNullOrWhiteSpace(Name) && _saved is not null && !string.IsNullOrWhiteSpace(_saved.Name))
+        {
+            // Never allow an empty Enter press to wipe out the macro's name: restore the last saved name cleanly.
+            Name = _saved.Name;
+        }
+
+        if (!IsDirty) return true;
+        Revalidate();
+        if (HasErrors) return false;
+        return await SaveAsync();
+    }
+
     public async Task<bool> SaveAsync()
     {
         if (!HasMacro || _isSaving) return false;
@@ -820,7 +969,22 @@ public sealed partial class EditorViewModel : ObservableObject
         Revalidate();
         if (HasErrors)
         {
+            FocusFirstErrorStepAndOpenProblems();
+            var errorLines = Issues
+                .Where(i => i.Severity == IssueSeverity.Error)
+                .Take(5)
+                .Select(i => $"• {i.Message}")
+                .ToList();
+            if (ErrorCount > errorLines.Count)
+                errorLines.Add($"• …and {ErrorCount - errorLines.Count} more error(s).");
+
+            var macroTitle = string.IsNullOrWhiteSpace(Name) ? "This macro" : Name.Trim();
             _setStatus($"Can't save yet: fix {ErrorCount} error{(ErrorCount == 1 ? "" : "s")} first (see the Problems list).", StatusKind.Error);
+            _dialogs.ShowWarning(
+                "Fix errors before saving",
+                $"\"{macroTitle}\" has {ErrorCount} error{(ErrorCount == 1 ? "" : "s")} that must be fixed before it can be saved:\n\n" +
+                string.Join("\n", errorLines) +
+                "\n\nWe've highlighted the problem step and opened the Problems panel below so you can fix or delete it (or choose \"Don't save\" when closing to discard unsaved changes).");
             return false;
         }
 
@@ -890,15 +1054,40 @@ public sealed partial class EditorViewModel : ObservableObject
 
     private void ReplaceSteps(IEnumerable<MacroStep> steps)
     {
-        foreach (var old in Steps) old.Modified -= OnStepModified;
-        Steps.Clear();
-        foreach (var step in steps)
-            Steps.Add(CreateStepViewModel(step));
+        _suspendStepsChanged = true;
+        try
+        {
+            foreach (var old in Steps) old.Modified -= OnStepModified;
+            Steps.Clear();
+            _selection.Clear();
+            OnPropertyChanged(nameof(HasMultiSelection));
+            OnPropertyChanged(nameof(MultiSelectCountText));
+            var index = 0;
+            foreach (var step in steps)
+            {
+                var vm = CreateStepViewModel(step);
+                vm.Number = ++index;
+                vm.Modified += OnStepModified;
+                Steps.Add(vm);
+            }
+        }
+        finally
+        {
+            _suspendStepsChanged = false;
+        }
+
+        var blocks = BlockStructure.Analyze(Steps.Select(s => s.Model).ToList());
+        UpdateBlockPairing(blocks);
+        RefreshListView();
+        OnPropertyChanged(nameof(HasSteps));
+        OnPropertyChanged(nameof(StepCountText));
         SelectedStep = Steps.FirstOrDefault();
     }
 
     private void OnStepsChanged(object? sender, NotifyCollectionChangedEventArgs e)
     {
+        if (_suspendStepsChanged) return;
+
         if (e.OldItems is not null)
             foreach (StepViewModel old in e.OldItems) old.Modified -= OnStepModified;
         if (e.NewItems is not null)

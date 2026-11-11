@@ -100,13 +100,25 @@ public sealed class ConditionViewModel : ObservableObject
     private readonly Action _changed;
     private ScreenTools _tools = ScreenTools.None;
     private ScreenSearchStepViewModel? _checkEditor;
+    private ConditionViewModel? _secondCondition;
 
-    public ConditionViewModel(MacroCondition condition, Action changed)
+    public ConditionViewModel(MacroCondition condition, Action changed, bool allowSecondCondition = true)
     {
         _condition = condition;
         _changed = changed;
+        AllowSecondCondition = allowSecondCondition;
         RebuildCheckEditor();
+        RebuildSecondConditionEditor();
     }
+
+    public bool AllowSecondCondition { get; }
+
+    public static IReadOnlyList<Choice<ConditionCombinator>> CombinatorChoices { get; } = new[]
+    {
+        new Choice<ConditionCombinator>(ConditionCombinator.None, "Single condition only"),
+        new Choice<ConditionCombinator>(ConditionCombinator.And, "AND — both conditions must be true"),
+        new Choice<ConditionCombinator>(ConditionCombinator.Or, "OR — either condition can be true"),
+    };
 
     public static IReadOnlyList<Choice<ConditionKind>> Kinds { get; } = new[]
     {
@@ -149,7 +161,41 @@ public sealed class ConditionViewModel : ObservableObject
         {
             _tools = value ?? ScreenTools.None;
             if (_checkEditor is not null) _tools.ApplyTo(_checkEditor);
+            if (_secondCondition is not null) _secondCondition.Tools = _tools;
         }
+    }
+
+    public ConditionCombinator SecondCombinator
+    {
+        get => _condition.SecondCombinator;
+        set
+        {
+            if (_condition.SecondCombinator == value) return;
+            _condition.SecondCombinator = value;
+            if (value == ConditionCombinator.None)
+            {
+                _condition.SecondCondition = null;
+            }
+            else if (_condition.SecondCondition is null)
+            {
+                _condition.SecondCondition = new MacroCondition
+                {
+                    Comparison = new VariableComparison { VariableName = "count", Operator = VariableCompareOperator.GreaterOrEqual, RightValue = "1" }
+                };
+            }
+            RebuildSecondConditionEditor();
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(HasSecondCondition));
+            _changed();
+        }
+    }
+
+    public bool HasSecondCondition => AllowSecondCondition && _condition.HasSecondCondition;
+
+    public ConditionViewModel? SecondCondition
+    {
+        get => _secondCondition;
+        private set => SetProperty(ref _secondCondition, value);
     }
 
     /// <summary>What the condition looks for. Null when the stored condition is damaged (pick a kind to fix it).</summary>
@@ -302,6 +348,21 @@ public sealed class ConditionViewModel : ObservableObject
         CheckEditor = editor;
         OnPropertyChanged(nameof(IsDamaged));
         OnPropertyChanged(nameof(TestVerdict));
+    }
+
+    private void RebuildSecondConditionEditor()
+    {
+        if (!AllowSecondCondition || !_condition.HasSecondCondition || _condition.SecondCondition is null)
+        {
+            SecondCondition = null;
+            return;
+        }
+
+        var vm = new ConditionViewModel(_condition.SecondCondition, _changed, allowSecondCondition: false)
+        {
+            Tools = _tools
+        };
+        SecondCondition = vm;
     }
 
     private void OnCheckModified(object? sender, EventArgs e) => _changed();
@@ -611,4 +672,53 @@ public sealed class BlockMarkerStepViewModel : StepViewModel
     };
 
     public string DisableHint => "Turning this marker off has no effect. To skip a whole block, turn off its If or Repeat step instead.";
+}
+
+/// <summary>Editor for <see cref="FlowControlStep"/> (Break loop / Continue loop / Stop macro).</summary>
+public sealed class FlowControlStepViewModel : StepViewModel
+{
+    private readonly FlowControlStep _step;
+
+    public FlowControlStepViewModel(FlowControlStep step) : base(step)
+    {
+        _step = step;
+    }
+
+    public static IReadOnlyList<Choice<FlowControlAction>> Actions { get; } = new[]
+    {
+        new Choice<FlowControlAction>(FlowControlAction.ExitLoop, "⏹ Break loop — exit the innermost Repeat block immediately"),
+        new Choice<FlowControlAction>(FlowControlAction.ContinueLoop, "⏭ Continue loop — skip to the next turn of the innermost Repeat"),
+        new Choice<FlowControlAction>(FlowControlAction.StopMacro, "🛑 Stop macro — finish the macro run cleanly right now"),
+    };
+
+    public FlowControlAction Action
+    {
+        get => _step.Action;
+        set
+        {
+            if (_step.Action == value) return;
+            _step.Action = value;
+            NotifyChanged();
+            OnPropertyChanged(nameof(ActionHelp));
+        }
+    }
+
+    public string Message
+    {
+        get => _step.Message ?? string.Empty;
+        set
+        {
+            var normalized = string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+            if (_step.Message == normalized) return;
+            _step.Message = normalized;
+            NotifyChanged();
+        }
+    }
+
+    public string ActionHelp => _step.Action switch
+    {
+        FlowControlAction.ExitLoop => "Place inside an If block inside a Repeat loop to break out of the loop early as soon as your condition is met.",
+        FlowControlAction.ContinueLoop => "Place inside an If block inside a Repeat loop to skip the rest of the current turn and start the next turn.",
+        _ => "Cleanly stops the entire macro run immediately (without marking the run as an error).",
+    };
 }

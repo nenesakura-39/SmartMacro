@@ -29,6 +29,15 @@ public sealed record StepTestResult(
 
     /// <summary>True when the amber "almost matched here" reticle should be shown.</summary>
     public bool ShowNearMiss => !Passed && !NearMiss.IsEmpty && NearMissConfidence >= NearMissFlashThreshold;
+
+    /// <summary>All matching rectangles found on screen during the test look.</summary>
+    public IReadOnlyList<ScreenRect>? AllMatches { get; init; }
+
+    /// <summary>Total number of matches found on screen during the test look.</summary>
+    public int MatchCount => AllMatches is { Count: > 0 } list ? list.Count : (Passed ? 1 : 0);
+
+    /// <summary>Total number of OCR words read across the searched screen area.</summary>
+    public int TotalWordsOnScreen { get; init; }
 }
 
 /// <summary>
@@ -88,9 +97,18 @@ public static class StepTester
 
         if (probe.Found)
         {
-            var text = $"🧪 Test Passed: Found at ({probe.X}, {probe.Y}) · {Percent(probe.Confidence)} confidence · {TargetDetection.FormatMs(probe.ElapsedMs)}{condition}";
+            var multiNote = probe.MatchCount > 1
+                ? (probe.TotalWordsOnScreen > 0
+                    ? $" ({probe.MatchCount} matches in {probe.TotalWordsOnScreen:N0} words)"
+                    : $" ({probe.MatchCount} matches)")
+                : string.Empty;
+            var text = $"🧪 Test Passed: Found at ({probe.X}, {probe.Y}){multiNote} · {Percent(probe.Confidence)} confidence · {TargetDetection.FormatMs(probe.ElapsedMs)}{condition}";
             return new StepTestResult(true, text, probe.Match, probe.Confidence, probe.ElapsedMs, probe.Match, probe.Confidence,
-                probe.RequiredConfidence, conditionIsTrue);
+                probe.RequiredConfidence, conditionIsTrue)
+            {
+                AllMatches = probe.AllMatches,
+                TotalWordsOnScreen = probe.TotalWordsOnScreen,
+            };
         }
 
         string failed;

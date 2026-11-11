@@ -11,22 +11,43 @@ namespace SmartMacro.Views;
 
 public partial class SettingsView : UserControl
 {
+    private bool _hasPlayedInitialChoreography;
+
     public SettingsView()
     {
         InitializeComponent();
         Loaded += OnLoaded;
+        Unloaded += (_, _) => HotkeyService.SuppressGlobalHotkeys = false;
         IsVisibleChanged += OnIsVisibleChanged;
     }
 
     private void OnLoaded(object sender, RoutedEventArgs e)
     {
-        PlayOpeningChoreography();
+        if (IsVisible && !_hasPlayedInitialChoreography)
+        {
+            _hasPlayedInitialChoreography = true;
+            PlayOpeningChoreography();
+        }
     }
 
     private void OnIsVisibleChanged(object sender, DependencyPropertyChangedEventArgs e)
     {
-        if (e.NewValue is true && IsLoaded)
-            PlayOpeningChoreography();
+        if (e.NewValue is not true)
+        {
+            HotkeyService.SuppressGlobalHotkeys = false;
+        }
+        else if (IsLoaded)
+        {
+            if (!_hasPlayedInitialChoreography)
+            {
+                _hasPlayedInitialChoreography = true;
+                PlayOpeningChoreography();
+            }
+            else
+            {
+                PlayBannerShowcaseAnimation();
+            }
+        }
     }
 
     /// <summary>
@@ -165,9 +186,20 @@ public partial class SettingsView : UserControl
         PlayBannerShowcaseAnimation();
     }
 
+    private void HotkeyBox_GotKeyboardFocus(object sender, KeyboardFocusChangedEventArgs e)
+    {
+        HotkeyService.SuppressGlobalHotkeys = true;
+    }
+
+    private void HotkeyBox_LostKeyboardFocus(object sender, KeyboardFocusChangedEventArgs e)
+    {
+        HotkeyService.SuppressGlobalHotkeys = false;
+    }
+
     // Records the key combination pressed while a shortcut box has focus.
     private void HotkeyBox_PreviewKeyDown(object sender, KeyEventArgs e)
     {
+        HotkeyService.SuppressGlobalHotkeys = true;
         if (sender is not TextBox { Tag: string which } || DataContext is not SettingsViewModel vm) return;
 
         var key = e.Key == Key.System ? e.SystemKey : e.Key;

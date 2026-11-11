@@ -1,6 +1,38 @@
+using System.Runtime.Intrinsics;
+using System.Runtime.Intrinsics.X86;
 using SmartMacro.Core.Ocr;
 
 namespace SmartMacro.Core.Vision;
+
+/// <summary>
+/// Reports the active CPU SIMD vision tier (AVX2 256-bit, SSE2/Vector128 128-bit, or Scalar) and adaptive worker thread budget
+/// so SmartMacro scales cleanly from 2-core budget laptops and ARM64 devices up to 6-core Ryzen 5 and 16-core Ryzen 9 / Core i9 desktops.
+/// </summary>
+public static class HardwareAccelerationInfo
+{
+    public static bool IsAvx2Supported => Avx2.IsSupported;
+
+    public static bool IsSse2Supported => Sse2.IsSupported;
+
+    public static bool IsVector128Accelerated => Vector128.IsHardwareAccelerated;
+
+    public static int LogicalProcessorCount => Math.Max(1, Environment.ProcessorCount);
+
+    /// <summary>
+    /// Reserves at least 1 logical processor for the foreground game / OS and caps vision worker threads at 8
+    /// so neither 2-core budget PCs nor 16-core high-end desktops suffer thread-pool contention.
+    /// </summary>
+    public static int MaxVisionWorkers => Math.Clamp(LogicalProcessorCount - 1, 1, 8);
+
+    public static string SimdTierName =>
+        Avx2.IsSupported ? "AVX2 256-bit SIMD (8 px/op + SSE2 4 px tail)"
+        : Sse2.IsSupported ? "SSE2 128-bit SIMD (4 px/op)"
+        : Vector128.IsHardwareAccelerated ? "Vector128 128-bit SIMD"
+        : "Scalar fallback";
+
+    public static string StatusText =>
+        $"Vision hardware acceleration: {SimdTierName} · {LogicalProcessorCount} logical cores (up to {MaxVisionWorkers} vision worker(s)).";
+}
 
 /// <summary>
 /// Takes pictures of the screen. The real version (WPF project) uses Windows GDI; tests use a fake.
@@ -17,6 +49,14 @@ public interface IScreenCapture
     /// Throws <see cref="ArgumentException"/> if the area is completely off screen.
     /// </summary>
     Task<ScreenFrame> CaptureAsync(ScreenRect region, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Captures <paramref name="region"/> from a specific top-level window (<paramref name="windowHandle"/>) when possible
+    /// (e.g. via DWM <c>PrintWindow(PW_RENDERFULLCONTENT)</c> when another window is in front of it), falling back to
+    /// <see cref="CaptureAsync"/>.
+    /// </summary>
+    Task<ScreenFrame> CaptureWindowAsync(long windowHandle, ScreenRect region, CancellationToken cancellationToken) =>
+        CaptureAsync(region, cancellationToken);
 
     /// <summary>
     /// True when capturing a small rectangle is much cheaper than capturing a whole search area (the real GDI capture

@@ -99,6 +99,17 @@
     <SolidColorBrush x:Key="PlayBrush" Color="#2563EB" />
     <SolidColorBrush x:Key="PlayHoverBrush" Color="#3B82F6" />
 
+    <!-- Studio X Ultra semantic aliases (used by new tactile controls, inspector cards, and popups) -->
+    <SolidColorBrush x:Key="BrandPrimaryBrush" Color="{StaticResource AccentColor}" />
+    <SolidColorBrush x:Key="BrandRecordBrush" Color="#EF4444" />
+    <SolidColorBrush x:Key="TextPrimaryBrush" Color="{StaticResource TextColor}" />
+    <SolidColorBrush x:Key="TextSecondaryBrush" Color="{StaticResource MutedTextColor}" />
+    <SolidColorBrush x:Key="TextMutedBrush" Color="{StaticResource SubtleTextColor}" />
+    <SolidColorBrush x:Key="SurfaceRecessedBrush" Color="#0D131F" />
+    <SolidColorBrush x:Key="SurfaceElevatedBrush" Color="#172033" />
+    <SolidColorBrush x:Key="BorderSubtleBrush" Color="#243045" />
+    <SolidColorBrush x:Key="BorderStrongBrush" Color="#334155" />
+
     <!-- Category accent / badge brushes. StepCategoryBrushConverter looks them up as "{Category}AccentBrush",
          "{Category}BadgeBrush" and "{Category}SoftBrush" (15 % of the accent, for tints). -->
     <SolidColorBrush x:Key="InputAccentBrush" Color="{StaticResource InputAccentColor}" />
@@ -127,11 +138,13 @@
     <SolidColorBrush x:Key="MemorySoftBrush" Color="#2614B8A6" />
 
     <!-- Monospace font for coordinates, telemetry, variables, and logs -->
-    <FontFamily x:Key="MonoFont">Cascadia Code, Cascadia Mono, Consolas</FontFamily>
+    <FontFamily x:Key="MonoFont">Cascadia Code, Cascadia Mono, Consolas, Segoe UI, Segoe Fluent Icons, Segoe MDL2 Assets, Segoe UI Emoji, Segoe UI Symbol</FontFamily>
+    <FontFamily x:Key="FontFamilyMono">Cascadia Code, Cascadia Mono, Consolas, Segoe UI, Segoe Fluent Icons, Segoe MDL2 Assets, Segoe UI Emoji, Segoe UI Symbol</FontFamily>
 
-    <!-- Fallback chain: any character the icon fonts don't have (▶, ✕, ↑ …) falls back to Segoe UI Symbol / Segoe UI
-         instead of rendering as an empty ▯ box. -->
-    <FontFamily x:Key="IconFont">Segoe Fluent Icons, Segoe MDL2 Assets, Segoe UI Symbol, Segoe UI</FontFamily>
-    <FontFamily x:Key="UiFont">Segoe UI Variable Text, Segoe UI</FontFamily>
+    <!-- Fallback chain: Segoe UI (Symbol=False, 0 PUA glyphs) MUST precede Segoe Fluent Icons / Segoe MDL2 Assets
+         (Symbol=True) so WPF keeps Unicode fallback active for both PUA icons (U+E700..U+F8FF) and emojis/symbols
+         instead of rendering non-PUA glyphs as empty ▯ / ▯▯ boxes. -->
+    <FontFamily x:Key="IconFont">Segoe UI, Segoe Fluent Icons, Segoe MDL2 Assets, Segoe UI Emoji, Segoe UI Symbol</FontFamily>
+    <FontFamily x:Key="UiFont">Segoe UI Variable Text, Segoe UI, Segoe Fluent Icons, Segoe MDL2 Assets, Segoe UI Emoji, Segoe UI Symbol</FontFamily>
 
 </ResourceDictionary>

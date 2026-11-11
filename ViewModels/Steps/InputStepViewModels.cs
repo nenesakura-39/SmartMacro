@@ -307,7 +307,7 @@ public sealed class MouseClickStepViewModel : StepViewModel
     // ---------------- 🎯 Test Smart-Aim & 🧭 Locate Target ----------------
 
     private IVisionTools? _visionTools;
-    private bool _testingSmartAim;
+    private bool _testingSmartAim; public string BackgroundWindowTitle { get => _step.BackgroundWindowTitle ?? string.Empty; set { var normalized = string.IsNullOrWhiteSpace(value) ? null : value.Trim(); if (_step.BackgroundWindowTitle == normalized) return; _step.BackgroundWindowTitle = normalized; NotifyChanged(); } }
     private string? _smartAimTestResult;
 
     /// <summary>Screen tools from the editor (set right after the step editor is created).</summary>
@@ -1010,6 +1010,18 @@ public sealed class KeyPressStepViewModel : StepViewModel
         ? $"VK 0x{_step.VirtualKey:X2} · ScanCode 0x{_step.ScanCode:X2}{(_step.Extended ? " (Extended E0)" : "")}"
         : $"VK 0x{_step.VirtualKey:X2} · Standard Virtual-Key";
 
+    public string BackgroundWindowTitle
+    {
+        get => _step.BackgroundWindowTitle ?? string.Empty;
+        set
+        {
+            var normalized = string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+            if (_step.BackgroundWindowTitle == normalized) return;
+            _step.BackgroundWindowTitle = normalized;
+            NotifyChanged();
+        }
+    }
+
     public int ScanCode
     {
         get => _step.ScanCode;
@@ -1125,7 +1137,6 @@ public sealed class KeyPressStepViewModel : StepViewModel
         _step.Modifiers = updated;
         OnPropertyChanged(nameof(KeycapDisplayText));
         NotifyChanged(propertyName);
-        NotifyChanged(propertyName);
     }
 }
 
@@ -1133,7 +1144,31 @@ public sealed class TypeTextStepViewModel : StepViewModel
 {
     private readonly TypeTextStep _step;
 
-    public TypeTextStepViewModel(TypeTextStep step) : base(step) => _step = step;
+    public TypeTextStepViewModel(TypeTextStep step) : base(step)
+    {
+        _step = step;
+        InsertVariableTokenCommand = new RelayCommand(p =>
+        {
+            var token = p as string;
+            if (string.IsNullOrWhiteSpace(token)) token = "{value}";
+            else if (!token.StartsWith('{')) token = $"{{{token}}}";
+            Text = string.IsNullOrEmpty(Text) ? token : $"{Text}{token}";
+        });
+    }
+
+    public string BackgroundWindowTitle
+    {
+        get => _step.BackgroundWindowTitle ?? string.Empty;
+        set
+        {
+            var normalized = string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+            if (_step.BackgroundWindowTitle == normalized) return;
+            _step.BackgroundWindowTitle = normalized;
+            NotifyChanged();
+        }
+    }
+
+    public RelayCommand InsertVariableTokenCommand { get; }
 
     public string Text
     {

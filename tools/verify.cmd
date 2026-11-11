@@ -4,6 +4,7 @@ rem - Stops (and skips the tests) if the build fails, so old test DLLs are never
 rem - Exit code: 0 = build and tests passed, otherwise the failing step's exit code.
 rem - Logs: artifacts\build.log, artifacts\test.log and artifacts\test-results.trx
 setlocal
+chcp 65001 >nul
 cd /d "%~dp0.."
 if not exist artifacts mkdir artifacts
 

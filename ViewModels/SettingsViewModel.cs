@@ -25,6 +25,7 @@ public sealed class SettingsViewModel : ObservableObject
     private bool _minimizeDuringRun;
     private bool _showRunOverlay;
     private bool _minimizeToTrayOnClose;
+    private bool _startWithWindows;
     private bool _autoSwitchProfileByWindow = true;
     private bool _recordMouseMovement;
     private RecordingMode _recordingMode;
@@ -35,6 +36,7 @@ public sealed class SettingsViewModel : ObservableObject
     private bool _captureClickSnapshots = true;
     private bool _captureClickIntent = true;
     private bool _smartTimingOnRecord = true;
+    private bool _coalesceTypedTextOnRecord = true;
     private bool _smoothMouseMoves;
     private StudioTheme _theme = StudioTheme.ObsidianNeon;
     private StudioAccent _accent = StudioAccent.NeonBrand;
@@ -72,6 +74,9 @@ public sealed class SettingsViewModel : ObservableObject
             PauseHotkey = HotkeyBinding.DefaultPause;
         });
         CopyDiagnosticsCommand = new RelayCommand(CopyDiagnostics);
+        ExportBackupCommand = new AsyncRelayCommand(ExportBackupAsync, ex => _log.Error("Backup export failed.", ex));
+        RestoreBackupCommand = new AsyncRelayCommand(RestoreBackupAsync, ex => _log.Error("Backup restore failed.", ex));
+        CheckForUpdatesCommand = new RelayCommand(CheckForUpdates);
         SetAccentCommand = new RelayCommand(p =>
         {
             if (p is StudioAccent accent) Accent = accent;
@@ -80,6 +85,15 @@ public sealed class SettingsViewModel : ObservableObject
     }
 
     public RelayCommand SetAccentCommand { get; }
+    public AsyncRelayCommand ExportBackupCommand { get; }
+    public AsyncRelayCommand RestoreBackupCommand { get; }
+    public RelayCommand CheckForUpdatesCommand { get; }
+
+    /// <summary>Optional delegate wired by <see cref="MainViewModel"/> to export all library macros + settings into a <c>.smbackup</c> archive.</summary>
+    public Func<Task>? ExportStudioBackupHandler { get; set; }
+
+    /// <summary>Optional delegate wired by <see cref="MainViewModel"/> to restore a <c>.smbackup</c> archive.</summary>
+    public Func<Task>? RestoreStudioBackupHandler { get; set; }
 
     // ---- Studio X Appearance & Motion ----
     public static IReadOnlyList<Choice<StudioTheme>> ThemeChoices { get; } = new[]
@@ -219,9 +233,21 @@ public sealed class SettingsViewModel : ObservableObject
     {
         switch (which)
         {
-            case "Record": RecordHotkey = binding; break;
-            case "Play": PlayHotkey = binding; break;
-            case "Pause": PauseHotkey = binding; break;
+            case "Record":
+                if (_playHotkey == binding && _recordHotkey != binding) _playHotkey = _recordHotkey;
+                else if (_pauseHotkey == binding && _recordHotkey != binding) _pauseHotkey = _recordHotkey;
+                RecordHotkey = binding;
+                break;
+            case "Play":
+                if (_recordHotkey == binding && _playHotkey != binding) _recordHotkey = _playHotkey;
+                else if (_pauseHotkey == binding && _playHotkey != binding) _pauseHotkey = _playHotkey;
+                PlayHotkey = binding;
+                break;
+            case "Pause":
+                if (_recordHotkey == binding && _pauseHotkey != binding) _recordHotkey = _pauseHotkey;
+                else if (_playHotkey == binding && _pauseHotkey != binding) _playHotkey = _pauseHotkey;
+                PauseHotkey = binding;
+                break;
         }
     }
 
@@ -256,6 +282,9 @@ public sealed class SettingsViewModel : ObservableObject
     public string OcrStatus { get; }
 
     public bool IsOcrAvailable { get; }
+
+    /// <summary>Hardware SIMD &amp; CPU worker telemetry shown on the Settings page.</summary>
+    public string HardwareAccelerationStatus => SmartMacro.Core.Vision.HardwareAccelerationInfo.StatusText;
 
     public AsyncRelayCommand SaveCommand { get; }
     public RelayCommand RevertCommand { get; }
@@ -304,6 +333,12 @@ public sealed class SettingsViewModel : ObservableObject
     {
         get => _minimizeToTrayOnClose;
         set { if (SetProperty(ref _minimizeToTrayOnClose, value)) IsDirty = true; }
+    }
+
+    public bool StartWithWindows
+    {
+        get => _startWithWindows;
+        set { if (SetProperty(ref _startWithWindows, value)) IsDirty = true; }
     }
 
     public bool AutoSwitchProfileByWindow
@@ -432,6 +467,13 @@ public sealed class SettingsViewModel : ObservableObject
         set { if (SetProperty(ref _smartTimingOnRecord, value)) IsDirty = true; }
     }
 
+    /// <summary>"Smart Typing: group typed words &amp; sentences into 'Type text' steps".</summary>
+    public bool CoalesceTypedTextOnRecord
+    {
+        get => _coalesceTypedTextOnRecord;
+        set { if (SetProperty(ref _coalesceTypedTextOnRecord, value)) IsDirty = true; }
+    }
+
     /// <summary>"Smooth mouse movement during playback" (glide instead of jumping).</summary>
     public bool SmoothMouseMoves
     {
@@ -463,6 +505,16 @@ public sealed class SettingsViewModel : ObservableObject
         _apply(_saved.Clone());
     }
 
+    public async Task ApplyRestoredSettingsAsync(AppSettings restored)
+    {
+        ArgumentNullException.ThrowIfNull(restored);
+        restored.Sanitize();
+        await _store.SaveAsync(restored);
+        _saved = restored.Clone();
+        LoadFrom(_saved);
+        _apply(_saved.Clone());
+    }
+
     private void LoadFrom(AppSettings settings)
     {
         _confirmBeforeDelete = settings.ConfirmBeforeDelete;
@@ -471,6 +523,7 @@ public sealed class SettingsViewModel : ObservableObject
         _minimizeDuringRun = settings.MinimizeDuringRun;
         _showRunOverlay = settings.ShowRunOverlay;
         _minimizeToTrayOnClose = settings.MinimizeToTrayOnClose;
+        _startWithWindows = settings.StartWithWindows;
         _autoSwitchProfileByWindow = settings.AutoSwitchProfileByWindow;
         _recordMouseMovement = settings.RecordMouseMovement;
         _recordingMode = settings.RecordingMode;
@@ -481,6 +534,7 @@ public sealed class SettingsViewModel : ObservableObject
         _captureClickSnapshots = settings.CaptureClickSnapshots;
         _captureClickIntent = settings.CaptureClickIntent;
         _smartTimingOnRecord = settings.SmartTimingOnRecord;
+        _coalesceTypedTextOnRecord = settings.CoalesceTypedTextOnRecord;
         _smoothMouseMoves = settings.SmoothMouseMoves;
         _theme = settings.Theme;
         _accent = settings.Accent;
@@ -507,6 +561,7 @@ public sealed class SettingsViewModel : ObservableObject
             MinimizeDuringRun = MinimizeDuringRun,
             ShowRunOverlay = ShowRunOverlay,
             MinimizeToTrayOnClose = MinimizeToTrayOnClose,
+            StartWithWindows = StartWithWindows,
             AutoSwitchProfileByWindow = AutoSwitchProfileByWindow,
             ProfileRules = _saved.ProfileRules is null ? null : new List<MacroProfileRule>(_saved.ProfileRules),
             RecordMouseMovement = RecordMouseMovement,
@@ -518,6 +573,7 @@ public sealed class SettingsViewModel : ObservableObject
             CaptureClickSnapshots = CaptureClickSnapshots,
             CaptureClickIntent = CaptureClickIntent,
             SmartTimingOnRecord = SmartTimingOnRecord,
+            CoalesceTypedTextOnRecord = CoalesceTypedTextOnRecord,
             SmoothMouseMoves = SmoothMouseMoves,
             ShowOverlaysInObsAndRecording = _saved.ShowOverlaysInObsAndRecording, // saved on its own when toggled
             Theme = Theme,
@@ -594,6 +650,26 @@ public sealed class SettingsViewModel : ObservableObject
         {
             _log.Error("Could not open the data folder.", ex);
             _dialogs.ShowError("Could not open folder", ex.Message);
+        }
+    }
+
+    private Task ExportBackupAsync() =>
+        ExportStudioBackupHandler is not null ? ExportStudioBackupHandler() : Task.CompletedTask;
+
+    private Task RestoreBackupAsync() =>
+        RestoreStudioBackupHandler is not null ? RestoreStudioBackupHandler() : Task.CompletedTask;
+
+    private void CheckForUpdates()
+    {
+        try
+        {
+            _setStatus($"SmartMacro Studio {AppInfo.Version} — opening official release channel…", StatusKind.Info);
+            Process.Start(new ProcessStartInfo("https://discord.gg/CKBk5KnGmk") { UseShellExecute = true });
+        }
+        catch (Exception ex)
+        {
+            _log.Warning("Could not open release page.", ex);
+            _setStatus($"You are running {AppInfo.Name} {AppInfo.Version}.", StatusKind.Info);
         }
     }
 }

@@ -29,6 +29,7 @@ public static class StepDescriber
         StepKind.SetVariable => "Set variable",
         StepKind.Checkpoint => "Checkpoint",
         StepKind.CallMacro => "Call sub-macro",
+        StepKind.FlowControl => "Flow control",
         _ => kind.ToString(),
     };
 
@@ -39,8 +40,8 @@ public static class StepDescriber
         MouseMoveStep m => $"{DescribeMoveTarget(m)}{MotionSuffix(m.MoveStyle, m.MoveDurationMs)}",
         MouseClickStep c => DescribeClick(c),
         MouseScrollStep s => $"Scroll {ScrollDirection(s)} {Notches(s.Delta)} {Where(s.UseCurrentPosition, s.X, s.Y)}",
-        KeyPressStep k => $"{KeyVerb(k.Action)} {KeyCombo(k)}{Hold(k.Action == KeyAction.Press, k.HoldMs)}",
-        TypeTextStep t => $"Type \"{Preview(t.Text)}\"",
+        KeyPressStep k => $"{KeyVerb(k.Action)} {KeyCombo(k)}{Hold(k.Action == KeyAction.Press, k.HoldMs)}{(k.SendInBackground ? $" · 👻 Background (\"{Preview(k.BackgroundWindowTitle)}\")" : "")}",
+        TypeTextStep t => $"Type \"{Preview(t.Text)}\"{(t.SendInBackground ? $" · 👻 Background (\"{Preview(t.BackgroundWindowTitle)}\")" : "")}",
         FindTextStep f => DescribeSearch(f, $"\"{Preview(f.Text)}\""),
         FindImageStep i => DescribeSearch(i, i.TemplateWidth > 0
             ? $"image ({i.TemplateWidth}×{i.TemplateHeight}{(i.AllowMultiScale ? ", multi-scale" : "")})"
@@ -59,8 +60,21 @@ public static class StepDescriber
         SetVariableStep v => DescribeSetVariable(v),
         CheckpointStep cp => $"🏁 Checkpoint \"{Preview(cp.Name)}\"",
         CallMacroStep call => DescribeCallMacro(call),
+        FlowControlStep fc => DescribeFlowControl(fc),
         _ => step.GetType().Name,
     };
+
+    private static string DescribeFlowControl(FlowControlStep fc)
+    {
+        var label = fc.Action switch
+        {
+            FlowControlAction.ExitLoop => "⏹ Break loop (exit innermost Repeat)",
+            FlowControlAction.ContinueLoop => "⏭ Continue loop (next turn)",
+            FlowControlAction.StopMacro => "🛑 Stop macro",
+            _ => fc.Action.ToString(),
+        };
+        return string.IsNullOrWhiteSpace(fc.Message) ? label : $"{label} — \"{Preview(fc.Message)}\"";
+    }
 
     private static string DescribeSetVariable(SetVariableStep v)
     {
@@ -74,22 +88,34 @@ public static class StepDescriber
             VariableSourceKind.ClipboardText => "clipboard text",
             VariableSourceKind.LastFoundX => "last found X",
             VariableSourceKind.LastFoundY => "last found Y",
+            VariableSourceKind.LastMatchCount => "last match count",
+            VariableSourceKind.LastOcrWordCount => "last OCR word count",
             VariableSourceKind.LoopCounter => "loop counter",
             VariableSourceKind.ElapsedSeconds => "elapsed seconds",
+            VariableSourceKind.RandomNumber => $"random ({(string.IsNullOrWhiteSpace(v.Value) ? "1..100" : Preview(v.Value))})",
+            VariableSourceKind.ActiveWindowTitle => "active window title",
+            VariableSourceKind.CurrentTimeText => $"current time ({(string.IsNullOrWhiteSpace(v.Value) ? "HH:mm:ss" : Preview(v.Value))})",
+            VariableSourceKind.SystemAudioPeakPercent => "system audio peak %",
+            VariableSourceKind.Formula => $"formula ({Preview(v.Value)})",
             _ => $"\"{Preview(v.Value)}\"",
         };
 
-        return v.Operation switch
+        var clip = v.CopyResultToClipboard ? " → clipboard" : "";
+        return (v.Operation switch
         {
             VariableOperation.Add => $"Add {source} to {name}",
             VariableOperation.Subtract => $"Subtract {source} from {name}",
+            VariableOperation.Multiply => $"Multiply {name} by {source}",
+            VariableOperation.Divide => $"Divide {name} by {source}",
+            VariableOperation.Modulo => $"Set {name} = {name} mod {source}",
+            VariableOperation.Round => $"Round {name} ({source} decimals)",
             VariableOperation.AppendText => $"Append {source} to {name}",
             VariableOperation.TrimText => $"Set {name} = Trim({source})",
             VariableOperation.ExtractDigits => $"Set {name} = Digits({source})",
             VariableOperation.ToUpper => $"Set {name} = Upper({source})",
             VariableOperation.ToLower => $"Set {name} = Lower({source})",
             _ => $"Set {name} = {source}",
-        };
+        }) + clip;
     }
 
     private static string DescribeCallMacro(CallMacroStep call)
@@ -145,7 +171,12 @@ public static class StepDescriber
             _ => "the main monitor",
         };
         var folder = string.IsNullOrWhiteSpace(s.FolderPath) ? $"Pictures\\{Vision.ScreenshotFiles.DefaultFolderName}" : s.FolderPath.Trim();
-        return $"Save a screenshot of {what} as {Vision.ScreenshotFiles.CleanPrefix(s.FileNamePrefix)}_….png in {folder}";
+        var extras = new List<string>();
+        if (s.SoundCue != SoundCueKind.None) extras.Add($"🔊 {s.SoundCue}");
+        if (!string.IsNullOrWhiteSpace(s.NotificationMessage)) extras.Add($"🔔 \"{Preview(s.NotificationMessage)}\"");
+        if (!string.IsNullOrWhiteSpace(s.WebhookUrl)) extras.Add("🌐 webhook");
+        var suffix = extras.Count > 0 ? $" ({string.Join(", ", extras)})" : "";
+        return $"Save a screenshot of {what} as {Vision.ScreenshotFiles.CleanPrefix(s.FileNamePrefix)}_….png in {folder}{suffix}";
     }
 
     private static string DescribeDelay(DelayStep d)
@@ -186,11 +217,12 @@ public static class StepDescriber
             }
         }
 
+        var bgBadge = c.SendInBackground ? $" · 👻 Background (\"{Preview(c.BackgroundWindowTitle)}\")" : "";
         return c.Action switch
         {
-            MouseClickAction.Hold => $"Hold {button} for {c.HoldMs} ms {where}{motion}{smartBadge}",
+            MouseClickAction.Hold => $"Hold {button} for {c.HoldMs} ms {where}{motion}{smartBadge}{bgBadge}",
             MouseClickAction.Drag => $"Drag {button} from {(c.UseLastFoundText ? lastFound : c.UseCurrentPosition ? "the cursor" : $"({c.X}, {c.Y})")} to ({c.EndX}, {c.EndY}) over {c.DragDurationMs / 1000.0:0.##} s",
-            _ => $"{ClickVerb(c.Action)} {button} {where}{Hold(c.Action == MouseClickAction.Click, c.HoldMs)}{motion}{smartBadge}",
+            _ => $"{ClickVerb(c.Action)} {button} {where}{Hold(c.Action == MouseClickAction.Click, c.HoldMs)}{motion}{smartBadge}{bgBadge}",
         };
     }
 
@@ -255,6 +287,13 @@ public static class StepDescriber
             CallMacroStep call => string.IsNullOrWhiteSpace(call.TargetMacroName)
                 ? "Calling sub-macro"
                 : $"Calling \"{Preview(call.TargetMacroName)}\"",
+            FlowControlStep fc => fc.Action switch
+            {
+                FlowControlAction.ExitLoop => "Breaking out of Repeat loop",
+                FlowControlAction.ContinueLoop => "Continuing to next Repeat turn",
+                FlowControlAction.StopMacro => "Stopping macro",
+                _ => "Flow control",
+            },
             _ => DisplayName(step.Kind),
         };
     }
@@ -295,9 +334,16 @@ public static class StepDescriber
             var action = f.Action switch
             {
                 FoundTextAction.Click => $"{move}{offset} and left-clicks ({f.ClickHoldMs} ms hold), then waits {f.PostActionDelayMs} ms",
+                FoundTextAction.HoverThenClick => $"{move}{offset}, hovers briefly, and left-clicks ({f.ClickHoldMs} ms hold)",
                 FoundTextAction.DoubleClick => $"{move}{offset} and double-clicks ({f.DoubleClickIntervalMs} ms apart), then waits {f.PostActionDelayMs} ms",
                 FoundTextAction.RightClick => $"{move}{offset} and right-clicks, then waits {f.PostActionDelayMs} ms",
+                FoundTextAction.MiddleClick => $"{move}{offset} and middle-clicks, then waits {f.PostActionDelayMs} ms",
                 FoundTextAction.Hold => $"{move}{offset} and holds the left button for {f.ActionHoldMs} ms, then waits {f.PostActionDelayMs} ms",
+                FoundTextAction.PressKey => $"presses {VirtualKeys.GetName(f.FoundVirtualKey <= 0 ? 0x20 : f.FoundVirtualKey)}",
+                FoundTextAction.ClickAndPressKey => $"{move}{offset}, left-clicks, and presses {VirtualKeys.GetName(f.FoundVirtualKey <= 0 ? 0x20 : f.FoundVirtualKey)}",
+                FoundTextAction.ClickAndTypeText => $"{move}{offset}, left-clicks, and types \"{Preview(f.FoundTextToType)}\"",
+                FoundTextAction.ScrollUp => $"{move}{offset} and scrolls wheel up ({Math.Max(1, f.FoundScrollClicks)} clicks)",
+                FoundTextAction.ScrollDown => $"{move}{offset} and scrolls wheel down ({Math.Max(1, f.FoundScrollClicks)} clicks)",
                 FoundTextAction.Move => $"{move}{offset} (no click)",
                 _ => "just continues with the next step",
             };
@@ -318,6 +364,18 @@ public static class StepDescriber
         };
 
         var v2Notes = new List<string>();
+        if (f.TargetSelection == SearchMatchMode.AllMatches)
+            v2Notes.Add(f.Action == FoundTextAction.None ? "finds & counts all occurrences" : $"acts on all occurrences ({f.MatchOrder}, {f.BetweenMatchesDelayMs} ms gap)");
+        else if (f.TargetSelection == SearchMatchMode.ReadingOrderNth)
+            v2Notes.Add($"picks match #{f.EffectiveTargetMatchIndex} in reading order");
+        else if (f.TargetSelection == SearchMatchMode.RandomMatch)
+            v2Notes.Add("picks a random match");
+        else if (f.TargetSelection == SearchMatchMode.NearestToCursor)
+            v2Notes.Add("picks match nearest cursor");
+        if (f.EffectiveMinMatchCount > 1)
+            v2Notes.Add($"requires ≥{f.EffectiveMinMatchCount} matches");
+        if (!string.IsNullOrWhiteSpace(f.CountVariableName))
+            v2Notes.Add($"stores count in {{{f.CountVariableName.Trim()}}}");
         if (f.TrackTarget) v2Notes.Add(f.PredictiveClick ? "tracks velocity + predictive lead click" : "tracks moving target");
         if (f.ConfirmFrames > 1) v2Notes.Add($"confirms across {f.ConfirmFrames} frames");
         if (f is FindImageStep { MinVisiblePercent: > 0 and < 100 } fi) v2Notes.Add($"occlusion-tolerant ({fi.MinVisiblePercent}% visible)");
@@ -419,6 +477,16 @@ public static class StepDescriber
 
     /// <summary>E.g. "\"OK\" is on screen", "the image (40×30) is not in area (…)", plus the wait time if any.</summary>
     public static string DescribeCondition(Condition? condition)
+    {
+        if (condition is null) return "(no condition yet)";
+        var first = DescribeSingleCondition(condition);
+        if (!condition.HasSecondCondition || condition.SecondCondition is not { } second)
+            return first;
+        var opWord = condition.SecondCombinator == ConditionCombinator.And ? "AND" : "OR";
+        return $"{first} {opWord} {DescribeSingleCondition(second)}";
+    }
+
+    public static string DescribeSingleCondition(Condition? condition)
     {
         if (condition is null) return "(no condition yet)";
         if (condition.Kind == ConditionKind.VariableCompare && condition.Comparison is { } comp)
@@ -612,7 +680,22 @@ public static class StepDescriber
             StepFailureAction.RestartFromCheckpoint => $"; → checkpoint \"{Preview(f.FailurePolicy?.CheckpointName)}\"",
             _ => "",
         };
-        return $"Find {what} {where} → {FoundActionText(f.Action, f.OffsetX, f.OffsetY, f.ActionHoldMs)} when found ({wait}{notFound})";
+
+        var prefix = f.TargetSelection switch
+        {
+            SearchMatchMode.AllMatches => "Find all",
+            SearchMatchMode.ReadingOrderNth => $"Find #{f.EffectiveTargetMatchIndex}",
+            SearchMatchMode.RandomMatch => "Find random",
+            SearchMatchMode.NearestToCursor => "Find nearest",
+            _ => "Find",
+        };
+        var minGate = f.EffectiveMinMatchCount > 1 ? $" (≥{f.EffectiveMinMatchCount})" : "";
+        var countStore = !string.IsNullOrWhiteSpace(f.CountVariableName) ? $" [count → {{{f.CountVariableName.Trim()}}}]" : "";
+        var actionDesc = f.TargetSelection == SearchMatchMode.AllMatches && f.Action != FoundTextAction.None
+            ? $"{FoundActionText(f.Action, f.OffsetX, f.OffsetY, f.ActionHoldMs)} on each match"
+            : FoundActionText(f.Action, f.OffsetX, f.OffsetY, f.ActionHoldMs);
+
+        return $"{prefix} {what}{minGate} {where} → {actionDesc} when found{countStore} ({wait}{notFound})";
     }
 
     private static string ClickVerb(MouseClickAction action) => action switch

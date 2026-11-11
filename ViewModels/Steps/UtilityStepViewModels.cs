@@ -324,6 +324,7 @@ public sealed class ScreenshotStepViewModel : StepViewModel
         ChooseFolderCommand = new RelayCommand(ChooseFolder);
         UseDefaultFolderCommand = new RelayCommand(() => FolderPath = string.Empty);
         OpenFolderCommand = new RelayCommand(OpenFolder);
+        TestSoundCueCommand = new RelayCommand(() => Services.Audio.StudioSoundCuePlayer.Play(_step.SoundCue), () => _step.SoundCue != SoundCueKind.None);
     }
 
     public IVisionTools? Tools
@@ -351,6 +352,15 @@ public sealed class ScreenshotStepViewModel : StepViewModel
     public RelayCommand ChooseFolderCommand { get; }
     public RelayCommand UseDefaultFolderCommand { get; }
     public RelayCommand OpenFolderCommand { get; }
+    public RelayCommand TestSoundCueCommand { get; }
+
+    public static IReadOnlyList<Choice<SoundCueKind>> SoundCueChoices { get; } = new[]
+    {
+        new Choice<SoundCueKind>(SoundCueKind.None, "Silent (no sound cue)"),
+        new Choice<SoundCueKind>(SoundCueKind.SuccessChime, "🔔 Success Chime (rising two-tone)"),
+        new Choice<SoundCueKind>(SoundCueKind.SoftBell, "🎵 Soft Bell (warm harmonic ping)"),
+        new Choice<SoundCueKind>(SoundCueKind.DoubleBeep, "🔊 Double Beep (crisp confirmation)"),
+    };
 
     public ObservableCollection<string> WindowTitles { get; } = new();
 
@@ -459,6 +469,42 @@ public sealed class ScreenshotStepViewModel : StepViewModel
     }
 
     public string ExampleFileName => ScreenshotFiles.FileName(_step.FileNamePrefix, DateTime.Now);
+
+    public SoundCueKind SoundCue
+    {
+        get => _step.SoundCue;
+        set
+        {
+            if (_step.SoundCue == value) return;
+            _step.SoundCue = value;
+            NotifyChanged();
+            System.Windows.Input.CommandManager.InvalidateRequerySuggested();
+        }
+    }
+
+    public string NotificationMessage
+    {
+        get => _step.NotificationMessage ?? string.Empty;
+        set
+        {
+            var normalized = string.IsNullOrWhiteSpace(value) ? null : value;
+            if (_step.NotificationMessage == normalized) return;
+            _step.NotificationMessage = normalized;
+            NotifyChanged();
+        }
+    }
+
+    public string WebhookUrl
+    {
+        get => _step.WebhookUrl ?? string.Empty;
+        set
+        {
+            var normalized = string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+            if (_step.WebhookUrl == normalized) return;
+            _step.WebhookUrl = normalized;
+            NotifyChanged();
+        }
+    }
 
     public string? TestResult
     {

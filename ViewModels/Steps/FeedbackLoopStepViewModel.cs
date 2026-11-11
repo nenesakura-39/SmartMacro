@@ -20,6 +20,7 @@ public enum MinigameKind
     HorizontalFollower,
     VerticalFollower,
     TimingCheck,
+    CastingHoldRelease,
     Custom,
 }
 
@@ -74,12 +75,14 @@ public sealed class FeedbackLoopStepViewModel : StepViewModel
     /// <summary>The visual preset cards at the top of the guided setup.</summary>
     public static IReadOnlyList<MinigameCard> MinigameCards { get; } = new[]
     {
-        new MinigameCard(MinigameKind.HorizontalFollower, "◀ ── [ 🎯 ] ── ▶", "Horizontal Bar Follower (Left / Right)",
-            "For horizontal bar minigames. Holds input when the target is to the Right of your bar; releases when it's to the Left."),
-        new MinigameCard(MinigameKind.VerticalFollower, "▲ │ [ 🎯 ] │ ▼", "Vertical Bar Follower (Up / Down)",
-            "For vertical bar minigames. Holds input to push your bar Up toward the target; releases to let it fall Down."),
-        new MinigameCard(MinigameKind.TimingCheck, "🎯", "Timing / Skill Check (Click When Marker Hits Zone)",
+        new MinigameCard(MinigameKind.HorizontalFollower, "◀─[🎯]─▶", "Horizontal Bar Follower (Left / Right)",
+            "Holds input when the target is to the Right of your bar; releases when it's to the Left."),
+        new MinigameCard(MinigameKind.VerticalFollower, "▲│[🎯]│▼", "Vertical Bar Follower (Up / Down)",
+            "Holds input to push your bar Up toward the target; releases to let it fall Down."),
+        new MinigameCard(MinigameKind.TimingCheck, "──[🎯]──", "Timing / Skill Check (Click in Zone)",
             "Watches a moving marker and clicks the instant it enters the target zone."),
+        new MinigameCard(MinigameKind.CastingHoldRelease, "🎣[██🎯]", "Casting Hold & Release (Charge / Power Bar)",
+            "Immediately presses and holds while the cast/power meter charges, then releases the instant it enters the target zone."),
         new MinigameCard(MinigameKind.Custom, "⚙", "Custom / Advanced",
             "Every setting by hand: rules for before / inside / after the zone, key or mouse button, limits and stop conditions."),
     };
@@ -88,7 +91,10 @@ public sealed class FeedbackLoopStepViewModel : StepViewModel
     public MinigameKind Minigame => _step.Preset switch
     {
         FeedbackPreset.FollowTargetBar => _step.Orientation == BarOrientation.Vertical ? MinigameKind.VerticalFollower : MinigameKind.HorizontalFollower,
-        FeedbackPreset.ClickWhenInZone => MinigameKind.TimingCheck,
+        FeedbackPreset.CastingHoldRelease => MinigameKind.CastingHoldRelease,
+        FeedbackPreset.ClickWhenInZone => _step.WhenInsideZone == FeedbackAction.Release && _step.WhenBeforeZone == FeedbackAction.Hold
+            ? MinigameKind.CastingHoldRelease
+            : MinigameKind.TimingCheck,
         _ => MinigameKind.Custom,
     };
 
@@ -115,6 +121,10 @@ public sealed class FeedbackLoopStepViewModel : StepViewModel
                     break;
                 case MinigameKind.TimingCheck:
                     FeedbackPresets.Apply(_step, FeedbackPreset.ClickWhenInZone);
+                    FeedbackPresets.SetZoneEntryAction(_step, releaseHeldInput: false);
+                    break;
+                case MinigameKind.CastingHoldRelease:
+                    FeedbackPresets.Apply(_step, FeedbackPreset.CastingHoldRelease);
                     break;
                 default:
                     FeedbackPresets.Apply(_step, FeedbackPreset.Custom);
@@ -148,7 +158,8 @@ public sealed class FeedbackLoopStepViewModel : StepViewModel
     public static IReadOnlyList<Choice<FeedbackPreset>> Presets { get; } = new[]
     {
         new Choice<FeedbackPreset>(FeedbackPreset.FollowTargetBar, "Follow target bar (fishing / reeling minigame)"),
-        new Choice<FeedbackPreset>(FeedbackPreset.ClickWhenInZone, "Click when marker enters zone (timing / skill check / casting meter)"),
+        new Choice<FeedbackPreset>(FeedbackPreset.ClickWhenInZone, "Click when marker enters zone (timing / skill check)"),
+        new Choice<FeedbackPreset>(FeedbackPreset.CastingHoldRelease, "Casting Hold & Release (hold to charge, release in target zone)"),
         new Choice<FeedbackPreset>(FeedbackPreset.Custom, "Custom / advanced (all settings)"),
     };
 
@@ -176,7 +187,10 @@ public sealed class FeedbackLoopStepViewModel : StepViewModel
 
     public bool IsFollowPreset => _step.Preset == FeedbackPreset.FollowTargetBar;
 
-    public bool IsZoneClickPreset => _step.Preset == FeedbackPreset.ClickWhenInZone;
+    public bool IsZoneClickPreset => _step.Preset is FeedbackPreset.ClickWhenInZone or FeedbackPreset.CastingHoldRelease;
+
+    public bool IsCastingHoldRelease => _step.Preset == FeedbackPreset.CastingHoldRelease
+        || (_step.Preset == FeedbackPreset.ClickWhenInZone && _step.WhenInsideZone == FeedbackAction.Release && _step.WhenBeforeZone == FeedbackAction.Hold);
 
     /// <summary>Show every raw setting (always for Custom; on request for a preset).</summary>
     public bool ShowAdvanced

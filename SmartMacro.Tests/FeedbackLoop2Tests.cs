@@ -191,7 +191,7 @@ public class FeedbackLoop2Tests
     [Theory]
     [InlineData(FeedbackGamePreset.FischMomentumBar, "🧲 Momentum Bar (Smart PD + Hover Pulse)", 0.18, 6, true, 80, 120, 8)]
     [InlineData(FeedbackGamePreset.FastReflexTracker, "⚡ Snap Bar (Fast Reflex Tracker)", 0.08, 3, false, 80, 120, 8)]
-    [InlineData(FeedbackGamePreset.SmoothBalanceBar, "🪶 Floaty Bar (Smooth Balance)", 0.25, 10, true, 120, 60, 16)]
+    [InlineData(FeedbackGamePreset.SmoothBalanceBar, "🍃 Floaty Bar (Smooth Balance)", 0.25, 10, true, 120, 60, 16)]
     public void Game_presets_set_smart_values_and_keep_the_area_and_colours(FeedbackGamePreset preset, string label, double lead, int deadzone,
         bool pwm, int pulseMs, int capturesPerSecond, int minChangeMs)
     {

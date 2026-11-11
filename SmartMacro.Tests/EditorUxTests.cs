@@ -339,3 +339,103 @@ public class MouseStepPlaybackTests
         Assert.Contains("at least 1 notch", issue.Message);
     }
 }
+
+public class SmartTypingAndJitterUpgradeTests
+{
+    [Fact]
+    public void CoalesceKeystrokesToTypeText_merges_typed_words_with_shift_and_backspace()
+    {
+        // Types: Shift+H, e, y, x, Backspace, Space, 1 -> "Hey 1"
+        var steps = new List<MacroStep>
+        {
+            new KeyPressStep { VirtualKey = 0xA0, Action = KeyAction.Down }, // Left Shift down
+            new KeyPressStep { VirtualKey = 0x48, Action = KeyAction.Press }, // H
+            new KeyPressStep { VirtualKey = 0xA0, Action = KeyAction.Up },   // Left Shift up
+            new DelayStep { DurationMs = 60 },
+            new KeyPressStep { VirtualKey = 0x45, Action = KeyAction.Press }, // e
+            new DelayStep { DurationMs = 60 },
+            new KeyPressStep { VirtualKey = 0x59, Action = KeyAction.Press }, // y
+            new DelayStep { DurationMs = 60 },
+            new KeyPressStep { VirtualKey = 0x58, Action = KeyAction.Press }, // x (typo)
+            new DelayStep { DurationMs = 60 },
+            new KeyPressStep { VirtualKey = 0x08, Action = KeyAction.Press }, // Backspace
+            new DelayStep { DurationMs = 60 },
+            new KeyPressStep { VirtualKey = 0x20, Action = KeyAction.Press }, // Space
+            new DelayStep { DurationMs = 60 },
+            new KeyPressStep { VirtualKey = 0x31, Action = KeyAction.Press }, // 1
+        };
+
+        var result = StepCleanup.CoalesceKeystrokesToTypeText(steps);
+
+        Assert.Equal(1, result.CreatedTypeSteps);
+        var typeStep = Assert.IsType<TypeTextStep>(Assert.Single(result.Steps));
+        Assert.Equal("Hey 1", typeStep.Text);
+        Assert.Equal(60, typeStep.CharacterDelayMs);
+    }
+
+    [Fact]
+    public void CoalesceKeystrokesToTypeText_leaves_single_keys_and_ctrl_shortcuts_alone()
+    {
+        var steps = new List<MacroStep>
+        {
+            new KeyPressStep { VirtualKey = 0x57, Action = KeyAction.Press, HoldMs = 120 }, // single W tap
+            new DelayStep { DurationMs = 800 },
+            new KeyPressStep { VirtualKey = 0xA2, Action = KeyAction.Down },                // Left Ctrl down
+            new KeyPressStep { VirtualKey = 0x43, Action = KeyAction.Press },               // C
+            new KeyPressStep { VirtualKey = 0x56, Action = KeyAction.Press },               // V
+            new KeyPressStep { VirtualKey = 0xA2, Action = KeyAction.Up },                  // Left Ctrl up
+        };
+
+        var result = StepCleanup.CoalesceKeystrokesToTypeText(steps);
+
+        Assert.Equal(0, result.CreatedTypeSteps);
+        Assert.Equal(0, result.RemovedSteps);
+        Assert.Equal(steps.Count, result.Steps.Count);
+    }
+
+    [Fact]
+    public void RecordingConverter_with_CoalesceTypedText_turns_typing_burst_into_TypeTextStep()
+    {
+        var raw = new[]
+        {
+            new SmartMacro.Core.Recording.RawInputEvent(0, SmartMacro.Core.Recording.RawInputKind.KeyDown, VirtualKey: 0x4F),   // O
+            new SmartMacro.Core.Recording.RawInputEvent(30, SmartMacro.Core.Recording.RawInputKind.KeyUp, VirtualKey: 0x4F),
+            new SmartMacro.Core.Recording.RawInputEvent(80, SmartMacro.Core.Recording.RawInputKind.KeyDown, VirtualKey: 0x4B),  // K
+            new SmartMacro.Core.Recording.RawInputEvent(110, SmartMacro.Core.Recording.RawInputKind.KeyUp, VirtualKey: 0x4B),
+        };
+
+        var steps = SmartMacro.Core.Recording.RecordingConverter.Convert(raw, new SmartMacro.Core.Recording.RecordingOptions
+        {
+            CoalesceTypedText = true,
+        });
+
+        var typeStep = Assert.IsType<TypeTextStep>(Assert.Single(steps));
+        Assert.Equal("ok", typeStep.Text);
+    }
+
+    [Fact]
+    public void MousePathSimplifier_absorbs_pre_click_micro_jitter()
+    {
+        var events = new List<SmartMacro.Core.Recording.RawInputEvent>
+        {
+            new(0, SmartMacro.Core.Recording.RawInputKind.MouseMove, 100, 100),
+            new(50, SmartMacro.Core.Recording.RawInputKind.MouseMove, 200, 100),
+            // 15 ms before click: 1 px hand tremor right around the click spot (200, 100)
+            new(85, SmartMacro.Core.Recording.RawInputKind.MouseMove, 201, 99),
+            new(100, SmartMacro.Core.Recording.RawInputKind.MouseDown, 200, 100),
+            new(150, SmartMacro.Core.Recording.RawInputKind.MouseUp, 200, 100),
+        };
+
+        var simplified = SmartMacro.Core.Recording.MousePathSimplifier.Simplify(events, tolerancePx: 3, restMs: 120);
+
+        Assert.DoesNotContain(simplified, e => e.Kind == SmartMacro.Core.Recording.RawInputKind.MouseMove && e.X == 201 && e.Y == 99);
+        Assert.Contains(simplified, e => e.Kind == SmartMacro.Core.Recording.RawInputKind.MouseMove && e.X == 200 && e.Y == 100);
+    }
+
+    [Fact]
+    public void StudioCommandCatalog_includes_MergeKeysToText_command()
+    {
+        var matches = StudioCommandCatalog.Filter("merge keys");
+        Assert.Contains(matches, c => c.Kind == StudioCommandKind.MergeKeysToText);
+    }
+}

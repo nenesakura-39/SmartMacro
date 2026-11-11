@@ -29,10 +29,11 @@
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
 
-        <!-- ===== Header: title | Triggers Armed, Open folder, Reload, Import .smacro, New macro ===== -->
+        <!-- ===== Header: title | Triggers Armed, Trash, Open folder, Reload, Import .smacro, New macro ===== -->
         <DockPanel Grid.Row="0" Margin="0,0,0,14">
             <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
                 <ToggleButton Style="{StaticResource GhostToggle}"
@@ -43,6 +44,12 @@
                         <ctrl:StudioIcon Kind="Bolt" Size="13" Foreground="{DynamicResource WarningBrush}" />
                         <TextBlock Text="{Binding DataContext.TriggersArmedStatusText, RelativeSource={RelativeSource AncestorType=Window}, FallbackValue='⚡ Triggers Armed'}" Margin="6,0,0,0" />
                     </StackPanel>
+                </ToggleButton>
+                <ToggleButton Style="{StaticResource GhostToggle}"
+                              IsChecked="{Binding IsTrashOpen, Mode=TwoWay}"
+                              ToolTip="View and restore recently deleted macros in SmartMacro's Trash folder"
+                              Margin="0,0,6,0">
+                    <TextBlock Text="{Binding TrashButtonText}" />
                 </ToggleButton>
                 <Button Style="{StaticResource GhostButton}" Command="{Binding OpenFolderCommand}" ToolTip="Open the folder where macro files are stored" Margin="0,0,6,0">
                     <StackPanel Orientation="Horizontal">
@@ -94,6 +101,14 @@
                     <TextBlock Text="{Binding CountText}" Foreground="{DynamicResource AccentHoverBrush}" FontFamily="{StaticResource MonoFont}" FontWeight="SemiBold" FontSize="11" />
                 </Border>
                 <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center" Margin="12,0,0,0">
+                    <TextBlock Text="⇅ Sort:" Foreground="{DynamicResource MutedTextBrush}" FontSize="11.5" VerticalAlignment="Center" Margin="0,0,6,0" />
+                    <ComboBox ItemsSource="{Binding SortModes}" SelectedValue="{Binding SortMode}"
+                              SelectedValuePath="Value" DisplayMemberPath="Label"
+                              MinWidth="164" Padding="8,4" FontSize="11.5"
+                              ToolTip="Sort macros in the library (pinned macros always stay at the top)"
+                              AutomationProperties.Name="Sort macros" />
+                </StackPanel>
+                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center" Margin="12,0,0,0">
                     <TextBlock Text="🗂 Profile:" Foreground="{DynamicResource MutedTextBrush}" FontSize="11.5" VerticalAlignment="Center" Margin="0,0,6,0" />
                     <ComboBox ItemsSource="{Binding ProfileChoices}" SelectedItem="{Binding SelectedProfileFilter}"
                               MinWidth="148" Padding="8,4" FontSize="11.5"
@@ -113,7 +128,72 @@
             </DockPanel>
         </Border>
 
-        <Grid Grid.Row="3">
+        <!-- ===== Trash Recovery Drawer ===== -->
+        <Border Grid.Row="3" Style="{StaticResource Card}" Padding="14,12" Margin="0,0,0,12"
+                BorderBrush="{DynamicResource InputBorderBrush}" BorderThickness="1"
+                Visibility="{Binding IsTrashOpen, Converter={StaticResource BoolToVisibility}}">
+            <StackPanel>
+                <DockPanel Margin="0,0,0,8">
+                    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                        <Button Style="{StaticResource DangerButton}" Command="{Binding EmptyTrashCommand}"
+                                Visibility="{Binding HasTrashItems, Converter={StaticResource BoolToVisibility}}"
+                                Padding="10,4" FontSize="11.5" Margin="0,0,6,0"
+                                ToolTip="Permanently delete all macros in Trash">
+                            <TextBlock Text="Empty Trash" />
+                        </Button>
+                        <Button Style="{StaticResource GhostButton}" Command="{Binding ToggleTrashCommand}"
+                                Padding="8,4" FontSize="11.5">
+                            <TextBlock Text="✕ Close" />
+                        </Button>
+                    </StackPanel>
+                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                        <TextBlock Text="🗑 Recently Deleted Macros (Trash)" FontWeight="Bold" FontSize="13.5" VerticalAlignment="Center" />
+                        <TextBlock Text=" · Automatically cleaned after 30 days" Style="{StaticResource MutedText}" FontSize="11.5" VerticalAlignment="Center" />
+                    </StackPanel>
+                </DockPanel>
+
+                <TextBlock Text="Trash is empty — deleted macros appear here so you can restore them with 1 click."
+                           Style="{StaticResource MutedText}" FontSize="12" Margin="0,4,0,2"
+                           Visibility="{Binding HasTrashItems, Converter={StaticResource BoolToVisibility}, ConverterParameter=Invert}" />
+
+                <ItemsControl ItemsSource="{Binding TrashItems}" MaxHeight="200"
+                              Visibility="{Binding HasTrashItems, Converter={StaticResource BoolToVisibility}}">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <Border CornerRadius="8" Padding="10,7" Margin="0,0,0,5"
+                                    Background="{DynamicResource SurfaceBrush}"
+                                    BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1">
+                                <DockPanel>
+                                    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                                        <Button Style="{StaticResource TestActionButton}" Padding="10,4" FontSize="11" Margin="0,0,6,0"
+                                                Command="{Binding DataContext.RestoreTrashItemCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                                CommandParameter="{Binding}"
+                                                ToolTip="Restore this macro back into your active Library">
+                                            <TextBlock Text="↩ Restore" />
+                                        </Button>
+                                        <Button Style="{StaticResource GhostButton}" Foreground="{DynamicResource ErrorBrush}" Padding="8,4" FontSize="11"
+                                                Command="{Binding DataContext.DeleteTrashItemCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                                CommandParameter="{Binding}"
+                                                ToolTip="Permanently delete this macro file">
+                                            <TextBlock Text="✕ Delete Forever" />
+                                        </Button>
+                                    </StackPanel>
+                                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                        <TextBlock Text="{Binding Name}" FontWeight="SemiBold" FontSize="12.5" VerticalAlignment="Center" />
+                                        <TextBlock Text=" · " Style="{StaticResource MutedText}" VerticalAlignment="Center" />
+                                        <TextBlock Text="{Binding StepCountText}" FontFamily="{StaticResource MonoFont}" FontSize="11" Foreground="{DynamicResource AccentHoverBrush}" VerticalAlignment="Center" />
+                                        <TextBlock Text=" · Deleted " Style="{StaticResource MutedText}" FontSize="11" VerticalAlignment="Center" />
+                                        <TextBlock Text="{Binding DeletedAtText}" FontFamily="{StaticResource MonoFont}" FontSize="11" Style="{StaticResource MutedText}" VerticalAlignment="Center" />
+                                    </StackPanel>
+                                </DockPanel>
+                            </Border>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </StackPanel>
+        </Border>
+
+        <Grid Grid.Row="4">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*" />
                 <ColumnDefinition Width="14" />
@@ -131,6 +211,7 @@
                              Visibility="{Binding HasVisibleItems, Converter={StaticResource BoolToVisibility}}">
                         <ListBox.InputBindings>
                             <KeyBinding Key="Return" Command="{Binding OpenCommand}" />
+                            <KeyBinding Key="F2" Command="{Binding BeginRenameCommand}" />
                             <KeyBinding Key="Delete" Command="{Binding DeleteCommand}" />
                         </ListBox.InputBindings>
                         <ListBox.ItemContainerStyle>
@@ -195,7 +276,14 @@
                                                     <TextBlock Text="{Binding StepCountText}" FontFamily="{StaticResource MonoFont}" FontSize="11" FontWeight="SemiBold" Foreground="{DynamicResource AccentHoverBrush}" />
                                                 </Border>
                                                 <StackPanel Orientation="Horizontal">
-                                                    <TextBlock Text="{Binding Name}" FontSize="14.5" FontWeight="Bold" TextTrimming="CharacterEllipsis" />
+                                                    <Button Style="{StaticResource IconButton}" Width="24" Height="24" Padding="0" Margin="0,0,6,0"
+                                                            Command="{Binding DataContext.TogglePinCommand, RelativeSource={RelativeSource AncestorType=ListBox}}"
+                                                            CommandParameter="{Binding}"
+                                                            ToolTip="{Binding PinTooltip}"
+                                                            AutomationProperties.Name="Pin or unpin macro">
+                                                        <TextBlock Text="{Binding PinGlyph}" FontFamily="{StaticResource UiFont}" FontSize="13" />
+                                                    </Button>
+                                                    <TextBlock Text="{Binding Name}" FontSize="14.5" FontWeight="Bold" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
                                                     <Border Style="{StaticResource Pill}" Margin="8,0,0,0" Background="{DynamicResource ErrorSoftBrush}"
                                                             ToolTip="This macro has validation issues. Open it in the Editor to inspect."
                                                             Visibility="{Binding HasErrors, Converter={StaticResource BoolToVisibility}}">
@@ -410,7 +498,34 @@
                                         </Border>
                                         <TextBlock Text="MACRO INSPECTOR" Style="{StaticResource SetupCardTitle}" VerticalAlignment="Center" />
                                     </DockPanel>
-                                    <TextBlock Text="{Binding Name}" FontSize="16.5" FontWeight="Bold" TextWrapping="Wrap" Margin="0,8,0,0" />
+                                    <TextBox x:Name="InspectorNameBox"
+                                             Text="{Binding Name, Mode=OneWay}"
+                                             FontSize="16.5" FontWeight="Bold"
+                                             Padding="6,3" Margin="-6,6,-6,0"
+                                             ToolTip="Macro name — click or press F2 to rename, press Enter to save or Esc to cancel"
+                                             AutomationProperties.Name="Macro name"
+                                             GotKeyboardFocus="InspectorNameBox_GotKeyboardFocus"
+                                             PreviewMouseLeftButtonDown="InspectorNameBox_PreviewMouseLeftButtonDown"
+                                             PreviewKeyDown="InspectorNameBox_PreviewKeyDown"
+                                             LostKeyboardFocus="InspectorNameBox_LostKeyboardFocus">
+                                        <TextBox.Style>
+                                            <Style TargetType="TextBox" BasedOn="{StaticResource {x:Type TextBox}}">
+                                                <Setter Property="Background" Value="Transparent" />
+                                                <Setter Property="BorderBrush" Value="Transparent" />
+                                                <Setter Property="BorderThickness" Value="1" />
+                                                <Style.Triggers>
+                                                    <Trigger Property="IsMouseOver" Value="True">
+                                                        <Setter Property="Background" Value="{DynamicResource SurfaceBrush}" />
+                                                        <Setter Property="BorderBrush" Value="{DynamicResource InputBorderBrush}" />
+                                                    </Trigger>
+                                                    <Trigger Property="IsKeyboardFocused" Value="True">
+                                                        <Setter Property="Background" Value="{DynamicResource InputBackgroundBrush}" />
+                                                        <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
+                                                    </Trigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </TextBox.Style>
+                                    </TextBox>
                                     <TextBlock Text="{Binding Description}" Style="{StaticResource MutedText}" FontSize="12" Margin="0,4,0,0" TextWrapping="Wrap" />
                                 </StackPanel>
                             </Grid>

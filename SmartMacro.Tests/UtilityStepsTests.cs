@@ -289,7 +289,7 @@ public class UtilityStepsTests : IDisposable
         Assert.True(HasError(new WaitForChangeStep { MinChangedPercent = 0 }, nameof(WaitForChangeStep.MinChangedPercent)));
         Assert.True(HasError(new WaitForChangeStep { MinChangedPercent = double.NaN }, nameof(WaitForChangeStep.MinChangedPercent)));
         Assert.True(HasError(new WaitForChangeStep { PixelTolerance = 300 }, nameof(WaitForChangeStep.PixelTolerance)));
-        Assert.True(HasError(new WaitForChangeStep { CheckIntervalMs = 10 }, nameof(WaitForChangeStep.CheckIntervalMs)));
+        Assert.True(HasError(new WaitForChangeStep { CheckIntervalMs = 5 }, nameof(WaitForChangeStep.CheckIntervalMs)));
         Assert.True(HasError(new WaitForChangeStep { Action = FoundTextAction.Hold, ActionHoldMs = 0 }, nameof(WaitForChangeStep.ActionHoldMs)));
 
         Assert.True(HasError(new FocusWindowStep { WindowTitle = "x", WaitForWindowMs = -1 }, nameof(FocusWindowStep.WaitForWindowMs)));

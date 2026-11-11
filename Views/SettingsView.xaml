@@ -92,13 +92,17 @@
                                 ToolTip="Click to replay banner showcase effect">
                             <Grid>
                                 <Image x:Name="BannerHeroImage"
-                                       Source="pack://application:,,,/Assets/KuroLogic-Banner-1920x1080.png"
                                        Stretch="UniformToFill"
                                        HorizontalAlignment="Center"
                                        VerticalAlignment="Center"
-                                       RenderOptions.BitmapScalingMode="HighQuality"
+                                       RenderOptions.BitmapScalingMode="Linear"
                                        RenderTransformOrigin="0.5,0.5"
                                        AutomationProperties.Name="KuroLogic Studio Banner">
+                                    <Image.Source>
+                                        <BitmapImage UriSource="pack://application:,,,/Assets/KuroLogic-Banner-1920x1080.png"
+                                                     DecodePixelWidth="960"
+                                                     CacheOption="OnLoad" />
+                                    </Image.Source>
                                     <Image.RenderTransform>
                                         <TransformGroup>
                                             <ScaleTransform x:Name="BannerScale" ScaleX="1.0" ScaleY="1.0" />
@@ -179,13 +183,22 @@
                         <!-- Studio Identity & Diagnostics Bar -->
                         <DockPanel Margin="18,14,18,14">
                             <views:BrandLogo DockPanel.Dock="Left" Width="52" Height="52" VerticalAlignment="Center" Margin="-2,0,0,0" />
-                            <Button DockPanel.Dock="Right" Command="{Binding CopyDiagnosticsCommand}" VerticalAlignment="Center"
-                                    ToolTip="Copies version, Windows, screen and OCR info plus the recent log, for bug reports">
-                                <StackPanel Orientation="Horizontal">
-                                    <TextBlock Text="&#xE8C8;" Style="{StaticResource IconText}" />
-                                    <TextBlock Text="Copy diagnostics" Margin="8,0,0,0" />
-                                </StackPanel>
-                            </Button>
+                            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                                <Button Style="{StaticResource GhostButton}" Command="{Binding CheckForUpdatesCommand}" Margin="0,0,8,0"
+                                        ToolTip="Open the official release channel to check for quarterly updates">
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock Text="&#xE895;" Style="{StaticResource IconText}" />
+                                        <TextBlock Text="Check for updates" Margin="8,0,0,0" />
+                                    </StackPanel>
+                                </Button>
+                                <Button Command="{Binding CopyDiagnosticsCommand}"
+                                        ToolTip="Copies version, Windows, screen and OCR info plus the recent log, for bug reports">
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock Text="&#xE8C8;" Style="{StaticResource IconText}" />
+                                        <TextBlock Text="Copy diagnostics" Margin="8,0,0,0" />
+                                    </StackPanel>
+                                </Button>
+                            </StackPanel>
                             <StackPanel Margin="14,0,16,0" VerticalAlignment="Center">
                                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
                                     <TextBlock Text="{Binding AppName}" FontSize="17" FontWeight="Bold" />
@@ -335,16 +348,22 @@
                                 </Grid.RowDefinitions>
                                 <TextBlock Grid.Row="0" Text="● Start / stop recording" VerticalAlignment="Center" />
                                 <TextBox Grid.Row="0" Grid.Column="1" Text="{Binding RecordHotkeyText, Mode=OneWay}" Tag="Record" IsReadOnly="True"
-                                         Margin="0,4" PreviewKeyDown="HotkeyBox_PreviewKeyDown" AutomationProperties.Name="Record shortcut" Cursor="Hand"
+                                         Margin="0,4" PreviewKeyDown="HotkeyBox_PreviewKeyDown"
+                                         GotKeyboardFocus="HotkeyBox_GotKeyboardFocus" LostKeyboardFocus="HotkeyBox_LostKeyboardFocus"
+                                         AutomationProperties.Name="Record shortcut" Cursor="Hand"
                                          FontWeight="SemiBold" />
                                 <TextBlock Grid.Row="1" Text="▶ Play / stop" VerticalAlignment="Center" />
                                 <TextBox Grid.Row="1" Grid.Column="1" Text="{Binding PlayHotkeyText, Mode=OneWay}" Tag="Play" IsReadOnly="True"
-                                         Margin="0,4" PreviewKeyDown="HotkeyBox_PreviewKeyDown" AutomationProperties.Name="Play shortcut" Cursor="Hand"
+                                         Margin="0,4" PreviewKeyDown="HotkeyBox_PreviewKeyDown"
+                                         GotKeyboardFocus="HotkeyBox_GotKeyboardFocus" LostKeyboardFocus="HotkeyBox_LostKeyboardFocus"
+                                         AutomationProperties.Name="Play shortcut" Cursor="Hand"
                                          FontWeight="SemiBold" />
                                 <TextBlock Grid.Row="2" Text="⏸ Pause / resume (while playing)" VerticalAlignment="Center"
                                            ToolTip="F8 by default. Only active while a macro plays, so the key works normally in other apps the rest of the time. Pausing releases every held key and mouse button; Resume continues from the same step." />
                                 <TextBox Grid.Row="2" Grid.Column="1" Text="{Binding PauseHotkeyText, Mode=OneWay}" Tag="Pause" IsReadOnly="True"
-                                         Margin="0,4" PreviewKeyDown="HotkeyBox_PreviewKeyDown" AutomationProperties.Name="Pause shortcut" Cursor="Hand"
+                                         Margin="0,4" PreviewKeyDown="HotkeyBox_PreviewKeyDown"
+                                         GotKeyboardFocus="HotkeyBox_GotKeyboardFocus" LostKeyboardFocus="HotkeyBox_LostKeyboardFocus"
+                                         AutomationProperties.Name="Pause shortcut" Cursor="Hand"
                                          FontWeight="SemiBold" />
                             </Grid>
                             <TextBlock Text="{Binding HotkeyError}" Foreground="{DynamicResource ErrorBrush}" FontSize="12" Margin="0,6,0,0" TextWrapping="Wrap"
@@ -395,6 +414,9 @@
                             <CheckBox Style="{StaticResource SettingSwitch}" IsChecked="{Binding SmartTimingOnRecord}" IsEnabled="{Binding MakesEditableSteps}"
                                       Content="⏱ Smart Timing: turn pauses after clicks into adaptive 'Until screen settles' waits" AutomationProperties.Name="Smart Timing"
                                       ToolTip="Pauses of 150 ms or longer right after a click become adaptive waits: playback continues early as soon as the UI stops changing, or waits safely up to 3× longer when a page or dialog loads slowly." />
+                            <CheckBox Style="{StaticResource SettingSwitch}" IsChecked="{Binding CoalesceTypedTextOnRecord}" IsEnabled="{Binding MakesEditableSteps}"
+                                      Content="⌨ Smart Typing: group typed words &amp; sentences into 'Type text' steps" AutomationProperties.Name="Smart Typing"
+                                      ToolTip="Consecutive printable keystrokes (letters, numbers, spaces, punctuation, Shift casing, and Backspace corrections) are automatically merged into clean 'Type text' steps, while single game keys (WASD, Space) and shortcuts (Ctrl+C) stay individual KeyPress steps." />
 
                             <TextBlock Text="Default length of new Delay steps (ms)" Style="{StaticResource FieldLabel}" Margin="0,14,0,4" />
                             <TextBox Text="{Binding DefaultDelayMs, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}" Width="140" HorizontalAlignment="Left"
@@ -430,6 +452,10 @@
                                       Content="⚡ Resident Tray Mode: keep SmartMacro in the system tray when closing the window"
                                       AutomationProperties.Name="Keep in system tray when closing" />
                             <TextBlock Style="{StaticResource SettingHelp}" Text="Keeps per-macro hotkeys, schedules and window triggers armed in the background. Right-click the SmartMacro tray icon anytime to pause triggers or exit completely." />
+                            <CheckBox Style="{StaticResource SettingSwitch}" IsChecked="{Binding StartWithWindows}"
+                                      Content="🚀 Launch SmartMacro when Windows starts (minimized to system tray)"
+                                      AutomationProperties.Name="Launch when Windows starts" />
+                            <TextBlock Style="{StaticResource SettingHelp}" Text="Starts SmartMacro quietly in the Windows notification area (--tray) when you sign in so your hotkeys and schedules are always ready." />
                             <CheckBox Style="{StaticResource SettingSwitch}" IsChecked="{Binding AutoSwitchProfileByWindow}"
                                       Content="🗂 Auto-Switch Profile by Active Window"
                                       AutomationProperties.Name="Auto switch profile by active window" />
@@ -465,6 +491,14 @@
                             </StackPanel>
                             <TextBlock Style="{StaticResource SettingHelp}" Margin="0,6,0,0"
                                        Text="Uses the text recognition built into Windows. Screen captures are processed on this PC only and are never uploaded (only the latest editor 'Test' capture is saved locally in the Logs folder)." />
+
+                            <TextBlock Text="HARDWARE VISION ACCELERATION (ZERO-GPU)" Style="{StaticResource SetupCardTitle}" Margin="0,16,0,6" />
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="&#xE945;" Style="{StaticResource IconText}" Foreground="{DynamicResource VisionAccentBrush}" VerticalAlignment="Top" Margin="0,2,8,0" />
+                                <TextBlock Text="{Binding HardwareAccelerationStatus}" FontFamily="{StaticResource MonoFont}" TextWrapping="Wrap" MaxWidth="660" FontSize="12" />
+                            </StackPanel>
+                            <TextBlock Style="{StaticResource SettingHelp}" Margin="0,6,0,0"
+                                       Text="Automatically uses 256-bit AVX2 or 128-bit SSE2 CPU vector instructions and scales parallel vision workers to your processor's core count while reserving 0% of your GPU." />
                         </StackPanel>
                     </StackPanel>
                 </Border>
@@ -495,7 +529,17 @@
                                 <TextBox Text="{Binding DataFolder, Mode=OneWay}" IsReadOnly="True" Foreground="{DynamicResource MutedTextBrush}" />
                             </DockPanel>
                             <TextBlock Style="{StaticResource SettingHelp}" Margin="0,6,0,0"
-                                       Text="Macros, settings, daily logs and deleted macros (Trash) are stored here." />
+                                       Text="Macros, settings, daily logs (30-day automatic retention) and deleted macros (Trash) are stored here. Tip: create a portable.txt file next to SmartMacro.exe to run in USB/Portable Mode." />
+                            <WrapPanel Margin="0,12,0,0">
+                                <Button Style="{StaticResource TestActionButton}" Command="{Binding ExportBackupCommand}" Margin="0,0,8,0"
+                                        ToolTip="Save all your macros, profiles and settings into one portable .smbackup ZIP file">
+                                    <TextBlock Text="📦 Export Full Backup (.smbackup)…" />
+                                </Button>
+                                <Button Style="{StaticResource GhostButton}" Command="{Binding RestoreBackupCommand}"
+                                        ToolTip="Restore macros from a .smbackup or .zip backup archive (safely merges with your current library)">
+                                    <TextBlock Text="📥 Restore Backup…" />
+                                </Button>
+                            </WrapPanel>
                             <CheckBox Style="{StaticResource SettingSwitch}" IsChecked="{Binding ConfirmBeforeDelete}" Margin="0,14,0,0"
                                       Content="Ask before deleting a macro" AutomationProperties.Name="Ask before deleting a macro" />
                             <CheckBox Style="{StaticResource SettingSwitch}" IsChecked="{Binding ShowLogPanel}"

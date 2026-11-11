@@ -143,6 +143,16 @@ public sealed class BoolToVisibilityConverter : IValueConverter
         throw new NotSupportedException();
 }
 
+/// <summary>true → Collapsed, false → Visible.</summary>
+public sealed class InverseBoolToVisibilityConverter : IValueConverter
+{
+    public object Convert(object? value, Type targetType, object? parameter, CultureInfo culture) =>
+        value is true ? Visibility.Collapsed : Visibility.Visible;
+
+    public object ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture) =>
+        throw new NotSupportedException();
+}
+
 /// <summary>Visible when the value is not null (or "Invert": visible when null).</summary>
 public sealed class NullToVisibilityConverter : IValueConverter
 {
@@ -201,10 +211,10 @@ public sealed class LevelToGlyphConverter : IValueConverter
 {
     public object Convert(object? value, Type targetType, object? parameter, CultureInfo culture) => value switch
     {
-        StatusKind.Success or AppLogLevel.Success => "",
-        StatusKind.Warning or AppLogLevel.Warning or IssueSeverity.Warning => "",
-        StatusKind.Error or AppLogLevel.Error or IssueSeverity.Error => "",
-        _ => "",
+        StatusKind.Success or AppLogLevel.Success => "\uE73E",
+        StatusKind.Warning or AppLogLevel.Warning or IssueSeverity.Warning => "\uE7BA",
+        StatusKind.Error or AppLogLevel.Error or IssueSeverity.Error => "\uEA39",
+        _ => "\uE946",
     };
 
     public object ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture) =>
@@ -232,7 +242,7 @@ public static class StepCategories
         StepKind.FindText or StepKind.FindImage or StepKind.FindColor or StepKind.WaitForChange => Vision,
         StepKind.FocusWindow or StepKind.Screenshot => Utility,
         StepKind.SetVariable or StepKind.Checkpoint or StepKind.CallMacro => Memory,
-        StepKind.If or StepKind.Else or StepKind.EndIf or StepKind.Repeat or StepKind.EndRepeat => Logic,
+        StepKind.If or StepKind.Else or StepKind.EndIf or StepKind.Repeat or StepKind.EndRepeat or StepKind.FlowControl => Logic,
         StepKind.FeedbackLoop => Feedback,
         _ => Recorded,
     };

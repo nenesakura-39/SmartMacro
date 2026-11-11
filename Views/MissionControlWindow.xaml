@@ -72,6 +72,14 @@
                                 <TextBlock Text="Pin" FontSize="11" Margin="5,0,0,0" />
                             </StackPanel>
                         </ToggleButton>
+                        <Button x:Name="CompactModeToggle" DockPanel.Dock="Right"
+                                Style="{StaticResource GhostButton}" Padding="8,4" Margin="0,4,4,4"
+                                WindowChrome.IsHitTestVisibleInChrome="True"
+                                Click="CompactToggle_Click"
+                                ToolTip="Toggle compact Mini-Bar mode (TinyTask / TGMacro style)"
+                                AutomationProperties.Name="Toggle Compact Mode">
+                            <TextBlock x:Name="CompactModeLabel" Text="▾ Mini" FontSize="11" />
+                        </Button>
 
                         <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="12,0,0,0">
                             <ctrl:StudioIcon Kind="MissionControl" Size="15" Foreground="{DynamicResource AccentHoverBrush}" />
@@ -83,7 +91,7 @@
             </Border>
 
             <!-- Live Telemetry Body -->
-            <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" Padding="14,12">
+            <ScrollViewer x:Name="TelemetryScrollViewer" Grid.Row="1" VerticalScrollBarVisibility="Auto" Padding="14,12">
                 <StackPanel>
                     <!-- Macro Target & Live State Badge -->
                     <Border Style="{StaticResource GlassCard}" Padding="14,12">
@@ -116,6 +124,15 @@
                                 <TextBlock Text="{Binding Automation.RunningMacroTitle}" FontSize="14.5" FontWeight="Bold"
                                            TextTrimming="CharacterEllipsis" VerticalAlignment="Center" Margin="0,0,8,0" />
                             </DockPanel>
+
+                            <!-- Quick Macro Switcher (Mission Control 2.0) -->
+                            <ComboBox ItemsSource="{Binding Library.Items}"
+                                      SelectedItem="{Binding Library.SelectedItem, Mode=TwoWay}"
+                                      DisplayMemberPath="Name"
+                                      Visibility="{Binding Automation.IsIdle, Converter={StaticResource BoolToVisibility}}"
+                                      Margin="0,8,0,0"
+                                      ToolTip="Quickly switch active macro from Mission Control"
+                                      AutomationProperties.Name="Quick Macro Switcher" />
 
                             <!-- Big Neon Run Counter + Elapsed Clock -->
                             <Grid Margin="0,12,0,0">
@@ -250,12 +267,32 @@
             <Border Grid.Row="2" Background="{DynamicResource SidebarBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,1,0,0"
                     Padding="14,10">
                 <DockPanel DataContext="{Binding Automation}">
-                    <TextBlock DockPanel.Dock="Left" Text="{Binding EmergencyHint}" FontSize="11" Foreground="{DynamicResource MutedTextBrush}"
-                               VerticalAlignment="Center" TextTrimming="CharacterEllipsis" MaxWidth="190" />
+                    <StackPanel DockPanel.Dock="Left" VerticalAlignment="Center" MaxWidth="195">
+                        <TextBlock x:Name="MiniStatusMacroText" Text="{Binding RunningMacroTitle}" FontSize="11.5" FontWeight="SemiBold"
+                                   Foreground="{DynamicResource TextBrush}" TextTrimming="CharacterEllipsis" Visibility="Collapsed" />
+                        <TextBlock Text="{Binding EmergencyHint}" FontSize="11" Foreground="{DynamicResource MutedTextBrush}"
+                                   VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                    </StackPanel>
 
                     <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" HorizontalAlignment="Right">
+                        <Button Style="{StaticResource TransportButton}" Command="{Binding RecordCommand}" ToolTip="{Binding RecordTooltip}"
+                                Margin="0,0,6,0"
+                                Visibility="{Binding IsIdle, Converter={StaticResource BoolToVisibility}}">
+                            <StackPanel Orientation="Horizontal">
+                                <ctrl:StudioIcon Kind="Record" Size="12" Foreground="{DynamicResource ErrorBrush}" />
+                                <TextBlock Text="Record" Margin="6,0,0,0" FontSize="12" />
+                            </StackPanel>
+                        </Button>
+                        <Button Style="{StaticResource DangerButton}" Height="28" Padding="10,0" Command="{Binding StopRecordingCommand}"
+                                ToolTip="{Binding StopRecordingTooltip}" Margin="0,0,6,0"
+                                Visibility="{Binding IsRecording, Converter={StaticResource BoolToVisibility}}">
+                            <StackPanel Orientation="Horizontal">
+                                <ctrl:StudioIcon Kind="Stop" Size="12" />
+                                <TextBlock Text="Stop Rec" Margin="6,0,0,0" FontSize="12" />
+                            </StackPanel>
+                        </Button>
                         <Button Style="{StaticResource NeonPlayButton}" Command="{Binding PlayCommand}" ToolTip="{Binding PlayTooltip}"
-                                Visibility="{Binding IsPlaying, Converter={StaticResource BoolToVisibility}, ConverterParameter=Invert}">
+                                Visibility="{Binding IsIdle, Converter={StaticResource BoolToVisibility}}">
                             <StackPanel Orientation="Horizontal">
                                 <ctrl:StudioIcon Kind="Play" Size="12" />
                                 <TextBlock Text="Play" Margin="6,0,0,0" FontSize="12" />

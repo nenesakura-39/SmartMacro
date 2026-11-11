@@ -43,7 +43,27 @@ public partial class MainWindow : Window
     {
         InitializeComponent();
         DataContextChanged += OnDataContextChanged;
+        Loaded += OnWindowLoaded;
         Closed += OnWindowClosed;
+    }
+
+    private void OnWindowLoaded(object sender, RoutedEventArgs e)
+    {
+        // Pre-warm heavy Studio pages in incremental idle passes after the main window renders,
+        // so the user's very first click on Workflow Editor, Settings, Manual, or Logs is instantaneous (< 5 ms).
+        Dispatcher.BeginInvoke(new Action(() =>
+        {
+            if (DataContext is not MainViewModel vm) return;
+            PageHost?.PrewarmView(vm.Editor);
+        }), System.Windows.Threading.DispatcherPriority.ContextIdle);
+
+        Dispatcher.BeginInvoke(new Action(() =>
+        {
+            if (DataContext is not MainViewModel vm) return;
+            PageHost?.PrewarmView(vm.Settings);
+            PageHost?.PrewarmView(vm.Manual);
+            PageHost?.PrewarmView(vm.Logs);
+        }), System.Windows.Threading.DispatcherPriority.ApplicationIdle);
     }
 
     /// <summary>Smallest / largest height of the Activity list when dragging its grip.</summary>
@@ -247,7 +267,7 @@ public partial class MainWindow : Window
 
     protected override void OnClosing(CancelEventArgs e)
     {
-        if (!_forceExit && DataContext is MainViewModel trayVm && trayVm.CurrentSettings.MinimizeToTrayOnClose)
+        if (!_forceExit && DataContext is MainViewModel trayVm && trayVm.CurrentSettings.MinimizeToTrayOnClose && !trayVm.Automation.IsRecording)
         {
             e.Cancel = true;
             Hide();
