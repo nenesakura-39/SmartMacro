@@ -1,7 +1,9 @@
 using System.Globalization;
+using System.Text.Json;
 using SmartMacro.Core.Models;
 using SmartMacro.Core.Network;
 using SmartMacro.Core.Ocr;
+using SmartMacro.Core.Storage;
 using SmartMacro.Core.Targeting;
 using SmartMacro.Core.Validation;
 using SmartMacro.Core.Vision;
@@ -76,9 +78,9 @@ public sealed partial class PlaybackEngine
     private string InterpolateActive(string? template) =>
         _activeRun?.Variables is { } store ? store.Interpolate(template) : (template ?? string.Empty);
 
-    private void NotifyVariablesChanged(RunContext run)
+    private void NotifyVariablesChanged(RunContext? run)
     {
-        if (run.IsSubRoutine) return;
+        if (run is null || !ReferenceEquals(run, _activeRun)) return;
         if (VariablesChanged is not { } handler) return;
         try
         {
@@ -87,6 +89,287 @@ public sealed partial class PlaybackEngine
         catch
         {
             // UI observer errors never interrupt playback.
+        }
+    }
+
+    private void NotifyCallStackChanged(RunContext? run)
+    {
+        if (CallStackChanged is not { } handler) return;
+        try
+        {
+            handler(this, BuildCallStackSnapshot(run));
+        }
+        catch
+        {
+            // UI observer errors never interrupt playback.
+        }
+    }
+
+    private static IReadOnlyList<CallStackFrame> BuildCallStackSnapshot(RunContext? active)
+    {
+        if (active is null) return Array.Empty<CallStackFrame>();
+        var frames = new List<CallStackFrame>();
+        for (var cur = active; cur is not null; cur = cur.Parent)
+        {
+            var title = !string.IsNullOrEmpty(cur.CurrentStepTitle)
+                ? cur.CurrentStepTitle
+                : (cur.CurrentStepIndex >= 0 && cur.CurrentStepIndex < cur.Steps.Count
+                    ? StepDescriber.DisplayName(cur.Steps[cur.CurrentStepIndex].Kind)
+                    : cur.Steps.ElementAtOrDefault(Math.Max(0, cur.CurrentStepNumber - 1)) is { } s
+                        ? StepDescriber.DisplayName(s.Kind)
+                        : string.Empty);
+            frames.Add(new CallStackFrame(
+                cur.MacroId,
+                cur.MacroName ?? string.Empty,
+                Math.Max(1, cur.CurrentStepNumber),
+                cur.StepCountShown,
+                Math.Max(0, cur.CurrentStepIndex),
+                cur.CurrentStepId,
+                title,
+                cur.Variables.Snapshot(),
+                cur.CallDepth,
+                cur.IsSubRoutine));
+        }
+        return frames;
+    }
+
+    private BreakpointRule? GetRegisteredBreakpointRule(Guid stepId)
+    {
+        lock (_gate)
+        {
+            return _breakpointRules.TryGetValue(stepId, out var rule) ? rule : null;
+        }
+    }
+
+    private IReadOnlyList<VariableWatchpoint> GetActiveWatchpoints()
+    {
+        if (WatchpointProvider?.Invoke() is { } provided)
+            return provided;
+        lock (_gate)
+        {
+            return _watchpoints.Count == 0 ? Array.Empty<VariableWatchpoint>() : _watchpoints.ToArray();
+        }
+    }
+
+    private async Task<(bool Hit, string? Reason)> EvaluateBreakpointAsync(RunContext run, MacroStep step, CancellationToken token)
+    {
+        var rule = BreakpointRuleProvider?.Invoke(step.Id) ?? GetRegisteredBreakpointRule(step.Id);
+        var marked = rule is not null || HasBreakpoint?.Invoke(step.Id) == true;
+        if (!marked) return default;
+        if (rule is null || !rule.HasCondition) return (true, null);
+
+        return await DebugConditionEvaluator.EvaluateBreakpointRuleAsync(
+            rule, run.Variables, run.Conditions, _lastVisionScore, token).ConfigureAwait(false);
+    }
+
+    private static void SeedWatchpointBaseline(RunContext run)
+    {
+        run.LastKnownVariables.Clear();
+        foreach (var snap in run.Variables.Snapshot())
+            run.LastKnownVariables[snap.Name] = snap.Value;
+    }
+
+    private void OnVariableStoreChanged(RunContext run, IReadOnlyList<VariableSnapshot> snapshot)
+    {
+        NotifyVariablesChanged(run);
+
+        var watchpoints = GetActiveWatchpoints();
+        var changed = new Dictionary<string, (string? OldValue, string NewValue)>(StringComparer.OrdinalIgnoreCase);
+        foreach (var entry in snapshot)
+        {
+            if (!run.LastKnownVariables.TryGetValue(entry.Name, out var oldVal) || !string.Equals(oldVal, entry.Value, StringComparison.Ordinal))
+            {
+                changed[entry.Name] = (oldVal, entry.Value);
+                run.LastKnownVariables[entry.Name] = entry.Value;
+            }
+        }
+
+        if (_suppressWatchpoints || !ReferenceEquals(run, _activeRun) || watchpoints.Count == 0 || changed.Count == 0)
+            return;
+
+        foreach (var wp in watchpoints)
+        {
+            if (wp is null || !wp.Enabled || string.IsNullOrWhiteSpace(wp.VariableName)) continue;
+            var name = wp.VariableName.Trim();
+            if (!changed.TryGetValue(name, out var delta)) continue;
+            if (!DebugConditionEvaluator.EvaluateWatchpointCondition(wp, run.Variables, _lastVisionScore)) continue;
+
+            var oldDisplay = delta.OldValue is null ? "(unset)" : TruncateLog(delta.OldValue);
+            var newDisplay = TruncateLog(delta.NewValue);
+            _pendingPauseReason = $"👁 Watchpoint hit: {{{name}}} changed ({oldDisplay} → {newDisplay})";
+            _pauseBeforeNextStep = true;
+            break;
+        }
+    }
+
+    /// <summary>
+    /// Debugger 2.0: mutates a variable in the currently paused stack frame (root or sub-macro) without stopping playback.
+    /// </summary>
+    public bool TrySetLiveVariable(string name, string? value) => TrySetLiveVariable(name, value, out _);
+
+    /// <summary>
+    /// Debugger 2.0: mutates a variable in the currently paused stack frame (root or sub-macro) with validation feedback.
+    /// </summary>
+    public bool TrySetLiveVariable(string name, string? value, out string? error)
+    {
+        error = null;
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            error = "Variable name cannot be empty.";
+            return false;
+        }
+
+        var trimmed = name.Trim();
+        if (!MacroVariableDefinition.IsValidName(trimmed))
+        {
+            error = "Variable name must start with a letter or underscore and use letters, digits, or underscores.";
+            return false;
+        }
+
+        RunContext? active;
+        lock (_gate)
+        {
+            if (_state != PlaybackState.Paused || _activeRun is null)
+            {
+                error = "Live variables can only be edited while playback is paused.";
+                return false;
+            }
+
+            active = _activeRun;
+        }
+
+        var raw = value ?? string.Empty;
+        MacroVariableType targetType;
+        if (active.Variables.HasVariable(trimmed))
+        {
+            targetType = active.Variables.GetTypeOrDefault(trimmed);
+            if (targetType == MacroVariableType.Number)
+            {
+                if (!double.TryParse(raw.Trim(), NumberStyles.Float | NumberStyles.AllowThousands, CultureInfo.InvariantCulture, out var parsed)
+                    || !double.IsFinite(parsed))
+                {
+                    error = $"\"{raw}\" is not a valid number for {{{trimmed}}}.";
+                    return false;
+                }
+            }
+            else if (targetType == MacroVariableType.Boolean)
+            {
+                var t = raw.Trim();
+                if (!(t.Equals("true", StringComparison.OrdinalIgnoreCase)
+                      || t.Equals("false", StringComparison.OrdinalIgnoreCase)
+                      || t.Equals("yes", StringComparison.OrdinalIgnoreCase)
+                      || t.Equals("no", StringComparison.OrdinalIgnoreCase)
+                      || t.Equals("1", StringComparison.Ordinal)
+                      || t.Equals("0", StringComparison.Ordinal)
+                      || t.Equals("on", StringComparison.OrdinalIgnoreCase)
+                      || t.Equals("off", StringComparison.OrdinalIgnoreCase)))
+                {
+                    error = $"\"{raw}\" is not a valid True/False value for {{{trimmed}}}.";
+                    return false;
+                }
+            }
+        }
+        else
+        {
+            targetType = double.TryParse(raw.Trim(), NumberStyles.Float | NumberStyles.AllowThousands, CultureInfo.InvariantCulture, out var parsed)
+                && double.IsFinite(parsed)
+                ? MacroVariableType.Number
+                : (raw.Trim().Equals("true", StringComparison.OrdinalIgnoreCase) || raw.Trim().Equals("false", StringComparison.OrdinalIgnoreCase)
+                    ? MacroVariableType.Boolean
+                    : MacroVariableType.Text);
+        }
+
+        string formatted;
+        _suppressWatchpoints = true;
+        try
+        {
+            formatted = active.Variables.SetRaw(trimmed, targetType, raw);
+            active.LastKnownVariables[trimmed] = formatted;
+        }
+        finally
+        {
+            _suppressWatchpoints = false;
+        }
+
+        NotifyCallStackChanged(active);
+        Message?.Invoke(this, $"✏ Live variable {{{trimmed}}} updated to \"{TruncateLog(formatted)}\" while paused.");
+        return true;
+    }
+
+    private void RecordTraceEntry(
+        RunContext run,
+        int stepNumber,
+        MacroStep step,
+        double durationMs,
+        ExecutionTraceOutcome outcome,
+        double? visionScore,
+        string? error,
+        string? detail)
+    {
+        var ms = double.IsFinite(durationMs) && durationMs > 0 ? durationMs : 0.0;
+        var entry = new ExecutionTraceEntry(
+            Interlocked.Increment(ref _traceSequence),
+            DateTimeOffset.UtcNow,
+            ActiveTime,
+            run.MacroId,
+            run.MacroName ?? string.Empty,
+            run.CallDepth,
+            step.Id,
+            stepNumber,
+            StepDescriber.DisplayName(step.Kind),
+            ms,
+            outcome,
+            visionScore,
+            error,
+            detail);
+
+        lock (_traceGate)
+        {
+            while (_traceBuffer.Count >= ExecutionTraceCapacity)
+                _traceBuffer.Dequeue();
+            _traceBuffer.Enqueue(entry);
+        }
+
+        try
+        {
+            TraceRecorded?.Invoke(this, entry);
+        }
+        catch
+        {
+            // UI observer errors never interrupt playback.
+        }
+    }
+
+    private async Task TrySaveFailureTraceAsync(
+        string macroName,
+        string? error,
+        IReadOnlyList<CallStackFrame> callStack,
+        IReadOnlyList<ExecutionTraceEntry> entries)
+    {
+        var dir = FailureSnapshotDirectory;
+        if (string.IsNullOrWhiteSpace(dir)) return;
+        if (!DiskSpaceGuard.HasEnoughFreeSpace(dir, out _)) return;
+
+        try
+        {
+            Directory.CreateDirectory(dir);
+            var tracePath = Path.Combine(dir, "last-failure-trace.json");
+            var doc = new ExecutionTraceDocument(
+                macroName,
+                PlaybackOutcome.Failed,
+                error,
+                DateTimeOffset.UtcNow,
+                LastFailureSnapshotPath,
+                callStack,
+                entries);
+            var json = JsonSerializer.Serialize(doc, MacroJson.Options);
+            await File.WriteAllTextAsync(tracePath, json, CancellationToken.None).ConfigureAwait(false);
+            LastFailureTracePath = tracePath;
+            Message?.Invoke(this, $"📜 Saved execution trace: {tracePath}");
+        }
+        catch
+        {
+            // Diagnostic failure trace must never mask playback errors.
         }
     }
 
@@ -524,15 +807,21 @@ public sealed partial class PlaybackEngine
             calleeVars)
         {
             CallDepth = callerRun.CallDepth + 1,
+            MacroId = target.Id,
             MacroName = target.Name,
+            Parent = callerRun,
             ActiveMacroIds = activeIds,
             IsSubRoutine = true,
             RunStartedAt = ActiveTime,
         };
+        SeedWatchpointBaseline(subRun);
+        calleeVars.Changed += (_, snap) => OnVariableStoreChanged(subRun, snap);
 
         var callerProbes = _probes;
         _activeRun = subRun;
         _probes = subProbes;
+        NotifyCallStackChanged(subRun);
+        NotifyVariablesChanged(subRun);
         Message?.Invoke(this, $"📦 Calling sub-macro \"{target.Name}\"…");
         try
         {
@@ -549,6 +838,8 @@ public sealed partial class PlaybackEngine
         {
             _activeRun = callerRun;
             _probes = callerProbes;
+            NotifyCallStackChanged(callerRun);
+            NotifyVariablesChanged(callerRun);
         }
 
         callerRun.StepsExecuted += subRun.StepsExecuted;

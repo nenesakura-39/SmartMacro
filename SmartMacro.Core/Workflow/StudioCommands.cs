@@ -40,6 +40,11 @@ public enum StudioCommandKind
 
     /// <summary>Copies a ready-to-run CLI command (<c>SmartMacro.exe --run ...</c>) for Stream Deck / Task Scheduler.</summary>
     CopyCliCommand,
+
+    /// <summary>Debugger 2.0 stepping actions while paused.</summary>
+    StepOver,
+    StepInto,
+    StepOut,
 }
 
 /// <summary>
@@ -101,6 +106,9 @@ public static class StudioCommandCatalog
             new("humanize", "🎲 Toggle Humanize Mode", StudioCommandKind.ToggleHumanize, "random jitter human natural"),
             new("test-step", "🧪 Test Selected Step", StudioCommandKind.TestStep, "try check detect diagnose near miss accuracy", Shortcut: "Ctrl+T"),
             new("copy-cli-command", "Copy CLI Run Command", StudioCommandKind.CopyCliCommand, "cli command line stream deck task scheduler headless"),
+            new("debug-step-over", "⏭ Debug: Step Over", StudioCommandKind.StepOver, "debugger pause step over next", Shortcut: "F10"),
+            new("debug-step-into", "⏬ Debug: Step Into Sub-Macro", StudioCommandKind.StepInto, "debugger pause step into submacro call stack", Shortcut: "F11"),
+            new("debug-step-out", "⏫ Debug: Step Out of Sub-Macro", StudioCommandKind.StepOut, "debugger pause step out return submacro", Shortcut: "Shift+F11"),
         };
 
         foreach (var speed in PaletteSpeeds)

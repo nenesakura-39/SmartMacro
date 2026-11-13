@@ -1296,9 +1296,10 @@ public sealed class AutomationViewModel : ObservableObject, IDisposable
             RunCounterText = PlaybackRunInfo.FormatCounter(runNumber, _configuredRuns);
             StepCounterText = $"Step {p.StepNumber} / {p.StepCount}";
             var state = Mode == AutomationMode.Paused ? "⏸ Paused" : "▶ Playing";
+            var scope = p.CallDepth > 0 && !string.IsNullOrWhiteSpace(p.MacroName) ? $"[{p.MacroName}] " : string.Empty;
             ProgressText = p.LoopText is null
-                ? $"{state}: {RunCounterText} · Step {p.StepNumber}/{p.StepCount}"
-                : $"{state}: {RunCounterText} · Step {p.StepNumber}/{p.StepCount} · {p.LoopText}";
+                ? $"{state}: {RunCounterText} · {scope}Step {p.StepNumber}/{p.StepCount}"
+                : $"{state}: {RunCounterText} · {scope}Step {p.StepNumber}/{p.StepCount} · {p.LoopText}";
             ProgressValue = p.TotalIterations is int t && t > 0
                 ? ((p.Iteration - 1) + (double)p.StepNumber / p.StepCount) / t
                 : (double)p.StepNumber / p.StepCount;
@@ -1317,7 +1318,8 @@ public sealed class AutomationViewModel : ObservableObject, IDisposable
         if (_latestProgress is { } p && p.StepCount > 0)
         {
             var name = string.IsNullOrWhiteSpace(p.Step.Comment) ? StepDescriber.DisplayName(p.Step.Kind) : p.Step.Comment.Trim();
-            stepText = $"Step {p.StepNumber}/{p.StepCount}: {name}";
+            var scope = p.CallDepth > 0 && !string.IsNullOrWhiteSpace(p.MacroName) ? $"[{p.MacroName}] " : string.Empty;
+            stepText = $"{scope}Step {p.StepNumber}/{p.StepCount}: {name}";
             progress = (double)p.StepNumber / p.StepCount;
         }
 

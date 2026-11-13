@@ -237,6 +237,28 @@ public sealed partial class EditorViewModel : ObservableObject
         });
         ToggleBreakpointCommand = new RelayCommand(p => ToggleBreakpoint(p as StepViewModel ?? SelectedStep), p => HasMacro && (p as StepViewModel ?? SelectedStep) is not null);
         StepOverCommand = new RelayCommand(ExecuteStepOver, () => HasMacro);
+        StepIntoCommand = new RelayCommand(ExecuteStepInto, () => HasMacro);
+        StepOutCommand = new RelayCommand(ExecuteStepOut, () => HasMacro);
+        ApplyBreakpointConditionCommand = new RelayCommand(ApplyBreakpointCondition, () => HasMacro && SelectedStep is not null);
+        ClearBreakpointConditionCommand = new RelayCommand(ClearBreakpointCondition, () => HasMacro && SelectedStep is { } st && (!string.IsNullOrWhiteSpace(SelectedBreakpointExpression) || st.HasBreakpointCondition));
+        RemoveBreakpointItemCommand = new RelayCommand(RemoveBreakpointItem, p => p is ConditionalBreakpointItemViewModel);
+        AddWatchpointCommand = new RelayCommand(AddWatchpoint, p => HasMacro && (!string.IsNullOrWhiteSpace(p as string) || !string.IsNullOrWhiteSpace(NewWatchpointVariableName)));
+        RemoveWatchpointCommand = new RelayCommand(RemoveWatchpoint, p => p is WatchpointItemViewModel);
+        ApplyLiveVariableCommand = new RelayCommand(ApplyLiveVariable, p => IsPlaybackPaused && p is VariableItemViewModel or LiveRuntimeVariableViewModel);
+        OpenCallStackFrameCommand = new RelayCommand(OpenCallStackFrame, p => p is CallStackFrame);
+        ClearTraceCommand = new RelayCommand(ClearTrace, () => HasTraceEntries);
+        SetTraceOutcomeFilterCommand = new RelayCommand(p =>
+        {
+            if (p is TraceOutcomeFilter filter) TraceOutcomeFilter = filter;
+            else if (p is string raw && Enum.TryParse<TraceOutcomeFilter>(raw, ignoreCase: true, out var parsed)) TraceOutcomeFilter = parsed;
+        });
+        OpenFailureTraceCommand = new RelayCommand(OpenFailureTrace, () => HasFailureTrace);
+        DismissFailureTraceCommand = new RelayCommand(() => FailureTracePath = null, () => HasFailureTrace);
+        DismissFailureBannerCommand = new RelayCommand(() =>
+        {
+            FailureSnapshotPath = null;
+            FailureTracePath = null;
+        }, () => HasFailureBanner);
         CopyCliCommand = new RelayCommand(CopyCliRunCommand, () => HasMacro);
 
         RefreshPaletteItems();
@@ -661,6 +683,7 @@ public sealed partial class EditorViewModel : ObservableObject
                         AddAtEnd = false;
                 }
                 UpdateBlockPartnerHighlights();
+                SyncSelectedBreakpointEditor();
                 OnPropertyChanged(nameof(HasSelection));
             }
         }

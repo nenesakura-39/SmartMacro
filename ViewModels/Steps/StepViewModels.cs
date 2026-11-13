@@ -116,6 +116,7 @@ public abstract class StepViewModel : ObservableObject
     private bool _hasWarning;
     private bool _isRunning;
     private bool _hasBreakpoint;
+    private string? _breakpointCondition;
     private int _inspectorTab;
     private bool _isQuickEditOpen;
     private bool _isInsertMenuOpen;
@@ -179,8 +180,41 @@ public abstract class StepViewModel : ObservableObject
     public bool HasBreakpoint
     {
         get => _hasBreakpoint;
-        set => SetProperty(ref _hasBreakpoint, value);
+        set
+        {
+            if (SetProperty(ref _hasBreakpoint, value))
+            {
+                OnPropertyChanged(nameof(HasBreakpointCondition));
+                OnPropertyChanged(nameof(BreakpointBadgeText));
+                OnPropertyChanged(nameof(BreakpointTooltip));
+            }
+        }
     }
+
+    /// <summary>Debugger 2.0: optional condition expression attached to this step's breakpoint.</summary>
+    public string? BreakpointCondition
+    {
+        get => _breakpointCondition;
+        set
+        {
+            if (SetProperty(ref _breakpointCondition, value))
+            {
+                OnPropertyChanged(nameof(HasBreakpointCondition));
+                OnPropertyChanged(nameof(BreakpointBadgeText));
+                OnPropertyChanged(nameof(BreakpointTooltip));
+            }
+        }
+    }
+
+    public bool HasBreakpointCondition => HasBreakpoint && !string.IsNullOrWhiteSpace(_breakpointCondition);
+
+    public string BreakpointBadgeText => HasBreakpointCondition
+        ? $"🔴 BREAK · {_breakpointCondition}"
+        : "🔴 BREAK";
+
+    public string BreakpointTooltip => HasBreakpointCondition
+        ? $"Conditional breakpoint active ({_breakpointCondition}) — F9 toggles, F10 Over, F11 Into, Shift+F11 Out"
+        : "Breakpoint active (F9 toggles, F10 Over, F11 Into, Shift+F11 Out while paused)";
 
     private string? _telemetryBadgeText;
 

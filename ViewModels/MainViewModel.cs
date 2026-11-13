@@ -181,6 +181,22 @@ public sealed class MainViewModel : ObservableObject, IDisposable
             return resolved is null ? null : MacroJson.Clone(resolved);
         };
         automation.Engine.VariablesChanged += (_, snap) => dispatcher.InvokeAsync(() => Editor.UpdateLiveVariables(snap));
+        automation.Engine.CallStackChanged += (_, frames) => dispatcher.InvokeAsync(() => Editor.UpdateCallStack(frames));
+        automation.Engine.TraceRecorded += (_, entry) => dispatcher.InvokeAsync(() => Editor.AppendTraceEntry(entry));
+        automation.Engine.PausedChanged += (_, paused) => dispatcher.InvokeAsync(() => Editor.IsPlaybackPaused = paused);
+        var wasPlaying = Automation.IsPlaying;
+        Automation.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName is nameof(AutomationViewModel.IsPlaying) or "")
+            {
+                var nowPlaying = Automation.IsPlaying;
+                if (nowPlaying && !wasPlaying)
+                    Editor.BeginRuntimeDebugSession();
+                wasPlaying = nowPlaying;
+            }
+            if (e.PropertyName is nameof(AutomationViewModel.IsPaused) or "")
+                Editor.IsPlaybackPaused = Automation.IsPaused;
+        };
         Automation.PlaybackFinished += (_, info) =>
         {
             Editor.ShowPlaybackResult(info.MacroId, info.Result);
@@ -248,9 +264,18 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         // 🧪 Test Step on an action step reports how its one-step run went.
         Editor.LastPlaybackResult = () => Automation.LastResult;
 
-        // v1.8 Studio X Interactive Debugger: breakpoints (F9) and single-step execution (F10).
+        // v1.8 + Debugger 2.0 Interactive Debugger: breakpoints (F9), conditional rules, watchpoints, Call Stack & stepping (F10/F11/Shift+F11).
         automation.Engine.HasBreakpoint = id => Editor.HasStepBreakpoint(id);
+        automation.Engine.BreakpointRuleProvider = id => Editor.GetBreakpointRule(id);
+        automation.Engine.WatchpointProvider = () => Editor.GetCoreWatchpoints();
         Editor.StepOverHandler = () => automation.Engine.StepOver();
+        Editor.StepIntoHandler = () => automation.Engine.StepInto();
+        Editor.StepOutHandler = () => automation.Engine.StepOut();
+        Editor.SetLiveVariableHandler = (name, val) =>
+        {
+            var ok = automation.Engine.TrySetLiveVariable(name, val, out var err);
+            return (ok, err);
+        };
 
         // 📚 In-App Manual: recipes load into the editor; the cheat-sheet shows the shortcuts set in Settings.
         Manual = new ManualViewModel(LoadRecipeAsync, () => (Automation.RecordShortcut, Automation.PlayShortcut, Automation.PauseShortcut),

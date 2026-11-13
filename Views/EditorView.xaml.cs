@@ -272,6 +272,13 @@ public partial class EditorView : UserControl
             e.Handled = true;
             return;
         }
+        if (e.Key == Key.System && e.SystemKey == Key.F10 && Keyboard.Modifiers == ModifierKeys.None && !IsTypingInto(e)
+            && _editor?.StepOverCommand.CanExecute(null) == true)
+        {
+            _editor.StepOverCommand.Execute(null);
+            e.Handled = true;
+            return;
+        }
 
         // Alt+1 / Alt+2 / Alt+3: quick-switch Inspector sub-tabs (Setup · Tune & Motion · Timing & Retry)
         // Alt+[ / Alt+]: step backward / forward through visible workflow steps in the Inspector
@@ -355,6 +362,36 @@ public partial class EditorView : UserControl
                 FocusSelectedStep();
                 e.Handled = true;
                 break;
+        }
+    }
+
+    private void LiveVariableBox_KeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key != Key.Enter || _editor is null || sender is not FrameworkElement fe) return;
+        if (_editor.ApplyLiveVariableCommand.CanExecute(fe.DataContext))
+        {
+            _editor.ApplyLiveVariableCommand.Execute(fe.DataContext);
+            e.Handled = true;
+        }
+    }
+
+    private void BreakpointConditionBox_KeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key != Key.Enter || _editor is null) return;
+        if (_editor.ApplyBreakpointConditionCommand.CanExecute(null))
+        {
+            _editor.ApplyBreakpointConditionCommand.Execute(null);
+            e.Handled = true;
+        }
+    }
+
+    private void WatchpointBox_KeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key != Key.Enter || _editor is null) return;
+        if (_editor.AddWatchpointCommand.CanExecute(null))
+        {
+            _editor.AddWatchpointCommand.Execute(null);
+            e.Handled = true;
         }
     }
 

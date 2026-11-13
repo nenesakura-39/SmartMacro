@@ -231,16 +231,95 @@ public sealed partial class PlaybackEngine
     private TaskCompletionSource? _resumeSignal;
     private TimeSpan? _pauseRequestedAt; // clock time of the latest Pause() call (under _gate)
 
-    // v1.8 Studio X Interactive Debugger: breakpoints (F9) and single-step execution (F10).
+    /// <summary>Maximum number of executed steps kept in the Debugger 2.0 trace ring buffer.</summary>
+    public const int ExecutionTraceCapacity = 200;
+
+    // v1.8 / Debugger 2.0 Interactive Debugger state: breakpoints, stepping, watchpoints, and execution trace.
     private volatile bool _pauseBeforeNextStep;
-    private volatile bool _stepOverRequested;
+    private volatile DebugStepMode _stepMode;
+    private int _stepTargetDepth;
+    private string? _pendingPauseReason;
     private Guid? _lastBreakpointPausedStepId;
+    private readonly Dictionary<Guid, BreakpointRule> _breakpointRules = new();
+    private readonly List<VariableWatchpoint> _watchpoints = new();
+    private readonly Dictionary<string, string> _watchLastValues = new(StringComparer.OrdinalIgnoreCase);
+    private volatile bool _suppressWatchpoints;
+    private readonly object _traceGate = new();
+    private readonly Queue<ExecutionTraceEntry> _traceBuffer = new(ExecutionTraceCapacity);
+    private long _traceSequence;
+    private double? _lastVisionScore;
+    private double? _currentStepVisionScore;
+    private IReadOnlyList<CallStackFrame>? _failureCallStack;
 
     /// <summary>
-    /// v1.8 Studio X Debugger: optional predicate returning true when a step ID has an active breakpoint.
-    /// When hit on a top-level macro step, playback pauses before running that step and reports its position.
+    /// Interactive Debugger predicate returning true when a step ID has an active breakpoint.
+    /// Evaluates for both top-level macro steps and sub-macro steps.
     /// </summary>
     public Func<Guid, bool>? HasBreakpoint { get; set; }
+
+    /// <summary>
+    /// Debugger 2.0 optional rule provider returning a <see cref="BreakpointRule"/> (condition/comparison/expression)
+    /// for a step ID, or null when unconditional or unset.
+    /// </summary>
+    public Func<Guid, BreakpointRule?>? BreakpointRuleProvider { get; set; }
+
+    /// <summary>
+    /// Debugger 2.0 optional provider returning live <see cref="VariableWatchpoint"/> definitions evaluated whenever variables change.
+    /// </summary>
+    public Func<IReadOnlyList<VariableWatchpoint>>? WatchpointProvider { get; set; }
+
+    /// <summary>Path to the JSON execution trace file saved alongside <see cref="LastFailureSnapshotPath"/> on failure.</summary>
+    public string? LastFailureTracePath { get; private set; }
+
+    /// <summary>Raised when the debugger pauses or enters/exits a sub-macro call frame.</summary>
+    public event EventHandler<IReadOnlyList<CallStackFrame>>? CallStackChanged;
+
+    /// <summary>Raised when a step completes and is appended to the execution trace ring buffer.</summary>
+    public event EventHandler<ExecutionTraceEntry>? TraceRecorded;
+
+    /// <summary>Configures or clears a conditional/unconditional breakpoint rule directly on this engine.</summary>
+    public void SetBreakpointRule(Guid stepId, BreakpointRule? rule)
+    {
+        if (stepId == Guid.Empty) return;
+        lock (_gate)
+        {
+            if (rule is null) _breakpointRules.Remove(stepId);
+            else _breakpointRules[stepId] = rule;
+        }
+    }
+
+    /// <summary>Removes all breakpoint rules registered via <see cref="SetBreakpointRule"/>.</summary>
+    public void ClearBreakpointRules()
+    {
+        lock (_gate) _breakpointRules.Clear();
+    }
+
+    /// <summary>Replaces the runtime watchpoints registered directly on this engine.</summary>
+    public void SetWatchpoints(IEnumerable<VariableWatchpoint>? watchpoints)
+    {
+        lock (_gate)
+        {
+            _watchpoints.Clear();
+            if (watchpoints is null) return;
+            foreach (var wp in watchpoints)
+            {
+                if (wp is not null && !string.IsNullOrWhiteSpace(wp.VariableName))
+                    _watchpoints.Add(wp);
+            }
+        }
+    }
+
+    /// <summary>Current sub-macro nesting depth (0 = root macro, 1+ = sub-macro).</summary>
+    public int CurrentCallDepth => _activeRun?.CallDepth ?? 0;
+
+    /// <summary>Snapshot of the active call stack ordered top frame first (current frame at index 0).</summary>
+    public IReadOnlyList<CallStackFrame> GetCallStackSnapshot() => BuildCallStackSnapshot(_activeRun);
+
+    /// <summary>Snapshot of the last up to <see cref="ExecutionTraceCapacity"/> executed step entries in chronological order.</summary>
+    public IReadOnlyList<ExecutionTraceEntry> GetExecutionTraceSnapshot()
+    {
+        lock (_traceGate) return _traceBuffer.ToArray();
+    }
 
     /// <param name="layout">
     /// Monitors and app windows, for Find steps / conditions that look at one monitor or inside one window. Without it the
@@ -457,6 +536,12 @@ public sealed partial class PlaybackEngine
         IReadOnlyList<ScreenRect>? allMatches = null)
     {
         RecordVisionLock(elapsedMs);
+        if (confidence > 0)
+        {
+            var clamped = Math.Clamp(confidence, 0, 1);
+            _currentStepVisionScore ??= clamped;
+            _lastVisionScore = clamped;
+        }
         // Never flash the reticle from inside a feedback loop: at 120 looks per second it would sit on the bar it watches
         // (and in streamer mode the loop's own captures would see it).
         if (_inFeedbackLoop) return;
@@ -588,6 +673,7 @@ public sealed partial class PlaybackEngine
             _lastFoundBounds = default;
             LastFoundRect = null;
             LastFailureSnapshotPath = null;
+            LastFailureTracePath = null;
             _pendingSpeed = double.NaN;
             _smartAimLastNote.Clear();
             _sessionSuggestions.Clear();
@@ -597,8 +683,20 @@ public sealed partial class PlaybackEngine
             _statPausedSince = null;
             _skipNextStep = false;
             _pauseBeforeNextStep = false;
-            _stepOverRequested = false;
+            _stepMode = DebugStepMode.None;
+            _stepTargetDepth = 0;
+            _pendingPauseReason = null;
             _lastBreakpointPausedStepId = null;
+            _lastVisionScore = null;
+            _currentStepVisionScore = null;
+            _failureCallStack = null;
+            _suppressWatchpoints = false;
+            _watchLastValues.Clear();
+            lock (_traceGate)
+            {
+                _traceBuffer.Clear();
+                _traceSequence = 0;
+            }
             _cursor = null;
             _glideTarget = null;
             _glideDuringDelay = null;
@@ -668,11 +766,13 @@ public sealed partial class PlaybackEngine
                 SourceIndexes = span?.SourceIndexes,
                 SourceCount = span?.SourceIndexes is not null ? span.SourceCount : 0,
                 Watchers = watchers,
+                MacroId = macro.Id,
                 MacroName = macro.Name,
                 ActiveMacroIds = activeIds,
                 RunStartedAt = ActiveTime,
             };
-            rootVariables.Changed += (_, _) => NotifyVariablesChanged(current);
+            SeedWatchpointBaseline(current);
+            rootVariables.Changed += (_, snap) => OnVariableStoreChanged(current, snap);
             if (macro.Variables is { Count: > 0 })
                 NotifyVariablesChanged(current);
 
@@ -790,6 +890,15 @@ public sealed partial class PlaybackEngine
             ? Array.Empty<SelfHealSuggestion>()
             : (IReadOnlyList<SelfHealSuggestion>)_sessionSuggestions.Values.OrderBy(s => s.StepNumber).ToList();
         var finalVars = run?.Variables.Snapshot() ?? Array.Empty<VariableSnapshot>();
+        var traceSnapshot = GetExecutionTraceSnapshot();
+        var failureCallStack = result.Outcome == PlaybackOutcome.Failed
+            ? (_failureCallStack ?? Array.Empty<CallStackFrame>())
+            : Array.Empty<CallStackFrame>();
+        if (result.Outcome == PlaybackOutcome.Failed)
+        {
+            await TrySaveFailureTraceAsync(macro.Name, result.Error, failureCallStack, traceSnapshot).ConfigureAwait(false);
+        }
+
         result = result with
         {
             Stats = stats,
@@ -797,6 +906,9 @@ public sealed partial class PlaybackEngine
             FinalVariables = finalVars,
             StepStats = run?.StepStats,
             FailureSnapshotPath = LastFailureSnapshotPath,
+            Trace = traceSnapshot,
+            FailureCallStack = failureCallStack,
+            FailureTracePath = LastFailureTracePath,
         };
         if (result.Outcome == PlaybackOutcome.Failed && !string.IsNullOrWhiteSpace(FailureWebhookUrl))
         {
@@ -811,6 +923,8 @@ public sealed partial class PlaybackEngine
         lock (_gate)
         {
             if (_state != PlaybackState.Running) return false;
+            _stepMode = DebugStepMode.None;
+            _pauseBeforeNextStep = false;
             _resumeSignal = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
             _state = PlaybackState.Paused;
             _pauseRequestedAt = _clock.Elapsed; // the pause counts from the key press, not from when playback notices it
@@ -825,16 +939,26 @@ public sealed partial class PlaybackEngine
             catch (Exception ex) { Message?.Invoke(this, $"Could not release held input when pausing: {ex.Message}"); }
         }
 
+        NotifyCallStackChanged(_activeRun);
+        NotifyVariablesChanged(_activeRun);
         StateChanged?.Invoke(this, PlaybackState.Paused);
         PausedChanged?.Invoke(this, true);
         return true;
     }
 
-    public bool Resume()
+    public bool Resume() => ResumeCore(clearStepState: true);
+
+    private bool ResumeCore(bool clearStepState)
     {
         lock (_gate)
         {
             if (_state != PlaybackState.Paused) return false;
+            if (clearStepState)
+            {
+                _stepMode = DebugStepMode.None;
+                _pauseBeforeNextStep = false;
+                _pendingPauseReason = null;
+            }
             _resumeSignal?.TrySetResult();
             _resumeSignal = null;
             _state = PlaybackState.Running;
@@ -851,18 +975,53 @@ public sealed partial class PlaybackEngine
     public bool TogglePause() => State == PlaybackState.Paused ? Resume() : Pause();
 
     /// <summary>
-    /// v1.8 Studio X Debugger: when paused, resumes for one step and automatically pauses before the next step.
-    /// Returns true if playback was paused and stepped forward.
+    /// Interactive Debugger (F10): when paused, executes the current step (running through any called sub-macro unless
+    /// a breakpoint/watchpoint inside hits) and pauses again before the next step at the same or caller frame depth.
     /// </summary>
     public bool StepOver()
     {
         lock (_gate)
         {
             if (_state != PlaybackState.Paused) return false;
-            _stepOverRequested = true;
+            _stepTargetDepth = _activeRun?.CallDepth ?? 0;
+            _stepMode = DebugStepMode.StepOver;
         }
 
-        return Resume();
+        return ResumeCore(clearStepState: false);
+    }
+
+    /// <summary>
+    /// Debugger 2.0 (F11): when paused, executes the current step and pauses before the very next executed step,
+    /// entering called sub-macros cleanly instead of stepping over them.
+    /// </summary>
+    public bool StepInto()
+    {
+        lock (_gate)
+        {
+            if (_state != PlaybackState.Paused) return false;
+            _stepTargetDepth = int.MaxValue;
+            _stepMode = DebugStepMode.StepInto;
+        }
+
+        return ResumeCore(clearStepState: false);
+    }
+
+    /// <summary>
+    /// Debugger 2.0 (Shift+F11): when paused inside a sub-macro, continues executing until the sub-macro returns
+    /// to its caller frame and pauses right before the caller's next step.
+    /// </summary>
+    public bool StepOut()
+    {
+        lock (_gate)
+        {
+            if (_state != PlaybackState.Paused) return false;
+            var depth = _activeRun?.CallDepth ?? 0;
+            if (depth <= 0) return false;
+            _stepTargetDepth = depth - 1;
+            _stepMode = DebugStepMode.StepOut;
+        }
+
+        return ResumeCore(clearStepState: false);
     }
 
     /// <summary>Stops as soon as possible. Safe to call any time, from any thread.</summary>

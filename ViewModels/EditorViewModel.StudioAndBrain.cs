@@ -29,13 +29,33 @@ public sealed partial class EditorViewModel : ObservableObject
     private string _toolboxFilter = string.Empty;
     private bool _isBottomDockExpanded;
     private int _selectedBottomTab;
-    private readonly HashSet<Guid> _breakpoints = new();
+    private readonly Dictionary<Guid, BreakpointRule?> _breakpoints = new();
+    private readonly Dictionary<Guid, (Guid MacroId, string MacroName, int StepNumber, string StepTitle)> _breakpointMeta = new();
     private int _runHistoryTotal;
     private int _runHistorySucceeded;
     private string _lastRunSummaryText = string.Empty;
+    private bool _isPlaybackPaused;
+    private string _selectedBreakpointExpression = string.Empty;
+    private string? _breakpointRuleError;
+    private string _newWatchpointVariableName = string.Empty;
+    private string _newWatchpointExpression = string.Empty;
+    private string? _watchpointRuleError;
+    private readonly List<ExecutionTraceEntry> _traceAll = new();
+    private string _traceFilterText = string.Empty;
+    private TraceOutcomeFilter _traceOutcomeFilter = TraceOutcomeFilter.All;
+    private string? _failureTracePath;
 
     /// <summary>v1.8 Studio X Debugger: set by MainViewModel to execute one step while paused (F10).</summary>
     public Func<bool>? StepOverHandler { get; set; }
+
+    /// <summary>Debugger 2.0: set by MainViewModel to step into sub-macro calls while paused (F11).</summary>
+    public Func<bool>? StepIntoHandler { get; set; }
+
+    /// <summary>Debugger 2.0: set by MainViewModel to step out of the active sub-macro frame while paused (Shift+F11).</summary>
+    public Func<bool>? StepOutHandler { get; set; }
+
+    /// <summary>Debugger 2.0: set by MainViewModel to mutate a live runtime variable while paused.</summary>
+    public Func<string, string?, (bool Success, string? Error)>? SetLiveVariableHandler { get; set; }
 
     public RelayCommand ClearToolboxFilterCommand { get; }
     public RelayCommand OpenSubMacroCommand { get; }
@@ -45,13 +65,171 @@ public sealed partial class EditorViewModel : ObservableObject
     public RelayCommand OpenBottomTabCommand { get; }
     public RelayCommand ToggleBreakpointCommand { get; }
     public RelayCommand StepOverCommand { get; }
+    public RelayCommand StepIntoCommand { get; }
+    public RelayCommand StepOutCommand { get; }
+    public RelayCommand ApplyBreakpointConditionCommand { get; }
+    public RelayCommand ClearBreakpointConditionCommand { get; }
+    public RelayCommand RemoveBreakpointItemCommand { get; }
+    public RelayCommand AddWatchpointCommand { get; }
+    public RelayCommand RemoveWatchpointCommand { get; }
+    public RelayCommand ApplyLiveVariableCommand { get; }
+    public RelayCommand OpenCallStackFrameCommand { get; }
+    public RelayCommand ClearTraceCommand { get; }
+    public RelayCommand SetTraceOutcomeFilterCommand { get; }
+    public RelayCommand OpenFailureTraceCommand { get; }
+    public RelayCommand DismissFailureTraceCommand { get; }
+    public RelayCommand DismissFailureBannerCommand { get; }
     public RelayCommand CopyCliCommand { get; }
 
     /// <summary>True when a step ID has an active debugger breakpoint (F9).</summary>
-    public bool HasStepBreakpoint(Guid stepId) => _breakpoints.Contains(stepId);
+    public bool HasStepBreakpoint(Guid stepId) => _breakpoints.ContainsKey(stepId);
 
-    /// <summary>Number of active breakpoints in the open workflow.</summary>
+    /// <summary>Optional conditional rule attached to <paramref name="stepId"/>.</summary>
+    public BreakpointRule? GetBreakpointRule(Guid stepId) => _breakpoints.TryGetValue(stepId, out var rule) ? rule : null;
+
+    /// <summary>Number of active breakpoints across opened workflows.</summary>
     public int BreakpointCount => _breakpoints.Count;
+
+    public bool HasActiveBreakpoints => ActiveBreakpoints.Count > 0;
+    public bool HasWatchpoints => VariableWatchpoints.Count > 0;
+    public bool HasActiveCallStack => CallStackFrames.Count > 0;
+    public bool HasActiveFrameVariables => ActiveFrameVariables.Count > 0;
+    public bool HasTraceEntries => _traceAll.Count > 0;
+
+    public bool IsPlaybackPaused
+    {
+        get => _isPlaybackPaused;
+        set
+        {
+            if (SetProperty(ref _isPlaybackPaused, value))
+                System.Windows.Input.CommandManager.InvalidateRequerySuggested();
+        }
+    }
+
+    public string DebuggerSummary
+    {
+        get
+        {
+            var count = _breakpoints.Count + VariableWatchpoints.Count;
+            return count == 0 ? "Debug" : $"Debug ({count})";
+        }
+    }
+
+    public string WatchpointsSummary => VariableWatchpoints.Count == 0
+        ? "Watchpoints"
+        : $"Watchpoints ({VariableWatchpoints.Count})";
+
+    public string ActiveCallStackSummary => CallStackFrames.Count == 0
+        ? "No active call stack"
+        : CallStackFrames[^1].DetailText;
+
+    public string TraceSummary => _traceAll.Count == 0 ? "Trace" : $"Trace ({_traceAll.Count})";
+
+    public string SelectedBreakpointExpression
+    {
+        get => _selectedBreakpointExpression;
+        set
+        {
+            if (SetProperty(ref _selectedBreakpointExpression, value ?? string.Empty))
+            {
+                BreakpointRuleError = null;
+                System.Windows.Input.CommandManager.InvalidateRequerySuggested();
+            }
+        }
+    }
+
+    public string? BreakpointRuleError
+    {
+        get => _breakpointRuleError;
+        private set
+        {
+            if (SetProperty(ref _breakpointRuleError, value))
+                OnPropertyChanged(nameof(HasBreakpointRuleError));
+        }
+    }
+
+    public bool HasBreakpointRuleError => !string.IsNullOrEmpty(_breakpointRuleError);
+
+    public string NewWatchpointVariableName
+    {
+        get => _newWatchpointVariableName;
+        set
+        {
+            if (SetProperty(ref _newWatchpointVariableName, value ?? string.Empty))
+            {
+                WatchpointRuleError = null;
+                System.Windows.Input.CommandManager.InvalidateRequerySuggested();
+            }
+        }
+    }
+
+    public string NewWatchpointExpression
+    {
+        get => _newWatchpointExpression;
+        set
+        {
+            if (SetProperty(ref _newWatchpointExpression, value ?? string.Empty))
+                WatchpointRuleError = null;
+        }
+    }
+
+    public string? WatchpointRuleError
+    {
+        get => _watchpointRuleError;
+        private set
+        {
+            if (SetProperty(ref _watchpointRuleError, value))
+                OnPropertyChanged(nameof(HasWatchpointRuleError));
+        }
+    }
+
+    public bool HasWatchpointRuleError => !string.IsNullOrEmpty(_watchpointRuleError);
+
+    public string TraceFilterText
+    {
+        get => _traceFilterText;
+        set
+        {
+            if (SetProperty(ref _traceFilterText, value ?? string.Empty))
+                RefreshFilteredTrace();
+        }
+    }
+
+    public TraceOutcomeFilter TraceOutcomeFilter
+    {
+        get => _traceOutcomeFilter;
+        set
+        {
+            if (SetProperty(ref _traceOutcomeFilter, value))
+            {
+                OnPropertyChanged(nameof(IsTraceFilterAll));
+                OnPropertyChanged(nameof(IsTraceFilterFailed));
+                OnPropertyChanged(nameof(IsTraceFilterVision));
+                RefreshFilteredTrace();
+            }
+        }
+    }
+
+    public bool IsTraceFilterAll => _traceOutcomeFilter == TraceOutcomeFilter.All;
+    public bool IsTraceFilterFailed => _traceOutcomeFilter == TraceOutcomeFilter.Failed;
+    public bool IsTraceFilterVision => _traceOutcomeFilter == TraceOutcomeFilter.Vision;
+
+    public string? FailureTracePath
+    {
+        get => _failureTracePath;
+        set
+        {
+            if (SetProperty(ref _failureTracePath, value))
+            {
+                OnPropertyChanged(nameof(HasFailureTrace));
+                OnPropertyChanged(nameof(HasFailureBanner));
+                System.Windows.Input.CommandManager.InvalidateRequerySuggested();
+            }
+        }
+    }
+
+    public bool HasFailureTrace => !string.IsNullOrWhiteSpace(_failureTracePath) && System.IO.File.Exists(_failureTracePath);
+    public bool HasFailureBanner => HasFailureSnapshot || HasFailureTrace;
 
     /// <summary>Total runs recorded for this macro during the current editor session.</summary>
     public int RunHistoryTotal => _runHistoryTotal;
@@ -68,21 +246,245 @@ public sealed partial class EditorViewModel : ObservableObject
     private void ToggleBreakpoint(StepViewModel? step)
     {
         if (!HasMacro || step is null) return;
-        var added = _breakpoints.Add(step.Id);
-        if (!added) _breakpoints.Remove(step.Id);
+        bool added;
+        if (_breakpoints.ContainsKey(step.Id))
+        {
+            _breakpoints.Remove(step.Id);
+            _breakpointMeta.Remove(step.Id);
+            added = false;
+        }
+        else
+        {
+            _breakpoints[step.Id] = null;
+            _breakpointMeta[step.Id] = (MacroId ?? Guid.Empty, Name, step.Number, step.Title);
+            added = true;
+        }
         step.HasBreakpoint = added;
-        OnPropertyChanged(nameof(BreakpointCount));
+        step.BreakpointCondition = null;
+        if (ReferenceEquals(step, SelectedStep))
+            SyncSelectedBreakpointEditor();
+        RebuildActiveBreakpoints();
         _setStatus(added
-            ? $"🔴 Breakpoint set on step #{step.Number} ({step.Title}). Playback will pause before this step (F10 steps over, F8 resumes)."
+            ? $"🔴 Breakpoint set on step #{step.Number} ({step.Title}). Playback pauses before this step (F10 over, F11 into, Shift+F11 out, F8 resume)."
             : $"⚪ Breakpoint removed from step #{step.Number}.", StatusKind.Info);
     }
+
+    private void SyncSelectedBreakpointEditor()
+    {
+        BreakpointRuleError = null;
+        if (SelectedStep is { } step && _breakpoints.TryGetValue(step.Id, out var rule))
+            _selectedBreakpointExpression = rule?.Expression ?? string.Empty;
+        else
+            _selectedBreakpointExpression = string.Empty;
+        OnPropertyChanged(nameof(SelectedBreakpointExpression));
+        System.Windows.Input.CommandManager.InvalidateRequerySuggested();
+    }
+
+    private void ApplyBreakpointCondition()
+    {
+        if (!HasMacro || SelectedStep is not { } step) return;
+        var raw = SelectedBreakpointExpression.Trim();
+        BreakpointRule? rule = null;
+        if (!string.IsNullOrEmpty(raw))
+        {
+            if (!DebugConditionEvaluator.TryParseExpression(raw, out _, out _, out var err))
+            {
+                BreakpointRuleError = err;
+                _setStatus(err ?? "Invalid breakpoint condition.", StatusKind.Warning);
+                return;
+            }
+            rule = new BreakpointRule { StepId = step.Id, Expression = raw };
+        }
+
+        BreakpointRuleError = null;
+        _breakpoints[step.Id] = rule;
+        _breakpointMeta[step.Id] = (MacroId ?? Guid.Empty, Name, step.Number, step.Title);
+        step.HasBreakpoint = true;
+        step.BreakpointCondition = rule?.Expression;
+        RebuildActiveBreakpoints();
+        System.Windows.Input.CommandManager.InvalidateRequerySuggested();
+        _setStatus(rule is null
+            ? $"🔴 Unconditional breakpoint active on step #{step.Number}."
+            : $"⚙ Conditional breakpoint set on step #{step.Number}: {rule.Expression}", StatusKind.Success);
+    }
+
+    private void ClearBreakpointCondition()
+    {
+        if (!HasMacro || SelectedStep is not { } step) return;
+        BreakpointRuleError = null;
+        _selectedBreakpointExpression = string.Empty;
+        OnPropertyChanged(nameof(SelectedBreakpointExpression));
+        if (_breakpoints.ContainsKey(step.Id))
+        {
+            _breakpoints[step.Id] = null;
+            step.BreakpointCondition = null;
+            RebuildActiveBreakpoints();
+            _setStatus($"🔴 Condition cleared on step #{step.Number} breakpoint (now unconditional).", StatusKind.Info);
+        }
+        System.Windows.Input.CommandManager.InvalidateRequerySuggested();
+    }
+
+    private void RemoveBreakpointItem(object? parameter)
+    {
+        if (parameter is not ConditionalBreakpointItemViewModel item) return;
+        _breakpoints.Remove(item.StepId);
+        _breakpointMeta.Remove(item.StepId);
+        if (Steps.FirstOrDefault(s => s.Id == item.StepId) is { } match)
+        {
+            match.HasBreakpoint = false;
+            match.BreakpointCondition = null;
+        }
+        if (SelectedStep?.Id == item.StepId)
+            SyncSelectedBreakpointEditor();
+        RebuildActiveBreakpoints();
+    }
+
+    private void RebuildActiveBreakpoints()
+    {
+        ActiveBreakpoints.Clear();
+        foreach (var (stepId, rule) in _breakpoints)
+        {
+            _breakpointMeta.TryGetValue(stepId, out var meta);
+            ActiveBreakpoints.Add(new ConditionalBreakpointItemViewModel
+            {
+                MacroId = meta.MacroId,
+                MacroName = string.IsNullOrWhiteSpace(meta.MacroName) ? "Macro" : meta.MacroName,
+                StepId = stepId,
+                StepNumber = meta.StepNumber,
+                StepTitle = string.IsNullOrWhiteSpace(meta.StepTitle) ? "Step" : meta.StepTitle,
+                ConditionText = rule?.Expression ?? string.Empty,
+            });
+        }
+        OnPropertyChanged(nameof(BreakpointCount));
+        OnPropertyChanged(nameof(HasActiveBreakpoints));
+        OnPropertyChanged(nameof(DebuggerSummary));
+    }
+
+    private void AddWatchpoint(object? parameter)
+    {
+        if (!HasMacro) return;
+        var varName = (parameter as string ?? NewWatchpointVariableName).Trim();
+        if (string.IsNullOrWhiteSpace(varName)) return;
+
+        var expr = parameter is string ? string.Empty : NewWatchpointExpression.Trim();
+        if (!string.IsNullOrEmpty(expr) && !DebugConditionEvaluator.TryParseExpression(expr, out _, out _, out var err))
+        {
+            WatchpointRuleError = err;
+            _setStatus(err ?? "Invalid watchpoint filter.", StatusKind.Warning);
+            return;
+        }
+
+        WatchpointRuleError = null;
+        var vm = new WatchpointItemViewModel(varName, expr, OnWatchpointsModified);
+        VariableWatchpoints.Add(vm);
+        if (parameter is not string)
+        {
+            _newWatchpointVariableName = string.Empty;
+            _newWatchpointExpression = string.Empty;
+            OnPropertyChanged(nameof(NewWatchpointVariableName));
+            OnPropertyChanged(nameof(NewWatchpointExpression));
+        }
+        OnWatchpointsModified();
+        _setStatus(string.IsNullOrEmpty(expr)
+            ? $"👁 Watchpoint added for {{{varName}}} (pauses on value change)."
+            : $"👁 Watchpoint added for {{{varName}}} when {expr}.", StatusKind.Success);
+    }
+
+    private void RemoveWatchpoint(object? parameter)
+    {
+        if (parameter is not WatchpointItemViewModel wp) return;
+        if (VariableWatchpoints.Remove(wp))
+            OnWatchpointsModified();
+    }
+
+    private void OnWatchpointsModified()
+    {
+        OnPropertyChanged(nameof(HasWatchpoints));
+        OnPropertyChanged(nameof(WatchpointsSummary));
+        OnPropertyChanged(nameof(DebuggerSummary));
+        System.Windows.Input.CommandManager.InvalidateRequerySuggested();
+    }
+
+    public IReadOnlyList<VariableWatchpoint> GetCoreWatchpoints()
+        => VariableWatchpoints.Select(w => w.ToCoreWatchpoint()).ToList();
 
     private void ExecuteStepOver()
     {
         if (StepOverHandler?.Invoke() == true)
             _setStatus("⏭ Stepping over current step (F10)…", StatusKind.Info);
         else
-            _setStatus("Pause playback first (F8 or hit a 🔴 breakpoint), then press F10 to step over one step at a time.", StatusKind.Info);
+            _setStatus("Pause playback first (F8 or hit a 🔴 breakpoint), then press F10 to step over one step.", StatusKind.Info);
+    }
+
+    private void ExecuteStepInto()
+    {
+        if (StepIntoHandler?.Invoke() == true)
+            _setStatus("⏬ Stepping into sub-macro / next step (F11)…", StatusKind.Info);
+        else
+            _setStatus("Pause playback first (F8 or hit a 🔴 breakpoint), then press F11 to step into calls.", StatusKind.Info);
+    }
+
+    private void ExecuteStepOut()
+    {
+        if (StepOutHandler?.Invoke() == true)
+            _setStatus("⏫ Stepping out to caller macro (Shift+F11)…", StatusKind.Info);
+        else
+            _setStatus("Pause inside a sub-macro first (F11 / breakpoint), then press Shift+F11 to step out.", StatusKind.Info);
+    }
+
+    private void ApplyLiveVariable(object? parameter)
+    {
+        if (!IsPlaybackPaused)
+        {
+            _setStatus("Pause playback first (F8 / breakpoint) to mutate runtime variables.", StatusKind.Warning);
+            return;
+        }
+
+        string name;
+        string value;
+        Action revert;
+        switch (parameter)
+        {
+            case VariableItemViewModel declared:
+                name = declared.Name;
+                value = declared.EditableLiveValue;
+                revert = () => declared.EditableLiveValue = declared.LiveValue ?? declared.DefaultValue;
+                break;
+            case LiveRuntimeVariableViewModel live:
+                name = live.Name;
+                value = live.EditableLiveValue;
+                revert = () => live.EditableLiveValue = live.LiveValue;
+                break;
+            default:
+                return;
+        }
+
+        if (SetLiveVariableHandler is null) return;
+        var (ok, error) = SetLiveVariableHandler(name, value);
+        if (!ok)
+        {
+            revert();
+            _setStatus(error ?? $"Could not update live variable {{{name}}}.", StatusKind.Warning);
+            return;
+        }
+
+        _setStatus($"✏ Live variable {{{name}}} set to \"{value}\" while paused.", StatusKind.Success);
+    }
+
+    private void OpenCallStackFrame(object? parameter)
+    {
+        if (parameter is not CallStackFrame frame) return;
+        if (HasMacro && MacroId == frame.MacroId)
+        {
+            if (frame.StepId is { } stepId && Steps.FirstOrDefault(s => s.Id == stepId) is { } match)
+            {
+                Reveal(match);
+                SelectedStep = match;
+                RevealStepRequested?.Invoke(this, match);
+            }
+            return;
+        }
+        _ = OpenSubMacroHandler?.Invoke(frame.MacroId, frame.MacroName);
     }
 
     private void CopyCliRunCommand()
@@ -177,13 +579,18 @@ public sealed partial class EditorViewModel : ObservableObject
     public int SelectedBottomTab
     {
         get => _selectedBottomTab;
-        set => SetProperty(ref _selectedBottomTab, Math.Clamp(value, 0, 4));
+        set => SetProperty(ref _selectedBottomTab, Math.Clamp(value, 0, 6));
     }
 
     public ObservableCollection<VariableItemViewModel> Variables { get; } = new();
     public ObservableCollection<WatcherItemViewModel> Watchers { get; } = new();
     public ObservableCollection<TriggerItemViewModel> Triggers { get; } = new();
     public ObservableCollection<SelfHealItemViewModel> PendingSuggestions { get; } = new();
+    public ObservableCollection<ConditionalBreakpointItemViewModel> ActiveBreakpoints { get; } = new();
+    public ObservableCollection<WatchpointItemViewModel> VariableWatchpoints { get; } = new();
+    public ObservableCollection<CallStackFrame> CallStackFrames { get; } = new();
+    public ObservableCollection<LiveRuntimeVariableViewModel> ActiveFrameVariables { get; } = new();
+    public ObservableCollection<ExecutionTraceEntry> FilteredTraceEntries { get; } = new();
 
     public RelayCommand AddVariableCommand { get; }
     public RelayCommand RemoveVariableCommand { get; }
@@ -287,23 +694,140 @@ public sealed partial class EditorViewModel : ObservableObject
         Touch();
     }
 
-    /// <summary>Updates live runtime values shown next to variables in the 🧠 Variables popover.</summary>
+    /// <summary>Resets runtime debugger telemetry at the start of a new playback run.</summary>
+    public void BeginRuntimeDebugSession()
+    {
+        IsPlaybackPaused = false;
+        CallStackFrames.Clear();
+        OnPropertyChanged(nameof(HasActiveCallStack));
+        OnPropertyChanged(nameof(ActiveCallStackSummary));
+        _traceAll.Clear();
+        FilteredTraceEntries.Clear();
+        OnPropertyChanged(nameof(HasTraceEntries));
+        OnPropertyChanged(nameof(TraceSummary));
+        FailureSnapshotPath = null;
+        FailureTracePath = null;
+        System.Windows.Input.CommandManager.InvalidateRequerySuggested();
+    }
+
+    /// <summary>Updates live runtime values shown next to variables and in the active Debugger frame table.</summary>
     public void UpdateLiveVariables(IReadOnlyList<VariableSnapshot>? snapshots)
     {
         if (snapshots is null || snapshots.Count == 0)
         {
             foreach (var v in Variables) v.LiveValue = null;
+            if (ActiveFrameVariables.Count > 0)
+            {
+                ActiveFrameVariables.Clear();
+                OnPropertyChanged(nameof(HasActiveFrameVariables));
+            }
             return;
         }
 
-        var map = snapshots.ToDictionary(s => s.Name, s => s.Value, StringComparer.OrdinalIgnoreCase);
+        var map = snapshots.ToDictionary(s => s.Name, s => s, StringComparer.OrdinalIgnoreCase);
         foreach (var v in Variables)
-            v.LiveValue = map.TryGetValue(v.Name, out var text) ? text : null;
+            v.LiveValue = map.TryGetValue(v.Name, out var snap) ? snap.Value : null;
+
+        // Sync active frame variables cleanly in-place when keys match so paused editing keeps focus.
+        var sameOrder = ActiveFrameVariables.Count == snapshots.Count &&
+                        !snapshots.Where((s, idx) => !string.Equals(ActiveFrameVariables[idx].Name, s.Name, StringComparison.OrdinalIgnoreCase)).Any();
+        if (sameOrder)
+        {
+            for (var i = 0; i < snapshots.Count; i++)
+            {
+                var snap = snapshots[i];
+                var row = ActiveFrameVariables[i];
+                row.Type = snap.Type;
+                row.LiveValue = snap.Value;
+            }
+        }
+        else
+        {
+            ActiveFrameVariables.Clear();
+            foreach (var snap in snapshots)
+                ActiveFrameVariables.Add(new LiveRuntimeVariableViewModel(snap.Name, snap.Type, snap.Value));
+            OnPropertyChanged(nameof(HasActiveFrameVariables));
+        }
+    }
+
+    /// <summary>Updates the Debugger 2.0 nested sub-macro Call Stack displayed in the Debugger dock tab.</summary>
+    public void UpdateCallStack(IReadOnlyList<CallStackFrame>? frames)
+    {
+        CallStackFrames.Clear();
+        if (frames is not null)
+        {
+            foreach (var frame in frames)
+                CallStackFrames.Add(frame);
+        }
+        OnPropertyChanged(nameof(HasActiveCallStack));
+        OnPropertyChanged(nameof(ActiveCallStackSummary));
+        if (frames is { Count: > 0 })
+            UpdateLiveVariables(frames[^1].VariablesSnapshot);
+    }
+
+    /// <summary>Appends one structured step record into the Debugger 2.0 Trace viewer.</summary>
+    public void AppendTraceEntry(ExecutionTraceEntry entry)
+    {
+        _traceAll.Add(entry);
+        while (_traceAll.Count > PlaybackEngine.ExecutionTraceCapacity)
+            _traceAll.RemoveAt(0);
+
+        if (MatchesTraceFilter(entry))
+        {
+            FilteredTraceEntries.Add(entry);
+            while (FilteredTraceEntries.Count > PlaybackEngine.ExecutionTraceCapacity)
+                FilteredTraceEntries.RemoveAt(0);
+        }
+
+        OnPropertyChanged(nameof(HasTraceEntries));
+        OnPropertyChanged(nameof(TraceSummary));
+    }
+
+    private void ClearTrace()
+    {
+        _traceAll.Clear();
+        FilteredTraceEntries.Clear();
+        OnPropertyChanged(nameof(HasTraceEntries));
+        OnPropertyChanged(nameof(TraceSummary));
+        System.Windows.Input.CommandManager.InvalidateRequerySuggested();
+    }
+
+    private void RefreshFilteredTrace()
+    {
+        FilteredTraceEntries.Clear();
+        foreach (var entry in _traceAll)
+        {
+            if (MatchesTraceFilter(entry))
+                FilteredTraceEntries.Add(entry);
+        }
+    }
+
+    private bool MatchesTraceFilter(ExecutionTraceEntry entry)
+    {
+        switch (_traceOutcomeFilter)
+        {
+            case TraceOutcomeFilter.Failed when entry.Outcome != ExecutionTraceOutcome.Failed:
+                return false;
+            case TraceOutcomeFilter.Vision when !entry.VisionScore.HasValue:
+                return false;
+        }
+
+        if (string.IsNullOrWhiteSpace(_traceFilterText))
+            return true;
+
+        var q = _traceFilterText.Trim();
+        return entry.MacroName.Contains(q, StringComparison.OrdinalIgnoreCase) ||
+               entry.StepTitle.Contains(q, StringComparison.OrdinalIgnoreCase) ||
+               entry.OutcomeText.Contains(q, StringComparison.OrdinalIgnoreCase) ||
+               (entry.Error?.Contains(q, StringComparison.OrdinalIgnoreCase) ?? false) ||
+               (entry.Detail?.Contains(q, StringComparison.OrdinalIgnoreCase) ?? false) ||
+               entry.StepNumber.ToString(System.Globalization.CultureInfo.InvariantCulture).Contains(q, StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>Called when playback finishes: updates final variable readouts, run history telemetry, and opt-in Self-Heal coordinate updates.</summary>
     public void ShowPlaybackResult(Guid? playedMacroId, PlaybackResult? result)
     {
+        IsPlaybackPaused = false;
         if (!HasMacro || playedMacroId != _id || result is null) return;
 
         _runHistoryTotal++;
@@ -322,6 +846,20 @@ public sealed partial class EditorViewModel : ObservableObject
         if (result.FinalVariables is { Count: > 0 } finalVars)
             UpdateLiveVariables(finalVars);
 
+        if (result.Trace is { Count: > 0 } finalTrace)
+        {
+            _traceAll.Clear();
+            _traceAll.AddRange(finalTrace);
+            RefreshFilteredTrace();
+            OnPropertyChanged(nameof(HasTraceEntries));
+            OnPropertyChanged(nameof(TraceSummary));
+        }
+
+        if (result.Outcome == PlaybackOutcome.Failed && result.FailureCallStack is { Count: > 0 } failedFrames)
+            UpdateCallStack(failedFrames);
+        else
+            UpdateCallStack(null);
+
         // v1.8 Evergreen Profiler: populate per-step execution count & average ms badges.
         var statMap = result.StepStats ?? new Dictionary<Guid, StepExecutionStat>();
         foreach (var stepVm in Steps)
@@ -339,8 +877,9 @@ public sealed partial class EditorViewModel : ObservableObject
             }
         }
 
-        // v1.8 Evergreen Blackbox Flight Recorder: show "View Failure Snapshot" banner if a vision step timed out.
+        // v1.8 Evergreen Blackbox Flight Recorder + Debugger 2.0 Trace export.
         FailureSnapshotPath = result.Outcome == PlaybackOutcome.Failed ? result.FailureSnapshotPath : null;
+        FailureTracePath = result.Outcome == PlaybackOutcome.Failed ? result.FailureTracePath : null;
 
         PendingSuggestions.Clear();
         if (result.Suggestions is { Count: > 0 } suggestions)
@@ -414,6 +953,7 @@ public sealed partial class EditorViewModel : ObservableObject
             if (SetProperty(ref _failureSnapshotPath, value))
             {
                 OnPropertyChanged(nameof(HasFailureSnapshot));
+                OnPropertyChanged(nameof(HasFailureBanner));
                 System.Windows.Input.CommandManager.InvalidateRequerySuggested();
             }
         }
@@ -431,6 +971,19 @@ public sealed partial class EditorViewModel : ObservableObject
         catch (Exception ex)
         {
             _setStatus($"Couldn't open failure snapshot: {ex.Message}", StatusKind.Error);
+        }
+    }
+
+    private void OpenFailureTrace()
+    {
+        if (!HasFailureTrace || string.IsNullOrWhiteSpace(_failureTracePath)) return;
+        try
+        {
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(_failureTracePath) { UseShellExecute = true });
+        }
+        catch (Exception ex)
+        {
+            _setStatus($"Couldn't open failure trace JSON: {ex.Message}", StatusKind.Error);
         }
     }
 
@@ -769,6 +1322,15 @@ public sealed partial class EditorViewModel : ObservableObject
             case StudioCommandKind.CopyCliCommand:
                 Run(CopyCliCommand, null, "Open a macro first to copy its CLI run command.");
                 break;
+            case StudioCommandKind.StepOver:
+                Run(StepOverCommand, null, "Open a macro and pause playback first to Step Over (F10).");
+                break;
+            case StudioCommandKind.StepInto:
+                Run(StepIntoCommand, null, "Open a macro and pause playback first to Step Into (F11).");
+                break;
+            case StudioCommandKind.StepOut:
+                Run(StepOutCommand, null, "Open a macro and pause inside a sub-macro first to Step Out (Shift+F11).");
+                break;
         }
 
         void Run(System.Windows.Input.ICommand target, object? parameter, string unavailable)
@@ -1063,7 +1625,10 @@ public sealed partial class EditorViewModel : ObservableObject
     private void ResetViewState()
     {
         _collapsed.Clear();
-        _breakpoints.Clear();
+        // Preserve _breakpoints across macro switches so users can arm breakpoints inside sub-macros
+        // before returning to the caller macro to run.
+        _breakpointRuleError = null;
+        _selectedBreakpointExpression = string.Empty;
         _runHistoryTotal = 0;
         _runHistorySucceeded = 0;
         _lastRunSummaryText = string.Empty;
@@ -1082,7 +1647,14 @@ public sealed partial class EditorViewModel : ObservableObject
     {
         var models = Steps.Select(s => s.Model).ToList();
         _collapsed.RemoveWhere(id => !models.Any(m => m.Id == id && StepListView.CanCollapse(m)));
-        _breakpoints.RemoveWhere(id => !models.Any(m => m.Id == id));
+        var staleBreakpoints = _breakpoints.Keys
+            .Where(id => _breakpointMeta.TryGetValue(id, out var meta) && meta.MacroId == MacroId && !models.Any(m => m.Id == id))
+            .ToList();
+        foreach (var id in staleBreakpoints)
+        {
+            _breakpoints.Remove(id);
+            _breakpointMeta.Remove(id);
+        }
         var fold = StepListView.Collapse(models, _collapsed);
         var searching = !string.IsNullOrWhiteSpace(_searchText);
         _matches = StepListView.FindMatches(models, _searchText, _filter);
@@ -1092,7 +1664,10 @@ public sealed partial class EditorViewModel : ObservableObject
         {
             var vm = Steps[i];
             vm.IsCollapsed = _collapsed.Contains(vm.Id);
-            vm.HasBreakpoint = _breakpoints.Contains(vm.Id);
+            vm.HasBreakpoint = _breakpoints.TryGetValue(vm.Id, out var bpRule);
+            vm.BreakpointCondition = vm.HasBreakpoint ? bpRule?.Expression : null;
+            if (vm.HasBreakpoint)
+                _breakpointMeta[vm.Id] = (MacroId ?? Guid.Empty, Name, vm.Number, vm.Title);
             vm.HiddenStepCount = vm.IsCollapsed ? fold.HiddenCount[i] : 0;
             vm.IsHiddenByCollapse = fold.Hidden[i];
             vm.IsFilteredOut = _filter != StepFilter.All && !StepListView.MatchesFilter(vm.Model, _filter);
@@ -1100,6 +1675,8 @@ public sealed partial class EditorViewModel : ObservableObject
             vm.IsSearchDimmed = searching && !matchSet.Contains(i);
         }
 
+        RebuildActiveBreakpoints();
+        SyncSelectedBreakpointEditor();
         if (_currentMatch >= _matches.Count) _currentMatch = -1;
         MarkCurrentMatch();
         OnPropertyChanged(nameof(SearchMatchCount));
@@ -1137,4 +1714,12 @@ public sealed class StepFilterPill : ObservableObject
         get => _isActive;
         set => SetProperty(ref _isActive, value);
     }
+}
+
+/// <summary>Filter selector for the Debugger 2.0 Trace dock tab.</summary>
+public enum TraceOutcomeFilter
+{
+    All = 0,
+    Failed = 1,
+    Vision = 2,
 }

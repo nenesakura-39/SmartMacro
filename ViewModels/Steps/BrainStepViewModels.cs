@@ -858,6 +858,7 @@ public sealed class VariableItemViewModel : ObservableObject
     private readonly MacroVariableDefinition _model;
     private readonly Action _changed;
     private string? _liveValue;
+    private string _editableLiveValue = string.Empty;
 
     public VariableItemViewModel(MacroVariableDefinition model, Action changed)
     {
@@ -925,7 +926,14 @@ public sealed class VariableItemViewModel : ObservableObject
         {
             if (SetProperty(ref _liveValue, value))
                 OnPropertyChanged(nameof(HasLiveValue));
+            EditableLiveValue = value ?? _model.DefaultValue ?? string.Empty;
         }
+    }
+
+    public string EditableLiveValue
+    {
+        get => _editableLiveValue;
+        set => SetProperty(ref _editableLiveValue, value ?? string.Empty);
     }
 
     public bool HasLiveValue => !string.IsNullOrEmpty(_liveValue);

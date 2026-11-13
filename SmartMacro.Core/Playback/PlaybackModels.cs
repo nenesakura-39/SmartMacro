@@ -45,6 +45,15 @@ public sealed record PlaybackResult(PlaybackOutcome Outcome, int IterationsCompl
 
     /// <summary>Path to the Blackbox Failure Snapshot PNG saved when a vision/wait step timed out and stopped the macro.</summary>
     public string? FailureSnapshotPath { get; init; }
+
+    /// <summary>Structured execution trace (last up to 200 executed steps) recorded during the run.</summary>
+    public IReadOnlyList<ExecutionTraceEntry> Trace { get; init; } = Array.Empty<ExecutionTraceEntry>();
+
+    /// <summary>Call stack captured at the exact moment an unhandled failure terminated playback.</summary>
+    public IReadOnlyList<CallStackFrame> FailureCallStack { get; init; } = Array.Empty<CallStackFrame>();
+
+    /// <summary>Path to the JSON execution trace file saved alongside <see cref="FailureSnapshotPath"/> on failure.</summary>
+    public string? FailureTracePath { get; init; }
 }
 
 /// <summary>
@@ -71,7 +80,16 @@ public sealed record PlaybackRunInfo(int CurrentRun, int TotalRuns)
 /// so it matches the numbers shown in the editor. TotalIterations is null when repeating until stopped.
 /// LoopText describes the innermost Repeat block the step is in (e.g. "loop turn 2 of 5"), or null.
 /// </summary>
-public sealed record PlaybackProgress(int Iteration, int? TotalIterations, int StepNumber, int StepCount, MacroStep Step, string? LoopText = null);
+public sealed record PlaybackProgress(
+    int Iteration,
+    int? TotalIterations,
+    int StepNumber,
+    int StepCount,
+    MacroStep Step,
+    string? LoopText = null,
+    Guid? MacroId = null,
+    string? MacroName = null,
+    int CallDepth = 0);
 
 /// <summary>
 /// <see cref="PlaybackEngine.TargetOverlayClearRequested"/>: the handler sets <see cref="Cleared"/> when it hid a reticle

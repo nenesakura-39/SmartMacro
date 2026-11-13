@@ -95,7 +95,8 @@ public sealed class ScreenConditionEvaluator : IConditionEvaluator
         var probe = await search.LookAsync(timer, cancellationToken).ConfigureAwait(false);
         var isTrue = probe.Found != condition.Negate;
         var details = probe.Found ? probe.FoundText : $"{search.What} is not on screen.{probe.MissText}";
-        return new ConditionCheck(probe.Found, isTrue, probe.X, probe.Y, details, probe.Match, probe.Found ? probe.Confidence : 0, probe.ElapsedMs);
+        var confidence = probe.Found ? probe.Confidence : probe.BestConfidence;
+        return new ConditionCheck(probe.Found, isTrue, probe.X, probe.Y, details, probe.Match, confidence, probe.ElapsedMs);
     }
 
     public DetectionTimer? NewTimer(Condition condition) =>

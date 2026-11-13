@@ -38,13 +38,22 @@ public sealed partial class PlaybackEngine
         public List<MacroWatcher>? Watchers { get; init; }
         public Dictionary<Guid, TimeSpan> WatcherLastCheck { get; } = new();
         public Dictionary<Guid, TimeSpan> WatcherLastFired { get; } = new();
+        public Dictionary<string, string> LastKnownVariables { get; } = new(StringComparer.OrdinalIgnoreCase);
         public int CallDepth { get; init; }
+        public Guid MacroId { get; init; }
         public string? MacroName { get; init; }
+        public RunContext? Parent { get; init; }
         public HashSet<Guid> ActiveMacroIds { get; init; } = new();
         public bool IsSubRoutine { get; init; }
         public int CheckpointRestarts { get; set; }
         public TimeSpan RunStartedAt { get; set; }
         public int CurrentStepNumber { get; set; } = 1;
+        public int CurrentStepIndex { get; set; }
+        public Guid? CurrentStepId { get; set; }
+        public string CurrentStepTitle { get; set; } = string.Empty;
+
+        public int SourceIndexOf(int index) =>
+            SourceIndexes is { } map && index >= 0 && index < map.Count ? map[index] : index;
 
         /// <summary>First step to play (0 for a normal run).</summary>
         public int Start { get; }
@@ -118,6 +127,7 @@ public sealed partial class PlaybackEngine
         var blocks = run.Blocks;
         var loops = new List<LoopFrame>();
         var pc = run.Start;
+        var lastExecutedPc = -1;
 
         while (pc < run.End)
         {
@@ -136,29 +146,65 @@ public sealed partial class PlaybackEngine
                     Message?.Invoke(this, $"Playback speed changed to {newSpeed:0.##}× (from step {run.StepNumberOf(pc)}).");
                 }
 
+                var currentPc = pc;
                 var step = steps[pc];
-                if (step.Enabled && !run.IsSubRoutine)
+                var stepNumber = run.StepNumberOf(pc);
+                var stepTitle = StepDescriber.DisplayName(step.Kind);
+                run.CurrentStepNumber = stepNumber;
+                run.CurrentStepIndex = run.SourceIndexOf(pc);
+                run.CurrentStepId = step.Id;
+                run.CurrentStepTitle = stepTitle;
+
+                if (step.Enabled)
                 {
-                    var hitBreakpoint = HasBreakpoint?.Invoke(step.Id) == true && _lastBreakpointPausedStepId != step.Id;
-                    if (_pauseBeforeNextStep || hitBreakpoint)
+                    var bpResult = _lastBreakpointPausedStepId == step.Id
+                        ? default
+                        : await EvaluateBreakpointAsync(run, step, token).ConfigureAwait(false);
+                    if (_pauseBeforeNextStep || bpResult.Hit)
                     {
+                        var watchReason = _pendingPauseReason;
                         _pauseBeforeNextStep = false;
+                        _pendingPauseReason = null;
+                        _stepMode = DebugStepMode.None;
                         _lastBreakpointPausedStepId = step.Id;
-                        Report(run, pc, loops, hitBreakpoint ? "breakpoint" : "step over");
-                        Message?.Invoke(this, hitBreakpoint
-                            ? $"🔴 Breakpoint hit at step #{run.StepNumberOf(pc)} (F8 to resume, F10 to step over)."
-                            : $"⏭ Paused at step #{run.StepNumberOf(pc)} (F8 to resume, F10 to step over).");
+
+                        var reasonTag = bpResult.Hit
+                            ? (string.IsNullOrWhiteSpace(bpResult.Reason) ? "breakpoint" : $"breakpoint ({bpResult.Reason})")
+                            : (watchReason is not null ? "watchpoint" : "step");
+                        Report(run, pc, loops, reasonTag);
+
+                        var scopeName = run.IsSubRoutine && !string.IsNullOrWhiteSpace(run.MacroName)
+                            ? $" in \"{run.MacroName}\""
+                            : string.Empty;
+                        var msg = bpResult.Hit
+                            ? (string.IsNullOrWhiteSpace(bpResult.Reason)
+                                ? $"🔴 Breakpoint hit at step #{stepNumber}{scopeName} (F8 resume, F10 step over, F11 step into)."
+                                : $"🔴 Conditional breakpoint [{bpResult.Reason}] hit at step #{stepNumber}{scopeName} (F8 resume, F10/F11 step).")
+                            : watchReason is not null
+                                ? $"{watchReason} — paused before step #{stepNumber}{scopeName} (F8 resume, F10/F11 step)."
+                                : $"⏭ Paused at step #{stepNumber}{scopeName} (F8 resume, F10 step over, F11 step into).";
+                        Message?.Invoke(this, msg);
+
                         Pause();
                         await WaitIfPausedAsync(token).ConfigureAwait(false);
                         token.ThrowIfCancellationRequested();
                     }
+
+                    if (_stepMode == DebugStepMode.StepInto)
+                    {
+                        // Arm pause before entering any sub-macro (or the next step) while keeping Resume (F8) able to clear it.
+                        _pauseBeforeNextStep = true;
+                        _stepMode = DebugStepMode.None;
+                    }
                 }
 
-                var stepOverThisStep = _stepOverRequested;
-                _stepOverRequested = false;
                 var stepStartedAt = ActiveTime;
                 var prevExecuted = run.StepsExecuted;
                 var attemptedStep = step.Enabled && step is not (ElseStep or EndIfStep or EndRepeatStep);
+                _currentStepVisionScore = null;
+                var traceOutcome = ExecutionTraceOutcome.Executed;
+                string? traceDetail = null;
+                string? traceError = null;
 
                 try
                 {
@@ -176,6 +222,8 @@ public sealed partial class PlaybackEngine
                         Report(run, pc, loops);
                         var answer = await EvaluateConditionAsync(run, ifStep.Condition, token, label: "If").ConfigureAwait(false);
                         run.StepsExecuted++;
+                        traceOutcome = answer.IsTrue ? ExecutionTraceOutcome.ConditionTrue : ExecutionTraceOutcome.ConditionFalse;
+                        traceDetail = answer.Text;
                         LogIfAnswer(run, pc, answer.IsTrue, answer.Text);
 
                         // Optional "when true" action on the spot the condition saw (not for "is NOT on screen").
@@ -288,6 +336,7 @@ public sealed partial class PlaybackEngine
                         if (call.Enabled)
                         {
                             Report(run, pc, loops);
+                            traceDetail = $"Sub-macro \"{(string.IsNullOrWhiteSpace(call.TargetMacroName) ? call.TargetMacroId.ToString() : call.TargetMacroName.Trim())}\"";
                             await ExecuteCallMacroAsync(call, token).ConfigureAwait(false);
                             SyncTimelineToNow();
                             run.StepsExecuted++;
@@ -373,18 +422,47 @@ public sealed partial class PlaybackEngine
                         break;
                 }
                 }
+                catch (CheckpointJumpSignal cj)
+                {
+                    traceOutcome = ExecutionTraceOutcome.Executed;
+                    traceDetail = $"Checkpoint \"{cj.CheckpointName}\"";
+                    throw;
+                }
+                catch (MacroStopRequestedSignal)
+                {
+                    traceOutcome = ExecutionTraceOutcome.Stopped;
+                    traceDetail = "Stop macro requested";
+                    throw;
+                }
+                catch (OperationCanceledException) when (token.IsCancellationRequested)
+                {
+                    traceOutcome = ExecutionTraceOutcome.Stopped;
+                    traceDetail = "Playback stopped";
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    traceOutcome = ExecutionTraceOutcome.Failed;
+                    traceError = ex.Message;
+                    _failureCallStack ??= BuildCallStackSnapshot(_activeRun ?? run);
+                    throw;
+                }
                 finally
                 {
-                    if (run.StepsExecuted > prevExecuted || attemptedStep)
+                    if (run.StepsExecuted > prevExecuted || attemptedStep || traceOutcome == ExecutionTraceOutcome.Failed)
                     {
-                        run.RecordStepStat(step.Id, (ActiveTime - stepStartedAt).TotalMilliseconds);
+                        var elapsedMs = (ActiveTime - stepStartedAt).TotalMilliseconds;
+                        run.RecordStepStat(step.Id, elapsedMs);
+                        RecordTraceEntry(run, stepNumber, step, elapsedMs, traceOutcome, _currentStepVisionScore, traceError, traceDetail);
                     }
                 }
 
+                lastExecutedPc = currentPc;
                 _lastBreakpointPausedStepId = null;
-                if (stepOverThisStep || _stepOverRequested)
+                if (_stepMode == DebugStepMode.StepInto
+                    || (_stepMode is DebugStepMode.StepOver or DebugStepMode.StepOut && run.CallDepth <= _stepTargetDepth))
                 {
-                    _stepOverRequested = false;
+                    _stepMode = DebugStepMode.None;
                     _pauseBeforeNextStep = true;
                 }
             }
@@ -397,6 +475,24 @@ public sealed partial class PlaybackEngine
                 Message?.Invoke(this, $"🏁 Jumped to checkpoint \"{jump.CheckpointName}\" (restart #{run.CheckpointRestarts}).");
                 pc = jump.TargetIndex + 1;
             }
+        }
+
+        if (_pendingPauseReason is { } finalWatchReason && lastExecutedPc >= 0 && !token.IsCancellationRequested)
+        {
+            var finalStep = steps[lastExecutedPc];
+            var finalNum = run.StepNumberOf(lastExecutedPc);
+            run.CurrentStepNumber = finalNum;
+            run.CurrentStepIndex = run.SourceIndexOf(lastExecutedPc);
+            run.CurrentStepId = finalStep.Id;
+            run.CurrentStepTitle = StepDescriber.DisplayName(finalStep.Kind);
+            _pauseBeforeNextStep = false;
+            _pendingPauseReason = null;
+            _stepMode = DebugStepMode.None;
+            Report(run, lastExecutedPc, loops, "watchpoint");
+            Message?.Invoke(this, $"{finalWatchReason} — paused at end of {(run.IsSubRoutine && !string.IsNullOrWhiteSpace(run.MacroName) ? $"\"{run.MacroName}\"" : "macro")} (F8 resume).");
+            Pause();
+            await WaitIfPausedAsync(token).ConfigureAwait(false);
+            token.ThrowIfCancellationRequested();
         }
     }
 
@@ -419,10 +515,14 @@ public sealed partial class PlaybackEngine
     private void Report(RunContext run, int index, List<LoopFrame> loops, string? extra = null)
     {
         var stepNumber = run.StepNumberOf(index);
+        var step = run.Steps[index];
+        var stepTitle = StepDescriber.DisplayName(step.Kind);
         run.CurrentStepNumber = stepNumber;
+        run.CurrentStepIndex = run.SourceIndexOf(index);
+        run.CurrentStepId = step.Id;
+        run.CurrentStepTitle = stepTitle;
 
         // Live progress bar: what plays now and how long it should take (only when it has a known length).
-        var step = run.Steps[index];
         Volatile.Write(ref _stepTiming, ExpectedDurationMs(step, run.Speed) is { } expected
             ? new StepTiming(step.Id, UiActiveTime(), expected)
             : null);
@@ -436,7 +536,16 @@ public sealed partial class PlaybackEngine
 
         if (extra is not null) loopText = loopText is null ? extra : $"{loopText} · {extra}";
 
-        ProgressChanged?.Invoke(this, new PlaybackProgress(run.Iteration, run.TotalIterations, stepNumber, run.StepCountShown, run.Steps[index], loopText));
+        ProgressChanged?.Invoke(this, new PlaybackProgress(
+            run.Iteration,
+            run.TotalIterations,
+            stepNumber,
+            run.StepCountShown,
+            step,
+            loopText,
+            run.MacroId == Guid.Empty ? null : run.MacroId,
+            run.MacroName,
+            run.CallDepth));
     }
 
     private void LogIfAnswer(RunContext run, int index, bool isTrue, string text)
@@ -563,6 +672,12 @@ public sealed partial class PlaybackEngine
             token.ThrowIfCancellationRequested();
 
             check = await conditions.CheckAsync(condition, timer, token).ConfigureAwait(false);
+            if (check.Confidence > 0 || check.Seen || condition.Kind is ConditionKind.ImageVisible or ConditionKind.ColorVisible or ConditionKind.TextVisible)
+            {
+                var score = Math.Clamp(check.Confidence, 0, 1);
+                _currentStepVisionScore = score;
+                _lastVisionScore = score;
+            }
             if (timer is not null) RecordProbeTime(check.ElapsedMs);
             if (check.Seen) RememberFound(check.X, check.Y, check.Match);
 

@@ -47,6 +47,9 @@ public sealed partial class PlaybackEngine
                 token.ThrowIfCancellationRequested();
 
                 var result = await search.LookAsync(timer, token).ConfigureAwait(false);
+                var stepScore = Math.Clamp(result.Found ? result.Confidence : result.BestConfidence, 0, 1);
+                _currentStepVisionScore = stepScore;
+                _lastVisionScore = stepScore;
                 if (search.IsTimed) RecordProbeTime(result.ElapsedMs);
 
                 if (step.Goal == WaitGoal.Appear && result.Found)
