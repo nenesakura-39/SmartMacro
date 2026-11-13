@@ -25,8 +25,9 @@ namespace SmartMacro.Services.Input;
 /// position and state from GetCursorPos / GetCursorInfo / GetClipCursor, read in the same handler.
 ///
 /// Limits: input to apps running as administrator may not be visible to a normal app (Windows UIPI), extra
-/// mouse buttons (4/5) aren't recorded, and timestamps are "when SmartMacro processed the message", which is
-/// normally well under a millisecond after the device reported it but can lag if the PC is very busy.
+/// mouse buttons (XButton1 / XButton2, mouse 4/5) are recorded in both game and smart modes, and timestamps are
+/// "when SmartMacro processed the message", which is normally well under a millisecond after the device reported
+/// it but can lag if the PC is very busy.
 /// </summary>
 public sealed class RawInputRecorder : IRelativeInputRecorder, IDisposable
 {

@@ -1,0 +1,93 @@
+<UserControl x:Class="SmartMacro.Views.EditorPanes.CommandPaletteOverlay"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:vm="clr-namespace:SmartMacro.ViewModels"
+             xmlns:ctrl="clr-namespace:SmartMacro.Controls"
+             mc:Ignorable="d"
+             d:DataContext="{d:DesignInstance Type=vm:EditorViewModel}">
+    <UserControl.Resources>
+        <!-- Command Palette rows -->
+        <Style x:Key="PaletteItemStyle" TargetType="ListBoxItem">
+            <Setter Property="Focusable" Value="False" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ListBoxItem">
+                        <Border x:Name="Bd" Background="Transparent" CornerRadius="8" Padding="10,7" Margin="0,1"
+                                BorderThickness="1" BorderBrush="Transparent">
+                            <ContentPresenter />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="{DynamicResource HoverBrush}" />
+                            </Trigger>
+                            <Trigger Property="IsSelected" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="{DynamicResource AccentSoftBrush}" />
+                                <Setter TargetName="Bd" Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </UserControl.Resources>
+
+    <!-- =========================================================================
+         C9: CTRL+K COMMAND PALETTE v2 (Glass Modal + Keycaps)
+         ========================================================================= -->
+    <Grid Visibility="{Binding IsCommandPaletteOpen, Converter={StaticResource BoolToVisibility}}">
+        <Border Background="#AA05070C" MouseLeftButtonDown="PaletteBackdrop_MouseLeftButtonDown" />
+        <Border x:Name="PaletteCard" Width="580" MaxHeight="450" Margin="0,56,0,0" HorizontalAlignment="Center" VerticalAlignment="Top"
+                Background="{DynamicResource CharcoalBrush}" BorderBrush="{DynamicResource InputBorderBrush}" BorderThickness="1" CornerRadius="12"
+                Padding="12" Effect="{StaticResource ShadowModal}">
+            <DockPanel>
+                <Grid DockPanel.Dock="Top">
+                    <ctrl:StudioIcon Kind="Search" Size="14" Foreground="{DynamicResource AccentHoverBrush}"
+                                     HorizontalAlignment="Left" VerticalAlignment="Center" Margin="11,0,0,0" Panel.ZIndex="1" />
+                    <TextBox x:Name="PaletteBox" Text="{Binding PaletteQuery, UpdateSourceTrigger=PropertyChanged}" FontSize="14"
+                             Padding="34,9,10,9" Tag="Type a step, blueprint, or studio command…"
+                             PreviewKeyDown="PaletteBox_PreviewKeyDown" AutomationProperties.Name="Command palette search" />
+                </Grid>
+
+                <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Margin="4,8,0,0">
+                    <TextBlock Text="↑↓ navigate  ·  Enter execute  ·  Esc close" FontSize="10.5"
+                               FontFamily="{StaticResource MonoFont}" Foreground="{DynamicResource SubtleTextBrush}" />
+                </StackPanel>
+
+                <Grid Margin="0,8,0,0">
+                    <TextBlock Text="No matching steps or commands." Style="{StaticResource MutedText}" Margin="10,8,0,8"
+                               Visibility="{Binding HasNoPaletteResults, Converter={StaticResource BoolToVisibility}}" />
+                    <ListBox x:Name="PaletteList" ItemsSource="{Binding PaletteItems}" SelectedIndex="{Binding SelectedPaletteIndex, Mode=TwoWay}"
+                             ItemContainerStyle="{StaticResource PaletteItemStyle}" Background="Transparent" BorderThickness="0"
+                             ScrollViewer.HorizontalScrollBarVisibility="Disabled" Focusable="False"
+                             PreviewMouseLeftButtonUp="PaletteList_PreviewMouseLeftButtonUp"
+                             AutomationProperties.Name="Command palette results">
+                        <ListBox.ItemTemplate>
+                            <DataTemplate>
+                                <DockPanel>
+                                    <Border DockPanel.Dock="Right" Margin="12,0,0,0">
+                                        <Border.Style>
+                                            <Style TargetType="Border" BasedOn="{StaticResource KeycapBorder}">
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding Shortcut}" Value="">
+                                                        <Setter Property="Visibility" Value="Collapsed" />
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </Border.Style>
+                                        <TextBlock Text="{Binding Shortcut}" FontSize="10" FontFamily="{StaticResource MonoFont}"
+                                                   Foreground="{DynamicResource MutedTextBrush}" />
+                                    </Border>
+                                    <TextBlock Text="{Binding Title}" FontSize="13" Foreground="{DynamicResource TextBrush}"
+                                               TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+                                </DockPanel>
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                    </ListBox>
+                </Grid>
+            </DockPanel>
+        </Border>
+    </Grid>
+</UserControl>

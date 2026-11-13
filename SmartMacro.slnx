@@ -2,4 +2,5 @@
   <Project Path="SmartMacro.csproj" />
   <Project Path="SmartMacro.Core/SmartMacro.Core.csproj" />
   <Project Path="SmartMacro.Tests/SmartMacro.Tests.csproj" />
+  <Project Path="SmartMacro.App.Tests/SmartMacro.App.Tests.csproj" />
 </Solution>

@@ -24,5 +24,8 @@ jobs:
       - name: Build solution (0 warnings required)
         run: dotnet build SmartMacro.slnx --no-restore -warnaserror
 
-      - name: Run unit tests
-        run: dotnet test SmartMacro.Tests/SmartMacro.Tests.csproj --no-build --logger "trx;LogFileName=test-results.trx"
+      - name: Run Core unit tests
+        run: dotnet test SmartMacro.Tests/SmartMacro.Tests.csproj --no-build --logger "trx;LogFileName=core-test-results.trx"
+
+      - name: Run WPF & ViewModel tests
+        run: dotnet test SmartMacro.App.Tests/SmartMacro.App.Tests.csproj --no-build --logger "trx;LogFileName=app-test-results.trx"

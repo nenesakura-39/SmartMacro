@@ -130,7 +130,7 @@ public partial class App : Application
 
         var dialogs = new DialogService();
         var repository = new JsonMacroRepository(paths.MacrosDirectory, paths.TrashDirectory);
-        var settingsStore = new JsonSettingsStore(paths.SettingsFile);
+        var settingsStore = new WindowsSettingsPersistence(new JsonSettingsStore(paths.SettingsFile));
 
         var window = new MainWindow();
 
@@ -265,10 +265,10 @@ public partial class App : Application
         };
         mainViewModel.SettingsApplied += (_, settings) =>
         {
-            ThemeManager.Apply(settings);
+            settingsStore.ApplyAppearance(settings);
             // "🎥 Show overlays in OBS / Discord": re-applies the capture rule to every open overlay right away.
             Services.Vision.OverlayCaptureService.AllowObsCapture = settings.ShowOverlaysInObsAndRecording;
-            WindowsStartupService.Apply(settings.StartWithWindows, _log);
+            settingsStore.ApplyStartup(settings.StartWithWindows, _log);
             var failed = _hotkeys.Apply(settings);
             if (failed.Count > 0)
                 mainViewModel.SetStatus($"These shortcuts are used by another program and won't work: {string.Join(", ", failed)}. Change them in Settings.", StatusKind.Warning);

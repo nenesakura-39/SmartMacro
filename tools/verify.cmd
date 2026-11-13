@@ -12,18 +12,25 @@ rem Start from clean logs so an old "passed" result can't be mistaken for this r
 if exist artifacts\build.log del /q artifacts\build.log
 if exist artifacts\test.log del /q artifacts\test.log
 if exist artifacts\test-results.trx del /q artifacts\test-results.trx
+if exist artifacts\app-test-results.trx del /q artifacts\app-test-results.trx
 
 echo Building...
-dotnet build SmartMacro.slnx -c Debug -nologo > artifacts\build.log 2>&1
+dotnet build SmartMacro.slnx -c Debug -nologo -warnaserror /nodeReuse:false > artifacts\build.log 2>&1
 set "BUILD_EXIT=%ERRORLEVEL%"
 >> artifacts\build.log echo BUILD_EXIT=%BUILD_EXIT%
 if not "%BUILD_EXIT%"=="0" goto build_failed
 
-echo Testing...
+echo Testing Core...
 rem --no-build is safe here: the build above just succeeded for the same configuration.
 dotnet test SmartMacro.Tests\SmartMacro.Tests.csproj -c Debug -nologo --no-build --logger "trx;LogFileName=test-results.trx" --results-directory artifacts > artifacts\test.log 2>&1
 set "TEST_EXIT=%ERRORLEVEL%"
->> artifacts\test.log echo TEST_EXIT=%TEST_EXIT%
+>> artifacts\test.log echo CORE_TEST_EXIT=%TEST_EXIT%
+if not "%TEST_EXIT%"=="0" goto tests_failed
+
+echo Testing WPF/App...
+dotnet test SmartMacro.App.Tests\SmartMacro.App.Tests.csproj -c Debug -nologo --no-build --logger "trx;LogFileName=app-test-results.trx" --results-directory artifacts >> artifacts\test.log 2>&1
+set "TEST_EXIT=%ERRORLEVEL%"
+>> artifacts\test.log echo APP_TEST_EXIT=%TEST_EXIT%
 if not "%TEST_EXIT%"=="0" goto tests_failed
 
 echo OK: build and tests passed. See artifacts\build.log and artifacts\test.log

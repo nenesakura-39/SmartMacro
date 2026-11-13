@@ -34,7 +34,16 @@ public sealed class ScreenInfoProvider : IScreenInfoProvider, IScreenLayout, IWi
     private const int SM_CXVIRTUALSCREEN = 78;
     private const int SM_CYVIRTUALSCREEN = 79;
 
-    private readonly uint _ownProcessId = (uint)Environment.ProcessId;
+    private readonly uint _ownProcessId;
+    private readonly IWindowApi _windowApi;
+
+    public ScreenInfoProvider() : this(null, null) { }
+
+    public ScreenInfoProvider(IWindowApi? windowApi, uint? ownProcessId = null)
+    {
+        _windowApi = windowApi ?? new Win32WindowApi();
+        _ownProcessId = ownProcessId ?? (uint)Environment.ProcessId;
+    }
 
     public ScreenBounds GetVirtualScreen()
     {
@@ -69,7 +78,7 @@ public sealed class ScreenInfoProvider : IScreenInfoProvider, IScreenLayout, IWi
     {
         using var dpi = NativeMethods.PhysicalPixelsScope.Enter();
         var windows = new List<WindowInfo>();
-        WindowApi.EnumWindows((hwnd, _) =>
+        _windowApi.EnumWindows(hwnd =>
         {
             try
             {
@@ -81,7 +90,7 @@ public sealed class ScreenInfoProvider : IScreenInfoProvider, IScreenLayout, IWi
             }
 
             return true;
-        }, IntPtr.Zero);
+        });
         return windows;
     }
 
@@ -91,21 +100,12 @@ public sealed class ScreenInfoProvider : IScreenInfoProvider, IScreenLayout, IWi
     {
         try
         {
-            var fg = NativeMethods.GetForegroundWindow();
+            var fg = _windowApi.GetForegroundWindow();
             if (fg == IntPtr.Zero) return (null, string.Empty);
-            NativeMethods.GetWindowThreadProcessId(fg, out var pid);
+            var pid = _windowApi.GetWindowThreadProcessId(fg);
             if (pid == _ownProcessId) return (null, string.Empty);
 
-            var length = WindowApi.GetWindowTextLength(fg);
-            string? title = null;
-            if (length > 0)
-            {
-                var sb = new StringBuilder(length + 1);
-                WindowApi.GetWindowText(fg, sb, sb.Capacity);
-                var trimmed = sb.ToString().Trim();
-                if (trimmed.Length > 0) title = trimmed;
-            }
-
+            var title = _windowApi.GetWindowText(fg);
             var processName = ProcessNameOf(pid);
             return (title, processName);
         }
@@ -117,28 +117,23 @@ public sealed class ScreenInfoProvider : IScreenInfoProvider, IScreenLayout, IWi
 
     private WindowInfo? TryDescribe(IntPtr hwnd)
     {
-        if (!WindowApi.IsWindowVisible(hwnd)) return null;
+        if (!_windowApi.IsWindowVisible(hwnd)) return null;
 
         // Tool windows (floating palettes, tray helpers) and owned pop-ups aren't "app windows".
-        var exStyle = NativeMethods.GetWindowLongValue(hwnd, NativeMethods.GWL_EXSTYLE);
-        if ((exStyle & NativeMethods.WS_EX_TOOLWINDOW) != 0) return null;
-        if (WindowApi.GetWindow(hwnd, WindowApi.GW_OWNER) != IntPtr.Zero) return null;
+        if (_windowApi.IsToolWindow(hwnd)) return null;
+        if (_windowApi.HasOwner(hwnd)) return null;
 
         // Windows on another virtual desktop, suspended Store apps etc. are "cloaked": visible to Windows, not to you.
-        if (WindowApi.DwmGetWindowAttribute(hwnd, WindowApi.DWMWA_CLOAKED, out int cloaked, sizeof(int)) == 0 && cloaked != 0) return null;
+        if (_windowApi.IsCloaked(hwnd)) return null;
 
-        var length = WindowApi.GetWindowTextLength(hwnd);
-        if (length <= 0) return null;
-        var text = new StringBuilder(length + 1);
-        WindowApi.GetWindowText(hwnd, text, text.Capacity);
-        var title = text.ToString().Trim();
-        if (title.Length == 0 || title == "Program Manager") return null;
+        var title = _windowApi.GetWindowText(hwnd);
+        if (string.IsNullOrEmpty(title) || title == "Program Manager") return null;
 
-        NativeMethods.GetWindowThreadProcessId(hwnd, out var processId);
+        var processId = _windowApi.GetWindowThreadProcessId(hwnd);
         if (processId == _ownProcessId) return null; // never search inside SmartMacro itself
 
-        var minimized = WindowApi.IsIconic(hwnd);
-        var bounds = minimized ? default : GetBounds(hwnd);
+        var minimized = _windowApi.IsMinimized(hwnd);
+        var bounds = minimized ? default : (_windowApi.GetWindowBounds(hwnd) ?? default);
         return new WindowInfo(hwnd.ToInt64(), title, bounds, ProcessNameOf(processId), IsMinimized: minimized);
     }
 
@@ -154,22 +149,7 @@ public sealed class ScreenInfoProvider : IScreenInfoProvider, IScreenLayout, IWi
             if (_processNames.TryGetValue(processId, out var cached)) return cached;
         }
 
-        var name = string.Empty;
-        var handle = WindowApi.OpenProcess(WindowApi.PROCESS_QUERY_LIMITED_INFORMATION, false, processId);
-        if (handle != IntPtr.Zero)
-        {
-            try
-            {
-                var buffer = new StringBuilder(1024);
-                var size = buffer.Capacity;
-                if (WindowApi.QueryFullProcessImageName(handle, 0, buffer, ref size))
-                    name = Path.GetFileNameWithoutExtension(buffer.ToString(0, size));
-            }
-            finally
-            {
-                WindowApi.CloseHandle(handle);
-            }
-        }
+        var name = _windowApi.QueryProcessName(processId);
 
         lock (_processNamesGate)
         {
@@ -286,21 +266,6 @@ public sealed class ScreenInfoProvider : IScreenInfoProvider, IScreenLayout, IWi
         }
 
         return NativeMethods.GetForegroundWindow() == hwnd;
-    }
-
-    /// <summary>
-    /// The window's visible rectangle. DWM's "extended frame bounds" leave out the invisible resize borders that
-    /// GetWindowRect includes on Windows 10 / 11, so the search area matches what you see.
-    /// </summary>
-    private static ScreenRect GetBounds(IntPtr hwnd)
-    {
-        if (WindowApi.DwmGetWindowAttribute(hwnd, WindowApi.DWMWA_EXTENDED_FRAME_BOUNDS, out NativeMethods.RECT frame,
-                Marshal.SizeOf<NativeMethods.RECT>()) == 0 && frame.Right > frame.Left && frame.Bottom > frame.Top)
-            return new ScreenRect(frame.Left, frame.Top, frame.Right - frame.Left, frame.Bottom - frame.Top);
-
-        return WindowApi.GetWindowRect(hwnd, out var rect) && rect.Right > rect.Left && rect.Bottom > rect.Top
-            ? new ScreenRect(rect.Left, rect.Top, rect.Right - rect.Left, rect.Bottom - rect.Top)
-            : default;
     }
 }
 

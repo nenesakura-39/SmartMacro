@@ -28,6 +28,7 @@ public sealed class HotkeyService : IDisposable
     private const int MacroHotkeyBaseId = 1_000;
 
     private readonly ILogService _log;
+    private readonly ISystemHotkeyApi _api;
     private readonly List<int> _registered = new();
     private readonly Dictionary<int, HotkeyBinding> _macroHotkeysById = new();
     private readonly HashSet<HotkeyBinding> _passThroughBindings = new();
@@ -41,14 +42,24 @@ public sealed class HotkeyService : IDisposable
     private bool _pauseRegistered;
     private List<ScopedHotkeyBinding> _desiredMacroHotkeys = new();
 
-    public HotkeyService(ILogService log)
+    public HotkeyService(ILogService log, ISystemHotkeyApi? hotkeyApi = null)
     {
         _log = log;
+        _api = hotkeyApi ?? new Win32SystemHotkeyApi();
         _holdPollTimer = new DispatcherTimer(DispatcherPriority.Input)
         {
             Interval = TimeSpan.FromMilliseconds(25),
         };
         _holdPollTimer.Tick += OnHoldPollTick;
+    }
+
+    internal void AttachHandle(IntPtr hwnd) => _hwnd = hwnd;
+
+    internal bool HandleWindowMessage(int msg, IntPtr wParam, IntPtr lParam)
+    {
+        var handled = false;
+        WndProc(_hwnd, msg, wParam, lParam, ref handled);
+        return handled;
     }
 
     /// <summary>
@@ -119,7 +130,7 @@ public sealed class HotkeyService : IDisposable
         }
         else if (_pauseRegistered)
         {
-            UnregisterHotKey(_hwnd, (int)HotkeyAction.TogglePause);
+            _api.UnregisterHotKey(_hwnd, (int)HotkeyAction.TogglePause);
             _registered.Remove((int)HotkeyAction.TogglePause);
             _pauseRegistered = false;
         }
@@ -148,7 +159,7 @@ public sealed class HotkeyService : IDisposable
 
         var modifiers = ToNativeModifiers(binding.Modifiers);
         var id = (int)action;
-        if (RegisterHotKey(_hwnd, id, modifiers, (uint)binding.VirtualKey))
+        if (_api.RegisterHotKey(_hwnd, id, modifiers, (uint)binding.VirtualKey))
         {
             _registered.Add(id);
         }
@@ -181,7 +192,7 @@ public sealed class HotkeyService : IDisposable
 
             var id = nextId++;
             var modifiers = ToNativeModifiers(binding.Modifiers);
-            if (RegisterHotKey(_hwnd, id, modifiers, (uint)binding.VirtualKey))
+            if (_api.RegisterHotKey(_hwnd, id, modifiers, (uint)binding.VirtualKey))
             {
                 _registered.Add(id);
                 _macroHotkeysById[id] = binding;
@@ -195,7 +206,7 @@ public sealed class HotkeyService : IDisposable
     {
         foreach (var id in _macroHotkeysById.Keys.ToList())
         {
-            if (_hwnd != IntPtr.Zero) UnregisterHotKey(_hwnd, id);
+            if (_hwnd != IntPtr.Zero) _api.UnregisterHotKey(_hwnd, id);
             _registered.Remove(id);
         }
 
@@ -307,13 +318,13 @@ public sealed class HotkeyService : IDisposable
         }
     }
 
-    private static KeyModifiers ReadCurrentModifiers()
+    private KeyModifiers ReadCurrentModifiers()
     {
         var mods = KeyModifiers.None;
-        if ((GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0) mods |= KeyModifiers.Control;
-        if ((GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0) mods |= KeyModifiers.Shift;
-        if ((GetAsyncKeyState(VK_MENU) & 0x8000) != 0) mods |= KeyModifiers.Alt;
-        if (((GetAsyncKeyState(VK_LWIN) & 0x8000) != 0) || ((GetAsyncKeyState(VK_RWIN) & 0x8000) != 0))
+        if ((_api.GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0) mods |= KeyModifiers.Control;
+        if ((_api.GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0) mods |= KeyModifiers.Shift;
+        if ((_api.GetAsyncKeyState(VK_MENU) & 0x8000) != 0) mods |= KeyModifiers.Alt;
+        if (((_api.GetAsyncKeyState(VK_LWIN) & 0x8000) != 0) || ((_api.GetAsyncKeyState(VK_RWIN) & 0x8000) != 0))
             mods |= KeyModifiers.Windows;
         return mods;
     }
@@ -342,7 +353,7 @@ public sealed class HotkeyService : IDisposable
 
     private void UnregisterAll()
     {
-        foreach (var id in _registered) UnregisterHotKey(_hwnd, id);
+        foreach (var id in _registered) _api.UnregisterHotKey(_hwnd, id);
         _registered.Clear();
         _macroHotkeysById.Clear();
         _passThroughBindings.Clear();
@@ -352,7 +363,9 @@ public sealed class HotkeyService : IDisposable
         _pauseRegistered = false;
     }
 
-    private void OnHoldPollTick(object? sender, EventArgs e)
+    private void OnHoldPollTick(object? sender, EventArgs e) => PollHeldHotkeysOnce();
+
+    internal void PollHeldHotkeysOnce()
     {
         if (_heldMacroBindings.Count == 0)
         {
@@ -362,7 +375,7 @@ public sealed class HotkeyService : IDisposable
 
         foreach (var binding in _heldMacroBindings.ToList())
         {
-            var isKeyDown = (GetAsyncKeyState(binding.VirtualKey) & 0x8000) != 0;
+            var isKeyDown = (_api.GetAsyncKeyState(binding.VirtualKey) & 0x8000) != 0;
             if (!isKeyDown)
             {
                 _heldMacroBindings.Remove(binding);

@@ -1,14 +1,14 @@
 # SmartMacro – Project Status / Handoff
 
-_Last updated: 2026-11-09 (**SmartMacro 1.0.0 — Evergreen AAA Edition** — 30-Day Automatic Log & Trash Pruning, Zero-Install Portable Mode, In-App Trash Recovery Drawer, 1-Click `.smbackup` ZIP Backup & Restore, Launch on Windows Startup (`--tray`), Brain & Logic 2.0 (`Multiply`, `Divide`, `Modulo`, `Round`, `RandomNumber`, `ActiveWindowTitle`, `CurrentTimeText`, WASAPI `SystemAudioPeakPercent`, `CopyResultToClipboard`, Compound `AND`/`OR` Conditions), Synthesized WAV Sound Cues & Rate-Limited HTTPS Webhooks, Blackbox Failure Snapshot (`last-failure-snapshot.png`), Library Pinning (`⭐`) & Multi-Sort, and Per-Step Execution Telemetry Badges:
-**built + tested with `tools\verify.cmd`: 0 warnings, 0 errors, 1284 / 1284 passed**.)
+_Last updated: 2026-11-13 (**Plans 1–9 Complete** — WGC Capture & SIMD FFT Pipeline, Context-Scoped Triggers, Profile Rules UI, Single-Instance CLI IPC, Asset Deduplication & Shallow Cloning, Background Input & UIA Actions, Hardened Webhooks & Update Checker, Debugger 2.0, WPF/Service Automated Test Suite (`SmartMacro.App.Tests`), Editor Pane & `TemplateMatcher` Modularization, and Repo/CI Hygiene:
+**built + tested with `tools\verify.cmd`: 0 warnings, 0 errors, 1393 Core + 18 WPF/App = 1411 / 1411 passed**.)
 Developer: Riku (リク) · Brand: KuroLogic_
 
-## Current status at a glance (2026-11-09)
+## Current status at a glance (2026-11-13)
 | Area | Build + automated tests | User / tester feedback | Committed |
 |---|---|---|---|
 | Stages 1–4 & Editor UX | passed: 0 warnings, 0 errors | tried by owner; future user/tester feedback & bugs will be logged in one consolidated feedback document | yes |
-| SmartMacro 1.0.0 Evergreen AAA Edition + Vision Pipeline 2.0 | passed: 0 warnings, 0 errors, **1284 / 1284** (`tools\verify.cmd`) | ready for release | pending |
+| SmartMacro 1.0.0 Evergreen AAA Edition + Plans 1–9 | passed: 0 warnings, 0 errors, **1393 + 18 / 1411** (`tools\verify.cmd`) | Plan 10 remaining | pending |
 | Release documents (`release-docs/`: EULA, LICENSE, notices, README) | passed marker & version checks (`1.0.0`, reset from internal 1.8.0) | – | pending |
 
 ## SmartMacro 1.0.0 — Evergreen AAA Edition (2026-11-09): **built + tested** (`tools\verify.cmd`: 0 warnings, 0 errors, **1284 / 1284 passed**)

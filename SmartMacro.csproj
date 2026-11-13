@@ -18,8 +18,12 @@
     <Description>SmartMacro AAA Automation, Vision &amp; 1:1 Input Studio</Description>
     <Copyright>© 2026 Riku · KuroLogic</Copyright>
     <!-- The Core library and tests live in sub-folders with their own projects; don't compile them twice. -->
-    <DefaultItemExcludes>$(DefaultItemExcludes);SmartMacro.Core\**;SmartMacro.Tests\**;artifacts\**;release\**;publish\**</DefaultItemExcludes>
+    <DefaultItemExcludes>$(DefaultItemExcludes);SmartMacro.Core\**;SmartMacro.Tests\**;SmartMacro.App.Tests\**;artifacts\**;release\**;publish\**</DefaultItemExcludes>
   </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="SmartMacro.App.Tests" />
+  </ItemGroup>
 
   <ItemGroup>
     <!-- WPF projects leave System.IO out of the implicit usings (it clashes with System.Windows.Shapes.Path). -->

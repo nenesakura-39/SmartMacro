@@ -412,13 +412,17 @@ public sealed class SettingsViewModel : ObservableObject
 
     private void PreviewAppearance()
     {
-        ThemeManager.Apply(new AppSettings
+        var preview = new AppSettings
         {
             Theme = _theme,
             Accent = _accent,
             Density = _density,
             ReduceMotion = _reduceMotion,
-        });
+        };
+        if (_store is ISettingsPersistence persistence)
+            persistence.ApplyAppearance(preview);
+        else
+            ThemeManager.Apply(preview);
     }
 
     // ---- About ----

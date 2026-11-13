@@ -1,0 +1,841 @@
+<UserControl x:Class="SmartMacro.Views.EditorPanes.BottomDockPane"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:vm="clr-namespace:SmartMacro.ViewModels"
+             xmlns:steps="clr-namespace:SmartMacro.ViewModels.Steps"
+             xmlns:ctrl="clr-namespace:SmartMacro.Controls"
+             xmlns:conv="clr-namespace:SmartMacro.Converters"
+             xmlns:core="clr-namespace:SmartMacro.Core.Validation;assembly=SmartMacro.Core"
+             xmlns:playback="clr-namespace:SmartMacro.Core.Playback;assembly=SmartMacro.Core"
+             mc:Ignorable="d"
+             d:DataContext="{d:DesignInstance Type=vm:EditorViewModel}">
+    <UserControl.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="/SmartMacro;component/Views/StepEditors/StepEditorsShared.xaml" />
+            </ResourceDictionary.MergedDictionaries>
+            <conv:CountToVisibilityConverter x:Key="CountToVisibility" />
+        </ResourceDictionary>
+    </UserControl.Resources>
+
+    <!-- =========================================================================
+         D1 & D2: STUDIO BOTTOM DOCK (Activity · Problems · Variables (Live) · Watchers · Triggers · Debugger · Trace)
+         ========================================================================= -->
+    <Border Style="{StaticResource GlassCard}" Padding="0">
+        <DockPanel>
+            <!-- 34px Dock Header Strip -->
+            <Grid DockPanel.Dock="Top" Height="34" Margin="10,0,8,0">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+
+                <!-- Dock Tab Strip -->
+                <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
+                    <Button Style="{StaticResource GhostButton}" Padding="8,4" FontSize="11.5"
+                            Command="{Binding OpenBottomTabCommand}" CommandParameter="0"
+                            ToolTip="Toggle Activity Log tab">
+                        <TextBlock Text="Activity" FontWeight="SemiBold" />
+                    </Button>
+
+                    <Button Style="{StaticResource GhostButton}" Padding="8,4" FontSize="11.5" Margin="2,0,0,0"
+                            Command="{Binding OpenBottomTabCommand}" CommandParameter="1"
+                            ToolTip="Toggle Problems &amp; Validation tab">
+                        <StackPanel Orientation="Horizontal">
+                            <ctrl:StudioIcon Kind="CheckCircle" Size="12" Foreground="{DynamicResource SuccessBrush}"
+                                             Visibility="{Binding HasIssues, Converter={StaticResource BoolToVisibility}, ConverterParameter=Invert}" />
+                            <ctrl:StudioIcon Kind="ErrorCircle" Size="12" Foreground="{DynamicResource ErrorBrush}"
+                                             Visibility="{Binding HasErrors, Converter={StaticResource BoolToVisibility}}" />
+                            <ctrl:StudioIcon Kind="WarningTriangle" Size="12" Foreground="{DynamicResource WarningBrush}" Margin="2,0,0,0"
+                                             Visibility="{Binding WarningCount, Converter={StaticResource CountToVisibility}}" />
+                            <TextBlock Text="{Binding ValidationSummary}" Margin="5,0,0,0" />
+                        </StackPanel>
+                    </Button>
+
+                    <Button Style="{StaticResource GhostButton}" Padding="8,4" FontSize="11.5" Margin="2,0,0,0"
+                            Command="{Binding OpenBottomTabCommand}" CommandParameter="2"
+                            ToolTip="Toggle Live Variables table">
+                        <StackPanel Orientation="Horizontal">
+                            <ctrl:StudioIcon Kind="Variable" Size="12" Foreground="{DynamicResource MemoryAccentBrush}" />
+                            <TextBlock Text="{Binding VariablesSummary}" Margin="5,0,0,0" />
+                        </StackPanel>
+                    </Button>
+
+                    <Button Style="{StaticResource GhostButton}" Padding="8,4" FontSize="11.5" Margin="2,0,0,0"
+                            Command="{Binding OpenBottomTabCommand}" CommandParameter="3"
+                            ToolTip="Toggle Background Watchers">
+                        <StackPanel Orientation="Horizontal">
+                            <ctrl:StudioIcon Kind="Watcher" Size="12" Foreground="{DynamicResource MemoryAccentBrush}" />
+                            <TextBlock Text="{Binding WatchersSummary}" Margin="5,0,0,0" />
+                        </StackPanel>
+                    </Button>
+
+                    <Button Style="{StaticResource GhostButton}" Padding="8,4" FontSize="11.5" Margin="2,0,0,0"
+                            Command="{Binding OpenBottomTabCommand}" CommandParameter="4"
+                            ToolTip="Toggle Triggers (per-macro hotkeys, schedules, window events &amp; Run Governor)">
+                        <StackPanel Orientation="Horizontal">
+                            <ctrl:StudioIcon Kind="Bolt" Size="12" Foreground="{DynamicResource WarningBrush}" />
+                            <TextBlock Text="{Binding TriggersSummary}" Margin="5,0,0,0" />
+                        </StackPanel>
+                    </Button>
+
+                    <Button Style="{StaticResource GhostButton}" Padding="8,4" FontSize="11.5" Margin="2,0,0,0"
+                            Command="{Binding OpenBottomTabCommand}" CommandParameter="5"
+                            ToolTip="Toggle Debugger 2.0 (Sub-Macro Call Stack, Conditional Breakpoints &amp; Watchpoints)">
+                        <StackPanel Orientation="Horizontal">
+                            <ctrl:StudioIcon Kind="Checkpoint" Size="12" Foreground="{DynamicResource ErrorBrush}" />
+                            <TextBlock Text="{Binding DebuggerSummary}" Margin="5,0,0,0" />
+                        </StackPanel>
+                    </Button>
+
+                    <Button Style="{StaticResource GhostButton}" Padding="8,4" FontSize="11.5" Margin="2,0,0,0"
+                            Command="{Binding OpenBottomTabCommand}" CommandParameter="6"
+                            ToolTip="Toggle Execution Trace ring buffer &amp; failure trace viewer">
+                        <StackPanel Orientation="Horizontal">
+                            <ctrl:StudioIcon Kind="Clock" Size="12" Foreground="{DynamicResource AccentHoverBrush}" />
+                            <TextBlock Text="{Binding TraceSummary}" Margin="5,0,0,0" />
+                        </StackPanel>
+                    </Button>
+                </StackPanel>
+
+                <!-- Inline Test Result / Latest Log Preview -->
+                <Grid Grid.Column="1" Margin="12,0,8,0" VerticalAlignment="Center"
+                      DataContext="{Binding DataContext, RelativeSource={RelativeSource AncestorType=Window}}">
+                    <StackPanel Orientation="Horizontal" Visibility="{Binding Automation.IsIdle, Converter={StaticResource BoolToVisibility}}">
+                        <Border CornerRadius="10" Padding="9,2,4,2" Margin="0,0,10,0" VerticalAlignment="Center" BorderThickness="1"
+                                Visibility="{Binding Editor.HasLastTestResult, Converter={StaticResource BoolToVisibility}}"
+                                ToolTip="{Binding Editor.LastTestResultText}">
+                            <Border.Style>
+                                <Style TargetType="Border">
+                                    <Setter Property="Background" Value="{DynamicResource WarningSoftBrush}" />
+                                    <Setter Property="BorderBrush" Value="{DynamicResource WarningBrush}" />
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding Editor.LastTestPassed}" Value="True">
+                                            <Setter Property="Background" Value="{DynamicResource SuccessSoftBrush}" />
+                                            <Setter Property="BorderBrush" Value="{DynamicResource SuccessBrush}" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Border.Style>
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="{Binding Editor.LastTestResultText}" FontSize="11" FontWeight="SemiBold" VerticalAlignment="Center"
+                                           MaxWidth="480" TextTrimming="CharacterEllipsis" />
+                                <Button Style="{StaticResource DismissButton}" Margin="6,0,0,0" VerticalAlignment="Center"
+                                        Command="{Binding Editor.DismissTestResultCommand}" />
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
+                    <TextBlock Text="{Binding Automation.ProgressText}" FontSize="11" FontFamily="{StaticResource MonoFont}"
+                               FontWeight="SemiBold" TextTrimming="CharacterEllipsis"
+                               Visibility="{Binding Automation.IsIdle, Converter={StaticResource BoolToVisibility}, ConverterParameter=Invert}" />
+                </Grid>
+
+                <!-- Expand / Collapse Toggle -->
+                <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
+                    <Button Style="{StaticResource GhostButton}" Padding="8,3" FontSize="11" Content="Full log"
+                            Command="{Binding DataContext.ShowLogsCommand, RelativeSource={RelativeSource AncestorType=Window}}" />
+                    <ToggleButton x:Name="DrawerToggle" Style="{StaticResource GhostToggle}" Padding="8,4" FontSize="11"
+                                  IsChecked="{Binding IsBottomDockExpanded, Mode=TwoWay}"
+                                  ToolTip="Expand or collapse bottom dock">
+                        <TextBlock>
+                            <TextBlock.Style>
+                                <Style TargetType="TextBlock">
+                                    <Setter Property="Text" Value="Dock ▴" />
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding IsBottomDockExpanded}" Value="True">
+                                            <Setter Property="Text" Value="Hide ▾" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </TextBlock.Style>
+                        </TextBlock>
+                    </ToggleButton>
+                </StackPanel>
+            </Grid>
+
+            <!-- Expanded Tab Content Body -->
+            <Border BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,1,0,0" Height="215" Padding="12,8"
+                    Visibility="{Binding IsBottomDockExpanded, Converter={StaticResource BoolToVisibility}}">
+                <Grid>
+                    <!-- TAB 0: ACTIVITY LOG -->
+                    <ListBox ItemsSource="{Binding DataContext.Logs.Entries, RelativeSource={RelativeSource AncestorType=Window}}"
+                             ItemContainerStyle="{StaticResource PlainListItem}"
+                             ScrollViewer.VerticalScrollBarVisibility="Auto" VirtualizingPanel.IsVirtualizing="True"
+                             AutomationProperties.Name="Activity log">
+                        <ListBox.Style>
+                            <Style TargetType="ListBox" BasedOn="{StaticResource {x:Type ListBox}}">
+                                <Setter Property="Visibility" Value="Collapsed" />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding SelectedBottomTab}" Value="0">
+                                        <Setter Property="Visibility" Value="Visible" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </ListBox.Style>
+                        <ListBox.ItemTemplate>
+                            <DataTemplate>
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock Text="{Binding Level, Converter={StaticResource LevelToGlyph}}" Style="{StaticResource IconText}"
+                                               FontSize="11" Foreground="{Binding Level, Converter={StaticResource LevelToBrush}}" />
+                                    <TextBlock Text="{Binding TimeText}" FontFamily="{StaticResource MonoFont}"
+                                               Foreground="{DynamicResource SubtleTextBrush}" Margin="8,0,10,0" FontSize="11" />
+                                    <TextBlock Text="{Binding Message}" FontSize="11.5" TextTrimming="CharacterEllipsis" />
+                                </StackPanel>
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                    </ListBox>
+
+                    <!-- TAB 1: PROBLEMS -->
+                    <Grid>
+                        <Grid.Style>
+                            <Style TargetType="Grid">
+                                <Setter Property="Visibility" Value="Collapsed" />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding SelectedBottomTab}" Value="1">
+                                        <Setter Property="Visibility" Value="Visible" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Grid.Style>
+                        <TextBlock Text="✓ No problems found — this workflow is ready to save and play."
+                                   Style="{StaticResource MutedText}" FontSize="12" Margin="4,6,0,0"
+                                   Visibility="{Binding HasIssues, Converter={StaticResource BoolToVisibility}, ConverterParameter=Invert}" />
+                        <ListBox ItemsSource="{Binding Issues}" ItemContainerStyle="{StaticResource PlainListItem}"
+                                 ScrollViewer.VerticalScrollBarVisibility="Auto"
+                                 Visibility="{Binding HasIssues, Converter={StaticResource BoolToVisibility}}">
+                            <ListBox.ItemTemplate>
+                                <DataTemplate DataType="{x:Type core:ValidationIssue}">
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock Text="{Binding Severity, Converter={StaticResource LevelToGlyph}}" Style="{StaticResource IconText}" FontSize="11"
+                                                   Foreground="{Binding Severity, Converter={StaticResource LevelToBrush}}" VerticalAlignment="Top" Margin="0,2,0,0" />
+                                        <TextBlock Text="{Binding DisplayText}" FontSize="11.5" Margin="8,0,0,0" TextWrapping="Wrap" />
+                                    </StackPanel>
+                                </DataTemplate>
+                            </ListBox.ItemTemplate>
+                        </ListBox>
+                    </Grid>
+
+                    <!-- TAB 2: LIVE VARIABLES TABLE (D1) -->
+                    <DockPanel>
+                        <DockPanel.Style>
+                            <Style TargetType="DockPanel">
+                                <Setter Property="Visibility" Value="Collapsed" />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding SelectedBottomTab}" Value="2">
+                                        <Setter Property="Visibility" Value="Visible" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </DockPanel.Style>
+                        <DockPanel DockPanel.Dock="Top" Margin="0,0,0,6">
+                            <Button DockPanel.Dock="Right" Content="+ Add variable" Command="{Binding AddVariableCommand}" Padding="9,3" FontSize="11" />
+                            <Border DockPanel.Dock="Right" Style="{StaticResource Pill}" Margin="0,0,8,0"
+                                    Background="{DynamicResource WarningSoftBrush}"
+                                    Visibility="{Binding IsPlaybackPaused, Converter={StaticResource BoolToVisibility}}">
+                                <TextBlock Text="⏸ Paused — edit live values &amp; press Enter or ✓" FontSize="10.5" FontWeight="SemiBold"
+                                           Foreground="{DynamicResource WarningBrush}" />
+                            </Border>
+                            <TextBlock Text="Declare counters, OCR numbers, or flags — reference anywhere as {name}."
+                                       Style="{StaticResource MutedText}" FontSize="11.5" VerticalAlignment="Center" />
+                        </DockPanel>
+                        <ScrollViewer VerticalScrollBarVisibility="Auto">
+                            <StackPanel>
+                                <ItemsControl ItemsSource="{Binding Variables}" Focusable="False">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate DataType="{x:Type steps:VariableItemViewModel}">
+                                            <Border Padding="8,5" Margin="0,0,0,5" CornerRadius="7" Background="{DynamicResource SurfaceAltBrush}"
+                                                    BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1">
+                                                <Grid>
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="150" />
+                                                        <ColumnDefinition Width="6" />
+                                                        <ColumnDefinition Width="105" />
+                                                        <ColumnDefinition Width="6" />
+                                                        <ColumnDefinition Width="140" />
+                                                        <ColumnDefinition Width="10" />
+                                                        <ColumnDefinition Width="*" />
+                                                        <ColumnDefinition Width="Auto" />
+                                                        <ColumnDefinition Width="Auto" />
+                                                    </Grid.ColumnDefinitions>
+                                                    <TextBox Grid.Column="0" Text="{Binding Name, UpdateSourceTrigger=PropertyChanged}" Tag="Variable name"
+                                                             FontFamily="{StaticResource MonoFont}" FontSize="12" Padding="6,3" />
+                                                    <ComboBox Grid.Column="2" ItemsSource="{x:Static steps:VariableItemViewModel.Types}"
+                                                              DisplayMemberPath="Label" SelectedValuePath="Value" SelectedValue="{Binding Type}" Padding="6,3" FontSize="11.5" />
+                                                    <TextBox Grid.Column="4" Text="{Binding DefaultValue, UpdateSourceTrigger=PropertyChanged}" Tag="Default value"
+                                                             FontFamily="{StaticResource MonoFont}" FontSize="12" Padding="6,3" />
+                                                    <Grid Grid.Column="6" VerticalAlignment="Center">
+                                                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                                            <StackPanel.Style>
+                                                                <Style TargetType="StackPanel">
+                                                                    <Setter Property="Visibility" Value="Visible" />
+                                                                    <Style.Triggers>
+                                                                        <DataTrigger Binding="{Binding DataContext.IsPlaybackPaused, RelativeSource={RelativeSource AncestorType=UserControl}}" Value="True">
+                                                                            <Setter Property="Visibility" Value="Collapsed" />
+                                                                        </DataTrigger>
+                                                                    </Style.Triggers>
+                                                                </Style>
+                                                            </StackPanel.Style>
+                                                            <TextBlock Text="Live: " FontSize="11" Foreground="{DynamicResource MutedTextBrush}" />
+                                                            <TextBlock Text="{Binding LiveValue}" FontFamily="{StaticResource MonoFont}" FontSize="12"
+                                                                       FontWeight="SemiBold" Foreground="{DynamicResource MemoryAccentBrush}" />
+                                                        </StackPanel>
+                                                        <Grid>
+                                                            <Grid.Style>
+                                                                <Style TargetType="Grid">
+                                                                    <Setter Property="Visibility" Value="Collapsed" />
+                                                                    <Style.Triggers>
+                                                                        <DataTrigger Binding="{Binding DataContext.IsPlaybackPaused, RelativeSource={RelativeSource AncestorType=UserControl}}" Value="True">
+                                                                            <Setter Property="Visibility" Value="Visible" />
+                                                                        </DataTrigger>
+                                                                    </Style.Triggers>
+                                                                </Style>
+                                                            </Grid.Style>
+                                                            <Grid.ColumnDefinitions>
+                                                                <ColumnDefinition Width="Auto" />
+                                                                <ColumnDefinition Width="*" />
+                                                                <ColumnDefinition Width="Auto" />
+                                                            </Grid.ColumnDefinitions>
+                                                            <TextBlock Grid.Column="0" Text="Live:" FontSize="11" Foreground="{DynamicResource WarningBrush}"
+                                                                       VerticalAlignment="Center" Margin="0,0,5,0" />
+                                                            <TextBox Grid.Column="1" Text="{Binding EditableLiveValue, UpdateSourceTrigger=PropertyChanged}"
+                                                                     FontFamily="{StaticResource MonoFont}" FontSize="12" Padding="6,3"
+                                                                     KeyDown="LiveVariableBox_KeyDown" AutomationProperties.Name="Edit live variable value" />
+                                                            <Button Grid.Column="2" Content="✓" Style="{StaticResource GhostButton}" Padding="7,3" FontSize="11" Margin="4,0,0,0"
+                                                                    Command="{Binding DataContext.ApplyLiveVariableCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                                                    CommandParameter="{Binding}" ToolTip="Apply live variable mutation while paused (Enter)" />
+                                                        </Grid>
+                                                    </Grid>
+                                                    <Button Grid.Column="7" Content="👁 Watch" Style="{StaticResource GhostButton}" Padding="7,3" FontSize="10.5" Margin="6,0,4,0"
+                                                            Command="{Binding DataContext.AddWatchpointCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                                            CommandParameter="{Binding Name}" ToolTip="Add variable watchpoint (pauses when changed)" />
+                                                    <Button Grid.Column="8" Style="{StaticResource DismissButton}"
+                                                            Command="{Binding DataContext.RemoveVariableCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                                            CommandParameter="{Binding}" ToolTip="Remove variable" />
+                                                </Grid>
+                                            </Border>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+
+                                <!-- Active Call-Stack Frame / Runtime Variables (Sub-macro locals & dynamic vision/OCR variables) -->
+                                <StackPanel Margin="0,6,0,0" Visibility="{Binding HasActiveFrameVariables, Converter={StaticResource BoolToVisibility}}">
+                                    <TextBlock Text="ACTIVE RUNTIME SCOPE (CURRENT CALL FRAME / DYNAMIC VARIABLES)"
+                                               Style="{StaticResource OverlineHeaderStyle}" Margin="2,0,0,4" />
+                                    <ItemsControl ItemsSource="{Binding ActiveFrameVariables}" Focusable="False">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate DataType="{x:Type vm:LiveRuntimeVariableViewModel}">
+                                                <Border Padding="8,4" Margin="0,0,0,4" CornerRadius="7" Background="{DynamicResource SurfaceAltBrush}"
+                                                        BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1">
+                                                    <Grid>
+                                                        <Grid.ColumnDefinitions>
+                                                            <ColumnDefinition Width="150" />
+                                                            <ColumnDefinition Width="70" />
+                                                            <ColumnDefinition Width="*" />
+                                                            <ColumnDefinition Width="Auto" />
+                                                        </Grid.ColumnDefinitions>
+                                                        <TextBlock Grid.Column="0" Text="{Binding Name}" FontFamily="{StaticResource MonoFont}" FontSize="12"
+                                                                   FontWeight="SemiBold" VerticalAlignment="Center" />
+                                                        <TextBlock Grid.Column="1" Text="{Binding TypeLabel}" FontSize="11" Foreground="{DynamicResource MutedTextBrush}"
+                                                                   VerticalAlignment="Center" />
+                                                        <Grid Grid.Column="2" VerticalAlignment="Center">
+                                                            <TextBlock Text="{Binding LiveValue}" FontFamily="{StaticResource MonoFont}" FontSize="12"
+                                                                       Foreground="{DynamicResource MemoryAccentBrush}" VerticalAlignment="Center">
+                                                                <TextBlock.Style>
+                                                                    <Style TargetType="TextBlock">
+                                                                        <Setter Property="Visibility" Value="Visible" />
+                                                                        <Style.Triggers>
+                                                                            <DataTrigger Binding="{Binding DataContext.IsPlaybackPaused, RelativeSource={RelativeSource AncestorType=UserControl}}" Value="True">
+                                                                                <Setter Property="Visibility" Value="Collapsed" />
+                                                                            </DataTrigger>
+                                                                        </Style.Triggers>
+                                                                    </Style>
+                                                                </TextBlock.Style>
+                                                            </TextBlock>
+                                                            <Grid>
+                                                                <Grid.Style>
+                                                                    <Style TargetType="Grid">
+                                                                        <Setter Property="Visibility" Value="Collapsed" />
+                                                                        <Style.Triggers>
+                                                                            <DataTrigger Binding="{Binding DataContext.IsPlaybackPaused, RelativeSource={RelativeSource AncestorType=UserControl}}" Value="True">
+                                                                                <Setter Property="Visibility" Value="Visible" />
+                                                                            </DataTrigger>
+                                                                        </Style.Triggers>
+                                                                    </Style>
+                                                                </Grid.Style>
+                                                                <Grid.ColumnDefinitions>
+                                                                    <ColumnDefinition Width="*" />
+                                                                    <ColumnDefinition Width="Auto" />
+                                                                </Grid.ColumnDefinitions>
+                                                                <TextBox Grid.Column="0" Text="{Binding EditableLiveValue, UpdateSourceTrigger=PropertyChanged}"
+                                                                         FontFamily="{StaticResource MonoFont}" FontSize="12" Padding="6,3"
+                                                                         KeyDown="LiveVariableBox_KeyDown" />
+                                                                <Button Grid.Column="1" Content="✓ Apply" Style="{StaticResource GhostButton}" Padding="8,3" FontSize="11" Margin="4,0,0,0"
+                                                                        Command="{Binding DataContext.ApplyLiveVariableCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                                                        CommandParameter="{Binding}" ToolTip="Apply live variable mutation while paused (Enter)" />
+                                                            </Grid>
+                                                        </Grid>
+                                                        <Button Grid.Column="3" Content="👁 Watch" Style="{StaticResource GhostButton}" Padding="7,3" FontSize="10.5" Margin="6,0,0,0"
+                                                                Command="{Binding DataContext.AddWatchpointCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                                                CommandParameter="{Binding Name}" />
+                                                    </Grid>
+                                                </Border>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                </StackPanel>
+                            </StackPanel>
+                        </ScrollViewer>
+                    </DockPanel>
+
+                    <!-- TAB 3: BACKGROUND WATCHERS (D2) -->
+                    <DockPanel>
+                        <DockPanel.Style>
+                            <Style TargetType="DockPanel">
+                                <Setter Property="Visibility" Value="Collapsed" />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding SelectedBottomTab}" Value="3">
+                                        <Setter Property="Visibility" Value="Visible" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </DockPanel.Style>
+                        <DockPanel DockPanel.Dock="Top" Margin="0,0,0,6">
+                            <Button DockPanel.Dock="Right" Content="+ Add watcher" Command="{Binding AddWatcherCommand}" Padding="9,3" FontSize="11" />
+                            <TextBlock Text="Interrupt guards checked between steps (dismiss surprise popups, reconnect, or jump to a Checkpoint)."
+                                       Style="{StaticResource MutedText}" FontSize="11.5" VerticalAlignment="Center" />
+                        </DockPanel>
+                        <ScrollViewer VerticalScrollBarVisibility="Auto">
+                            <ItemsControl ItemsSource="{Binding Watchers}" Focusable="False">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate DataType="{x:Type steps:WatcherItemViewModel}">
+                                        <Border Padding="10,8" Margin="0,0,0,8" CornerRadius="8" Background="{DynamicResource SurfaceAltBrush}"
+                                                BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1">
+                                            <StackPanel>
+                                                <DockPanel>
+                                                    <Button DockPanel.Dock="Right" Style="{StaticResource DismissButton}" Margin="6,0,0,0"
+                                                            Command="{Binding DataContext.RemoveWatcherCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                                                            CommandParameter="{Binding}" ToolTip="Remove watcher" />
+                                                    <CheckBox DockPanel.Dock="Right" Style="{StaticResource ToggleSwitchCheckBoxStyle}" Content="Armed"
+                                                              IsChecked="{Binding Enabled}" Margin="8,0,0,0" VerticalAlignment="Center" />
+                                                    <Grid>
+                                                        <Grid.ColumnDefinitions>
+                                                            <ColumnDefinition Width="200" />
+                                                            <ColumnDefinition Width="10" />
+                                                            <ColumnDefinition Width="120" />
+                                                            <ColumnDefinition Width="10" />
+                                                            <ColumnDefinition Width="120" />
+                                                            <ColumnDefinition Width="10" />
+                                                            <ColumnDefinition Width="*" />
+                                                        </Grid.ColumnDefinitions>
+                                                        <TextBox Grid.Column="0" Text="{Binding Name, UpdateSourceTrigger=PropertyChanged}" Tag="Watcher name"
+                                                                 FontWeight="SemiBold" Padding="6,3" FontSize="12" />
+                                                        <TextBox Grid.Column="2" Text="{Binding CheckIntervalMs, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}"
+                                                                 Tag="Interval ms" Padding="6,3" FontSize="11.5" ToolTip="Check every (ms)" />
+                                                        <TextBox Grid.Column="4" Text="{Binding CooldownMs, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}"
+                                                                 Tag="Cooldown ms" Padding="6,3" FontSize="11.5" ToolTip="Cooldown after firing (ms)" />
+                                                        <ComboBox Grid.Column="6" ItemsSource="{x:Static steps:WatcherItemViewModel.ActionChoices}"
+                                                                  DisplayMemberPath="Label" SelectedValuePath="Value" SelectedValue="{Binding Action}" Padding="6,3" FontSize="11.5" />
+                                                    </Grid>
+                                                </DockPanel>
+                                                <ContentControl Content="{Binding Condition}" ContentTemplate="{StaticResource ConditionEditorTemplate}"
+                                                                Focusable="False" Margin="0,6,0,0" />
+                                                <StackPanel Orientation="Horizontal" Margin="0,6,0,0" Visibility="{Binding IsSubMacro, Converter={StaticResource BoolToVisibility}}">
+                                                    <TextBlock Text="Handler sub-macro:" Style="{StaticResource MutedText}" VerticalAlignment="Center" Margin="0,0,8,0" />
+                                                    <ComboBox ItemsSource="{Binding MacroChoices}" DisplayMemberPath="Label" SelectedItem="{Binding SelectedMacroChoice}" MinWidth="180" />
+                                                    <TextBox Text="{Binding HandlerMacroName, UpdateSourceTrigger=PropertyChanged}" Tag="Or macro name" Width="160" Margin="8,0,0,0" />
+                                                </StackPanel>
+                                                <StackPanel Orientation="Horizontal" Margin="0,6,0,0" Visibility="{Binding IsCheckpointJump, Converter={StaticResource BoolToVisibility}}">
+                                                    <TextBlock Text="Target checkpoint:" Style="{StaticResource MutedText}" VerticalAlignment="Center" Margin="0,0,8,0" />
+                                                    <TextBox Text="{Binding CheckpointName, UpdateSourceTrigger=PropertyChanged}" Tag="e.g. start" Width="180" />
+                                                </StackPanel>
+                                            </StackPanel>
+                                        </Border>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </ScrollViewer>
+                    </DockPanel>
+
+                    <!-- TAB 4: PER-MACRO TRIGGERS & RUN GOVERNOR (v1.4 Reflex) -->
+                    <DockPanel>
+                        <DockPanel.Style>
+                            <Style TargetType="DockPanel">
+                                <Setter Property="Visibility" Value="Collapsed" />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding SelectedBottomTab}" Value="4">
+                                        <Setter Property="Visibility" Value="Visible" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </DockPanel.Style>
+                        <DockPanel DockPanel.Dock="Top" Margin="0,0,0,6">
+                            <Button DockPanel.Dock="Right" Content="+ Add trigger" Command="{Binding AddTriggerCommand}" Padding="9,3" FontSize="11" />
+                            <Button DockPanel.Dock="Right" Style="{StaticResource GhostButton}" Command="{Binding CopyCliCommand}" Padding="9,3" FontSize="11" Margin="0,0,6,0"
+                                    ToolTip="Copy a CLI command (--run ... --no-focus) for Task Scheduler, Stream Deck, or shortcuts">
+                                <StackPanel Orientation="Horizontal">
+                                    <ctrl:StudioIcon Kind="ExternalLink" Size="11" />
+                                    <TextBlock Text="Copy CLI (--run)" Margin="5,0,0,0" />
+                                </StackPanel>
+                            </Button>
+                            <TextBlock Text="Per-macro shortcuts (Press Once / Toggle / Hold-to-Run / Repeat-While-Held), schedules, window triggers, and Run Governor conflict rules."
+                                       Style="{StaticResource MutedText}" FontSize="11.5" VerticalAlignment="Center" />
+                        </DockPanel>
+                        <ScrollViewer VerticalScrollBarVisibility="Auto">
+                            <ItemsControl ItemsSource="{Binding Triggers}" Focusable="False">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate DataType="{x:Type steps:TriggerItemViewModel}">
+                                        <Border Padding="10,8" Margin="0,0,0,8" CornerRadius="8" Background="{DynamicResource SurfaceAltBrush}"
+                                                BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1">
+                                            <StackPanel>
+                                                <DockPanel>
+                                                    <Button DockPanel.Dock="Right" Style="{StaticResource DismissButton}" Margin="6,0,0,0"
+                                                            Command="{Binding DataContext.RemoveTriggerCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                                                            CommandParameter="{Binding}" ToolTip="Remove trigger" />
+                                                    <CheckBox DockPanel.Dock="Right" Style="{StaticResource ToggleSwitchCheckBoxStyle}" Content="Armed"
+                                                              IsChecked="{Binding Enabled}" Margin="8,0,0,0" VerticalAlignment="Center" />
+                                                    <Grid>
+                                                        <Grid.ColumnDefinitions>
+                                                            <ColumnDefinition Width="170" />
+                                                            <ColumnDefinition Width="8" />
+                                                            <ColumnDefinition Width="180" />
+                                                            <ColumnDefinition Width="8" />
+                                                            <ColumnDefinition Width="210" />
+                                                            <ColumnDefinition Width="8" />
+                                                            <ColumnDefinition Width="120" />
+                                                        </Grid.ColumnDefinitions>
+                                                        <TextBox Grid.Column="0" Text="{Binding Name, UpdateSourceTrigger=PropertyChanged}" Tag="Trigger label"
+                                                                 FontWeight="SemiBold" Padding="6,3" FontSize="12" />
+                                                        <ComboBox Grid.Column="2" ItemsSource="{x:Static steps:TriggerItemViewModel.KindChoices}"
+                                                                  DisplayMemberPath="Label" SelectedValuePath="Value" SelectedValue="{Binding Kind}" Padding="6,3" FontSize="11.5" />
+                                                        <ComboBox Grid.Column="4" ItemsSource="{x:Static steps:TriggerItemViewModel.ConflictChoices}"
+                                                                  DisplayMemberPath="Label" SelectedValuePath="Value" SelectedValue="{Binding ConflictPolicy}" Padding="6,3" FontSize="11.5"
+                                                                  ToolTip="Run Governor: what to do if another macro is already playing when this trigger fires" />
+                                                        <TextBox Grid.Column="6" Text="{Binding CooldownMs, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}"
+                                                                 Tag="Cooldown ms" Padding="6,3" FontSize="11.5" ToolTip="Cooldown after firing (ms)" />
+                                                    </Grid>
+                                                </DockPanel>
+
+                                                <!-- Hotkey settings -->
+                                                <WrapPanel Margin="0,6,0,0" Visibility="{Binding IsHotkey, Converter={StaticResource BoolToVisibility}}">
+                                                    <TextBlock Text="Shortcut:" Style="{StaticResource MutedText}" VerticalAlignment="Center" Margin="0,0,6,0" />
+                                                    <TextBox Text="{Binding HotkeyText, Mode=OneWay}" IsReadOnly="True" Width="150" Padding="6,3" FontSize="11.5"
+                                                             FontWeight="SemiBold" Cursor="Hand" PreviewKeyDown="TriggerHotkeyBox_PreviewKeyDown"
+                                                             ToolTip="Click here and press the key combination (e.g. Ctrl+Shift+F6)" />
+                                                    <TextBlock Text="Mode:" Style="{StaticResource MutedText}" VerticalAlignment="Center" Margin="10,0,6,0" />
+                                                    <ComboBox ItemsSource="{x:Static steps:TriggerItemViewModel.HotkeyModeChoices}"
+                                                              DisplayMemberPath="Label" SelectedValuePath="Value" SelectedValue="{Binding HotkeyMode}" Width="240" Padding="6,3" FontSize="11.5" />
+                                                    <CheckBox Content="Only in window:" IsChecked="{Binding OnlyWhenWindowActive}" VerticalAlignment="Center" Margin="10,0,6,0" />
+                                                    <TextBox Text="{Binding WindowTitle, UpdateSourceTrigger=PropertyChanged}" Tag="Window title (e.g. Excel)"
+                                                             Width="145" Padding="6,3" FontSize="11.5"
+                                                             ToolTip="When 'Only in window' is checked, the shortcut only fires while the active window title contains this text" />
+                                                    <TextBox Text="{Binding ProcessNameMatch, UpdateSourceTrigger=PropertyChanged}" Tag="Process (e.g. Code)"
+                                                             Width="125" Padding="6,3" FontSize="11.5" Margin="6,0,0,0"
+                                                             ToolTip="Optional executable/process name filter without .exe (works even when document/tab titles change)" />
+                                                    <CheckBox Content="Pass key through" IsChecked="{Binding PassThroughKey}" VerticalAlignment="Center" Margin="10,0,0,0"
+                                                              ToolTip="Observe the shortcut passively so the active game or app still receives the keypress" />
+                                                </WrapPanel>
+
+                                                <!-- Schedule settings -->
+                                                <WrapPanel Margin="0,6,0,0" Visibility="{Binding IsSchedule, Converter={StaticResource BoolToVisibility}}">
+                                                    <TextBlock Text="When:" Style="{StaticResource MutedText}" VerticalAlignment="Center" Margin="0,0,6,0" />
+                                                    <ComboBox ItemsSource="{x:Static steps:TriggerItemViewModel.RecurrenceChoices}"
+                                                              DisplayMemberPath="Label" SelectedValuePath="Value" SelectedValue="{Binding Recurrence}" Width="220" Padding="6,3" FontSize="11.5" />
+                                                    <StackPanel Orientation="Horizontal" Margin="10,0,0,0" Visibility="{Binding IsEveryNMinutes, Converter={StaticResource BoolToVisibility}}">
+                                                        <TextBlock Text="Every (min):" Style="{StaticResource MutedText}" VerticalAlignment="Center" Margin="0,0,6,0" />
+                                                        <TextBox Text="{Binding IntervalMinutes, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}" Width="70" Padding="6,3" FontSize="11.5" />
+                                                    </StackPanel>
+                                                    <StackPanel Orientation="Horizontal" Margin="10,0,0,0" Visibility="{Binding IsDailyAtTime, Converter={StaticResource BoolToVisibility}}">
+                                                        <TextBlock Text="Time (HH:mm):" Style="{StaticResource MutedText}" VerticalAlignment="Center" Margin="0,0,6,0" />
+                                                        <TextBox Text="{Binding TimeOfDay, UpdateSourceTrigger=PropertyChanged}" Tag="09:00" Width="80" Padding="6,3" FontSize="11.5" FontFamily="{StaticResource MonoFont}" />
+                                                    </StackPanel>
+                                                </WrapPanel>
+
+                                                <!-- Window event settings -->
+                                                <WrapPanel Margin="0,6,0,0" Visibility="{Binding IsWindowEvent, Converter={StaticResource BoolToVisibility}}">
+                                                    <TextBlock Text="Event:" Style="{StaticResource MutedText}" VerticalAlignment="Center" Margin="0,0,6,0" />
+                                                    <ComboBox ItemsSource="{x:Static steps:TriggerItemViewModel.WindowEventChoices}"
+                                                              DisplayMemberPath="Label" SelectedValuePath="Value" SelectedValue="{Binding WindowEvent}" Width="220" Padding="6,3" FontSize="11.5" />
+                                                    <TextBlock Text="Window title:" Style="{StaticResource MutedText}" VerticalAlignment="Center" Margin="10,0,6,0" />
+                                                    <TextBox Text="{Binding WindowTitleMatch, UpdateSourceTrigger=PropertyChanged}" Tag="e.g. Excel, Discord, Game"
+                                                             Width="170" Padding="6,3" FontSize="11.5" />
+                                                    <TextBlock Text="Process:" Style="{StaticResource MutedText}" VerticalAlignment="Center" Margin="10,0,6,0" />
+                                                    <TextBox Text="{Binding ProcessNameMatch, UpdateSourceTrigger=PropertyChanged}" Tag="e.g. Code, chrome"
+                                                             Width="140" Padding="6,3" FontSize="11.5" />
+                                                </WrapPanel>
+                                            </StackPanel>
+                                        </Border>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </ScrollViewer>
+                    </DockPanel>
+
+                    <!-- TAB 5: DEBUGGER 2.0 (CALL STACK, CONDITIONAL BREAKPOINTS, WATCHPOINTS) -->
+                    <Grid>
+                        <Grid.Style>
+                            <Style TargetType="Grid">
+                                <Setter Property="Visibility" Value="Collapsed" />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding SelectedBottomTab}" Value="5">
+                                        <Setter Property="Visibility" Value="Visible" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Grid.Style>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="12" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="12" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+
+                        <!-- Col 0: Active Sub-Macro Call Stack -->
+                        <DockPanel Grid.Column="0">
+                            <DockPanel DockPanel.Dock="Top" Margin="0,0,0,6">
+                                <TextBlock Text="CALL STACK (F10 Over · F11 Into · Shift+F11 Out)" Style="{StaticResource OverlineHeaderStyle}" VerticalAlignment="Center" />
+                            </DockPanel>
+                            <Border Background="{DynamicResource SurfaceAltBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="8" Padding="6">
+                                <Grid>
+                                    <TextBlock Text="Pause at a breakpoint or step into a sub-macro (F11) to inspect nested frames."
+                                               Style="{StaticResource MutedText}" FontSize="11" TextWrapping="Wrap" VerticalAlignment="Center" HorizontalAlignment="Center"
+                                               TextAlignment="Center" Margin="8"
+                                               Visibility="{Binding HasActiveCallStack, Converter={StaticResource BoolToVisibility}, ConverterParameter=Invert}" />
+                                    <ScrollViewer VerticalScrollBarVisibility="Auto"
+                                                  Visibility="{Binding HasActiveCallStack, Converter={StaticResource BoolToVisibility}}">
+                                        <ItemsControl ItemsSource="{Binding CallStackFrames}" Focusable="False">
+                                            <ItemsControl.ItemTemplate>
+                                                <DataTemplate DataType="{x:Type playback:CallStackFrame}">
+                                                    <Button Style="{StaticResource GhostButton}" HorizontalContentAlignment="Left" Padding="8,5" Margin="0,0,0,3"
+                                                            Command="{Binding DataContext.OpenCallStackFrameCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                                            CommandParameter="{Binding}" ToolTip="Click to open this macro frame in the editor">
+                                                        <TextBlock Text="{Binding DetailText}" FontFamily="{StaticResource MonoFont}" FontSize="11.5"
+                                                                   TextTrimming="CharacterEllipsis" />
+                                                    </Button>
+                                                </DataTemplate>
+                                            </ItemsControl.ItemTemplate>
+                                        </ItemsControl>
+                                    </ScrollViewer>
+                                </Grid>
+                            </Border>
+                        </DockPanel>
+
+                        <!-- Col 2: Conditional Breakpoints -->
+                        <DockPanel Grid.Column="2">
+                            <DockPanel DockPanel.Dock="Top" Margin="0,0,0,4">
+                                <TextBlock Text="CONDITIONAL BREAKPOINTS" Style="{StaticResource OverlineHeaderStyle}" VerticalAlignment="Center" />
+                            </DockPanel>
+                            <StackPanel DockPanel.Dock="Top" Margin="0,0,0,6">
+                                <DockPanel>
+                                    <Button DockPanel.Dock="Right" Content="Clear" Style="{StaticResource GhostButton}" Padding="7,3" FontSize="11" Margin="4,0,0,0"
+                                            Command="{Binding ClearBreakpointConditionCommand}" ToolTip="Clear condition expression on selected step" />
+                                    <Button DockPanel.Dock="Right" Content="✓ Set" Style="{StaticResource GhostButton}" Padding="8,3" FontSize="11" Margin="4,0,0,0"
+                                            Command="{Binding ApplyBreakpointConditionCommand}" ToolTip="Attach condition to selected step breakpoint (e.g. {hp} &lt; 20 or VisionScore &lt; 0.85)" />
+                                    <TextBox Text="{Binding SelectedBreakpointExpression, UpdateSourceTrigger=PropertyChanged}"
+                                             Tag="Select step → {hp} &lt; 20 or VisionScore &lt; 0.85"
+                                             FontFamily="{StaticResource MonoFont}" FontSize="11.5" Padding="6,3"
+                                             KeyDown="BreakpointConditionBox_KeyDown" />
+                                </DockPanel>
+                                <TextBlock Text="{Binding BreakpointRuleError}" FontSize="10.5" Foreground="{DynamicResource ErrorBrush}" Margin="0,3,0,0"
+                                           TextWrapping="Wrap" Visibility="{Binding HasBreakpointRuleError, Converter={StaticResource BoolToVisibility}}" />
+                            </StackPanel>
+                            <Border Background="{DynamicResource SurfaceAltBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="8" Padding="6">
+                                <Grid>
+                                    <TextBlock Text="No breakpoints set (select a step and press F9, or enter a condition above)."
+                                               Style="{StaticResource MutedText}" FontSize="11" TextWrapping="Wrap" VerticalAlignment="Center" HorizontalAlignment="Center"
+                                               TextAlignment="Center" Margin="8"
+                                               Visibility="{Binding HasActiveBreakpoints, Converter={StaticResource BoolToVisibility}, ConverterParameter=Invert}" />
+                                    <ScrollViewer VerticalScrollBarVisibility="Auto"
+                                                  Visibility="{Binding HasActiveBreakpoints, Converter={StaticResource BoolToVisibility}}">
+                                        <ItemsControl ItemsSource="{Binding ActiveBreakpoints}" Focusable="False">
+                                            <ItemsControl.ItemTemplate>
+                                                <DataTemplate DataType="{x:Type vm:ConditionalBreakpointItemViewModel}">
+                                                    <DockPanel Margin="0,0,0,3">
+                                                        <Button DockPanel.Dock="Right" Style="{StaticResource DismissButton}"
+                                                                Command="{Binding DataContext.RemoveBreakpointItemCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                                                CommandParameter="{Binding}" ToolTip="Remove breakpoint" />
+                                                        <TextBlock Text="{Binding DisplayLabel}" FontFamily="{StaticResource MonoFont}" FontSize="11"
+                                                                   VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                                                    </DockPanel>
+                                                </DataTemplate>
+                                            </ItemsControl.ItemTemplate>
+                                        </ItemsControl>
+                                    </ScrollViewer>
+                                </Grid>
+                            </Border>
+                        </DockPanel>
+
+                        <!-- Col 4: Variable Watchpoints -->
+                        <DockPanel Grid.Column="4">
+                            <DockPanel DockPanel.Dock="Top" Margin="0,0,0,4">
+                                <TextBlock Text="VARIABLE WATCHPOINTS" Style="{StaticResource OverlineHeaderStyle}" VerticalAlignment="Center" />
+                            </DockPanel>
+                            <StackPanel DockPanel.Dock="Top" Margin="0,0,0,6">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="95" />
+                                        <ColumnDefinition Width="4" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBox Grid.Column="0" Text="{Binding NewWatchpointVariableName, UpdateSourceTrigger=PropertyChanged}"
+                                             Tag="var name" FontFamily="{StaticResource MonoFont}" FontSize="11.5" Padding="6,3"
+                                             KeyDown="WatchpointBox_KeyDown" />
+                                    <TextBox Grid.Column="2" Text="{Binding NewWatchpointExpression, UpdateSourceTrigger=PropertyChanged}"
+                                             Tag="optional e.g. {hp} &lt; 20" FontFamily="{StaticResource MonoFont}" FontSize="11.5" Padding="6,3"
+                                             KeyDown="WatchpointBox_KeyDown" />
+                                    <Button Grid.Column="3" Content="+ Watch" Style="{StaticResource GhostButton}" Padding="8,3" FontSize="11" Margin="4,0,0,0"
+                                            Command="{Binding AddWatchpointCommand}" ToolTip="Pause automatically when variable changes (or matches expression)" />
+                                </Grid>
+                                <TextBlock Text="{Binding WatchpointRuleError}" FontSize="10.5" Foreground="{DynamicResource ErrorBrush}" Margin="0,3,0,0"
+                                           TextWrapping="Wrap" Visibility="{Binding HasWatchpointRuleError, Converter={StaticResource BoolToVisibility}}" />
+                            </StackPanel>
+                            <Border Background="{DynamicResource SurfaceAltBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="8" Padding="6">
+                                <Grid>
+                                    <TextBlock Text="Add a watchpoint to pause the moment a variable mutates."
+                                               Style="{StaticResource MutedText}" FontSize="11" TextWrapping="Wrap" VerticalAlignment="Center" HorizontalAlignment="Center"
+                                               TextAlignment="Center" Margin="8"
+                                               Visibility="{Binding HasWatchpoints, Converter={StaticResource BoolToVisibility}, ConverterParameter=Invert}" />
+                                    <ScrollViewer VerticalScrollBarVisibility="Auto"
+                                                  Visibility="{Binding HasWatchpoints, Converter={StaticResource BoolToVisibility}}">
+                                        <ItemsControl ItemsSource="{Binding VariableWatchpoints}" Focusable="False">
+                                            <ItemsControl.ItemTemplate>
+                                                <DataTemplate DataType="{x:Type vm:WatchpointItemViewModel}">
+                                                    <DockPanel Margin="0,0,0,4">
+                                                        <CheckBox DockPanel.Dock="Left" IsChecked="{Binding Enabled}" VerticalAlignment="Center" Margin="0,0,6,0" />
+                                                        <Button DockPanel.Dock="Right" Style="{StaticResource DismissButton}"
+                                                                Command="{Binding DataContext.RemoveWatchpointCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                                                CommandParameter="{Binding}" ToolTip="Remove watchpoint" />
+                                                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                                            <TextBlock Text="{Binding VariableName}" FontFamily="{StaticResource MonoFont}" FontSize="11.5"
+                                                                       FontWeight="SemiBold" Foreground="{DynamicResource MemoryAccentBrush}" />
+                                                            <TextBlock Text="{Binding DisplayCondition}" FontFamily="{StaticResource MonoFont}" FontSize="11"
+                                                                       Foreground="{DynamicResource MutedTextBrush}" Margin="6,0,0,0" />
+                                                        </StackPanel>
+                                                    </DockPanel>
+                                                </DataTemplate>
+                                            </ItemsControl.ItemTemplate>
+                                        </ItemsControl>
+                                    </ScrollViewer>
+                                </Grid>
+                            </Border>
+                        </DockPanel>
+                    </Grid>
+
+                    <!-- TAB 6: EXECUTION TRACE RING BUFFER -->
+                    <DockPanel>
+                        <DockPanel.Style>
+                            <Style TargetType="DockPanel">
+                                <Setter Property="Visibility" Value="Collapsed" />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding SelectedBottomTab}" Value="6">
+                                        <Setter Property="Visibility" Value="Visible" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </DockPanel.Style>
+                        <DockPanel DockPanel.Dock="Top" Margin="0,0,0,6">
+                            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                                <Button Content="All" Padding="8,3" FontSize="11" Margin="0,0,4,0"
+                                        Command="{Binding SetTraceOutcomeFilterCommand}" CommandParameter="All">
+                                    <Button.Style>
+                                        <Style TargetType="Button" BasedOn="{StaticResource GhostButton}">
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding IsTraceFilterAll}" Value="True">
+                                                    <Setter Property="Background" Value="{DynamicResource AccentSoftBrush}" />
+                                                    <Setter Property="Foreground" Value="{DynamicResource AccentHoverBrush}" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </Button.Style>
+                                </Button>
+                                <Button Content="Failed" Padding="8,3" FontSize="11" Margin="0,0,4,0"
+                                        Command="{Binding SetTraceOutcomeFilterCommand}" CommandParameter="Failed">
+                                    <Button.Style>
+                                        <Style TargetType="Button" BasedOn="{StaticResource GhostButton}">
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding IsTraceFilterFailed}" Value="True">
+                                                    <Setter Property="Background" Value="{DynamicResource ErrorSoftBrush}" />
+                                                    <Setter Property="Foreground" Value="{DynamicResource ErrorBrush}" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </Button.Style>
+                                </Button>
+                                <Button Content="Vision" Padding="8,3" FontSize="11" Margin="0,0,8,0"
+                                        Command="{Binding SetTraceOutcomeFilterCommand}" CommandParameter="Vision">
+                                    <Button.Style>
+                                        <Style TargetType="Button" BasedOn="{StaticResource GhostButton}">
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding IsTraceFilterVision}" Value="True">
+                                                    <Setter Property="Background" Value="{DynamicResource AccentSoftBrush}" />
+                                                    <Setter Property="Foreground" Value="{DynamicResource VisionAccentBrush}" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </Button.Style>
+                                </Button>
+                                <Button Content="📜 Trace JSON" Style="{StaticResource GhostButton}" Padding="8,3" FontSize="11" Margin="0,0,4,0"
+                                        Command="{Binding OpenFailureTraceCommand}"
+                                        Visibility="{Binding HasFailureTrace, Converter={StaticResource BoolToVisibility}}"
+                                        ToolTip="Open last-failure-trace.json" />
+                                <Button Content="Clear" Style="{StaticResource GhostButton}" Padding="8,3" FontSize="11"
+                                        Command="{Binding ClearTraceCommand}" />
+                            </StackPanel>
+                            <TextBox Text="{Binding TraceFilterText, UpdateSourceTrigger=PropertyChanged}" Width="260" HorizontalAlignment="Left"
+                                     Tag="Filter trace by step, macro, error…" FontSize="11.5" Padding="7,3" />
+                        </DockPanel>
+                        <Grid>
+                            <TextBlock Text="Run or step a macro to record the last 200 executed steps (timing, vision score, errors, sub-macro depth)."
+                                       Style="{StaticResource MutedText}" FontSize="11.5" VerticalAlignment="Center" HorizontalAlignment="Center"
+                                       Visibility="{Binding HasTraceEntries, Converter={StaticResource BoolToVisibility}, ConverterParameter=Invert}" />
+                            <ListBox ItemsSource="{Binding FilteredTraceEntries}" ItemContainerStyle="{StaticResource PlainListItem}"
+                                     ScrollViewer.VerticalScrollBarVisibility="Auto" VirtualizingPanel.IsVirtualizing="True"
+                                     Visibility="{Binding HasTraceEntries, Converter={StaticResource BoolToVisibility}}"
+                                     AutomationProperties.Name="Execution trace">
+                                <ListBox.ItemTemplate>
+                                    <DataTemplate DataType="{x:Type playback:ExecutionTraceEntry}">
+                                        <TextBlock Text="{Binding SummaryLine}" FontFamily="{StaticResource MonoFont}" FontSize="11.5"
+                                                   TextTrimming="CharacterEllipsis">
+                                            <TextBlock.Style>
+                                                <Style TargetType="TextBlock">
+                                                    <Setter Property="Foreground" Value="{DynamicResource TextBrush}" />
+                                                    <Style.Triggers>
+                                                        <DataTrigger Binding="{Binding Outcome}" Value="Failed">
+                                                            <Setter Property="Foreground" Value="{DynamicResource ErrorBrush}" />
+                                                        </DataTrigger>
+                                                        <DataTrigger Binding="{Binding Outcome}" Value="Paused">
+                                                            <Setter Property="Foreground" Value="{DynamicResource WarningBrush}" />
+                                                        </DataTrigger>
+                                                        <DataTrigger Binding="{Binding Outcome}" Value="Executed">
+                                                            <Setter Property="Foreground" Value="{DynamicResource SuccessBrush}" />
+                                                        </DataTrigger>
+                                                        <DataTrigger Binding="{Binding Outcome}" Value="ConditionTrue">
+                                                            <Setter Property="Foreground" Value="{DynamicResource SuccessBrush}" />
+                                                        </DataTrigger>
+                                                        <DataTrigger Binding="{Binding Outcome}" Value="ConditionFalse">
+                                                            <Setter Property="Foreground" Value="{DynamicResource MutedTextBrush}" />
+                                                        </DataTrigger>
+                                                        <DataTrigger Binding="{Binding Outcome}" Value="Skipped">
+                                                            <Setter Property="Foreground" Value="{DynamicResource SubtleTextBrush}" />
+                                                        </DataTrigger>
+                                                        <DataTrigger Binding="{Binding Outcome}" Value="Stopped">
+                                                            <Setter Property="Foreground" Value="{DynamicResource WarningBrush}" />
+                                                        </DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </TextBlock.Style>
+                                        </TextBlock>
+                                    </DataTemplate>
+                                </ListBox.ItemTemplate>
+                            </ListBox>
+                        </Grid>
+                    </DockPanel>
+                </Grid>
+            </Border>
+        </DockPanel>
+    </Border>
+</UserControl>

@@ -64,7 +64,7 @@ internal static class RegionPicker
             foreach (var window in windows) window.CloseQuietly();
         }
 
-        async void Refreeze()
+        async Task RefreezeAsync()
         {
             if (refreezing || result.Task.IsCompleted) return;
             refreezing = true;
@@ -107,7 +107,7 @@ internal static class RegionPicker
 
         var session = new PickerSession(UnionBounds(monitors, frozen?.Bounds)) { Anchor = pickPoint ? anchor : null };
         foreach (var monitor in monitors)
-            windows.Add(new RegionPickerWindow(monitor, session, Finish, hint ?? DefaultHint, pickPoint, CropFor(frozen, monitor), Refreeze));
+            windows.Add(new RegionPickerWindow(monitor, session, Finish, hint ?? DefaultHint, pickPoint, CropFor(frozen, monitor), RefreezeAsync));
 
         session.Windows = windows;
         foreach (var window in windows) window.Show();
@@ -323,7 +323,7 @@ internal sealed class RegionPickerWindow : Window
     private readonly ScreenRect _monitor;
     private readonly PickerSession _session;
     private readonly Action<ScreenRect?> _done;
-    private readonly Action? _refreeze;
+    private readonly Func<Task>? _refreeze;
     private readonly bool _pickPoint;
     private readonly string _hintText;
     private readonly Canvas _canvas = new() { Background = Brushes.Transparent, Focusable = true };
@@ -350,7 +350,7 @@ internal sealed class RegionPickerWindow : Window
     private bool _closed;
 
     public RegionPickerWindow(ScreenRect monitor, PickerSession session, Action<ScreenRect?> done, string hintText, bool pickPoint,
-        BgraImage? frozen = null, Action? refreeze = null)
+        BgraImage? frozen = null, Func<Task>? refreeze = null)
     {
         _monitor = monitor;
         _session = session;
@@ -521,7 +521,7 @@ internal sealed class RegionPickerWindow : Window
             else if (e.Key == Key.Space && _refreeze is not null && !_session.PointPressed && _session.Start is null)
             {
                 e.Handled = true;
-                _refreeze();
+                _ = InvokeRefreezeSafelyAsync();
             }
         };
         Loaded += (_, _) =>
@@ -538,6 +538,19 @@ internal sealed class RegionPickerWindow : Window
 
     /// <summary>The monitor this overlay covers (physical pixels).</summary>
     public ScreenRect Monitor => _monitor;
+
+    private async Task InvokeRefreezeSafelyAsync()
+    {
+        if (_refreeze is null || _closed) return;
+        try
+        {
+            await _refreeze();
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _done(null);
+        }
+    }
 
     public bool Contains(int x, int y) =>
         x >= _monitor.X && y >= _monitor.Y && x < _monitor.Right && y < _monitor.Bottom;
