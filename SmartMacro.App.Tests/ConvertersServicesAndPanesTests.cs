@@ -1,10 +1,14 @@
 using System.Globalization;
 using System.Windows;
 using System.Windows.Media;
+using System.Windows.Media.Imaging;
+using System.Windows.Threading;
+using SmartMacro.Controls;
 using SmartMacro.Converters;
 using SmartMacro.Core.Logging;
 using SmartMacro.Core.Models;
 using SmartMacro.Core.Ocr;
+using SmartMacro.Core.Storage;
 using SmartMacro.Core.Vision;
 using SmartMacro.Services;
 using SmartMacro.ViewModels;
@@ -199,5 +203,122 @@ public sealed class ConvertersServicesAndPanesTests
             Assert.Same(editorVm, palette.DataContext);
             Assert.Same(editorVm, view.DataContext);
         });
+    }
+
+    [Fact]
+    public async Task AllViewsAndStepTemplates_LoadAndMeasureWithoutXamlExceptions()
+    {
+        await StaTestRunner.RunAsync(async () =>
+        {
+            var root = Path.Combine(Path.GetTempPath(), "SmartMacroAppTests", Guid.NewGuid().ToString("N"));
+            try
+            {
+                var log = new FakeLogService();
+                var settingsVm = new SettingsViewModel(
+                    new FakeSettingsPersistence(),
+                    log,
+                    new FakeDialogService(),
+                    new AppPaths(root),
+                    _ => { },
+                    (_, _) => { });
+                await settingsVm.LoadAsync();
+
+                var settingsView = new SettingsView { DataContext = settingsVm };
+                settingsView.Measure(new Size(1100, 800));
+                settingsView.Arrange(new Rect(0, 0, 1100, 800));
+
+                using var logVm = new LogViewModel(log, Dispatcher.CurrentDispatcher);
+                var logView = new LogView { DataContext = logVm };
+                logView.Measure(new Size(1000, 700));
+
+                var manualVm = new ManualViewModel(
+                    _ => Task.CompletedTask,
+                    () => ("Ctrl+F9", "Ctrl+F10", "Ctrl+P"),
+                    _ => { });
+                var manualView = new ManualView { DataContext = manualVm };
+                manualView.Measure(new Size(1000, 700));
+
+                var brandLogo = new BrandLogo { Width = 64, Height = 64 };
+                brandLogo.Measure(new Size(64, 64));
+                brandLogo.Arrange(new Rect(0, 0, 64, 64));
+
+                var splash = new SplashLoadingWindow();
+                splash.Measure(new Size(420, 320));
+                splash.Close();
+
+                var missionControl = new MissionControlWindow();
+                missionControl.Measure(new Size(420, 520));
+                missionControl.Close();
+
+                var telemetry = new FeedbackTelemetryOverlay();
+                telemetry.Measure(new Size(300, 200));
+                telemetry.Close();
+
+                // Verify every DataTemplate in StepEditorTemplates and its merged dictionaries loads cleanly.
+                var templatesDict = new ResourceDictionary
+                {
+                    Source = new Uri("pack://application:,,,/SmartMacro;component/Views/StepEditorTemplates.xaml", UriKind.Absolute),
+                };
+                var templateCount = LoadAllTemplatesRecursively(templatesDict);
+                Assert.True(templateCount >= 10, $"Expected step editor templates to be loaded, found {templateCount}.");
+
+                StaTestRunner.DoEvents();
+            }
+            finally
+            {
+                if (Directory.Exists(root))
+                    Directory.Delete(root, recursive: true);
+            }
+        });
+    }
+
+    [Fact]
+    public void SearchRegionRadar_Render_DoesNotThrowOnExtremeCustomCoordinates()
+    {
+        StaTestRunner.Run(() =>
+        {
+            var radar = new SearchRegionRadar
+            {
+                Width = 320,
+                Height = 64,
+            };
+
+            foreach (var (scope, x, y, w, h) in new[]
+            {
+                (SearchScope.PrimaryMonitor, 0, 0, 0, 0),
+                (SearchScope.CustomArea, 0, 0, 0, 0),
+                (SearchScope.CustomArea, 8000, 8000, 10, 10),
+                (SearchScope.CustomArea, -3840, -1080, 120, 80),
+            })
+            {
+                radar.Scope = scope;
+                radar.RegionX = x;
+                radar.RegionY = y;
+                radar.RegionWidth = w;
+                radar.RegionHeight = h;
+                radar.Measure(new Size(320, 64));
+                radar.Arrange(new Rect(0, 0, 320, 64));
+                var rtb = new RenderTargetBitmap(320, 64, 96, 96, PixelFormats.Pbgra32);
+                rtb.Render(radar);
+            }
+        });
+    }
+
+    private static int LoadAllTemplatesRecursively(ResourceDictionary dict)
+    {
+        var loaded = 0;
+        foreach (var key in dict.Keys)
+        {
+            if (dict[key] is DataTemplate template)
+            {
+                Assert.NotNull(template.LoadContent());
+                loaded++;
+            }
+        }
+
+        foreach (var merged in dict.MergedDictionaries)
+            loaded += LoadAllTemplatesRecursively(merged);
+
+        return loaded;
     }
 }

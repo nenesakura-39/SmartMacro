@@ -8,7 +8,7 @@
         mc:Ignorable="d"
         d:DataContext="{d:DesignInstance Type=vm:MainViewModel}"
         Title="SmartMacro — Mission Control"
-        Icon="pack://application:,,,/Assets/SmartMacro.ico"
+        Icon="pack://application:,,,/SmartMacro;component/Assets/SmartMacro.ico"
         Width="430" Height="515" MinWidth="360" MinHeight="380"
         WindowStartupLocation="Manual"
         Topmost="True"

@@ -182,7 +182,7 @@
                                         <DataTemplate>
                                             <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
                                                 <Border Width="28" Height="22" CornerRadius="4" Margin="0,0,8,0"
-                                                        Background="{DynamicResource PanelBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1">
+                                                        Background="{DynamicResource SurfaceRecessedBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1">
                                                     <Image Source="{Binding Preview}" Stretch="Uniform" />
                                                 </Border>
                                                 <StackPanel>

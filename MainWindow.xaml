@@ -10,7 +10,7 @@
         mc:Ignorable="d"
         d:DataContext="{d:DesignInstance Type=vm:MainViewModel}"
         Title="{Binding WindowTitle}"
-        Icon="pack://application:,,,/Assets/SmartMacro.ico"
+        Icon="pack://application:,,,/SmartMacro;component/Assets/SmartMacro.ico"
         Width="1380" Height="880" MinWidth="1040" MinHeight="680"
         WindowStartupLocation="CenterScreen"
         Background="{DynamicResource BackgroundBrush}"

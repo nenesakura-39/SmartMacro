@@ -99,7 +99,7 @@
                                        RenderTransformOrigin="0.5,0.5"
                                        AutomationProperties.Name="KuroLogic Studio Banner">
                                     <Image.Source>
-                                        <BitmapImage UriSource="pack://application:,,,/Assets/KuroLogic-Banner-1920x1080.png"
+                                        <BitmapImage UriSource="pack://application:,,,/SmartMacro;component/Assets/KuroLogic-Banner-1920x1080.png"
                                                      DecodePixelWidth="960"
                                                      CacheOption="OnLoad" />
                                     </Image.Source>
@@ -692,14 +692,14 @@
                                     <ColumnDefinition Width="*" />
                                 </Grid.ColumnDefinitions>
                                 <StackPanel Grid.Column="0">
-                                    <TextBlock Text="Compute Engine" Style="{StaticResource SettingLabel}" Margin="0,0,0,4" />
+                                    <TextBlock Text="Compute Engine" Style="{StaticResource FieldLabel}" Margin="0,0,0,4" />
                                     <ComboBox ItemsSource="{Binding ComputeEngineModes}"
                                               DisplayMemberPath="Label" SelectedValuePath="Value"
                                               SelectedValue="{Binding ComputeEngineMode, Mode=TwoWay}"
                                               ToolTip="Choose Auto (GPU if available + CPU SIMD), strict CPU Only for low-end PCs/iGPUs, or GPU Accelerated (D3D11 DXGI)." />
                                 </StackPanel>
                                 <StackPanel Grid.Column="2">
-                                    <TextBlock Text="RAM Template Cache Limit" Style="{StaticResource SettingLabel}" Margin="0,0,0,4" />
+                                    <TextBlock Text="RAM Template Cache Limit" Style="{StaticResource FieldLabel}" Margin="0,0,0,4" />
                                     <ComboBox ItemsSource="{Binding VisionMemoryBudgets}"
                                               DisplayMemberPath="Label" SelectedValuePath="Value"
                                               SelectedValue="{Binding VisionMemoryBudgetMb, Mode=TwoWay}"

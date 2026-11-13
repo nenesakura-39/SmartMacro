@@ -595,7 +595,7 @@
                                                         <Setter Property="BorderBrush" Value="{DynamicResource InputBorderBrush}" />
                                                     </Trigger>
                                                     <Trigger Property="IsKeyboardFocused" Value="True">
-                                                        <Setter Property="Background" Value="{DynamicResource InputBackgroundBrush}" />
+                                                        <Setter Property="Background" Value="{DynamicResource InputBrush}" />
                                                         <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
                                                     </Trigger>
                                                 </Style.Triggers>
