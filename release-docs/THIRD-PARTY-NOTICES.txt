@@ -15,11 +15,11 @@ these platform packs). The automated-test packages (xunit, Microsoft.NET.Test.Sd
 are not part of the download.
 
 =========================================================================================
-1. .NET runtime – Microsoft.NETCore.App.Runtime.win-x64 10.0.11
-   (managed libraries 10.0.1126.37416; source: github.com/dotnet/dotnet commit
-   e2f47b0110ed922f21a1522da67279133ce28f32)
+1. .NET runtime – Microsoft.NETCore.App.Runtime.win-x64 10.0.15
+   (managed libraries 10.0.1526.53008; source: github.com/dotnet/dotnet commit
+   8e0f8ed2312954727f8919d7d1c2f78b483b4ee7)
    Copyright (c) .NET Foundation and Contributors
-   License: MIT (full text in section A below). This includes msquic.dll 2.5.9.0,
+   License: MIT (full text in section A below). This includes msquic.dll 2.5.12.0,
    which ships inside the .NET runtime pack and is not named separately in Microsoft's
    license information for Windows ("All other binaries and files are licensed with
    the MIT license").
@@ -29,10 +29,10 @@ are not part of the download.
    published as a single file, the runtime parts (coreclr) are covered by the
    Microsoft .NET Library License (section 4 below), not MIT.
 
-2. Windows Desktop runtime / WPF – Microsoft.WindowsDesktop.App.Runtime.win-x64 10.0.11
+2. Windows Desktop runtime / WPF – Microsoft.WindowsDesktop.App.Runtime.win-x64 10.0.15
    Copyright (c) .NET Foundation and Contributors
    License: MIT (section A), except the native files listed in section 4 and 5.
-   This includes PenImc_cor3.dll 10.0.1126.37416, which is not named separately in
+   This includes PenImc_cor3.dll 10.0.1526.53008, which is not named separately in
    Microsoft's license information for Windows.
    WPF's own third-party notices (https://github.com/dotnet/wpf/blob/main/
    THIRD-PARTY-NOTICES.TXT, checked 2026-10-17) list zlib 1.2.11 and Json.NET. Their
@@ -46,10 +46,10 @@ are not part of the download.
 
 4. Microsoft .NET Library License components (closed source, distributed unmodified
    as part of SmartMacro):
-   - PresentationNative_cor3.dll 10.0.526.35501 (WPF)
-   - wpfgfx_cor3.dll 10.0.1126.37416 (WPF)
+   - PresentationNative_cor3.dll 10.0.826.50103 (WPF)
+   - wpfgfx_cor3.dll 10.0.1526.53008 (WPF)
    - vcruntime140_cor3.dll 14.44.35211.0 (WPF)
-   - Microsoft.DiaSymReader.Native.amd64.dll 14.42.34436.0 (.NET runtime)
+   - Microsoft.DiaSymReader.Native.amd64.dll 14.50.35740.0 (.NET runtime)
    - .NET runtime parts of the single-file bundle (coreclr)
    Copyright (c) Microsoft Corporation. All rights reserved.
    License: Microsoft .NET Library License,
@@ -73,7 +73,7 @@ Segoe UI / Segoe Fluent Icons / Segoe MDL2 Assets fonts (used by name, not bundl
 
 =========================================================================================
 A. MIT License – .NET runtime and Windows Desktop runtime (items 1 and 2)
-   (copied unchanged from LICENSE.TXT / LICENSE in the 10.0.11 runtime packages)
+   (copied unchanged from LICENSE.TXT / LICENSE in the 10.0.15 runtime packages)
 
 The MIT License (MIT)
 
