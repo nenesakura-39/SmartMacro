@@ -474,8 +474,15 @@ public static partial class MacroValidator
             if (t.CooldownMs < 0 || t.CooldownMs > MacroTrigger.MaxCooldownMs)
                 issues.Add(Error($"{label}: cooldown must be 0 to {MacroTrigger.MaxCooldownMs:N0} ms.", nameof(Macro.Triggers)));
 
-            if (t.OnlyWhenWindowActive && (string.IsNullOrWhiteSpace(t.WindowTitle) || t.WindowTitle.Trim().Length > SearchArea.MaxWindowTitleLength))
-                issues.Add(Error($"{label}: enter the active window title to filter by (1 to {SearchArea.MaxWindowTitleLength} characters).", nameof(Macro.Triggers)));
+            var hasWindowTitle = !string.IsNullOrWhiteSpace(t.WindowTitle);
+            var hasProcessMatch = !string.IsNullOrWhiteSpace(t.ProcessNameMatch);
+            if (hasWindowTitle && t.WindowTitle!.Trim().Length > SearchArea.MaxWindowTitleLength)
+                issues.Add(Error($"{label}: window title filter must be up to {SearchArea.MaxWindowTitleLength} characters.", nameof(Macro.Triggers)));
+            if (hasProcessMatch && t.ProcessNameMatch!.Trim().Length > SearchArea.MaxWindowTitleLength)
+                issues.Add(Error($"{label}: process name filter must be up to {SearchArea.MaxWindowTitleLength} characters.", nameof(Macro.Triggers)));
+
+            if (t.OnlyWhenWindowActive && !hasWindowTitle && !hasProcessMatch)
+                issues.Add(Error($"{label}: enter the active window title or process name to filter by (1 to {SearchArea.MaxWindowTitleLength} characters).", nameof(Macro.Triggers)));
 
             switch (t.Kind)
             {
@@ -510,8 +517,8 @@ public static partial class MacroValidator
                 case TriggerKind.WindowEvent:
                     if (!Enum.IsDefined(t.WindowEvent))
                         issues.Add(Error($"{label}: unknown window event.", nameof(Macro.Triggers)));
-                    if (string.IsNullOrWhiteSpace(t.WindowTitle) || t.WindowTitle.Trim().Length > SearchArea.MaxWindowTitleLength)
-                        issues.Add(Error($"{label}: enter (part of) the window title to watch for (1 to {SearchArea.MaxWindowTitleLength} characters).", nameof(Macro.Triggers)));
+                    if (!hasWindowTitle && !hasProcessMatch)
+                        issues.Add(Error($"{label}: enter (part of) the window title or process name to watch for (1 to {SearchArea.MaxWindowTitleLength} characters).", nameof(Macro.Triggers)));
                     break;
             }
         }

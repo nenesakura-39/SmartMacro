@@ -3,6 +3,8 @@ using System.Windows.Interop;
 using System.Windows.Threading;
 using SmartMacro.Core.Logging;
 using SmartMacro.Core.Models;
+using SmartMacro.Core.Recording;
+using SmartMacro.Services.Input;
 using static SmartMacro.Services.Input.NativeMethods;
 
 namespace SmartMacro.Services;
@@ -28,14 +30,16 @@ public sealed class HotkeyService : IDisposable
     private readonly ILogService _log;
     private readonly List<int> _registered = new();
     private readonly Dictionary<int, HotkeyBinding> _macroHotkeysById = new();
+    private readonly HashSet<HotkeyBinding> _passThroughBindings = new();
     private readonly HashSet<HotkeyBinding> _heldMacroBindings = new();
     private readonly DispatcherTimer _holdPollTimer;
     private HwndSource? _source;
     private IntPtr _hwnd;
+    private LowLevelInputHook? _passThroughHook;
     private HotkeyBinding _pauseBinding = HotkeyBinding.DefaultPause;
     private bool _pauseActive;
     private bool _pauseRegistered;
-    private List<HotkeyBinding> _desiredMacroHotkeys = new();
+    private List<ScopedHotkeyBinding> _desiredMacroHotkeys = new();
 
     public HotkeyService(ILogService log)
     {
@@ -82,10 +86,21 @@ public sealed class HotkeyService : IDisposable
         return failed;
     }
 
-    /// <summary>(Re-)registers per-macro trigger shortcuts across all armed macros in the library.</summary>
-    public void ApplyMacroHotkeys(IEnumerable<HotkeyBinding> bindings)
+    /// <summary>(Re-)registers per-macro trigger shortcuts (all consuming via RegisterHotKey).</summary>
+    public void ApplyMacroHotkeys(IEnumerable<HotkeyBinding> bindings) =>
+        ApplyMacroHotkeys((bindings ?? Array.Empty<HotkeyBinding>()).Select(b => new ScopedHotkeyBinding(b, PassThroughKey: false)));
+
+    /// <summary>
+    /// (Re-)registers per-macro trigger shortcuts for the active foreground context, updating Win32 hooks and
+    /// passive pass-through observers only when the normalized binding set actually changes.
+    /// </summary>
+    public void ApplyMacroHotkeys(IEnumerable<ScopedHotkeyBinding> entries)
     {
-        _desiredMacroHotkeys = bindings?.Distinct().ToList() ?? new List<HotkeyBinding>();
+        var normalized = NormalizeEntries(entries);
+        if (normalized.SequenceEqual(_desiredMacroHotkeys))
+            return;
+
+        _desiredMacroHotkeys = normalized;
         UnregisterMacroHotkeys();
         RegisterMacroHotkeysInternal();
     }
@@ -121,6 +136,7 @@ public sealed class HotkeyService : IDisposable
     public void Dispose()
     {
         _holdPollTimer.Stop();
+        DisposePassThroughHook();
         UnregisterAll();
         _source?.RemoveHook(WndProc);
         _source = null;
@@ -145,12 +161,24 @@ public sealed class HotkeyService : IDisposable
 
     private void RegisterMacroHotkeysInternal()
     {
-        if (_hwnd == IntPtr.Zero || _desiredMacroHotkeys.Count == 0) return;
+        if (_hwnd == IntPtr.Zero || _desiredMacroHotkeys.Count == 0)
+        {
+            SyncPassThroughHook();
+            return;
+        }
 
         var nextId = MacroHotkeyBaseId;
-        foreach (var binding in _desiredMacroHotkeys)
+        foreach (var entry in _desiredMacroHotkeys)
         {
+            var binding = entry.Binding;
             if (binding.Problem() is not null) continue;
+
+            if (entry.PassThroughKey)
+            {
+                _passThroughBindings.Add(binding);
+                continue;
+            }
+
             var id = nextId++;
             var modifiers = ToNativeModifiers(binding.Modifiers);
             if (RegisterHotKey(_hwnd, id, modifiers, (uint)binding.VirtualKey))
@@ -159,6 +187,8 @@ public sealed class HotkeyService : IDisposable
                 _macroHotkeysById[id] = binding;
             }
         }
+
+        SyncPassThroughHook();
     }
 
     private void UnregisterMacroHotkeys()
@@ -170,7 +200,135 @@ public sealed class HotkeyService : IDisposable
         }
 
         _macroHotkeysById.Clear();
+        _passThroughBindings.Clear();
+        SyncPassThroughHook();
     }
+
+    private static List<ScopedHotkeyBinding> NormalizeEntries(IEnumerable<ScopedHotkeyBinding>? entries)
+    {
+        if (entries is null)
+            return new List<ScopedHotkeyBinding>();
+
+        var merged = new Dictionary<HotkeyBinding, bool>();
+        foreach (var entry in entries)
+        {
+            if (entry.Binding.VirtualKey <= 0 || entry.Binding.Problem() is not null)
+                continue;
+
+            if (merged.TryGetValue(entry.Binding, out var existingPass))
+                merged[entry.Binding] = existingPass && entry.PassThroughKey;
+            else
+                merged[entry.Binding] = entry.PassThroughKey;
+        }
+
+        return merged
+            .Select(kvp => new ScopedHotkeyBinding(kvp.Key, kvp.Value))
+            .OrderBy(e => (int)e.Binding.Modifiers)
+            .ThenBy(e => e.Binding.VirtualKey)
+            .ToList();
+    }
+
+    private void SyncPassThroughHook()
+    {
+        if (_passThroughBindings.Count > 0 && _hwnd != IntPtr.Zero)
+        {
+            if (_passThroughHook is null)
+            {
+                _passThroughHook = new LowLevelInputHook(mouse: false, keyboard: true);
+                _passThroughHook.Received += OnPassThroughHookEvent;
+                try
+                {
+                    _passThroughHook.Install();
+                }
+                catch (Exception ex)
+                {
+                    _log.Warning($"Could not start non-blocking trigger hook: {ex.Message}");
+                    DisposePassThroughHook();
+                }
+            }
+        }
+        else
+        {
+            DisposePassThroughHook();
+        }
+    }
+
+    private void DisposePassThroughHook()
+    {
+        if (_passThroughHook is null) return;
+        _passThroughHook.Received -= OnPassThroughHookEvent;
+        _passThroughHook.Dispose();
+        _passThroughHook = null;
+    }
+
+    private void OnPassThroughHookEvent(HookEvent e)
+    {
+        if (SuppressGlobalHotkeys || e.Injected || e.FromSmartMacro || _passThroughBindings.Count == 0)
+            return;
+
+        if (e.Kind == RawInputKind.KeyDown)
+        {
+            if (IsModifierVirtualKey(e.VirtualKey))
+                return;
+
+            var candidate = new HotkeyBinding(ReadCurrentModifiers(), e.VirtualKey);
+            if (!_passThroughBindings.Contains(candidate))
+                return;
+
+            if (!_heldMacroBindings.Add(candidate))
+                return; // ignore OS auto-repeat while held
+
+            if (!_holdPollTimer.IsEnabled)
+                _holdPollTimer.Start();
+
+            var dispatcher = _source?.Dispatcher ?? Application.Current?.Dispatcher;
+            if (dispatcher is not null)
+                _ = dispatcher.BeginInvoke(() => MacroHotkeyPressed?.Invoke(this, candidate));
+            else
+                MacroHotkeyPressed?.Invoke(this, candidate);
+        }
+        else if (e.Kind == RawInputKind.KeyUp)
+        {
+            foreach (var held in _heldMacroBindings.Where(b => _passThroughBindings.Contains(b)).ToList())
+            {
+                if (held.VirtualKey == e.VirtualKey || ReleasesRequiredModifier(e.VirtualKey, held.Modifiers))
+                {
+                    _heldMacroBindings.Remove(held);
+                    var dispatcher = _source?.Dispatcher ?? Application.Current?.Dispatcher;
+                    if (dispatcher is not null)
+                        _ = dispatcher.BeginInvoke(() => MacroHotkeyReleased?.Invoke(this, held));
+                    else
+                        MacroHotkeyReleased?.Invoke(this, held);
+                }
+            }
+
+            if (_heldMacroBindings.Count == 0)
+                _holdPollTimer.Stop();
+        }
+    }
+
+    private static KeyModifiers ReadCurrentModifiers()
+    {
+        var mods = KeyModifiers.None;
+        if ((GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0) mods |= KeyModifiers.Control;
+        if ((GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0) mods |= KeyModifiers.Shift;
+        if ((GetAsyncKeyState(VK_MENU) & 0x8000) != 0) mods |= KeyModifiers.Alt;
+        if (((GetAsyncKeyState(VK_LWIN) & 0x8000) != 0) || ((GetAsyncKeyState(VK_RWIN) & 0x8000) != 0))
+            mods |= KeyModifiers.Windows;
+        return mods;
+    }
+
+    private static bool IsModifierVirtualKey(int vk) =>
+        vk is VK_SHIFT or VK_CONTROL or VK_MENU or VK_LWIN or VK_RWIN or (>= 0xA0 and <= 0xA5);
+
+    private static bool ReleasesRequiredModifier(int vk, KeyModifiers modifiers) => vk switch
+    {
+        VK_CONTROL or 0xA2 or 0xA3 => modifiers.HasFlag(KeyModifiers.Control),
+        VK_SHIFT or 0xA0 or 0xA1 => modifiers.HasFlag(KeyModifiers.Shift),
+        VK_MENU or 0xA4 or 0xA5 => modifiers.HasFlag(KeyModifiers.Alt),
+        VK_LWIN or VK_RWIN => modifiers.HasFlag(KeyModifiers.Windows),
+        _ => false,
+    };
 
     private static uint ToNativeModifiers(KeyModifiers modifiers)
     {
@@ -187,6 +345,8 @@ public sealed class HotkeyService : IDisposable
         foreach (var id in _registered) UnregisterHotKey(_hwnd, id);
         _registered.Clear();
         _macroHotkeysById.Clear();
+        _passThroughBindings.Clear();
+        DisposePassThroughHook();
         _heldMacroBindings.Clear();
         _holdPollTimer.Stop();
         _pauseRegistered = false;

@@ -1388,6 +1388,33 @@ public sealed class TriggerItemViewModel : ObservableObject
         set => WindowTitle = value;
     }
 
+    public string ProcessNameMatch
+    {
+        get => _model.ProcessNameMatch ?? string.Empty;
+        set
+        {
+            var trimmed = string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+            if (_model.ProcessNameMatch == trimmed) return;
+            _model.ProcessNameMatch = trimmed;
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(SummaryText));
+            _changed();
+        }
+    }
+
+    public bool PassThroughKey
+    {
+        get => _model.PassThroughKey;
+        set
+        {
+            if (_model.PassThroughKey == value) return;
+            _model.PassThroughKey = value;
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(SummaryText));
+            _changed();
+        }
+    }
+
     public bool OnlyWhenWindowActive
     {
         get => _model.OnlyWhenWindowActive;

@@ -16,6 +16,9 @@ public interface IScreenInfoProvider
 
     /// <summary>The title of the currently focused foreground window, or null if none / SmartMacro itself.</summary>
     string? GetForegroundWindowTitle() => null;
+
+    /// <summary>Title and executable process name (without ".exe") of the currently focused window.</summary>
+    (string? Title, string ProcessName) GetForegroundWindowInfo() => (GetForegroundWindowTitle(), string.Empty);
 }
 
 /// <summary>
@@ -82,24 +85,33 @@ public sealed class ScreenInfoProvider : IScreenInfoProvider, IScreenLayout, IWi
         return windows;
     }
 
-    public string? GetForegroundWindowTitle()
+    public string? GetForegroundWindowTitle() => GetForegroundWindowInfo().Title;
+
+    public (string? Title, string ProcessName) GetForegroundWindowInfo()
     {
         try
         {
             var fg = NativeMethods.GetForegroundWindow();
-            if (fg == IntPtr.Zero) return null;
+            if (fg == IntPtr.Zero) return (null, string.Empty);
             NativeMethods.GetWindowThreadProcessId(fg, out var pid);
-            if (pid == _ownProcessId) return null;
+            if (pid == _ownProcessId) return (null, string.Empty);
+
             var length = WindowApi.GetWindowTextLength(fg);
-            if (length <= 0) return null;
-            var sb = new StringBuilder(length + 1);
-            WindowApi.GetWindowText(fg, sb, sb.Capacity);
-            var title = sb.ToString().Trim();
-            return title.Length > 0 ? title : null;
+            string? title = null;
+            if (length > 0)
+            {
+                var sb = new StringBuilder(length + 1);
+                WindowApi.GetWindowText(fg, sb, sb.Capacity);
+                var trimmed = sb.ToString().Trim();
+                if (trimmed.Length > 0) title = trimmed;
+            }
+
+            var processName = ProcessNameOf(pid);
+            return (title, processName);
         }
         catch
         {
-            return null;
+            return (null, string.Empty);
         }
     }
 

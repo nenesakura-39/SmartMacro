@@ -51,13 +51,29 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     private readonly IDialogService _dialogs;
     private readonly IMacroRepository _repository;
     private readonly IScreenInfoProvider _screen;
+    private readonly Dispatcher _dispatcher;
+    private readonly IWindowEventMonitor? _windowMonitor;
     private readonly DispatcherTimer _triggerTimer;
+    private readonly object _snapshotGate = new();
+    private bool _snapshotInFlight;
+    private bool _snapshotPending;
+    private bool _snapshotPendingEvaluate;
 
     private AppPage _currentPage = AppPage.Library;
     private string _statusMessage = "Starting…";
     private StatusKind _statusKind = StatusKind.Info;
     private AppSettings _settings = new();
     private bool _isInitialized;
+    private string? _lastForegroundTitle;
+    private string _lastForegroundProcess = string.Empty;
+    private IReadOnlyList<Core.Vision.WindowInfo>? _lastOpenWindows;
+    private string? _lastOpenWindowsSignature;
+    private bool _hasWindowSnapshot;
+    private volatile bool _needsOpenWindowsSnapshot;
+    private volatile bool _hasScheduleTriggers;
+    private List<ScopedHotkeyBinding> _lastNotifiedHotkeys = new();
+    private string? _lastNotifiedProfile;
+    private bool _lastNotifiedArmed = true;
 
     /// <summary>v1.4 Reflex: deterministic trigger engine (per-macro hotkeys, schedules, window triggers, Run Governor).</summary>
     public TriggerEvaluator TriggerEngine { get; } = new();
@@ -73,18 +89,24 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         IScreenInfoProvider screen,
         AppPaths paths,
         Dispatcher dispatcher,
-        AutomationServices automation)
+        AutomationServices automation,
+        IWindowEventMonitor? windowMonitor = null)
     {
         _log = log;
         _dialogs = dialogs;
         _repository = repository;
         _screen = screen;
+        _dispatcher = dispatcher;
+        _windowMonitor = windowMonitor;
+
+        if (_windowMonitor is not null)
+            _windowMonitor.WindowStateChanged += (_, _) => _ = ProcessMonitorWindowChangeAsync();
 
         _triggerTimer = new DispatcherTimer(DispatcherPriority.Background, dispatcher)
         {
             Interval = TimeSpan.FromSeconds(1),
         };
-        _triggerTimer.Tick += (_, _) => _ = EvaluateBackgroundTriggersAsync();
+        _triggerTimer.Tick += (_, _) => _ = EvaluateScheduleOrFallbackTickAsync();
         ToggleTriggersArmedCommand = new RelayCommand(() => AreTriggersArmed = !AreTriggersArmed);
 
         Logs = new LogViewModel(log, dispatcher);
@@ -95,7 +117,9 @@ public sealed class MainViewModel : ObservableObject, IDisposable
             onSaved: saved =>
             {
                 Library!.Upsert(saved);
-                MacroHotkeysChanged?.Invoke(this, EventArgs.Empty);
+                RefreshTriggerCapabilities();
+                NotifyHotkeysChanged(force: true);
+                _windowMonitor?.RequestRefresh();
             },
             setStatus: SetStatus,
             goToLibrary: () => CurrentPage = AppPage.Library,
@@ -109,7 +133,8 @@ public sealed class MainViewModel : ObservableObject, IDisposable
             afterDelete: id =>
             {
                 Editor.OnMacroDeleted(id);
-                MacroHotkeysChanged?.Invoke(this, EventArgs.Empty);
+                RefreshTriggerCapabilities();
+                NotifyHotkeysChanged(force: true);
             },
             setStatus: SetStatus,
             playMacro: macro => Automation!.PlayMacroAsync(macro),
@@ -185,12 +210,15 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         Library.MacroRenamed = renamed => Editor.SyncExternalRename(renamed.Id, renamed.Name);
         Library.PropertyChanged += (_, e) =>
         {
-            if (e.PropertyName is nameof(LibraryViewModel.SelectedItem) or nameof(LibraryViewModel.CountText) or "")
+            if (e.PropertyName is nameof(LibraryViewModel.SelectedItem) or nameof(LibraryViewModel.CountText) or nameof(LibraryViewModel.SelectedProfileFilter) or "")
             {
                 Automation.RefreshTarget();
                 if (Editor.HasMacro) Editor.RefreshSubMacroLinks();
-                if (e.PropertyName is nameof(LibraryViewModel.CountText) or "")
-                    MacroHotkeysChanged?.Invoke(this, EventArgs.Empty);
+                if (e.PropertyName is nameof(LibraryViewModel.CountText) or nameof(LibraryViewModel.SelectedProfileFilter) or "")
+                {
+                    RefreshTriggerCapabilities();
+                    NotifyHotkeysChanged(force: true);
+                }
             }
         };
 
@@ -408,9 +436,11 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         if (StatusKind is StatusKind.Info)
             SetStatus(Library.Items.Count == 0 ? "Ready. Create your first macro to get started." : $"Ready. {Library.CountText} loaded.", StatusKind.Info);
         Automation.RefreshTarget();
-        MacroHotkeysChanged?.Invoke(this, EventArgs.Empty);
+        RefreshTriggerCapabilities();
+        _windowMonitor?.Start();
+        await CaptureAndApplyWindowSnapshotAsync(evaluateTriggers: true);
+        NotifyHotkeysChanged(force: true);
         _triggerTimer.Start();
-        await EvaluateBackgroundTriggersAsync();
     }
 
     // ---------------- v1.4 Reflex: Per-macro triggers & Run Governor ----------------
@@ -427,7 +457,9 @@ public sealed class MainViewModel : ObservableObject, IDisposable
             TriggerEngine.IsArmed = value;
             OnPropertyChanged();
             OnPropertyChanged(nameof(TriggersArmedStatusText));
-            MacroHotkeysChanged?.Invoke(this, EventArgs.Empty);
+            RefreshTriggerCapabilities();
+            NotifyHotkeysChanged(force: true);
+            if (value) _windowMonitor?.RequestRefresh();
             SetStatus(value ? "⚡ Macro triggers armed." : "⚡ Macro triggers disarmed.", StatusKind.Info);
         }
     }
@@ -451,7 +483,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
                 ? "⚡ Triggers Armed"
                 : $"⚡ Armed ({_activeProfileName})";
 
-    private IReadOnlyList<Macro> GetArmedLibraryMacros(string? fg)
+    private IReadOnlyList<Macro> GetArmedLibraryMacros(string? fgTitle, string? fgProc = null)
     {
         var all = Library.Items.Select(i => i.Macro).ToList();
         var manualFilter = Library.SelectedProfileFilter;
@@ -460,43 +492,86 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         var activeProfile = ProfileRouter.ResolveActiveProfile(
             _settings.ProfileRules,
             all,
-            fg,
+            fgTitle,
             manualFilter,
-            _settings.AutoSwitchProfileByWindow);
+            _settings.AutoSwitchProfileByWindow,
+            fgProc);
         ActiveProfileName = activeProfile;
-        return ProfileRouter.FilterArmedMacros(all, activeProfile, fg, _settings.AutoSwitchProfileByWindow, isManual);
+        return ProfileRouter.FilterArmedMacros(all, activeProfile, fgTitle, _settings.AutoSwitchProfileByWindow, isManual, fgProc);
     }
 
-    /// <summary>Returns all distinct valid hotkeys used by enabled macro triggers across the library (empty when disarmed).</summary>
+    /// <summary>Returns all distinct valid hotkeys active for the current profile &amp; foreground context (empty when disarmed).</summary>
+    public IReadOnlyList<ScopedHotkeyBinding> GetActiveTriggerHotkeyEntries()
+    {
+        if (!TriggerEngine.IsArmed) return Array.Empty<ScopedHotkeyBinding>();
+        var armed = GetArmedLibraryMacros(_lastForegroundTitle, _lastForegroundProcess);
+        return ProfileRouter.ResolveActiveHotkeyEntries(armed, _lastForegroundTitle, _lastForegroundProcess);
+    }
+
+    /// <summary>Returns all distinct valid hotkeys used by active macro triggers in the current context (empty when disarmed).</summary>
     public IReadOnlyList<HotkeyBinding> GetActiveTriggerHotkeys()
     {
-        if (!TriggerEngine.IsArmed) return Array.Empty<HotkeyBinding>();
-        var list = new List<HotkeyBinding>();
-        foreach (var item in Library.Items)
+        var entries = GetActiveTriggerHotkeyEntries();
+        if (entries.Count == 0) return Array.Empty<HotkeyBinding>();
+        var list = new List<HotkeyBinding>(entries.Count);
+        foreach (var entry in entries)
+            list.Add(entry.Binding);
+        return list;
+    }
+
+    private void RefreshTriggerCapabilities()
+    {
+        var macros = Library.Items.Select(i => i.Macro).ToList();
+        _needsOpenWindowsSnapshot = TriggerEvaluator.RequiresOpenWindowsSnapshot(macros);
+        _hasScheduleTriggers = TriggerEvaluator.HasScheduleTriggers(macros);
+    }
+
+    private void NotifyHotkeysChanged(bool force = false)
+    {
+        var armed = GetArmedLibraryMacros(_lastForegroundTitle, _lastForegroundProcess);
+        var isArmed = TriggerEngine.IsArmed;
+        var entries = isArmed
+            ? ProfileRouter.ResolveActiveHotkeyEntries(armed, _lastForegroundTitle, _lastForegroundProcess)
+            : Array.Empty<ScopedHotkeyBinding>();
+
+        var profileChanged = !string.Equals(_lastNotifiedProfile, ActiveProfileName, StringComparison.OrdinalIgnoreCase);
+        var armedChanged = _lastNotifiedArmed != isArmed;
+        var hotkeysChanged = _lastNotifiedHotkeys.Count != entries.Count;
+        if (!hotkeysChanged)
         {
-            if (item.Macro.Triggers is not { Count: > 0 } triggers) continue;
-            foreach (var trigger in triggers)
+            for (var i = 0; i < entries.Count; i++)
             {
-                if (!trigger.Enabled || trigger.Kind != TriggerKind.Hotkey || trigger.Hotkey is not { VirtualKey: > 0 } hk)
-                    continue;
-                if (!list.Contains(hk))
-                    list.Add(hk);
+                if (_lastNotifiedHotkeys[i] != entries[i])
+                {
+                    hotkeysChanged = true;
+                    break;
+                }
             }
         }
-        return list;
+
+        if (!force && !hotkeysChanged && !profileChanged && !armedChanged)
+            return;
+
+        _lastNotifiedHotkeys = new List<ScopedHotkeyBinding>(entries);
+        _lastNotifiedProfile = ActiveProfileName;
+        _lastNotifiedArmed = isArmed;
+        MacroHotkeysChanged?.Invoke(this, EventArgs.Empty);
     }
 
     public void HandleMacroHotkeyDown(HotkeyBinding binding)
     {
         if (Automation.IsRecording) return;
-        var fg = _screen.GetForegroundWindowTitle();
-        var macros = GetArmedLibraryMacros(fg);
+        var (fgTitle, fgProc) = _screen.GetForegroundWindowInfo();
+        _lastForegroundTitle = fgTitle;
+        _lastForegroundProcess = fgProc ?? string.Empty;
+        var macros = GetArmedLibraryMacros(fgTitle, fgProc);
         var decision = TriggerEngine.EvaluateHotkeyDown(
             macros,
             binding,
-            fg,
+            fgTitle,
             Automation.RunningMacroId,
-            DateTimeOffset.UtcNow);
+            DateTimeOffset.UtcNow,
+            fgProc);
         _ = ExecuteTriggerDecisionAsync(decision);
     }
 
@@ -509,24 +584,232 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         _ = ExecuteTriggerDecisionAsync(decision);
     }
 
+    private async Task ProcessMonitorWindowChangeAsync()
+    {
+        if (Automation.IsRecording) return;
+        await CaptureAndApplyWindowSnapshotAsync(evaluateTriggers: TriggerEngine.IsArmed);
+    }
+
+    private async Task EvaluateScheduleOrFallbackTickAsync()
+    {
+        if (!TriggerEngine.IsArmed || Automation.IsRecording || Library.Items.Count == 0) return;
+
+        if (_windowMonitor is null || !_windowMonitor.IsRunning || !_hasWindowSnapshot)
+        {
+            await CaptureAndApplyWindowSnapshotAsync(evaluateTriggers: true);
+            return;
+        }
+
+        if (_hasScheduleTriggers)
+            await EvaluateBackgroundTriggersAsync();
+    }
+
+    private async Task CaptureAndApplyWindowSnapshotAsync(bool evaluateTriggers)
+    {
+        bool needsOpenWindows;
+        lock (_snapshotGate)
+        {
+            if (_snapshotInFlight)
+            {
+                _snapshotPending = true;
+                _snapshotPendingEvaluate |= evaluateTriggers;
+                return;
+            }
+            _snapshotInFlight = true;
+            needsOpenWindows = _needsOpenWindowsSnapshot;
+        }
+
+        try
+        {
+            while (true)
+            {
+                var snapshot = await Task.Run(() =>
+                {
+                    var (fgTitle, fgProc) = _screen.GetForegroundWindowInfo();
+                    IReadOnlyList<Core.Vision.WindowInfo>? openWindows = null;
+                    string? signature = null;
+
+                    if (needsOpenWindows && _screen is Core.Vision.IScreenLayout layout)
+                    {
+                        var windows = layout.GetWindows();
+                        openWindows = windows;
+                        signature = BuildOpenWindowsSignature(windows);
+                    }
+
+                    return (fgTitle, fgProc, openWindows, signature);
+                }).ConfigureAwait(false);
+
+                if (_dispatcher.HasShutdownStarted)
+                {
+                    lock (_snapshotGate)
+                    {
+                        _snapshotPending = false;
+                        _snapshotPendingEvaluate = false;
+                        _snapshotInFlight = false;
+                    }
+                    return;
+                }
+
+                if (_dispatcher.CheckAccess())
+                {
+                    ApplyWindowSnapshotOnUiThread(
+                        snapshot.fgTitle,
+                        snapshot.fgProc,
+                        snapshot.openWindows,
+                        snapshot.signature,
+                        evaluateTriggers);
+                }
+                else
+                {
+                    await _dispatcher.InvokeAsync(() =>
+                        ApplyWindowSnapshotOnUiThread(
+                            snapshot.fgTitle,
+                            snapshot.fgProc,
+                            snapshot.openWindows,
+                            snapshot.signature,
+                            evaluateTriggers));
+                }
+
+                lock (_snapshotGate)
+                {
+                    if (_snapshotPending)
+                    {
+                        _snapshotPending = false;
+                        evaluateTriggers = _snapshotPendingEvaluate;
+                        _snapshotPendingEvaluate = false;
+                        needsOpenWindows = _needsOpenWindowsSnapshot;
+                        continue;
+                    }
+                    _snapshotInFlight = false;
+                    break;
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            lock (_snapshotGate)
+            {
+                _snapshotPending = false;
+                _snapshotPendingEvaluate = false;
+                _snapshotInFlight = false;
+            }
+            _log.Warning($"Window snapshot failed: {ex.Message}", ex);
+        }
+    }
+
+    private void ApplyWindowSnapshotOnUiThread(
+        string? fgTitle,
+        string? fgProc,
+        IReadOnlyList<Core.Vision.WindowInfo>? openWindows,
+        string? openWindowsSignature,
+        bool evaluateTriggers)
+    {
+        var normalizedProc = fgProc ?? string.Empty;
+        var fgChanged = !_hasWindowSnapshot
+            || !string.Equals(_lastForegroundTitle, fgTitle, StringComparison.Ordinal)
+            || !string.Equals(_lastForegroundProcess, normalizedProc, StringComparison.OrdinalIgnoreCase);
+
+        var windowsChanged = openWindows is not null
+            && !string.Equals(_lastOpenWindowsSignature, openWindowsSignature, StringComparison.Ordinal);
+
+        _lastForegroundTitle = fgTitle;
+        _lastForegroundProcess = normalizedProc;
+        if (openWindows is not null)
+        {
+            _lastOpenWindows = openWindows;
+            _lastOpenWindowsSignature = openWindowsSignature;
+        }
+        else if (!_needsOpenWindowsSnapshot)
+        {
+            _lastOpenWindows = null;
+            _lastOpenWindowsSignature = null;
+        }
+        _hasWindowSnapshot = true;
+
+        if (!fgChanged && !windowsChanged)
+            return;
+
+        if (fgChanged)
+            NotifyHotkeysChanged();
+
+        if (evaluateTriggers && TriggerEngine.IsArmed && !Automation.IsRecording && Library.Items.Count > 0)
+            _ = EvaluateBackgroundTriggersWithSnapshotAsync(_lastForegroundTitle, _lastForegroundProcess, _lastOpenWindows);
+    }
+
+    private static string BuildOpenWindowsSignature(IReadOnlyList<Core.Vision.WindowInfo> windows)
+    {
+        if (windows.Count == 0) return string.Empty;
+        var sb = new System.Text.StringBuilder(windows.Count * 24);
+        for (var i = 0; i < windows.Count; i++)
+        {
+            var w = windows[i];
+            if (i > 0) sb.Append('\n');
+            sb.Append(w.Handle);
+            sb.Append('|');
+            sb.Append(w.Title);
+            sb.Append('|');
+            sb.Append(w.ProcessName);
+        }
+        return sb.ToString();
+    }
+
     public async Task EvaluateBackgroundTriggersAsync()
     {
         if (!TriggerEngine.IsArmed || Automation.IsRecording) return;
         if (Library.Items.Count == 0) return;
 
-        var fg = _screen.GetForegroundWindowTitle();
-        var macros = GetArmedLibraryMacros(fg);
-        if (macros.Count == 0) return;
+        string? fgTitle;
+        string fgProc;
+        IReadOnlyList<Core.Vision.WindowInfo>? openWindows;
 
-        IReadOnlyList<string> openWindows = _screen is Core.Vision.IScreenLayout layout
-            ? layout.GetWindows().Select(w => w.Title).Where(t => !string.IsNullOrWhiteSpace(t)).ToList()
-            : Array.Empty<string>();
+        if (_windowMonitor is { IsRunning: true } && _hasWindowSnapshot)
+        {
+            fgTitle = _lastForegroundTitle;
+            fgProc = _lastForegroundProcess;
+            openWindows = _lastOpenWindows;
+        }
+        else
+        {
+            var snap = await Task.Run(() =>
+            {
+                var (title, proc) = _screen.GetForegroundWindowInfo();
+                IReadOnlyList<Core.Vision.WindowInfo>? wins = _needsOpenWindowsSnapshot && _screen is Core.Vision.IScreenLayout layout
+                    ? layout.GetWindows()
+                    : null;
+                return (title, proc, wins);
+            });
+            fgTitle = snap.title;
+            fgProc = snap.proc ?? string.Empty;
+            openWindows = snap.wins;
+            _lastForegroundTitle = fgTitle;
+            _lastForegroundProcess = fgProc;
+            if (openWindows is not null)
+            {
+                _lastOpenWindows = openWindows;
+                _lastOpenWindowsSignature = BuildOpenWindowsSignature(openWindows);
+            }
+            _hasWindowSnapshot = true;
+            NotifyHotkeysChanged();
+        }
 
+        await EvaluateBackgroundTriggersWithSnapshotAsync(fgTitle, fgProc, openWindows);
+    }
+
+    private async Task EvaluateBackgroundTriggersWithSnapshotAsync(
+        string? fgTitle,
+        string fgProc,
+        IReadOnlyList<Core.Vision.WindowInfo>? openWindows)
+    {
+        if (!TriggerEngine.IsArmed || Automation.IsRecording) return;
+        if (Library.Items.Count == 0) return;
+
+        var macros = GetArmedLibraryMacros(fgTitle, fgProc);
         var decisions = TriggerEngine.EvaluateTick(
             macros,
             DateTimeOffset.Now,
             openWindows,
-            fg,
+            fgTitle,
+            fgProc,
             Automation.RunningMacroId);
 
         foreach (var decision in decisions)
@@ -589,6 +872,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     public void Dispose()
     {
         _triggerTimer.Stop();
+        _windowMonitor?.Dispose();
         _log.Info("SmartMacro closed.");
         Automation.Dispose();
         Logs.Dispose();
@@ -740,6 +1024,8 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(HardwareBadgeText));
         Automation?.RefreshShortcuts();
         SettingsApplied?.Invoke(this, settings);
+        NotifyHotkeysChanged(force: true);
+        _windowMonitor?.RequestRefresh();
     }
 
     /// <summary>Raised when settings are loaded or saved (the app re-registers global shortcuts).</summary>
@@ -835,7 +1121,9 @@ public sealed class MainViewModel : ObservableObject, IDisposable
             }
 
             Editor.RefreshSubMacroLinks();
-            MacroHotkeysChanged?.Invoke(this, EventArgs.Empty);
+            RefreshTriggerCapabilities();
+            NotifyHotkeysChanged(force: true);
+            _windowMonitor?.RequestRefresh();
             var msg = $"📥 Restored {result.RestoredMacros.Count} macro(s) from {Path.GetFileName(file)}.";
             if (result.SkippedFiles.Count > 0)
                 msg += $" ({result.SkippedFiles.Count} entry/entries skipped.)";

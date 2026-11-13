@@ -180,7 +180,8 @@ public partial class App : Application
             await Task.Delay(65);
         }
 
-        var mainViewModel = new MainViewModel(repository, settingsStore, _log, dialogs, screenInfo, paths, Dispatcher, automation);
+        var windowMonitor = new WindowEventMonitor();
+        var mainViewModel = new MainViewModel(repository, settingsStore, _log, dialogs, screenInfo, paths, Dispatcher, automation, windowMonitor);
         viewModel = mainViewModel;
         _mainViewModel = mainViewModel;
 
@@ -246,9 +247,11 @@ public partial class App : Application
 
         mainViewModel.MacroHotkeysChanged += (_, _) =>
         {
-            _hotkeys.ApplyMacroHotkeys(mainViewModel.GetActiveTriggerHotkeys());
+            _hotkeys.ApplyMacroHotkeys(mainViewModel.GetActiveTriggerHotkeyEntries());
             _tray.UpdateTooltip($"SmartMacro Studio — {mainViewModel.TriggersArmedStatusText}");
         };
+        _hotkeys.ApplyMacroHotkeys(mainViewModel.GetActiveTriggerHotkeyEntries());
+        _tray.UpdateTooltip($"SmartMacro Studio — {mainViewModel.TriggersArmedStatusText}");
 
         // Pause / resume (F8 by default) is only a global shortcut while a macro plays, so F8 works normally otherwise.
         mainViewModel.Automation.PropertyChanged += (_, e) =>

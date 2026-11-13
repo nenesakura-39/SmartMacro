@@ -1,4 +1,5 @@
 using SmartMacro.Core.Models;
+using SmartMacro.Core.Vision;
 
 namespace SmartMacro.Core.Playback;
 
@@ -42,7 +43,8 @@ public sealed class TriggerEvaluator
 
     private bool _hasWindowBaseline;
     private string? _previousActiveWindow;
-    private HashSet<string> _previousOpenWindows = new(StringComparer.OrdinalIgnoreCase);
+    private string? _previousActiveProcess;
+    private List<(string Title, string ProcessName)> _previousOpenWindows = new();
 
     public bool IsArmed { get; set; } = true;
 
@@ -61,6 +63,7 @@ public sealed class TriggerEvaluator
         _activeHoldMacroId = null;
         _hasWindowBaseline = false;
         _previousActiveWindow = null;
+        _previousActiveProcess = null;
         _previousOpenWindows.Clear();
     }
 
@@ -70,7 +73,8 @@ public sealed class TriggerEvaluator
         HotkeyBinding binding,
         string? activeWindowTitle,
         Guid? currentlyPlayingMacroId,
-        DateTimeOffset now)
+        DateTimeOffset now,
+        string? activeProcessName = null)
     {
         ArgumentNullException.ThrowIfNull(library);
         if (!IsArmed) return new TriggerDecision(TriggerDecisionKind.None);
@@ -89,7 +93,7 @@ public sealed class TriggerEvaluator
                 if (trigger is not { Enabled: true, Kind: TriggerKind.Hotkey } || trigger.Hotkey != binding)
                     continue;
 
-                if (!MatchesWindowFilter(trigger, activeWindowTitle))
+                if (!MatchesWindowFilter(trigger, activeWindowTitle, activeProcessName))
                     continue;
 
                 // PressOnce / Toggle while this same macro is already playing stops it (even during cooldown).
@@ -162,15 +166,41 @@ public sealed class TriggerEvaluator
         string? activeWindowTitle,
         Guid? currentlyPlayingMacroId)
     {
+        IReadOnlyList<WindowInfo>? infos = null;
+        if (openWindowTitles is { Count: > 0 })
+        {
+            var list = new List<WindowInfo>(openWindowTitles.Count);
+            foreach (var title in openWindowTitles)
+            {
+                if (!string.IsNullOrWhiteSpace(title))
+                    list.Add(new WindowInfo(0, title, default));
+            }
+            infos = list;
+        }
+
+        return EvaluateTick(library, now, infos, activeWindowTitle, activeProcessName: null, currentlyPlayingMacroId);
+    }
+
+    /// <summary>
+    /// Full window-aware trigger evaluation supporting both window titles and process names for window focus/open
+    /// events as well as schedule <see cref="MacroTrigger.OnlyWhenWindowActive"/> filters.
+    /// </summary>
+    public IReadOnlyList<TriggerDecision> EvaluateTick(
+        IReadOnlyList<Macro> library,
+        DateTimeOffset now,
+        IReadOnlyList<WindowInfo>? openWindows,
+        string? activeWindowTitle,
+        string? activeProcessName,
+        Guid? currentlyPlayingMacroId)
+    {
         ArgumentNullException.ThrowIfNull(library);
         var results = new List<TriggerDecision>();
-        var currentOpen = new HashSet<string>(
-            (openWindowTitles ?? Array.Empty<string>()).Where(t => !string.IsNullOrWhiteSpace(t)),
-            StringComparer.OrdinalIgnoreCase);
+        var currentOpen = BuildOpenWindowSnapshot(openWindows);
 
         if (!IsArmed)
         {
             _previousActiveWindow = activeWindowTitle;
+            _previousActiveProcess = activeProcessName;
             _previousOpenWindows = currentOpen;
             _hasWindowBaseline = true;
             return results;
@@ -189,7 +219,7 @@ public sealed class TriggerEvaluator
                 {
                     case TriggerKind.Schedule:
                     {
-                        if (!MatchesWindowFilter(trigger, activeWindowTitle))
+                        if (!MatchesWindowFilter(trigger, activeWindowTitle, activeProcessName))
                             break;
 
                         if (ShouldFireSchedule(trigger, now, out var reason))
@@ -213,7 +243,7 @@ public sealed class TriggerEvaluator
 
                     case TriggerKind.WindowEvent:
                     {
-                        if (ShouldFireWindowEvent(trigger, currentOpen, activeWindowTitle, out var reason))
+                        if (ShouldFireWindowEvent(trigger, currentOpen, activeWindowTitle, activeProcessName, out var reason))
                         {
                             if (IsOnCooldown(trigger, now))
                                 break;
@@ -239,9 +269,57 @@ public sealed class TriggerEvaluator
         }
 
         _previousActiveWindow = activeWindowTitle;
+        _previousActiveProcess = activeProcessName;
         _previousOpenWindows = currentOpen;
         _hasWindowBaseline = true;
         return results;
+    }
+
+    public static bool RequiresOpenWindowsSnapshot(IReadOnlyList<Macro> library)
+    {
+        if (library is null || library.Count == 0) return false;
+        foreach (var macro in library)
+        {
+            if (macro?.Triggers is not { Count: > 0 } triggers) continue;
+            foreach (var trigger in triggers)
+            {
+                if (trigger is { Enabled: true, Kind: TriggerKind.WindowEvent, WindowEvent: WindowTriggerEvent.WindowOpened })
+                    return true;
+            }
+        }
+
+        return false;
+    }
+
+    public static bool HasScheduleTriggers(IReadOnlyList<Macro> library)
+    {
+        if (library is null || library.Count == 0) return false;
+        foreach (var macro in library)
+        {
+            if (macro?.Triggers is not { Count: > 0 } triggers) continue;
+            foreach (var trigger in triggers)
+            {
+                if (trigger is { Enabled: true, Kind: TriggerKind.Schedule })
+                    return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static List<(string Title, string ProcessName)> BuildOpenWindowSnapshot(IReadOnlyList<WindowInfo>? openWindows)
+    {
+        if (openWindows is null || openWindows.Count == 0)
+            return new List<(string Title, string ProcessName)>();
+
+        var list = new List<(string Title, string ProcessName)>(openWindows.Count);
+        foreach (var w in openWindows)
+        {
+            if (!string.IsNullOrWhiteSpace(w.Title) || !string.IsNullOrWhiteSpace(w.ProcessName))
+                list.Add((w.Title ?? string.Empty, w.ProcessName ?? string.Empty));
+        }
+
+        return list;
     }
 
     /// <summary>Pops the next queued trigger decision when playback becomes idle.</summary>
@@ -323,26 +401,30 @@ public sealed class TriggerEvaluator
 
     private bool ShouldFireWindowEvent(
         MacroTrigger trigger,
-        HashSet<string> currentOpen,
+        IReadOnlyList<(string Title, string ProcessName)> currentOpen,
         string? activeWindowTitle,
+        string? activeProcessName,
         out string reason)
     {
         reason = string.Empty;
-        var target = trigger.WindowTitle?.Trim();
-        if (string.IsNullOrEmpty(target)) return false;
+        if (!ProfileRouter.HasWindowOrProcessFilter(trigger.WindowTitle, trigger.ProcessNameMatch))
+            return false;
 
         // Establish baseline on first tick so already-open windows don't all fire at startup unless focused later.
         if (!_hasWindowBaseline) return false;
 
+        var targetLabel = trigger.DescribeWindowTarget();
         switch (trigger.WindowEvent)
         {
             case WindowTriggerEvent.WindowFocused:
             {
-                var wasMatching = ContainsWindowTitle(_previousActiveWindow, target);
-                var isMatching = ContainsWindowTitle(activeWindowTitle, target);
+                var wasMatching = ProfileRouter.MatchesWindowAndProcess(
+                    _previousActiveWindow, _previousActiveProcess, trigger.WindowTitle, trigger.ProcessNameMatch);
+                var isMatching = ProfileRouter.MatchesWindowAndProcess(
+                    activeWindowTitle, activeProcessName, trigger.WindowTitle, trigger.ProcessNameMatch);
                 if (!wasMatching && isMatching)
                 {
-                    reason = $"\"{target}\" focused";
+                    reason = $"\"{targetLabel}\" focused";
                     return true;
                 }
                 return false;
@@ -350,11 +432,13 @@ public sealed class TriggerEvaluator
 
             case WindowTriggerEvent.WindowOpened:
             {
-                var wasOpen = _previousOpenWindows.Any(w => ContainsWindowTitle(w, target));
-                var isOpen = currentOpen.Any(w => ContainsWindowTitle(w, target));
+                var wasOpen = _previousOpenWindows.Any(w =>
+                    ProfileRouter.MatchesWindowAndProcess(w.Title, w.ProcessName, trigger.WindowTitle, trigger.ProcessNameMatch));
+                var isOpen = currentOpen.Any(w =>
+                    ProfileRouter.MatchesWindowAndProcess(w.Title, w.ProcessName, trigger.WindowTitle, trigger.ProcessNameMatch));
                 if (!wasOpen && isOpen)
                 {
-                    reason = $"\"{target}\" opened";
+                    reason = $"\"{targetLabel}\" opened";
                     return true;
                 }
                 return false;
@@ -408,16 +492,8 @@ public sealed class TriggerEvaluator
         return (now - last).TotalMilliseconds < trigger.CooldownMs;
     }
 
-    private static bool MatchesWindowFilter(MacroTrigger trigger, string? activeWindowTitle)
-    {
-        if (!trigger.OnlyWhenWindowActive || string.IsNullOrWhiteSpace(trigger.WindowTitle))
-            return true;
-        return ContainsWindowTitle(activeWindowTitle, trigger.WindowTitle.Trim());
-    }
-
-    private static bool ContainsWindowTitle(string? candidate, string targetSubstring) =>
-        !string.IsNullOrWhiteSpace(candidate)
-        && candidate.Contains(targetSubstring, StringComparison.OrdinalIgnoreCase);
+    public static bool MatchesWindowFilter(MacroTrigger trigger, string? activeWindowTitle, string? activeProcessName = null) =>
+        ProfileRouter.MatchesTriggerFilter(trigger, activeWindowTitle, activeProcessName);
 
     private static Macro PrepareMacroForTrigger(Macro macro, MacroTrigger trigger)
     {

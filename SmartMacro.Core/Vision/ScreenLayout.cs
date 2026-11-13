@@ -58,6 +58,9 @@ public interface IScreenLayout
 
     /// <summary>Title of the current foreground window, or null when unavailable.</summary>
     string? GetForegroundWindowTitle() => null;
+
+    /// <summary>Title and executable process name (without ".exe") of the foreground window, if available.</summary>
+    (string? Title, string ProcessName) GetForegroundWindowInfo() => (GetForegroundWindowTitle(), string.Empty);
 }
 
 /// <summary>

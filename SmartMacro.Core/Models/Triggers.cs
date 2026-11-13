@@ -95,6 +95,13 @@ public sealed class MacroTrigger
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public HotkeyTriggerMode HotkeyMode { get; set; } = HotkeyTriggerMode.PressOnce;
 
+    /// <summary>
+    /// When true on a Hotkey trigger, observe key presses passively without consuming them via Win32 RegisterHotKey
+    /// so the foreground game or app still receives the keystroke.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public bool PassThroughKey { get; set; }
+
     // ---- Schedule trigger settings ----
 
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
@@ -121,8 +128,16 @@ public sealed class MacroTrigger
     public string? WindowTitle { get; set; }
 
     /// <summary>
+    /// Optional executable/process name substring (without ".exe", e.g. "Code", "chrome", "RobloxPlayerBeta") matched
+    /// alongside <see cref="WindowTitle"/> when <see cref="Kind"/> is <see cref="TriggerKind.WindowEvent"/> or when
+    /// <see cref="OnlyWhenWindowActive"/> is enabled.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ProcessNameMatch { get; set; }
+
+    /// <summary>
     /// When true on a Hotkey or Schedule trigger, the trigger only fires while a window matching <see cref="WindowTitle"/>
-    /// is the active foreground window (context-aware per-app/per-game trigger).
+    /// and/or <see cref="ProcessNameMatch"/> is the active foreground window (context-aware per-app/per-game trigger).
     /// </summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public bool OnlyWhenWindowActive { get; set; }
@@ -149,18 +164,19 @@ public sealed class MacroTrigger
         return hour is >= 0 and <= 23 && minute is >= 0 and <= 59;
     }
 
+    public string DescribeWindowTarget()
+    {
+        var title = WindowTitle?.Trim();
+        var proc = ProcessNameMatch?.Trim();
+        if (!string.IsNullOrEmpty(title) && !string.IsNullOrEmpty(proc))
+            return $"{title} [{proc}]";
+        return !string.IsNullOrEmpty(title) ? title : proc ?? string.Empty;
+    }
+
     /// <summary>Short human-readable badge text for library cards and the editor header.</summary>
     public string DescribeShort() => Kind switch
     {
-        TriggerKind.Hotkey => Hotkey is null
-            ? "Hotkey"
-            : HotkeyMode switch
-            {
-                HotkeyTriggerMode.HoldToRun => $"{Hotkey} (Hold)",
-                HotkeyTriggerMode.RepeatWhileHeld => $"{Hotkey} (Hold ∞)",
-                HotkeyTriggerMode.Toggle => $"{Hotkey} (Toggle)",
-                _ => Hotkey.ToString(),
-            },
+        TriggerKind.Hotkey => DescribeHotkeyShort(),
         TriggerKind.Schedule => Recurrence switch
         {
             ScheduleRecurrence.EveryNMinutes => $"Every {IntervalMinutes}m",
@@ -170,11 +186,29 @@ public sealed class MacroTrigger
         },
         TriggerKind.WindowEvent => WindowEvent switch
         {
-            WindowTriggerEvent.WindowOpened => $"When \"{WindowTitle}\" opens",
-            _ => $"When \"{WindowTitle}\" focused",
+            WindowTriggerEvent.WindowOpened => $"When \"{DescribeWindowTarget()}\" opens",
+            _ => $"When \"{DescribeWindowTarget()}\" focused",
         },
         _ => "Trigger",
     };
+
+    private string DescribeHotkeyShort()
+    {
+        if (Hotkey is null)
+            return PassThroughKey ? "Hotkey (Pass-through)" : "Hotkey";
+
+        return (HotkeyMode, PassThroughKey) switch
+        {
+            (HotkeyTriggerMode.HoldToRun, true) => $"{Hotkey} (Hold, Pass-through)",
+            (HotkeyTriggerMode.HoldToRun, false) => $"{Hotkey} (Hold)",
+            (HotkeyTriggerMode.RepeatWhileHeld, true) => $"{Hotkey} (Hold ∞, Pass-through)",
+            (HotkeyTriggerMode.RepeatWhileHeld, false) => $"{Hotkey} (Hold ∞)",
+            (HotkeyTriggerMode.Toggle, true) => $"{Hotkey} (Toggle, Pass-through)",
+            (HotkeyTriggerMode.Toggle, false) => $"{Hotkey} (Toggle)",
+            (_, true) => $"{Hotkey} (Pass-through)",
+            _ => Hotkey.ToString(),
+        };
+    }
 
     public MacroTrigger Clone() => new()
     {
@@ -184,13 +218,18 @@ public sealed class MacroTrigger
         Kind = Kind,
         Hotkey = Hotkey,
         HotkeyMode = HotkeyMode,
+        PassThroughKey = PassThroughKey,
         Recurrence = Recurrence,
         IntervalMinutes = IntervalMinutes,
         TimeOfDay = TimeOfDay,
         WindowEvent = WindowEvent,
         WindowTitle = WindowTitle,
+        ProcessNameMatch = ProcessNameMatch,
         OnlyWhenWindowActive = OnlyWhenWindowActive,
         CooldownMs = CooldownMs,
         ConflictPolicy = ConflictPolicy,
     };
 }
+
+/// <summary>Effective hotkey registration entry resolved for the active window context.</summary>
+public readonly record struct ScopedHotkeyBinding(HotkeyBinding Binding, bool PassThroughKey);

@@ -1945,9 +1945,14 @@
                                                             <ComboBox ItemsSource="{x:Static steps:TriggerItemViewModel.HotkeyModeChoices}"
                                                                       DisplayMemberPath="Label" SelectedValuePath="Value" SelectedValue="{Binding HotkeyMode}" Width="240" Padding="6,3" FontSize="11.5" />
                                                             <CheckBox Content="Only in window:" IsChecked="{Binding OnlyWhenWindowActive}" VerticalAlignment="Center" Margin="10,0,6,0" />
-                                                            <TextBox Text="{Binding WindowTitle, UpdateSourceTrigger=PropertyChanged}" Tag="e.g. Excel, Roblox"
-                                                                     Width="160" Padding="6,3" FontSize="11.5"
+                                                            <TextBox Text="{Binding WindowTitle, UpdateSourceTrigger=PropertyChanged}" Tag="Window title (e.g. Excel)"
+                                                                     Width="145" Padding="6,3" FontSize="11.5"
                                                                      ToolTip="When 'Only in window' is checked, the shortcut only fires while the active window title contains this text" />
+                                                            <TextBox Text="{Binding ProcessNameMatch, UpdateSourceTrigger=PropertyChanged}" Tag="Process (e.g. Code)"
+                                                                     Width="125" Padding="6,3" FontSize="11.5" Margin="6,0,0,0"
+                                                                     ToolTip="Optional executable/process name filter without .exe (works even when document/tab titles change)" />
+                                                            <CheckBox Content="Pass key through" IsChecked="{Binding PassThroughKey}" VerticalAlignment="Center" Margin="10,0,0,0"
+                                                                      ToolTip="Observe the shortcut passively so the active game or app still receives the keypress" />
                                                         </WrapPanel>
 
                                                         <!-- Schedule settings -->
@@ -1970,9 +1975,12 @@
                                                             <TextBlock Text="Event:" Style="{StaticResource MutedText}" VerticalAlignment="Center" Margin="0,0,6,0" />
                                                             <ComboBox ItemsSource="{x:Static steps:TriggerItemViewModel.WindowEventChoices}"
                                                                       DisplayMemberPath="Label" SelectedValuePath="Value" SelectedValue="{Binding WindowEvent}" Width="220" Padding="6,3" FontSize="11.5" />
-                                                            <TextBlock Text="Window title contains:" Style="{StaticResource MutedText}" VerticalAlignment="Center" Margin="10,0,6,0" />
+                                                            <TextBlock Text="Window title:" Style="{StaticResource MutedText}" VerticalAlignment="Center" Margin="10,0,6,0" />
                                                             <TextBox Text="{Binding WindowTitleMatch, UpdateSourceTrigger=PropertyChanged}" Tag="e.g. Excel, Discord, Game"
-                                                                     Width="220" Padding="6,3" FontSize="11.5" />
+                                                                     Width="170" Padding="6,3" FontSize="11.5" />
+                                                            <TextBlock Text="Process:" Style="{StaticResource MutedText}" VerticalAlignment="Center" Margin="10,0,6,0" />
+                                                            <TextBox Text="{Binding ProcessNameMatch, UpdateSourceTrigger=PropertyChanged}" Tag="e.g. Code, chrome"
+                                                                     Width="140" Padding="6,3" FontSize="11.5" />
                                                         </WrapPanel>
                                                     </StackPanel>
                                                 </Border>
