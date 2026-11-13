@@ -783,7 +783,17 @@ public sealed partial class PlaybackEngine
         ScreenFrame frame;
         try
         {
-            frame = await capture.CaptureAsync(region, token).ConfigureAwait(false);
+            long windowHandle = 0;
+            if (c.SendInBackground && _layout is not null)
+            {
+                var liveWindow = TargetResolver.FindLiveWindow(c.Target, _layout, c.X, c.Y)
+                    ?? TargetResolver.FindLiveWindowByQuery(InterpolateActive(c.BackgroundWindowTitle), _layout, c.X, c.Y);
+                if (liveWindow is { Handle: not 0 }) windowHandle = liveWindow.Handle;
+            }
+
+            frame = windowHandle != 0
+                ? await capture.CaptureWindowAsync(windowHandle, region, token).ConfigureAwait(false)
+                : await capture.CaptureAsync(region, token).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (token.IsCancellationRequested)
         {
@@ -833,7 +843,8 @@ public sealed partial class PlaybackEngine
     private async Task<((int X, int Y) Spot, ScreenRect Bounds)> SmartIntentAsync(MouseClickStep c, CancellationToken token)
     {
         var resolver = new TargetResolver(_uiLocator, _ocr, _capture, _layout);
-        var resolution = await resolver.ResolveAsync(c, token).ConfigureAwait(false);
+        var bgTitle = c.SendInBackground ? InterpolateActive(c.BackgroundWindowTitle) : null;
+        var resolution = await resolver.ResolveAsync(c, bgTitle, token).ConfigureAwait(false);
         RecordProbeTime(resolution.TotalElapsedMs);
 
         if (resolution.WinningStrategy != LocatorStrategyKind.Coordinates)

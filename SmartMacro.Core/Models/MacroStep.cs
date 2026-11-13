@@ -508,6 +508,13 @@ public sealed class MouseClickStep : MacroStep
     [JsonIgnore]
     public bool SendInBackground => !string.IsNullOrWhiteSpace(BackgroundWindowTitle);
 
+    /// <summary>
+    /// Selects how background clicks targeting <see cref="BackgroundWindowTitle"/> execute
+    /// (<see cref="BackgroundInputBackend.Auto"/> tries UI Automation first on normal clicks then falls back to Win32 PostMessage).
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public BackgroundInputBackend BackgroundBackend { get; set; } = BackgroundInputBackend.Auto;
+
     [JsonIgnore]
     public override StepKind Kind => StepKind.MouseClick;
 
@@ -608,8 +615,28 @@ public sealed class TypeTextStep : MacroStep
     [JsonIgnore]
     public bool SendInBackground => !string.IsNullOrWhiteSpace(BackgroundWindowTitle);
 
+    /// <summary>
+    /// Selects how background text targeting <see cref="BackgroundWindowTitle"/> is delivered
+    /// (<see cref="BackgroundInputBackend.Auto"/> tries UI Automation <c>ValuePattern.SetValue</c> then falls back to Win32 <c>PostMessage</c>).
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public BackgroundInputBackend BackgroundBackend { get; set; } = BackgroundInputBackend.Auto;
+
     [JsonIgnore]
     public override StepKind Kind => StepKind.TypeText;
+}
+
+/// <summary>Selects how background steps deliver input to inactive windows without stealing focus.</summary>
+public enum BackgroundInputBackend
+{
+    /// <summary>Try UI Automation control patterns first when supported, falling back to Win32 PostMessage.</summary>
+    Auto = 0,
+
+    /// <summary>Send direct Win32 <c>PostMessage</c> mouse/keyboard messages to the target window handle.</summary>
+    Win32PostMessage = 1,
+
+    /// <summary>Execute via UI Automation control patterns (<c>Invoke</c>, <c>Toggle</c>, <c>SelectionItem</c>, <c>Value.SetValue</c>) only.</summary>
+    UiAutomationInvoke = 2,
 }
 
 public enum TextMatchMode

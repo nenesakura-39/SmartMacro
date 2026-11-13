@@ -57,7 +57,17 @@ public sealed class WindowsOcrService : IOcrService
     public Task<OcrReadResult> ReadAsync(ScreenRect region, CancellationToken cancellationToken) =>
         ReadAsync(region, OcrPreprocessMode.Auto, cancellationToken);
 
-    public async Task<OcrReadResult> ReadAsync(ScreenRect region, OcrPreprocessMode preprocess, CancellationToken cancellationToken)
+    public Task<OcrReadResult> ReadAsync(ScreenRect region, OcrPreprocessMode preprocess, CancellationToken cancellationToken) =>
+        ReadCoreAsync(windowHandle: 0, region, preprocess, cancellationToken);
+
+    public Task<OcrReadResult> ReadWindowAsync(long windowHandle, ScreenRect region, CancellationToken cancellationToken) =>
+        ReadCoreAsync(windowHandle, region, OcrPreprocessMode.Auto, cancellationToken);
+
+    private async Task<OcrReadResult> ReadCoreAsync(
+        long windowHandle,
+        ScreenRect region,
+        OcrPreprocessMode preprocess,
+        CancellationToken cancellationToken)
     {
         var engine = _engine ?? throw new OcrUnavailableException(StatusText);
         var screen = GetVirtualScreen();
@@ -66,9 +76,15 @@ public sealed class WindowsOcrService : IOcrService
         if (requested.IsEmpty)
             throw new ArgumentException($"The search area {region} is outside the screen. Pick the area again.");
 
-        // Windows OCR struggles with tightly cropped text, so capture a margin around the area...
+        // Windows OCR struggles with tightly cropped text, so capture a margin around the area so words touching the border don't get cut off.
         var area = new ScreenRect(requested.X - CapturePadding, requested.Y - CapturePadding,
             requested.Width + CapturePadding * 2, requested.Height + CapturePadding * 2).Intersect(screen);
+        if (windowHandle != 0)
+        {
+            var frame = ScreenCapture.CaptureWindowOrScreen(new IntPtr(windowHandle), area);
+            return await RecognizeBufferAsync(engine, frame.Image.Pixels, frame.Bounds, requested, preprocess, cancellationToken).ConfigureAwait(false);
+        }
+
         var rawPixels = ScreenCapture.CaptureBgra(area);
         return await RecognizeBufferAsync(engine, rawPixels, area, requested, preprocess, cancellationToken).ConfigureAwait(false);
     }

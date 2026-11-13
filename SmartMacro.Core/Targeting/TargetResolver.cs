@@ -70,16 +70,27 @@ public sealed class TargetResolver
     /// Resolves the best live click point for <paramref name="step"/>, stopping as soon as the highest-priority tier succeeds.
     /// </summary>
     public Task<TargetResolution> ResolveAsync(MouseClickStep step, CancellationToken cancellationToken = default) =>
-        RunChainAsync(step, evaluateAllTiers: false, cancellationToken);
+        RunChainAsync(step, step.BackgroundWindowTitle, evaluateAllTiers: false, cancellationToken);
+
+    /// <summary>
+    /// Resolves the best live click point for <paramref name="step"/> with an optional runtime-interpolated
+    /// <paramref name="backgroundWindowTitle"/> so background Smart Intent uses DWM occluded-window capture cleanly.
+    /// </summary>
+    public Task<TargetResolution> ResolveAsync(
+        MouseClickStep step,
+        string? backgroundWindowTitle,
+        CancellationToken cancellationToken = default) =>
+        RunChainAsync(step, backgroundWindowTitle, evaluateAllTiers: false, cancellationToken);
 
     /// <summary>
     /// Evaluates all 5 tiers without short-circuiting so the Inspector's "🧭 Locate Target" button can show ✓/✗ for every strategy.
     /// </summary>
     public Task<TargetResolution> DiagnoseAllAsync(MouseClickStep step, CancellationToken cancellationToken = default) =>
-        RunChainAsync(step, evaluateAllTiers: true, cancellationToken);
+        RunChainAsync(step, step.BackgroundWindowTitle, evaluateAllTiers: true, cancellationToken);
 
     private async Task<TargetResolution> RunChainAsync(
         MouseClickStep step,
+        string? backgroundWindowTitle,
         bool evaluateAllTiers,
         CancellationToken cancellationToken)
     {
@@ -89,6 +100,16 @@ public sealed class TargetResolver
         var target = step.Target;
 
         var liveWindow = FindLiveWindow(target, _layout, step.X, step.Y);
+        var effectiveBgTitle = !string.IsNullOrWhiteSpace(backgroundWindowTitle)
+            ? backgroundWindowTitle
+            : step.BackgroundWindowTitle;
+        var isBackground = !string.IsNullOrWhiteSpace(effectiveBgTitle);
+        if (liveWindow is null && isBackground)
+        {
+            liveWindow = FindLiveWindowByQuery(effectiveBgTitle, _layout, step.X, step.Y);
+        }
+        var windowCaptureHandle = isBackground && liveWindow is { Handle: not 0 } ? liveWindow.Handle : 0L;
+
         var (expectedX, expectedY, scaleX, scaleY) = ComputeExpectedPoint(step, target, liveWindow);
         StrategyDiagnostic? winner = null;
 
@@ -102,7 +123,7 @@ public sealed class TargetResolver
         }
 
         // Tier 2: OCR Text
-        var ocrDiag = await TryOcrTextAsync(target, liveWindow, (expectedX, expectedY), scaleX, scaleY, cancellationToken).ConfigureAwait(false);
+        var ocrDiag = await TryOcrTextAsync(target, liveWindow, windowCaptureHandle, (expectedX, expectedY), scaleX, scaleY, cancellationToken).ConfigureAwait(false);
         diagnostics.Add(ocrDiag);
         if (ocrDiag.Succeeded && winner is null)
         {
@@ -111,7 +132,7 @@ public sealed class TargetResolver
         }
 
         // Tier 3: Image Snapshot (1:1 fast path + multi-scale fallback)
-        var imageDiag = await TryImageSnapshotAsync(step, liveWindow, (expectedX, expectedY), cancellationToken).ConfigureAwait(false);
+        var imageDiag = await TryImageSnapshotAsync(step, liveWindow, windowCaptureHandle, (expectedX, expectedY), cancellationToken).ConfigureAwait(false);
         diagnostics.Add(imageDiag);
         if (imageDiag.Succeeded && winner is null)
         {
@@ -214,6 +235,7 @@ public sealed class TargetResolver
     private async Task<StrategyDiagnostic> TryOcrTextAsync(
         TargetFingerprint? target,
         WindowInfo? liveWindow,
+        long windowCaptureHandle,
         (int X, int Y) expectedPoint,
         double scaleX,
         double scaleY,
@@ -256,7 +278,7 @@ public sealed class TargetResolver
             TextMatch? best = null;
             if (!localBox.IsEmpty)
             {
-                best = await FindBestOcrMatchAsync(localBox, query, expectedTextCenter, cancellationToken).ConfigureAwait(false);
+                best = await FindBestOcrMatchAsync(localBox, query, expectedTextCenter, windowCaptureHandle, cancellationToken).ConfigureAwait(false);
             }
 
             if (best is null && liveWindow is { Bounds.IsEmpty: false })
@@ -264,7 +286,7 @@ public sealed class TargetResolver
                 var winBox = liveWindow.Bounds.Intersect(virtualScreen);
                 if (!winBox.IsEmpty && winBox != localBox && (long)winBox.Width * winBox.Height <= MaxFullWindowPixelArea)
                 {
-                    best = await FindBestOcrMatchAsync(winBox, query, expectedTextCenter, cancellationToken).ConfigureAwait(false);
+                    best = await FindBestOcrMatchAsync(winBox, query, expectedTextCenter, windowCaptureHandle, cancellationToken).ConfigureAwait(false);
                 }
             }
 
@@ -300,9 +322,12 @@ public sealed class TargetResolver
         ScreenRect region,
         string query,
         (int X, int Y) expectedTextCenter,
+        long windowCaptureHandle,
         CancellationToken cancellationToken)
     {
-        var read = await _ocr!.ReadAsync(region, cancellationToken).ConfigureAwait(false);
+        var read = windowCaptureHandle != 0
+            ? await _ocr!.ReadWindowAsync(windowCaptureHandle, region, cancellationToken).ConfigureAwait(false)
+            : await _ocr!.ReadAsync(region, cancellationToken).ConfigureAwait(false);
         var matches = OcrTextMatcher.Find(
             read,
             query,
@@ -321,6 +346,7 @@ public sealed class TargetResolver
     private async Task<StrategyDiagnostic> TryImageSnapshotAsync(
         MouseClickStep step,
         WindowInfo? liveWindow,
+        long windowCaptureHandle,
         (int X, int Y) expectedPoint,
         CancellationToken cancellationToken)
     {
@@ -363,7 +389,9 @@ public sealed class TargetResolver
 
             if (!localArea.IsEmpty)
             {
-                var frame = await _capture.CaptureAsync(localArea, cancellationToken).ConfigureAwait(false);
+                var frame = windowCaptureHandle != 0
+                    ? await _capture.CaptureWindowAsync(windowCaptureHandle, localArea, cancellationToken).ConfigureAwait(false)
+                    : await _capture.CaptureAsync(localArea, cancellationToken).ConfigureAwait(false);
                 var (hit, score) = MatchTemplateInFrame(frame, template, minScore, expectedTopLeftX, expectedTopLeftY, anchorX, anchorY, cancellationToken);
                 bestSeen = Math.Max(bestSeen, score);
                 if (hit is not null)
@@ -377,7 +405,9 @@ public sealed class TargetResolver
                 var winArea = liveWindow.Bounds.Intersect(virtualScreen);
                 if (!winArea.IsEmpty && winArea != localArea && (long)winArea.Width * winArea.Height <= MaxFullWindowPixelArea)
                 {
-                    var winFrame = await _capture.CaptureAsync(winArea, cancellationToken).ConfigureAwait(false);
+                    var winFrame = windowCaptureHandle != 0
+                        ? await _capture.CaptureWindowAsync(windowCaptureHandle, winArea, cancellationToken).ConfigureAwait(false)
+                        : await _capture.CaptureAsync(winArea, cancellationToken).ConfigureAwait(false);
                     var (hit, score) = MatchTemplateInFrame(winFrame, template, minScore, expectedTopLeftX, expectedTopLeftY, anchorX, anchorY, cancellationToken);
                     bestSeen = Math.Max(bestSeen, score);
                     if (hit is not null)
@@ -517,6 +547,64 @@ public sealed class TargetResolver
     /// When multiple windows share the same title/process (e.g. two Roblox windows side-by-side), prefers the window
     /// that contains or is closest to <paramref name="preferredX"/>, <paramref name="preferredY"/>.
     /// </summary>
+    /// <summary>
+    /// Finds the best live top-level window matching a background window query string (exact title > substring title >
+    /// exact process > substring process), preferring the window closest to (<paramref name="preferredX"/>, <paramref name="preferredY"/>).
+    /// </summary>
+    public static WindowInfo? FindLiveWindowByQuery(
+        string? titleOrProcess,
+        IScreenLayout? layout,
+        int? preferredX = null,
+        int? preferredY = null)
+    {
+        if (string.IsNullOrWhiteSpace(titleOrProcess) || layout is null) return null;
+        var wanted = NormalizeProcessName(titleOrProcess);
+        var rawWanted = titleOrProcess.Trim();
+        var windows = layout.GetWindows();
+        WindowInfo? best = null;
+        var bestRank = int.MaxValue;
+        var bestContains = false;
+        var bestDistanceSq = long.MaxValue;
+
+        foreach (var w in windows)
+        {
+            if (w.IsMinimized || w.Bounds.IsEmpty) continue;
+            var title = w.Title?.Trim() ?? string.Empty;
+            var proc = NormalizeProcessName(w.ProcessName);
+
+            var rank = int.MaxValue;
+            if (title.Length > 0 && string.Equals(title, rawWanted, StringComparison.OrdinalIgnoreCase)) rank = 0;
+            else if (title.Length > 0 && title.Contains(rawWanted, StringComparison.OrdinalIgnoreCase)) rank = 1;
+            else if (proc.Length > 0 && string.Equals(proc, wanted, StringComparison.OrdinalIgnoreCase)) rank = 2;
+            else if (proc.Length > 0 && proc.Contains(wanted, StringComparison.OrdinalIgnoreCase)) rank = 3;
+
+            if (rank > bestRank) continue;
+
+            var contains = false;
+            var distSq = long.MaxValue;
+            if (preferredX is int px && preferredY is int py)
+            {
+                contains = w.Bounds.Contains(px, py);
+                distSq = DistanceSquared(w.Bounds.CenterX, w.Bounds.CenterY, px, py);
+            }
+
+            var isBetter = rank < bestRank
+                || (preferredX is not null && preferredY is not null
+                    && ((contains && !bestContains) || (contains == bestContains && distSq < bestDistanceSq)));
+
+            if (isBetter)
+            {
+                bestRank = rank;
+                best = w;
+                bestContains = contains;
+                bestDistanceSq = distSq;
+                if (rank == 0 && (preferredX is null || preferredY is null)) break;
+            }
+        }
+
+        return best;
+    }
+
     public static WindowInfo? FindLiveWindow(
         TargetFingerprint? target,
         IScreenLayout? layout,

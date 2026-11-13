@@ -92,6 +92,12 @@ public sealed class Win32InputSimulator : IInputSimulator
     /// <summary>What SmartMacro's simulated input is holding down right now.</summary>
     public HeldInputTracker Held => _held;
 
+    /// <summary>
+    /// Allows background helpers to match windows belonging to SmartMacro's own process.
+    /// Off in production so macros can never self-click; opt-in only for internal test harnesses.
+    /// </summary>
+    internal bool AllowOwnProcess { get; set; }
+
     /// <param name="log">If given, unusual click conditions (window not active, cursor confined or moved by
     /// another program) are written to the log, at most once every 2 seconds.</param>
     public Win32InputSimulator(ILogService? log = null)
@@ -457,14 +463,26 @@ public sealed class Win32InputSimulator : IInputSimulator
     public string? ReleaseAllHeldInputs()
     {
         if (_held.IsEmpty) return null;
-        var buttons = _held.HeldButtons.Count;
-        var keys = _held.HeldKeys.Count;
+        var buttons = _held.HeldButtons.Count + _held.HeldBackgroundButtons.Count;
+        var keys = _held.HeldKeys.Count + _held.HeldBackgroundKeys.Count;
         var error = _held.ReleaseAll(
             button => MouseButtonCore(button, down: false),
             key =>
             {
                 if (key.ScanMode) KeyWithScanCodeCore(key.VirtualKey, key.ScanCode, key.Extended, down: false);
                 else Send(KeyInput(key.VirtualKey, false));
+            },
+            bgButton =>
+            {
+                if (!WindowApi.IsWindow(bgButton.WindowHandle)) return;
+                var (_, upMsg, _, _) = GetBackgroundMouseMessages(bgButton.Button);
+                PostMessage(bgButton.WindowHandle, upMsg, IntPtr.Zero, MakeLParam(bgButton.ClientX, bgButton.ClientY));
+            },
+            bgKey =>
+            {
+                if (!WindowApi.IsWindow(bgKey.WindowHandle)) return;
+                var lParam = new IntPtr(KeyboardInputEncoder.BuildMessageLParam(bgKey.ScanCode, bgKey.Extended, down: false));
+                PostMessage(bgKey.WindowHandle, WM_KEYUP, new IntPtr(bgKey.VirtualKey), lParam);
             });
         _log?.Info($"Input safety: released {buttons} mouse button(s) and {keys} key(s) that were still held when playback ended.");
         return error;
@@ -609,80 +627,16 @@ public sealed class Win32InputSimulator : IInputSimulator
 
     // ---------------- Background / Inactive Window Input (PostMessage) ----------------
 
-    /// <summary>
-    /// Finds a visible top-level window matching <paramref name="windowTitle"/>, ranking exact title matches above
-    /// substring title matches, and only querying process names if no title matched. Non-minimized windows are preferred.
-    /// </summary>
-    private static IntPtr FindBackgroundTargetWindow(string? windowTitle)
-    {
-        if (string.IsNullOrWhiteSpace(windowTitle)) return IntPtr.Zero;
-        var wanted = windowTitle.Trim();
-        IntPtr exactTitleMatch = IntPtr.Zero;
-        IntPtr substringTitleMatch = IntPtr.Zero;
-        IntPtr minimizedTitleMatch = IntPtr.Zero;
-        var candidatesForProcess = new List<(IntPtr Hwnd, uint Pid, bool Minimized)>(16);
+    private IntPtr FindBackgroundTargetWindow(string? windowTitle) =>
+        WindowApi.FindTopLevelWindow(windowTitle, AllowOwnProcess);
 
-        WindowApi.EnumWindows((hwnd, _) =>
+    private static (uint DownMsg, uint UpMsg, uint DblMsg, IntPtr WParamDown) GetBackgroundMouseMessages(MacroMouseButton button) =>
+        button switch
         {
-            if (!WindowApi.IsWindowVisible(hwnd)) return true;
-            GetWindowThreadProcessId(hwnd, out var pid);
-            if (pid == 0 || pid == OwnProcessId) return true;
-
-            var minimized = WindowApi.IsIconic(hwnd);
-            var len = WindowApi.GetWindowTextLength(hwnd);
-            if (len > 0)
-            {
-                var sb = new System.Text.StringBuilder(len + 1);
-                WindowApi.GetWindowText(hwnd, sb, sb.Capacity);
-                var title = sb.ToString();
-                if (string.Equals(title, wanted, StringComparison.OrdinalIgnoreCase))
-                {
-                    if (!minimized)
-                    {
-                        exactTitleMatch = hwnd;
-                        return false; // best possible match found immediately
-                    }
-                    if (minimizedTitleMatch == IntPtr.Zero)
-                        minimizedTitleMatch = hwnd;
-                }
-                else if (title.Contains(wanted, StringComparison.OrdinalIgnoreCase))
-                {
-                    if (!minimized && substringTitleMatch == IntPtr.Zero)
-                        substringTitleMatch = hwnd;
-                    else if (minimized && minimizedTitleMatch == IntPtr.Zero)
-                        minimizedTitleMatch = hwnd;
-                }
-
-                if (candidatesForProcess.Count < 64)
-                    candidatesForProcess.Add((hwnd, pid, minimized));
-            }
-
-            return true;
-        }, IntPtr.Zero);
-
-        if (exactTitleMatch != IntPtr.Zero) return exactTitleMatch;
-        if (substringTitleMatch != IntPtr.Zero) return substringTitleMatch;
-        if (minimizedTitleMatch != IntPtr.Zero) return minimizedTitleMatch;
-
-        IntPtr substringProcessMatch = IntPtr.Zero;
-        var pidCache = new Dictionary<uint, string>();
-        foreach (var (hwnd, pid, _) in candidatesForProcess)
-        {
-            if (!pidCache.TryGetValue(pid, out var procName))
-            {
-                procName = ProcessNameById(pid);
-                pidCache[pid] = procName;
-            }
-
-            if (string.IsNullOrEmpty(procName)) continue;
-            if (string.Equals(procName, wanted, StringComparison.OrdinalIgnoreCase))
-                return hwnd;
-            if (substringProcessMatch == IntPtr.Zero && procName.Contains(wanted, StringComparison.OrdinalIgnoreCase))
-                substringProcessMatch = hwnd;
-        }
-
-        return substringProcessMatch;
-    }
+            MacroMouseButton.Right => (WM_RBUTTONDOWN, WM_RBUTTONUP, WM_RBUTTONDBLCLK, (IntPtr)MK_RBUTTON),
+            MacroMouseButton.Middle => (WM_MBUTTONDOWN, WM_MBUTTONUP, WM_MBUTTONDBLCLK, (IntPtr)MK_MBUTTON),
+            _ => (WM_LBUTTONDOWN, WM_LBUTTONUP, WM_LBUTTONDBLCLK, (IntPtr)MK_LBUTTON),
+        };
 
     /// <summary>
     /// Resolves the inner child window at the center of <paramref name="rootHwnd"/> so background keyboard and text
@@ -741,13 +695,7 @@ public sealed class Win32InputSimulator : IInputSimulator
 
         var target = ResolveChildClientPoint(root, screenX, screenY, out var clientPt);
         var lParam = MakeLParam(clientPt.X, clientPt.Y);
-
-        var (downMsg, upMsg, dblMsg, wParamDown) = button switch
-        {
-            MacroMouseButton.Right => ((uint)WM_RBUTTONDOWN, (uint)WM_RBUTTONUP, (uint)WM_RBUTTONDBLCLK, (IntPtr)MK_RBUTTON),
-            MacroMouseButton.Middle => ((uint)WM_MBUTTONDOWN, (uint)WM_MBUTTONUP, (uint)WM_MBUTTONDBLCLK, (IntPtr)MK_MBUTTON),
-            _ => ((uint)WM_LBUTTONDOWN, (uint)WM_LBUTTONUP, (uint)WM_LBUTTONDBLCLK, (IntPtr)MK_LBUTTON),
-        };
+        var (downMsg, upMsg, dblMsg, wParamDown) = GetBackgroundMouseMessages(button);
 
         PostMessage(target, WM_MOUSEMOVE, IntPtr.Zero, lParam);
 
@@ -755,31 +703,65 @@ public sealed class Win32InputSimulator : IInputSimulator
         switch (action)
         {
             case MouseClickAction.Down:
+                _held.NoteBackgroundButton(target, button, clientPt.X, clientPt.Y, down: true);
                 PostMessage(target, downMsg, wParamDown, lParam);
                 break;
 
             case MouseClickAction.Up:
                 PostMessage(target, upMsg, IntPtr.Zero, lParam);
+                _held.NoteBackgroundButton(target, button, clientPt.X, clientPt.Y, down: false);
                 break;
 
             case MouseClickAction.DoubleClick:
+                _held.NoteBackgroundButton(target, button, clientPt.X, clientPt.Y, down: true);
                 PostMessage(target, downMsg, wParamDown, lParam);
                 if (clampHold > 0) PreciseSleep(Math.Min(clampHold, 150));
                 PostMessage(target, upMsg, IntPtr.Zero, lParam);
+                _held.NoteBackgroundButton(target, button, clientPt.X, clientPt.Y, down: false);
                 PreciseSleep(35);
+                _held.NoteBackgroundButton(target, button, clientPt.X, clientPt.Y, down: true);
                 PostMessage(target, dblMsg, wParamDown, lParam);
                 if (clampHold > 0) PreciseSleep(Math.Min(clampHold, 150));
                 PostMessage(target, upMsg, IntPtr.Zero, lParam);
+                _held.NoteBackgroundButton(target, button, clientPt.X, clientPt.Y, down: false);
                 break;
 
             default:
+                _held.NoteBackgroundButton(target, button, clientPt.X, clientPt.Y, down: true);
                 PostMessage(target, downMsg, wParamDown, lParam);
                 if (clampHold > 0) PreciseSleep(clampHold);
                 PostMessage(target, upMsg, IntPtr.Zero, lParam);
+                _held.NoteBackgroundButton(target, button, clientPt.X, clientPt.Y, down: false);
                 break;
         }
 
         return true;
+    }
+
+    private void PostBackgroundSingleKey(IntPtr target, int virtualKey, bool down)
+    {
+        var scan = (int)MapVirtualKey((uint)virtualKey, MAPVK_VK_TO_VSC);
+        var extended = KeyboardInputEncoder.IsExtendedVirtualKey(virtualKey);
+        var lParam = new IntPtr(KeyboardInputEncoder.BuildMessageLParam(scan, extended, down));
+        if (down) _held.NoteBackgroundKey(target, virtualKey, scan, extended, down: true);
+        PostMessage(target, down ? (uint)WM_KEYDOWN : (uint)WM_KEYUP, new IntPtr(virtualKey), lParam);
+        if (!down) _held.NoteBackgroundKey(target, virtualKey, scan, extended, down: false);
+    }
+
+    private void PostBackgroundModifiers(IntPtr target, KeyModifiers mods, bool down)
+    {
+        if (down)
+        {
+            if (mods.HasFlag(KeyModifiers.Control)) PostBackgroundSingleKey(target, VK_CONTROL, down: true);
+            if (mods.HasFlag(KeyModifiers.Shift)) PostBackgroundSingleKey(target, VK_SHIFT, down: true);
+            if (mods.HasFlag(KeyModifiers.Alt)) PostBackgroundSingleKey(target, VK_MENU, down: true);
+        }
+        else
+        {
+            if (mods.HasFlag(KeyModifiers.Alt)) PostBackgroundSingleKey(target, VK_MENU, down: false);
+            if (mods.HasFlag(KeyModifiers.Shift)) PostBackgroundSingleKey(target, VK_SHIFT, down: false);
+            if (mods.HasFlag(KeyModifiers.Control)) PostBackgroundSingleKey(target, VK_CONTROL, down: false);
+        }
     }
 
     public bool SendBackgroundKey(string windowTitle, int virtualKey, KeyAction action, int holdMs, KeyModifiers modifiers)
@@ -788,40 +770,33 @@ public sealed class Win32InputSimulator : IInputSimulator
         if (root == IntPtr.Zero) return false;
         var target = ResolveKeyboardTargetWindow(root);
 
-        var scan = MapVirtualKey((uint)virtualKey, MAPVK_VK_TO_VSC);
-        var downLParam = new IntPtr(1 | ((int)scan << 16));
-        var upLParam = new IntPtr(1 | ((int)scan << 16) | (unchecked((int)0xC0000000)));
-        var vkPtr = new IntPtr(virtualKey);
-
-        static void PostMod(IntPtr hwnd, KeyModifiers mods, bool down)
-        {
-            var msg = down ? (uint)WM_KEYDOWN : (uint)WM_KEYUP;
-            if (mods.HasFlag(KeyModifiers.Control)) PostMessage(hwnd, msg, new IntPtr(0x11), IntPtr.Zero);
-            if (mods.HasFlag(KeyModifiers.Shift)) PostMessage(hwnd, msg, new IntPtr(0x10), IntPtr.Zero);
-            if (mods.HasFlag(KeyModifiers.Alt)) PostMessage(hwnd, msg, new IntPtr(0x12), IntPtr.Zero);
-        }
-
         switch (action)
         {
             case KeyAction.Down:
-                PostMessage(target, WM_KEYDOWN, vkPtr, downLParam);
+                if (modifiers != KeyModifiers.None) PostBackgroundModifiers(target, modifiers, down: true);
+                PostBackgroundSingleKey(target, virtualKey, down: true);
                 break;
 
             case KeyAction.Up:
-                PostMessage(target, WM_KEYUP, vkPtr, upLParam);
+                PostBackgroundSingleKey(target, virtualKey, down: false);
+                if (modifiers != KeyModifiers.None) PostBackgroundModifiers(target, modifiers, down: false);
                 break;
 
             default:
-                if (modifiers != KeyModifiers.None) PostMod(target, modifiers, down: true);
-                PostMessage(target, WM_KEYDOWN, vkPtr, downLParam);
+                if (modifiers != KeyModifiers.None) PostBackgroundModifiers(target, modifiers, down: true);
+                PostBackgroundSingleKey(target, virtualKey, down: true);
                 if (holdMs > 0) PreciseSleep(Math.Clamp(holdMs, 0, 60_000));
-                PostMessage(target, WM_KEYUP, vkPtr, upLParam);
-                if (modifiers != KeyModifiers.None) PostMod(target, modifiers, down: false);
+                PostBackgroundSingleKey(target, virtualKey, down: false);
+                if (modifiers != KeyModifiers.None) PostBackgroundModifiers(target, modifiers, down: false);
                 break;
         }
 
         return true;
     }
+
+    private static bool ProbeSupportsUniChar(IntPtr target) =>
+        SendMessageTimeout(target, WM_UNICHAR, UNICODE_NOCHAR, IntPtr.Zero, SMTO_ABORTIFHUNG, 100, out var result) != IntPtr.Zero
+        && result != IntPtr.Zero;
 
     public bool SendBackgroundText(string windowTitle, string text, int characterDelayMs)
     {
@@ -831,23 +806,38 @@ public sealed class Win32InputSimulator : IInputSimulator
         var target = ResolveKeyboardTargetWindow(root);
 
         var delay = Math.Clamp(characterDelayMs, 0, 10_000);
-        for (var i = 0; i < text.Length; i++)
-        {
-            var ch = text[i];
-            if (ch == '\r' && i + 1 < text.Length && text[i + 1] == '\n')
-                continue; // handle \r\n on the \n
+        var tokens = KeyboardInputEncoder.SplitBackgroundText(text);
+        var charLParam = new IntPtr(KeyboardInputEncoder.BuildMessageLParam(scanCode: 0, extended: false, down: true));
+        bool? supportsUniChar = null;
 
-            if (ch is '\n' or '\r')
+        for (var i = 0; i < tokens.Count; i++)
+        {
+            var token = tokens[i];
+            if (token.IsNewline)
             {
-                PostMessage(target, WM_KEYDOWN, new IntPtr(VK_RETURN), IntPtr.Zero);
-                PostMessage(target, WM_KEYUP, new IntPtr(VK_RETURN), IntPtr.Zero);
+                PostBackgroundSingleKey(target, VK_RETURN, down: true);
+                PostBackgroundSingleKey(target, VK_RETURN, down: false);
+            }
+            else if (token.IsSurrogatePair)
+            {
+                supportsUniChar ??= ProbeSupportsUniChar(target);
+                if (supportsUniChar.Value)
+                {
+                    PostMessage(target, WM_UNICHAR, new IntPtr(token.Utf32CodePoint), charLParam);
+                }
+                else
+                {
+                    // Send both halves atomically back-to-back without sleeping in between so controls join them.
+                    PostMessage(target, WM_CHAR, new IntPtr(token.Char1), charLParam);
+                    PostMessage(target, WM_CHAR, new IntPtr(token.Char2), charLParam);
+                }
             }
             else
             {
-                PostMessage(target, WM_CHAR, new IntPtr(ch), IntPtr.Zero);
+                PostMessage(target, WM_CHAR, new IntPtr(token.Char1), charLParam);
             }
 
-            if (delay > 0 && i < text.Length - 1)
+            if (delay > 0 && i < tokens.Count - 1)
                 PreciseSleep(delay);
         }
 

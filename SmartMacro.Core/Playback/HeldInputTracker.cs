@@ -6,6 +6,12 @@ namespace SmartMacro.Core.Playback;
 /// <param name="ScanMode">True when it was pressed with <see cref="IInputSimulator.KeyWithScanCode"/> (recorded game input).</param>
 public readonly record struct TrackedKey(int VirtualKey, int ScanCode = 0, bool Extended = false, bool ScanMode = false);
 
+/// <summary>A background mouse button currently pressed on a specific target window handle.</summary>
+public readonly record struct TrackedBackgroundMouseButton(nint WindowHandle, MacroMouseButton Button, int ClientX = 0, int ClientY = 0);
+
+/// <summary>A background key currently pressed on a specific target window handle.</summary>
+public readonly record struct TrackedBackgroundKey(nint WindowHandle, int VirtualKey, int ScanCode = 0, bool Extended = false);
+
 /// <summary>
 /// Remembers which keys and mouse buttons an input simulator has pressed and not released yet (in press order).
 /// Used by the Windows input simulator (and <see cref="TrackingInputSimulator"/>) to implement <see cref="IInputSimulator.ReleaseAllHeldInputs"/>:
@@ -17,11 +23,22 @@ public sealed class HeldInputTracker
     private readonly object _gate = new();
     private readonly List<TrackedKey> _keys = new();
     private readonly List<MacroMouseButton> _buttons = new();
+    private readonly List<TrackedBackgroundKey> _backgroundKeys = new();
+    private readonly List<TrackedBackgroundMouseButton> _backgroundButtons = new();
 
-    /// <summary>True when nothing is held.</summary>
+    /// <summary>True when nothing is held (foreground or background).</summary>
     public bool IsEmpty
     {
-        get { lock (_gate) return _keys.Count == 0 && _buttons.Count == 0; }
+        get
+        {
+            lock (_gate)
+            {
+                return _keys.Count == 0
+                    && _buttons.Count == 0
+                    && _backgroundKeys.Count == 0
+                    && _backgroundButtons.Count == 0;
+            }
+        }
     }
 
     /// <summary>The keys held right now, oldest press first.</summary>
@@ -34,6 +51,18 @@ public sealed class HeldInputTracker
     public IReadOnlyList<MacroMouseButton> HeldButtons
     {
         get { lock (_gate) return _buttons.ToList(); }
+    }
+
+    /// <summary>Background mouse buttons held right now, oldest press first.</summary>
+    public IReadOnlyList<TrackedBackgroundMouseButton> HeldBackgroundButtons
+    {
+        get { lock (_gate) return _backgroundButtons.ToList(); }
+    }
+
+    /// <summary>Background keys held right now, oldest press first.</summary>
+    public IReadOnlyList<TrackedBackgroundKey> HeldBackgroundKeys
+    {
+        get { lock (_gate) return _backgroundKeys.ToList(); }
     }
 
     /// <summary>A virtual-key press / release was sent.</summary>
@@ -50,6 +79,28 @@ public sealed class HeldInputTracker
         {
             _buttons.Remove(button);
             if (down) _buttons.Add(button);
+        }
+    }
+
+    /// <summary>A background mouse button down / up was posted to <paramref name="windowHandle"/>.</summary>
+    public void NoteBackgroundButton(nint windowHandle, MacroMouseButton button, int clientX, int clientY, bool down)
+    {
+        if (windowHandle == 0) return;
+        lock (_gate)
+        {
+            _backgroundButtons.RemoveAll(b => b.WindowHandle == windowHandle && b.Button == button);
+            if (down) _backgroundButtons.Add(new TrackedBackgroundMouseButton(windowHandle, button, clientX, clientY));
+        }
+    }
+
+    /// <summary>A background key down / up was posted to <paramref name="windowHandle"/>.</summary>
+    public void NoteBackgroundKey(nint windowHandle, int virtualKey, int scanCode, bool extended, bool down)
+    {
+        if (windowHandle == 0) return;
+        lock (_gate)
+        {
+            _backgroundKeys.RemoveAll(k => k.WindowHandle == windowHandle && k.VirtualKey == virtualKey);
+            if (down) _backgroundKeys.Add(new TrackedBackgroundKey(windowHandle, virtualKey, scanCode, extended));
         }
     }
 
@@ -77,16 +128,33 @@ public sealed class HeldInputTracker
         }
     }
 
-    /// <summary>
-    /// Sends a release for everything that is held, through <paramref name="send"/> (mouse buttons first, then keys in
-    /// reverse press order, so Ctrl / Shift / Alt let go after the key they modify). Every release is attempted even when
-    /// one fails. Returns the first error message, or null.
-    /// </summary>
-    public string? ReleaseAll(Action<MacroMouseButton> releaseButton, Action<TrackedKey> releaseKey)
+    /// <summary>Everything background that is held, and forgets it (the caller sends the releases).</summary>
+    public (IReadOnlyList<TrackedBackgroundMouseButton> Buttons, IReadOnlyList<TrackedBackgroundKey> Keys) TakeAllBackground()
+    {
+        lock (_gate)
+        {
+            var result = (
+                Buttons: (IReadOnlyList<TrackedBackgroundMouseButton>)_backgroundButtons.ToList(),
+                Keys: (IReadOnlyList<TrackedBackgroundKey>)_backgroundKeys.ToList());
+            _backgroundButtons.Clear();
+            _backgroundKeys.Clear();
+            return result;
+        }
+    }
+
+    public string? ReleaseAll(Action<MacroMouseButton> releaseButton, Action<TrackedKey> releaseKey) =>
+        ReleaseAll(releaseButton, releaseKey, releaseBackgroundButton: null, releaseBackgroundKey: null);
+
+    public string? ReleaseAll(
+        Action<MacroMouseButton> releaseButton,
+        Action<TrackedKey> releaseKey,
+        Action<TrackedBackgroundMouseButton>? releaseBackgroundButton,
+        Action<TrackedBackgroundKey>? releaseBackgroundKey)
     {
         ArgumentNullException.ThrowIfNull(releaseButton);
         ArgumentNullException.ThrowIfNull(releaseKey);
         var (buttons, keys) = TakeAll();
+        var (bgButtons, bgKeys) = TakeAllBackground();
         string? error = null;
 
         foreach (var button in buttons)
@@ -101,9 +169,26 @@ public sealed class HeldInputTracker
             catch (Exception ex) { error ??= $"Could not release a held key: {ex.Message}"; }
         }
 
-        // A release that failed half-way may have been re-noted as held by the simulator; forget it so a later
-        // failsafe call doesn't keep retrying a key Windows refuses.
+        if (releaseBackgroundButton is not null)
+        {
+            foreach (var bgBtn in bgButtons)
+            {
+                try { releaseBackgroundButton(bgBtn); }
+                catch (Exception ex) { error ??= $"Could not release the background {StepDescriber.DescribeMouseButton(bgBtn.Button)}: {ex.Message}"; }
+            }
+        }
+
+        if (releaseBackgroundKey is not null)
+        {
+            for (var i = bgKeys.Count - 1; i >= 0; i--)
+            {
+                try { releaseBackgroundKey(bgKeys[i]); }
+                catch (Exception ex) { error ??= $"Could not release a held background key: {ex.Message}"; }
+            }
+        }
+
         TakeAll();
+        TakeAllBackground();
         return error;
     }
 }
@@ -156,11 +241,24 @@ public sealed class TrackingInputSimulator : IInputSimulator
 
     public bool TryGetCursorPosition(out int x, out int y) => _inner.TryGetCursorPosition(out x, out y);
 
-    public string? ReleaseAllHeldInputs() => Tracker.ReleaseAll(
-        button => _inner.MouseButton(button, false),
-        key =>
-        {
-            if (key.ScanMode) _inner.KeyWithScanCode(key.VirtualKey, key.ScanCode, key.Extended, false);
-            else _inner.Key(key.VirtualKey, false);
-        });
+    public bool SendBackgroundMouseClick(string windowTitle, MacroMouseButton button, MouseClickAction action, int screenX, int screenY, int holdMs) =>
+        _inner.SendBackgroundMouseClick(windowTitle, button, action, screenX, screenY, holdMs);
+
+    public bool SendBackgroundKey(string windowTitle, int virtualKey, KeyAction action, int holdMs, KeyModifiers modifiers) =>
+        _inner.SendBackgroundKey(windowTitle, virtualKey, action, holdMs, modifiers);
+
+    public bool SendBackgroundText(string windowTitle, string text, int characterDelayMs) =>
+        _inner.SendBackgroundText(windowTitle, text, characterDelayMs);
+
+    public string? ReleaseAllHeldInputs()
+    {
+        var error = Tracker.ReleaseAll(
+            button => _inner.MouseButton(button, false),
+            key =>
+            {
+                if (key.ScanMode) _inner.KeyWithScanCode(key.VirtualKey, key.ScanCode, key.Extended, false);
+                else _inner.Key(key.VirtualKey, false);
+            });
+        return error ?? _inner.ReleaseAllHeldInputs();
+    }
 }

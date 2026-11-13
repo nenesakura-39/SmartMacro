@@ -307,7 +307,40 @@ public sealed class MouseClickStepViewModel : StepViewModel
     // ---------------- 🎯 Test Smart-Aim & 🧭 Locate Target ----------------
 
     private IVisionTools? _visionTools;
-    private bool _testingSmartAim; public string BackgroundWindowTitle { get => _step.BackgroundWindowTitle ?? string.Empty; set { var normalized = string.IsNullOrWhiteSpace(value) ? null : value.Trim(); if (_step.BackgroundWindowTitle == normalized) return; _step.BackgroundWindowTitle = normalized; NotifyChanged(); } }
+    private bool _testingSmartAim;
+
+    public static IReadOnlyList<Choice<BackgroundInputBackend>> BackgroundBackends { get; } = new[]
+    {
+        new Choice<BackgroundInputBackend>(BackgroundInputBackend.Auto, "Auto (UI Automation → PostMessage)"),
+        new Choice<BackgroundInputBackend>(BackgroundInputBackend.Win32PostMessage, "Win32 PostMessage"),
+        new Choice<BackgroundInputBackend>(BackgroundInputBackend.UiAutomationInvoke, "UI Automation only"),
+    };
+
+    public string BackgroundWindowTitle
+    {
+        get => _step.BackgroundWindowTitle ?? string.Empty;
+        set
+        {
+            var normalized = string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+            if (_step.BackgroundWindowTitle == normalized) return;
+            _step.BackgroundWindowTitle = normalized;
+            NotifyChanged();
+            OnPropertyChanged(nameof(HasBackgroundTarget));
+        }
+    }
+
+    public bool HasBackgroundTarget => !string.IsNullOrWhiteSpace(_step.BackgroundWindowTitle);
+
+    public BackgroundInputBackend BackgroundBackend
+    {
+        get => _step.BackgroundBackend;
+        set
+        {
+            if (_step.BackgroundBackend == value) return;
+            _step.BackgroundBackend = value;
+            NotifyChanged();
+        }
+    }
     private string? _smartAimTestResult;
 
     /// <summary>Screen tools from the editor (set right after the step editor is created).</summary>
@@ -1156,6 +1189,8 @@ public sealed class TypeTextStepViewModel : StepViewModel
         });
     }
 
+    public static IReadOnlyList<Choice<BackgroundInputBackend>> BackgroundBackends => MouseClickStepViewModel.BackgroundBackends;
+
     public string BackgroundWindowTitle
     {
         get => _step.BackgroundWindowTitle ?? string.Empty;
@@ -1164,6 +1199,20 @@ public sealed class TypeTextStepViewModel : StepViewModel
             var normalized = string.IsNullOrWhiteSpace(value) ? null : value.Trim();
             if (_step.BackgroundWindowTitle == normalized) return;
             _step.BackgroundWindowTitle = normalized;
+            NotifyChanged();
+            OnPropertyChanged(nameof(HasBackgroundTarget));
+        }
+    }
+
+    public bool HasBackgroundTarget => !string.IsNullOrWhiteSpace(_step.BackgroundWindowTitle);
+
+    public BackgroundInputBackend BackgroundBackend
+    {
+        get => _step.BackgroundBackend;
+        set
+        {
+            if (_step.BackgroundBackend == value) return;
+            _step.BackgroundBackend = value;
             NotifyChanged();
         }
     }

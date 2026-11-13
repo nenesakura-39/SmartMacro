@@ -156,7 +156,26 @@ public sealed partial class PlaybackEngine
                     }
 
                     var bgHold = c.HoldMs > 0 ? (int)Math.Round(ScaledHoldMs(c.HoldMs, speed)) : 0;
-                    if (!_input.SendBackgroundMouseClick(bgTitle, c.Button, c.Action, bgSpot.X, bgSpot.Y, bgHold))
+                    var uiaHandled = false;
+                    if (c.Action == MouseClickAction.Click
+                        && (c.BackgroundBackend == BackgroundInputBackend.UiAutomationInvoke
+                            || (c.BackgroundBackend == BackgroundInputBackend.Auto && c.Button == MacroMouseButton.Left))
+                        && _uiLocator is { IsAvailable: true })
+                    {
+                        var uiaResult = await _uiLocator.TryBackgroundClickAsync(bgTitle, c.Target, bgSpot, token).ConfigureAwait(false);
+                        if (uiaResult.Succeeded)
+                        {
+                            uiaHandled = true;
+                            SyncTimelineToNow();
+                        }
+                        else if (c.BackgroundBackend == BackgroundInputBackend.UiAutomationInvoke)
+                        {
+                            Message?.Invoke(this, $"👻 Background click (UI Automation): {uiaResult.Error ?? $"no matching control found in \"{bgTitle}\"."}");
+                            uiaHandled = true;
+                        }
+                    }
+
+                    if (!uiaHandled && !_input.SendBackgroundMouseClick(bgTitle, c.Button, c.Action, bgSpot.X, bgSpot.Y, bgHold))
                     {
                         Message?.Invoke(this, $"👻 Background click: window \"{bgTitle}\" was not found.");
                     }
@@ -391,7 +410,23 @@ public sealed partial class PlaybackEngine
                     var bgTitle = InterpolateActive(t.BackgroundWindowTitle);
                     var bgText = InterpolateActive(t.Text);
                     var bgDelay = t.CharacterDelayMs > 0 ? (int)Math.Round(t.CharacterDelayMs / Math.Max(0.1, speed)) : 0;
-                    if (!_input.SendBackgroundText(bgTitle, bgText, bgDelay))
+                    var uiaHandled = false;
+                    if (t.BackgroundBackend != BackgroundInputBackend.Win32PostMessage
+                        && _uiLocator is { IsAvailable: true })
+                    {
+                        var uiaResult = await _uiLocator.TryBackgroundSetValueAsync(bgTitle, bgText, token).ConfigureAwait(false);
+                        if (uiaResult.Succeeded)
+                        {
+                            uiaHandled = true;
+                        }
+                        else if (t.BackgroundBackend == BackgroundInputBackend.UiAutomationInvoke)
+                        {
+                            Message?.Invoke(this, $"👻 Background type (UI Automation): {uiaResult.Error ?? $"no editable control found in \"{bgTitle}\"."}");
+                            uiaHandled = true;
+                        }
+                    }
+
+                    if (!uiaHandled && !_input.SendBackgroundText(bgTitle, bgText, bgDelay))
                     {
                         Message?.Invoke(this, $"👻 Background type: window \"{bgTitle}\" was not found.");
                     }

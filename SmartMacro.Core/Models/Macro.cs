@@ -272,7 +272,8 @@ public sealed class MacroDocument
                 SetVariableStep { CopyResultToClipboard: true } => 17,
                 SetVariableStep { Source: VariableSourceKind.Formula } => 17,
                 FlowControlStep => 17,
-                MouseClickStep { SendInBackground: true } or KeyPressStep { SendInBackground: true } or TypeTextStep { SendInBackground: true } => 17,
+                MouseClickStep { SendInBackground: true } or KeyPressStep { SendInBackground: true } or TypeTextStep { SendInBackground: true }
+                    or MouseClickStep { BackgroundBackend: not BackgroundInputBackend.Auto } or TypeTextStep { BackgroundBackend: not BackgroundInputBackend.Auto } => 17,
                 FocusWindowStep { SnapLayout: not WindowSnapLayout.KeepCurrent } => 17,
                 ScreenshotStep s when s.SoundCue != SoundCueKind.None || s.AttachScreenshot || !string.IsNullOrWhiteSpace(s.NotificationMessage) || !string.IsNullOrWhiteSpace(s.WebhookUrl) => 17,
                 _ when WorkflowSteps.ConditionOf(step) is { HasSecondCondition: true } => 17,

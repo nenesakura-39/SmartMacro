@@ -1,5 +1,4 @@
 using System.Runtime.InteropServices;
-using System.Text;
 using System.Windows.Automation;
 using SmartMacro.Core.Ocr;
 using SmartMacro.Core.Targeting;
@@ -18,7 +17,22 @@ public sealed class UiAutomationService : IUiElementLocator
     private const uint GA_ROOT = 2;
     private static readonly TimeSpan InspectTimeout = TimeSpan.FromMilliseconds(150);
     private static readonly TimeSpan FindTimeout = TimeSpan.FromMilliseconds(300);
+    // Windows cross-process UIA pattern RPCs (Invoke/Value/Scroll) can wait up to ~2 s internally on busy desktops.
+    private static readonly TimeSpan BackgroundActionTimeout = TimeSpan.FromSeconds(3);
     private static readonly int OwnProcessId = Environment.ProcessId;
+
+    private readonly bool _allowOwnProcess;
+
+    public UiAutomationService() : this(allowOwnProcess: false)
+    {
+    }
+
+    public UiAutomationService(bool allowOwnProcess)
+    {
+        _allowOwnProcess = allowOwnProcess;
+    }
+
+    private bool IsExcludedProcess(uint pid) => !_allowOwnProcess && pid == (uint)OwnProcessId;
 
     private static readonly HashSet<string> InteractiveControlTypes = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -75,7 +89,7 @@ public sealed class UiAutomationService : IUiElementLocator
         }
     }
 
-    private static UiElementSnapshot? TryInspectWindowOnly(int x, int y)
+    private UiElementSnapshot? TryInspectWindowOnly(int x, int y)
     {
         try
         {
@@ -84,9 +98,9 @@ public sealed class UiAutomationService : IUiElementLocator
             if (rootHwnd == IntPtr.Zero) return null;
 
             NativeMethods.GetWindowThreadProcessId(rootHwnd, out var pid);
-            if (pid == (uint)OwnProcessId) return null;
+            if (IsExcludedProcess(pid)) return null;
 
-            var windowProcess = ReadProcessName(pid);
+            var windowProcess = CleanField(WindowApi.ReadProcessName(pid));
             var windowBounds = ReadVisibleBounds(rootHwnd);
             if (string.IsNullOrWhiteSpace(windowProcess)) return null;
 
@@ -134,7 +148,347 @@ public sealed class UiAutomationService : IUiElementLocator
         }
     }
 
-    private static UiElementSnapshot? InspectPointCore(int x, int y, CancellationToken cancellationToken)
+    public Task<UiBackgroundActionResult> TryBackgroundClickAsync(
+        string windowTitle,
+        TargetFingerprint? target,
+        (int X, int Y)? expectedPoint,
+        CancellationToken cancellationToken = default) =>
+        RunBackgroundUiaAsync(() => BackgroundClickCore(windowTitle, target, expectedPoint, cancellationToken), cancellationToken);
+
+    public Task<UiBackgroundActionResult> TryBackgroundSetValueAsync(
+        string windowTitle,
+        string text,
+        CancellationToken cancellationToken = default) =>
+        RunBackgroundUiaAsync(() => BackgroundSetValueCore(windowTitle, text, cancellationToken), cancellationToken);
+
+    public Task<UiBackgroundActionResult> TryBackgroundScrollAsync(
+        string windowTitle,
+        int delta,
+        bool horizontal,
+        (int X, int Y)? expectedPoint,
+        CancellationToken cancellationToken = default) =>
+        RunBackgroundUiaAsync(() => BackgroundScrollCore(windowTitle, delta, horizontal, expectedPoint, cancellationToken), cancellationToken);
+
+    private static async Task<UiBackgroundActionResult> RunBackgroundUiaAsync(
+        Func<UiBackgroundActionResult> work,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await Task.Run(work, cancellationToken)
+                .WaitAsync(BackgroundActionTimeout, cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (TimeoutException)
+        {
+            return new UiBackgroundActionResult(Succeeded: false, Error: "Background UI Automation timed out.");
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            return new UiBackgroundActionResult(Succeeded: false, Error: ex.Message);
+        }
+    }
+
+    private AutomationElement? ResolveBackgroundRoot(string windowTitle)
+    {
+        var hwnd = WindowApi.FindTopLevelWindow(windowTitle, _allowOwnProcess);
+        if (hwnd == IntPtr.Zero || WindowApi.IsIconic(hwnd)) return null;
+        try { return AutomationElement.FromHandle(hwnd); }
+        catch { return null; }
+    }
+
+    private UiBackgroundActionResult BackgroundClickCore(
+        string windowTitle,
+        TargetFingerprint? target,
+        (int X, int Y)? expectedPoint,
+        CancellationToken cancellationToken)
+    {
+        using var dpi = NativeMethods.PhysicalPixelsScope.Enter();
+        cancellationToken.ThrowIfCancellationRequested();
+
+        var root = ResolveBackgroundRoot(windowTitle);
+        if (root is null) return UiBackgroundActionResult.NotSupported;
+
+        AutomationElement? candidate = null;
+        if (target is { HasUiElement: true })
+        {
+            var matched = FindBestElementByFingerprint(root, target, expectedPoint, requireEnabled: true, cancellationToken);
+            candidate = matched?.Element;
+        }
+
+        if (candidate is null && expectedPoint is { } pt)
+        {
+            candidate = FindInteractiveElementAtPoint(root, pt, cancellationToken);
+        }
+
+        return candidate is null ? UiBackgroundActionResult.NotSupported : TryExecuteClickPattern(candidate);
+    }
+
+    private UiBackgroundActionResult BackgroundSetValueCore(string windowTitle, string text, CancellationToken cancellationToken)
+    {
+        using var dpi = NativeMethods.PhysicalPixelsScope.Enter();
+        cancellationToken.ThrowIfCancellationRequested();
+
+        var root = ResolveBackgroundRoot(windowTitle);
+        if (root is null) return UiBackgroundActionResult.NotSupported;
+
+        AutomationElementCollection? found;
+        try
+        {
+            var cond = new AndCondition(
+                new PropertyCondition(AutomationElement.IsEnabledProperty, true),
+                new PropertyCondition(AutomationElement.IsValuePatternAvailableProperty, true));
+            found = root.FindAll(TreeScope.Descendants, cond);
+        }
+        catch
+        {
+            return UiBackgroundActionResult.NotSupported;
+        }
+
+        if (found is null || found.Count == 0) return UiBackgroundActionResult.NotSupported;
+
+        ValuePattern? bestPattern = null;
+        var bestScore = int.MaxValue;
+        for (var i = 0; i < found.Count; i++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            try
+            {
+                var el = found[i];
+                var current = el.Current;
+                if (!current.IsEnabled || current.IsOffscreen) continue;
+                var rect = ToScreenRect(current.BoundingRectangle);
+                if (rect.IsEmpty) continue;
+                if (!el.TryGetCurrentPattern(ValuePattern.Pattern, out var patObj) || patObj is not ValuePattern vp) continue;
+                if (vp.Current.IsReadOnly) continue;
+
+                var typeScore = current.ControlType == ControlType.Edit ? 0
+                    : current.ControlType == ControlType.Document ? 1
+                    : 2;
+                if (typeScore < bestScore)
+                {
+                    bestScore = typeScore;
+                    bestPattern = vp;
+                    if (typeScore == 0) break;
+                }
+            }
+            catch
+            {
+                // Skip volatile elements.
+            }
+        }
+
+        if (bestPattern is null) return UiBackgroundActionResult.NotSupported;
+
+        bestPattern.SetValue(text ?? string.Empty);
+        return new UiBackgroundActionResult(Succeeded: true, PatternUsed: "ValuePattern");
+    }
+
+    private UiBackgroundActionResult BackgroundScrollCore(
+        string windowTitle,
+        int delta,
+        bool horizontal,
+        (int X, int Y)? expectedPoint,
+        CancellationToken cancellationToken)
+    {
+        using var dpi = NativeMethods.PhysicalPixelsScope.Enter();
+        cancellationToken.ThrowIfCancellationRequested();
+
+        var root = ResolveBackgroundRoot(windowTitle);
+        if (root is null) return UiBackgroundActionResult.NotSupported;
+
+        var candidates = new List<AutomationElement>(8);
+        candidates.Add(root);
+        try
+        {
+            var cond = new AndCondition(
+                new PropertyCondition(AutomationElement.IsEnabledProperty, true),
+                new PropertyCondition(AutomationElement.IsScrollPatternAvailableProperty, true));
+            var found = root.FindAll(TreeScope.Descendants, cond);
+            if (found is not null)
+            {
+                for (var i = 0; i < found.Count; i++) candidates.Add(found[i]);
+            }
+        }
+        catch
+        {
+            // Keep root fallback if tree search failed.
+        }
+
+        ScrollPattern? best = null;
+        var bestContains = false;
+        var bestMetric = long.MaxValue;
+
+        foreach (var el in candidates)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            try
+            {
+                if (!el.TryGetCurrentPattern(ScrollPattern.Pattern, out var patObj) || patObj is not ScrollPattern sp) continue;
+                var sc = sp.Current;
+                if (horizontal ? !sc.HorizontallyScrollable : !sc.VerticallyScrollable) continue;
+
+                var rect = ToScreenRect(el.Current.BoundingRectangle);
+                if (rect.IsEmpty) continue;
+
+                if (expectedPoint is { } pt)
+                {
+                    var contains = ContainsPoint(rect, pt);
+                    var area = (long)rect.Width * rect.Height;
+                    long dx = rect.CenterX - pt.X;
+                    long dy = rect.CenterY - pt.Y;
+                    var dist = dx * dx + dy * dy;
+
+                    if (best is null
+                        || (contains && !bestContains)
+                        || (contains == bestContains && (contains ? area < bestMetric : dist < bestMetric)))
+                    {
+                        best = sp;
+                        bestContains = contains;
+                        bestMetric = contains ? area : dist;
+                    }
+                }
+                else
+                {
+                    best = sp;
+                    break;
+                }
+            }
+            catch
+            {
+                // Skip unavailable elements.
+            }
+        }
+
+        if (best is null) return UiBackgroundActionResult.NotSupported;
+
+        var notches = Math.Clamp(Math.Max(1, Math.Abs(delta) / 120), 1, 20);
+        if (notches > 1)
+        {
+            var sc = best.Current;
+            var currentPct = horizontal ? sc.HorizontalScrollPercent : sc.VerticalScrollPercent;
+            var viewSize = horizontal ? sc.HorizontalViewSize : sc.VerticalViewSize;
+            if (currentPct is >= 0.0 and <= 100.0)
+            {
+                var sign = horizontal ? (delta >= 0 ? 1.0 : -1.0) : (delta >= 0 ? -1.0 : 1.0);
+                var perNotchPct = Math.Clamp(viewSize is > 0.0 and < 100.0 ? viewSize * 0.25 : 5.0, 2.5, 25.0);
+                var targetPct = Math.Clamp(currentPct + sign * notches * perNotchPct, 0.0, 100.0);
+                if (Math.Abs(targetPct - currentPct) < 0.01)
+                    return new UiBackgroundActionResult(Succeeded: true, PatternUsed: "ScrollPattern");
+
+                try
+                {
+                    if (horizontal) best.SetScrollPercent(targetPct, ScrollPattern.NoScroll);
+                    else best.SetScrollPercent(ScrollPattern.NoScroll, targetPct);
+                    return new UiBackgroundActionResult(Succeeded: true, PatternUsed: "ScrollPattern");
+                }
+                catch (Exception ex) when (ex is InvalidOperationException or ArgumentException)
+                {
+                    // Target control only supports discrete SmallIncrement/SmallDecrement steps.
+                }
+            }
+        }
+
+        // Win32 vertical wheel delta > 0 scrolls up (SmallDecrement); horizontal delta > 0 scrolls right (SmallIncrement).
+        var amount = horizontal
+            ? (delta >= 0 ? ScrollAmount.SmallIncrement : ScrollAmount.SmallDecrement)
+            : (delta >= 0 ? ScrollAmount.SmallDecrement : ScrollAmount.SmallIncrement);
+
+        for (var i = 0; i < notches; i++)
+        {
+            if (horizontal) best.ScrollHorizontal(amount);
+            else best.ScrollVertical(amount);
+        }
+
+        return new UiBackgroundActionResult(Succeeded: true, PatternUsed: "ScrollPattern");
+    }
+
+    private static AutomationElement? FindInteractiveElementAtPoint(
+        AutomationElement root,
+        (int X, int Y) pt,
+        CancellationToken cancellationToken)
+    {
+        AutomationElementCollection? found;
+        try
+        {
+            found = root.FindAll(TreeScope.Descendants, new PropertyCondition(AutomationElement.IsEnabledProperty, true));
+        }
+        catch
+        {
+            return null;
+        }
+
+        if (found is null || found.Count == 0) return null;
+
+        AutomationElement? best = null;
+        var bestArea = long.MaxValue;
+        for (var i = 0; i < found.Count; i++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            try
+            {
+                var el = found[i];
+                var current = el.Current;
+                if (current.IsOffscreen || !current.IsEnabled) continue;
+                var rect = ToScreenRect(current.BoundingRectangle);
+                if (rect.IsEmpty || !ContainsPoint(rect, pt)) continue;
+                if (!SupportsAnyClickPattern(el)) continue;
+
+                var area = (long)rect.Width * rect.Height;
+                if (area < bestArea)
+                {
+                    bestArea = area;
+                    best = el;
+                }
+            }
+            catch
+            {
+                // Skip disappearing elements.
+            }
+        }
+
+        return best;
+    }
+
+    private static bool ContainsPoint(ScreenRect rect, (int X, int Y) pt) =>
+        pt.X >= rect.X && pt.X < rect.X + rect.Width && pt.Y >= rect.Y && pt.Y < rect.Y + rect.Height;
+
+    private static bool SupportsAnyClickPattern(AutomationElement element) =>
+        element.TryGetCurrentPattern(InvokePattern.Pattern, out _)
+        || element.TryGetCurrentPattern(TogglePattern.Pattern, out _)
+        || element.TryGetCurrentPattern(SelectionItemPattern.Pattern, out _);
+
+    private static UiBackgroundActionResult TryExecuteClickPattern(AutomationElement element)
+    {
+        if (!element.Current.IsEnabled)
+            return new UiBackgroundActionResult(Succeeded: false, Error: "Target UI control is disabled.");
+
+        if (element.TryGetCurrentPattern(InvokePattern.Pattern, out var invokeObj) && invokeObj is InvokePattern invoke)
+        {
+            invoke.Invoke();
+            return new UiBackgroundActionResult(Succeeded: true, PatternUsed: "InvokePattern");
+        }
+
+        if (element.TryGetCurrentPattern(TogglePattern.Pattern, out var toggleObj) && toggleObj is TogglePattern toggle)
+        {
+            toggle.Toggle();
+            return new UiBackgroundActionResult(Succeeded: true, PatternUsed: "TogglePattern");
+        }
+
+        if (element.TryGetCurrentPattern(SelectionItemPattern.Pattern, out var selectObj) && selectObj is SelectionItemPattern select)
+        {
+            select.Select();
+            return new UiBackgroundActionResult(Succeeded: true, PatternUsed: "SelectionItemPattern");
+        }
+
+        return UiBackgroundActionResult.NotSupported;
+    }
+
+    private UiElementSnapshot? InspectPointCore(int x, int y, CancellationToken cancellationToken)
     {
         using var dpi = NativeMethods.PhysicalPixelsScope.Enter();
         cancellationToken.ThrowIfCancellationRequested();
@@ -148,10 +502,10 @@ public sealed class UiAutomationService : IUiElementLocator
         if (rootHwnd != IntPtr.Zero)
         {
             NativeMethods.GetWindowThreadProcessId(rootHwnd, out var pid);
-            if (pid == (uint)OwnProcessId) return null; // Never inspect SmartMacro's own windows.
+            if (IsExcludedProcess(pid)) return null; // Never inspect SmartMacro's own windows.
 
-            windowTitle = ReadWindowTitle(rootHwnd);
-            windowProcess = ReadProcessName(pid);
+            windowTitle = CleanField(WindowApi.ReadWindowTitle(rootHwnd, TargetFingerprint.MaxFieldLength));
+            windowProcess = CleanField(WindowApi.ReadProcessName(pid));
             windowBounds = ReadVisibleBounds(rootHwnd);
         }
 
@@ -168,7 +522,7 @@ public sealed class UiAutomationService : IUiElementLocator
             if (element is not null)
             {
                 var info = element.Current;
-                if (info.ProcessId == OwnProcessId) return null;
+                if (!_allowOwnProcess && info.ProcessId == OwnProcessId) return null;
 
                 // If the leaf element is an unnamed icon/text glyph inside a button/tab/menu item, walk up 1–2 levels.
                 if (string.IsNullOrWhiteSpace(info.Name) && string.IsNullOrWhiteSpace(info.AutomationId))
@@ -197,7 +551,7 @@ public sealed class UiAutomationService : IUiElementLocator
 
                 if (string.IsNullOrEmpty(windowProcess) && info.ProcessId > 0)
                 {
-                    windowProcess = ReadProcessName((uint)info.ProcessId);
+                    windowProcess = CleanField(WindowApi.ReadProcessName((uint)info.ProcessId));
                 }
             }
         }
@@ -260,7 +614,7 @@ public sealed class UiAutomationService : IUiElementLocator
         return null;
     }
 
-    private static UiElementMatch? FindCore(
+    private UiElementMatch? FindCore(
         TargetFingerprint target,
         ScreenRect? windowBounds,
         (int X, int Y)? expectedPoint,
@@ -269,41 +623,53 @@ public sealed class UiAutomationService : IUiElementLocator
         using var dpi = NativeMethods.PhysicalPixelsScope.Enter();
         cancellationToken.ThrowIfCancellationRequested();
 
-        var roots = FindCandidateWindowElements(target, windowBounds);
-        if (roots.Count == 0) return null;
+        var roots = FindCandidateWindowElements(target, windowBounds, _allowOwnProcess);
+        foreach (var root in roots)
+        {
+            var hit = FindBestElementByFingerprint(root, target, expectedPoint, requireEnabled: false, cancellationToken);
+            if (hit is { } m)
+                return new UiElementMatch(m.Bounds, m.Confidence, m.MatchedBy);
+        }
 
+        return null;
+    }
+
+    private static (AutomationElement Element, ScreenRect Bounds, double Confidence, string MatchedBy)? FindBestElementByFingerprint(
+        AutomationElement root,
+        TargetFingerprint target,
+        (int X, int Y)? expectedPoint,
+        bool requireEnabled,
+        CancellationToken cancellationToken)
+    {
         var wantedId = target.AutomationId?.Trim();
         var wantedName = target.ElementName?.Trim();
         var wantedType = LookupControlType(target.ControlType);
 
-        foreach (var root in roots)
+        cancellationToken.ThrowIfCancellationRequested();
+
+        // 1. Try AutomationId first (most stable across localizations and dynamic labels).
+        if (!string.IsNullOrEmpty(wantedId))
         {
-            cancellationToken.ThrowIfCancellationRequested();
+            var idCond = BuildCondition(
+                new PropertyCondition(AutomationElement.AutomationIdProperty, wantedId, PropertyConditionFlags.IgnoreCase),
+                wantedType);
+            if (PickBestElement(root, idCond, expectedPoint, requireEnabled, $"#{wantedId}", confidence: 0.98) is { } byId)
+                return byId;
+        }
 
-            // 1. Try AutomationId first (most stable across localizations and dynamic labels).
-            if (!string.IsNullOrEmpty(wantedId))
+        // 2. Try ElementName (+ ControlType when known, then ElementName alone if control wrapper changed).
+        if (!string.IsNullOrEmpty(wantedName))
+        {
+            var nameProp = new PropertyCondition(AutomationElement.NameProperty, wantedName, PropertyConditionFlags.IgnoreCase);
+            if (wantedType is not null)
             {
-                var idCond = BuildCondition(
-                    new PropertyCondition(AutomationElement.AutomationIdProperty, wantedId, PropertyConditionFlags.IgnoreCase),
-                    wantedType);
-                if (PickBestMatch(root, idCond, expectedPoint, $"#{wantedId}", confidence: 0.98) is { } byId)
-                    return byId;
+                var typedNameCond = BuildCondition(nameProp, wantedType);
+                if (PickBestElement(root, typedNameCond, expectedPoint, requireEnabled, $"{target.ControlType} \"{wantedName}\"", confidence: 0.96) is { } byTypedName)
+                    return byTypedName;
             }
 
-            // 2. Try ElementName (+ ControlType when known, then ElementName alone if control wrapper changed).
-            if (!string.IsNullOrEmpty(wantedName))
-            {
-                var nameProp = new PropertyCondition(AutomationElement.NameProperty, wantedName, PropertyConditionFlags.IgnoreCase);
-                if (wantedType is not null)
-                {
-                    var typedNameCond = BuildCondition(nameProp, wantedType);
-                    if (PickBestMatch(root, typedNameCond, expectedPoint, $"{target.ControlType} \"{wantedName}\"", confidence: 0.96) is { } byTypedName)
-                        return byTypedName;
-                }
-
-                if (PickBestMatch(root, nameProp, expectedPoint, $"\"{wantedName}\"", confidence: 0.92) is { } byName)
-                    return byName;
-            }
+            if (PickBestElement(root, nameProp, expectedPoint, requireEnabled, $"\"{wantedName}\"", confidence: 0.92) is { } byName)
+                return byName;
         }
 
         return null;
@@ -314,10 +680,11 @@ public sealed class UiAutomationService : IUiElementLocator
             ? primary
             : new AndCondition(primary, new PropertyCondition(AutomationElement.ControlTypeProperty, controlType));
 
-    private static UiElementMatch? PickBestMatch(
+    private static (AutomationElement Element, ScreenRect Bounds, double Confidence, string MatchedBy)? PickBestElement(
         AutomationElement root,
         UiaCondition condition,
         (int X, int Y)? expectedPoint,
+        bool requireEnabled,
         string matchedBy,
         double confidence)
     {
@@ -333,6 +700,7 @@ public sealed class UiAutomationService : IUiElementLocator
 
         if (found is null || found.Count == 0) return null;
 
+        AutomationElement? bestElement = null;
         ScreenRect bestBounds = default;
         var bestDistance = long.MaxValue;
 
@@ -343,12 +711,13 @@ public sealed class UiAutomationService : IUiElementLocator
                 var candidate = found[i];
                 var current = candidate.Current;
                 if (current.IsOffscreen) continue;
+                if (requireEnabled && !current.IsEnabled) continue;
                 var rect = ToScreenRect(current.BoundingRectangle);
                 if (rect.IsEmpty) continue;
 
                 if (expectedPoint is not { } pt)
                 {
-                    return new UiElementMatch(rect, confidence, matchedBy);
+                    return (candidate, rect, confidence, matchedBy);
                 }
 
                 long dx = rect.CenterX - pt.X;
@@ -357,6 +726,7 @@ public sealed class UiAutomationService : IUiElementLocator
                 if (dist < bestDistance)
                 {
                     bestDistance = dist;
+                    bestElement = candidate;
                     bestBounds = rect;
                 }
             }
@@ -366,20 +736,22 @@ public sealed class UiAutomationService : IUiElementLocator
             }
         }
 
-        return bestBounds.IsEmpty ? null : new UiElementMatch(bestBounds, confidence, matchedBy);
+        return bestElement is null || bestBounds.IsEmpty
+            ? null
+            : (bestElement, bestBounds, confidence, matchedBy);
     }
 
-    private static List<AutomationElement> FindCandidateWindowElements(TargetFingerprint target, ScreenRect? windowBounds)
+    private static List<AutomationElement> FindCandidateWindowElements(TargetFingerprint target, ScreenRect? windowBounds, bool allowOwnProcess)
     {
         var hwnds = new List<(IntPtr Hwnd, int Rank)>();
         var wantedTitle = target.WindowTitle?.Trim() ?? string.Empty;
-        var wantedProc = NormalizeProcessName(target.WindowProcessName);
+        var wantedProc = WindowApi.NormalizeProcessName(target.WindowProcessName);
 
         WindowApi.EnumWindows((hwnd, _) =>
         {
             if (!WindowApi.IsWindowVisible(hwnd) || WindowApi.IsIconic(hwnd)) return true;
             NativeMethods.GetWindowThreadProcessId(hwnd, out var pid);
-            if (pid == (uint)OwnProcessId) return true;
+            if (!allowOwnProcess && pid == (uint)OwnProcessId) return true;
 
             var bounds = ReadVisibleBounds(hwnd);
             if (bounds.IsEmpty) return true;
@@ -390,8 +762,8 @@ public sealed class UiAutomationService : IUiElementLocator
                 return true;
             }
 
-            var proc = NormalizeProcessName(ReadProcessName(pid));
-            var title = ReadWindowTitle(hwnd) ?? string.Empty;
+            var proc = WindowApi.NormalizeProcessName(WindowApi.ReadProcessName(pid));
+            var title = WindowApi.ReadWindowTitle(hwnd, TargetFingerprint.MaxFieldLength) ?? string.Empty;
 
             var exactProc = wantedProc.Length > 0 && string.Equals(proc, wantedProc, StringComparison.OrdinalIgnoreCase);
             var exactTitle = wantedTitle.Length > 0 && string.Equals(title, wantedTitle, StringComparison.OrdinalIgnoreCase);
@@ -433,7 +805,7 @@ public sealed class UiAutomationService : IUiElementLocator
             if (fg != IntPtr.Zero)
             {
                 NativeMethods.GetWindowThreadProcessId(fg, out var fgPid);
-                if (fgPid != (uint)OwnProcessId)
+                if (allowOwnProcess || fgPid != (uint)OwnProcessId)
                 {
                     try { elements.Add(AutomationElement.FromHandle(fg)); } catch { }
                 }
@@ -466,33 +838,6 @@ public sealed class UiAutomationService : IUiElementLocator
         return WindowApi.GetWindowRect(hwnd, out var rect) && rect.Right > rect.Left && rect.Bottom > rect.Top
             ? new ScreenRect(rect.Left, rect.Top, rect.Right - rect.Left, rect.Bottom - rect.Top)
             : default;
-    }
-
-    private static string? ReadWindowTitle(IntPtr hwnd)
-    {
-        var length = WindowApi.GetWindowTextLength(hwnd);
-        if (length <= 0) return null;
-        var sb = new StringBuilder(Math.Min(length + 1, TargetFingerprint.MaxFieldLength + 1));
-        WindowApi.GetWindowText(hwnd, sb, sb.Capacity);
-        return CleanField(sb.ToString());
-    }
-
-    private static string? ReadProcessName(uint pid)
-    {
-        if (pid == 0) return null;
-        var handle = WindowApi.OpenProcess(WindowApi.PROCESS_QUERY_LIMITED_INFORMATION, false, pid);
-        if (handle == IntPtr.Zero) return null;
-        try
-        {
-            var buffer = new StringBuilder(1024);
-            var size = buffer.Capacity;
-            if (!WindowApi.QueryFullProcessImageName(handle, 0, buffer, ref size)) return null;
-            return CleanField(Path.GetFileNameWithoutExtension(buffer.ToString(0, size)));
-        }
-        finally
-        {
-            WindowApi.CloseHandle(handle);
-        }
     }
 
     private static ScreenRect ToScreenRect(System.Windows.Rect rect)
@@ -546,13 +891,6 @@ public sealed class UiAutomationService : IUiElementLocator
         return trimmed.Length <= TargetFingerprint.MaxFieldLength
             ? trimmed
             : trimmed[..TargetFingerprint.MaxFieldLength];
-    }
-
-    private static string NormalizeProcessName(string? name)
-    {
-        if (string.IsNullOrWhiteSpace(name)) return string.Empty;
-        var trimmed = name.Trim();
-        return trimmed.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) ? trimmed[..^4] : trimmed;
     }
 
     [DllImport("user32.dll")]

@@ -326,11 +326,19 @@
                         </StackPanel>
 
                         <StackPanel Margin="0,10,0,0">
-                            <TextBlock Text="👻 Background window title (optional — PostMessage click without moving cursor)" Style="{StaticResource FieldLabel}" />
+                            <TextBlock Text="👻 Background window title (optional — click without moving cursor)" Style="{StaticResource FieldLabel}" />
                             <TextBox Text="{Binding BackgroundWindowTitle, UpdateSourceTrigger=PropertyChanged}"
                                      Tag="Leave empty for normal physical cursor click, or enter window title / process…"
                                      MaxLength="120" Margin="0,4,0,0"
                                      AutomationProperties.Name="Background window title" />
+                            <StackPanel Visibility="{Binding HasBackgroundTarget, Converter={StaticResource BoolToVisibility}}" Margin="0,8,0,0">
+                                <TextBlock Text="Background delivery method" Style="{StaticResource FieldLabel}" Margin="0,0,0,4" />
+                                <ListBox ItemsSource="{x:Static steps:MouseClickStepViewModel.BackgroundBackends}"
+                                         DisplayMemberPath="Label" SelectedValuePath="Value"
+                                         SelectedValue="{Binding BackgroundBackend}"
+                                         Style="{StaticResource ChoiceChipListBoxStyle}"
+                                         AutomationProperties.Name="Background delivery method" />
+                            </StackPanel>
                         </StackPanel>
                     </StackPanel>
                 </Border>
@@ -548,11 +556,19 @@
                                                   AutomationProperties.Name="Delay between characters in milliseconds" />
 
                         <StackPanel Margin="0,10,0,0">
-                            <TextBlock Text="👻 Background window title (optional — PostMessage text without switching focus)" Style="{StaticResource FieldLabel}" />
+                            <TextBlock Text="👻 Background window title (optional — type without switching focus)" Style="{StaticResource FieldLabel}" />
                             <TextBox Text="{Binding BackgroundWindowTitle, UpdateSourceTrigger=PropertyChanged}"
                                      Tag="Leave empty for normal active typing, or enter window title / process…"
                                      MaxLength="120" Margin="0,4,0,0"
                                      AutomationProperties.Name="Background window title" />
+                            <StackPanel Visibility="{Binding HasBackgroundTarget, Converter={StaticResource BoolToVisibility}}" Margin="0,8,0,0">
+                                <TextBlock Text="Background delivery method" Style="{StaticResource FieldLabel}" Margin="0,0,0,4" />
+                                <ListBox ItemsSource="{x:Static steps:TypeTextStepViewModel.BackgroundBackends}"
+                                         DisplayMemberPath="Label" SelectedValuePath="Value"
+                                         SelectedValue="{Binding BackgroundBackend}"
+                                         Style="{StaticResource ChoiceChipListBoxStyle}"
+                                         AutomationProperties.Name="Background delivery method" />
+                            </StackPanel>
                         </StackPanel>
                     </StackPanel>
                 </Border>

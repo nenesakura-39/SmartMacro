@@ -154,6 +154,10 @@ public interface IOcrService
     /// <summary>Captures the given screen area, applies the requested preprocessing mode, and reads its text.</summary>
     Task<OcrReadResult> ReadAsync(ScreenRect region, OcrPreprocessMode preprocess, CancellationToken cancellationToken) =>
         ReadAsync(region, cancellationToken);
+
+    /// <summary>Captures <paramref name="region"/> from a specific top-level window (<paramref name="windowHandle"/>) when supported and reads its text.</summary>
+    Task<OcrReadResult> ReadWindowAsync(long windowHandle, ScreenRect region, CancellationToken cancellationToken) =>
+        ReadAsync(region, cancellationToken);
 }
 
 public sealed class OcrUnavailableException : Exception

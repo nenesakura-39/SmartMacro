@@ -410,4 +410,131 @@ internal static class WindowApi
     [DllImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     public static extern bool CloseHandle(IntPtr hObject);
+
+    private static readonly uint OwnProcessId = (uint)Environment.ProcessId;
+
+    public static string NormalizeProcessName(string? name)
+    {
+        if (string.IsNullOrWhiteSpace(name)) return string.Empty;
+        var trimmed = name.Trim();
+        return trimmed.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) ? trimmed[..^4] : trimmed;
+    }
+
+    public static string? ReadWindowTitle(IntPtr hwnd, int maxLength = 512)
+    {
+        var length = GetWindowTextLength(hwnd);
+        if (length <= 0) return null;
+        var capacity = maxLength > 0 ? Math.Min(length + 1, maxLength + 1) : length + 1;
+        var sb = new StringBuilder(capacity);
+        GetWindowText(hwnd, sb, sb.Capacity);
+        var trimmed = sb.ToString().Trim();
+        if (trimmed.Length == 0) return null;
+        return maxLength > 0 && trimmed.Length > maxLength ? trimmed[..maxLength] : trimmed;
+    }
+
+    public static string? ReadProcessName(uint pid)
+    {
+        if (pid == 0) return null;
+        var handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid);
+        if (handle == IntPtr.Zero) return null;
+        try
+        {
+            var buffer = new StringBuilder(1024);
+            var size = buffer.Capacity;
+            if (!QueryFullProcessImageName(handle, 0, buffer, ref size)) return null;
+            var name = Path.GetFileNameWithoutExtension(buffer.ToString(0, size)).Trim();
+            return name.Length == 0 ? null : name;
+        }
+        finally
+        {
+            CloseHandle(handle);
+        }
+    }
+
+    /// <summary>
+    /// Finds a visible top-level window matching <paramref name="query"/>, ranking exact title matches above
+    /// substring title matches and process names (without arbitrary candidate limits), preferring non-minimized windows.
+    /// </summary>
+    public static IntPtr FindTopLevelWindow(string? query, bool allowOwnProcess = false)
+    {
+        if (string.IsNullOrWhiteSpace(query)) return IntPtr.Zero;
+        var wanted = query.Trim();
+        var wantedProc = NormalizeProcessName(wanted);
+
+        IntPtr exactTitleMatch = IntPtr.Zero;
+        IntPtr substringTitleMatch = IntPtr.Zero;
+        IntPtr minimizedExactTitleMatch = IntPtr.Zero;
+        IntPtr minimizedSubstringTitleMatch = IntPtr.Zero;
+        var processCandidates = new List<(IntPtr Hwnd, uint Pid, bool Minimized)>(64);
+
+        EnumWindows((hwnd, _) =>
+        {
+            if (!IsWindowVisible(hwnd)) return true;
+            NativeMethods.GetWindowThreadProcessId(hwnd, out var pid);
+            if (pid == 0 || (!allowOwnProcess && pid == OwnProcessId)) return true;
+
+            var minimized = IsIconic(hwnd);
+            var title = ReadWindowTitle(hwnd, maxLength: 0);
+            if (!string.IsNullOrEmpty(title))
+            {
+                if (string.Equals(title, wanted, StringComparison.OrdinalIgnoreCase))
+                {
+                    if (!minimized)
+                    {
+                        exactTitleMatch = hwnd;
+                        return false; // best possible match found immediately
+                    }
+
+                    if (minimizedExactTitleMatch == IntPtr.Zero)
+                        minimizedExactTitleMatch = hwnd;
+                }
+                else if (title.Contains(wanted, StringComparison.OrdinalIgnoreCase))
+                {
+                    if (!minimized && substringTitleMatch == IntPtr.Zero)
+                        substringTitleMatch = hwnd;
+                    else if (minimized && minimizedSubstringTitleMatch == IntPtr.Zero)
+                        minimizedSubstringTitleMatch = hwnd;
+                }
+            }
+
+            // Collect untitled visible top-level windows too so process-name matching still finds them.
+            processCandidates.Add((hwnd, pid, minimized));
+            return true;
+        }, IntPtr.Zero);
+
+        if (exactTitleMatch != IntPtr.Zero) return exactTitleMatch;
+        if (substringTitleMatch != IntPtr.Zero) return substringTitleMatch;
+        if (minimizedExactTitleMatch != IntPtr.Zero) return minimizedExactTitleMatch;
+        if (minimizedSubstringTitleMatch != IntPtr.Zero) return minimizedSubstringTitleMatch;
+
+        IntPtr exactProcMinimized = IntPtr.Zero;
+        IntPtr substringProcActive = IntPtr.Zero;
+        IntPtr substringProcMinimized = IntPtr.Zero;
+        var pidCache = new Dictionary<uint, string?>();
+
+        foreach (var (hwnd, pid, minimized) in processCandidates)
+        {
+            if (!pidCache.TryGetValue(pid, out var procName))
+            {
+                procName = NormalizeProcessName(ReadProcessName(pid));
+                pidCache[pid] = procName;
+            }
+
+            if (string.IsNullOrEmpty(procName)) continue;
+            if (string.Equals(procName, wantedProc, StringComparison.OrdinalIgnoreCase))
+            {
+                if (!minimized) return hwnd;
+                if (exactProcMinimized == IntPtr.Zero) exactProcMinimized = hwnd;
+            }
+            else if (wantedProc.Length > 0 && procName.Contains(wantedProc, StringComparison.OrdinalIgnoreCase))
+            {
+                if (!minimized && substringProcActive == IntPtr.Zero) substringProcActive = hwnd;
+                else if (minimized && substringProcMinimized == IntPtr.Zero) substringProcMinimized = hwnd;
+            }
+        }
+
+        if (exactProcMinimized != IntPtr.Zero) return exactProcMinimized;
+        if (substringProcActive != IntPtr.Zero) return substringProcActive;
+        return substringProcMinimized;
+    }
 }

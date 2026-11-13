@@ -78,4 +78,63 @@ public static class KeyboardInputEncoder
         if (extended) flags |= ExtendedKeyFlag;
         return new KeyboardInputFields(0, (ushort)scanCode, flags);
     }
+
+    /// <summary>
+    /// Builds the Win32 <c>lParam</c> bitfield expected by <c>WM_KEYDOWN</c> and <c>WM_KEYUP</c>
+    /// (repeat count in bits 0..15, OEM scan code in bits 16..23, extended-key bit 24, and previous/transition bits 30–31 on release).
+    /// </summary>
+    public static int BuildMessageLParam(int scanCode, bool extended, bool down, int repeatCount = 1)
+    {
+        var lParam = (repeatCount & 0xFFFF) | ((scanCode & 0xFF) << 16);
+        if (extended) lParam |= 1 << 24;
+        if (!down) lParam |= unchecked((int)0xC0000000);
+        return lParam;
+    }
+
+    /// <summary>One logical background typing unit (normalized newline, BMP character, or UTF-16 surrogate pair).</summary>
+    public readonly record struct BackgroundTextToken(bool IsNewline, char Char1, char Char2, int Utf32CodePoint)
+    {
+        public bool IsSurrogatePair => Char2 != '\0';
+    }
+
+    /// <summary>
+    /// Splits <paramref name="text"/> into coherent background-typing tokens so <c>\r\n</c> produces one Enter press
+    /// and UTF-16 surrogate pairs stay together with their decoded UTF-32 code point.
+    /// </summary>
+    public static IReadOnlyList<BackgroundTextToken> SplitBackgroundText(string text)
+    {
+        ArgumentNullException.ThrowIfNull(text);
+        if (text.Length == 0) return Array.Empty<BackgroundTextToken>();
+
+        var tokens = new List<BackgroundTextToken>(text.Length);
+        for (var i = 0; i < text.Length; i++)
+        {
+            var ch = text[i];
+            if (ch == '\r')
+            {
+                if (i + 1 < text.Length && text[i + 1] == '\n') i++;
+                tokens.Add(new BackgroundTextToken(IsNewline: true, '\n', '\0', '\n'));
+                continue;
+            }
+
+            if (ch == '\n')
+            {
+                tokens.Add(new BackgroundTextToken(IsNewline: true, '\n', '\0', '\n'));
+                continue;
+            }
+
+            if (char.IsSurrogatePair(text, i))
+            {
+                var low = text[i + 1];
+                var utf32 = char.ConvertToUtf32(ch, low);
+                tokens.Add(new BackgroundTextToken(IsNewline: false, ch, low, utf32));
+                i++;
+                continue;
+            }
+
+            tokens.Add(new BackgroundTextToken(IsNewline: false, ch, '\0', ch));
+        }
+
+        return tokens;
+    }
 }

@@ -20,6 +20,12 @@ public sealed record UiElementSnapshot(
 /// </summary>
 public sealed record UiElementMatch(ScreenRect Bounds, double Confidence, string MatchedBy);
 
+/// <summary>Result of executing a background UI Automation control pattern action without stealing focus.</summary>
+public readonly record struct UiBackgroundActionResult(bool Succeeded, string? PatternUsed = null, string? Error = null)
+{
+    public static UiBackgroundActionResult NotSupported => default;
+}
+
 /// <summary>
 /// Finds desktop/web UI controls via accessibility APIs. The Windows implementation uses built-in UI Automation
 /// (<c>System.Windows.Automation</c>) with strict timeouts; unit tests supply a fast fake.
@@ -44,4 +50,36 @@ public interface IUiElementLocator
         ScreenRect? windowBounds,
         (int X, int Y)? expectedPoint,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Activates a control in a background window using UI Automation (<c>InvokePattern</c>, <c>TogglePattern</c>, or
+    /// <c>SelectionItemPattern</c>) without moving the physical cursor or stealing foreground focus.
+    /// </summary>
+    Task<UiBackgroundActionResult> TryBackgroundClickAsync(
+        string windowTitle,
+        TargetFingerprint? target,
+        (int X, int Y)? expectedPoint,
+        CancellationToken cancellationToken = default) =>
+        Task.FromResult(UiBackgroundActionResult.NotSupported);
+
+    /// <summary>
+    /// Sets text on an enabled writable control in a background window via UI Automation <c>ValuePattern.SetValue</c>
+    /// without stealing foreground focus.
+    /// </summary>
+    Task<UiBackgroundActionResult> TryBackgroundSetValueAsync(
+        string windowTitle,
+        string text,
+        CancellationToken cancellationToken = default) =>
+        Task.FromResult(UiBackgroundActionResult.NotSupported);
+
+    /// <summary>
+    /// Scrolls a scrollable container inside a background window via UI Automation <c>ScrollPattern</c> without stealing focus.
+    /// </summary>
+    Task<UiBackgroundActionResult> TryBackgroundScrollAsync(
+        string windowTitle,
+        int delta,
+        bool horizontal,
+        (int X, int Y)? expectedPoint,
+        CancellationToken cancellationToken = default) =>
+        Task.FromResult(UiBackgroundActionResult.NotSupported);
 }

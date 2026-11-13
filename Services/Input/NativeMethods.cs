@@ -43,6 +43,9 @@ internal static class NativeMethods
     public const int WM_KEYUP = 0x0101;
     public const int WM_CHAR = 0x0102;
     public const int WM_SYSKEYDOWN = 0x0104;
+    public const int WM_UNICHAR = 0x0109;
+    public static readonly IntPtr UNICODE_NOCHAR = new(0xFFFF);
+    public const uint SMTO_ABORTIFHUNG = 0x0002;
 
     public const int VK_SHIFT = 0x10;
     public const int VK_CONTROL = 0x11;
@@ -647,6 +650,11 @@ internal static class NativeMethods
     [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     public static extern bool PostMessage(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    public static extern IntPtr SendMessageTimeout(
+        IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam,
+        uint fuFlags, uint uTimeout, out IntPtr lpdwResult);
 
     [DllImport("user32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
