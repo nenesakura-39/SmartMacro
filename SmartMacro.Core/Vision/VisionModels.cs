@@ -25,6 +25,10 @@ public static class HardwareAccelerationInfo
     private static bool _gpuAvailable;
     private static string _gpuAdapterName = "";
     private static int _gpuDedicatedVramMb;
+    private static string _captureBackend = "GDI BitBlt";
+
+    /// <summary>Raised outside the lock whenever <see cref="Configure"/> updates the active compute mode or RAM budget.</summary>
+    public static event Action? SettingsChanged;
 
     public static bool IsAvx2Supported => Avx2.IsSupported;
 
@@ -59,6 +63,28 @@ public static class HardwareAccelerationInfo
         get { lock (Sync) return _gpuDedicatedVramMb; }
     }
 
+    public static string RegisteredCaptureBackend
+    {
+        get { lock (Sync) return _captureBackend; }
+    }
+
+    /// <summary>
+    /// Active screen-capture backend after applying the current compute mode and GPU availability.
+    /// Zero-GPU mode (<see cref="HardwareAccelerationMode.CpuOnly"/>) or missing D3D11 GPUs always fall back to GDI BitBlt.
+    /// </summary>
+    public static string EffectiveCaptureBackend
+    {
+        get
+        {
+            lock (Sync)
+            {
+                if (_computeMode == HardwareAccelerationMode.CpuOnly || !_gpuAvailable)
+                    return "GDI BitBlt";
+                return string.IsNullOrWhiteSpace(_captureBackend) ? "GDI BitBlt" : _captureBackend;
+            }
+        }
+    }
+
     /// <summary>True when GPU acceleration is both requested/auto-selected and backed by a hardware D3D11 adapter.</summary>
     public static bool IsGpuActive
     {
@@ -80,6 +106,15 @@ public static class HardwareAccelerationInfo
         }
     }
 
+    /// <summary>Registers the initialized capture service backend name (e.g. "WGC / D3D11" or "GDI BitBlt").</summary>
+    public static void RegisterCaptureBackend(string? backendName)
+    {
+        lock (Sync)
+        {
+            _captureBackend = string.IsNullOrWhiteSpace(backendName) ? "GDI BitBlt" : backendName.Trim();
+        }
+    }
+
     /// <summary>Applies user compute mode and RAM cache budget immediately.</summary>
     public static void Configure(HardwareAccelerationMode mode, int memoryLimitMb)
     {
@@ -90,6 +125,7 @@ public static class HardwareAccelerationInfo
             _memoryLimitMb = clampedMb;
         }
         TemplateCache.Shared.ConfigureMemoryBudget(clampedMb);
+        SettingsChanged?.Invoke();
     }
 
     /// <summary>
@@ -113,6 +149,7 @@ public static class HardwareAccelerationInfo
             bool gpu;
             string gpuName;
             int vramMb;
+            string captureBackend;
             lock (Sync)
             {
                 mode = _computeMode;
@@ -120,6 +157,7 @@ public static class HardwareAccelerationInfo
                 gpu = _gpuAvailable;
                 gpuName = _gpuAdapterName;
                 vramMb = _gpuDedicatedVramMb;
+                captureBackend = _captureBackend;
             }
 
             var gpuPart = mode == HardwareAccelerationMode.CpuOnly
@@ -130,7 +168,11 @@ public static class HardwareAccelerationInfo
                         ? "GPU requested (D3D11 adapter unavailable · SIMD fallback)"
                         : "Auto (CPU SIMD)";
 
-            return $"{gpuPart} · {SimdTierName} · {LogicalProcessorCount} cores (up to {MaxVisionWorkers} worker(s)) · {ramMb} MB RAM cache.";
+            var capturePart = mode == HardwareAccelerationMode.CpuOnly || !gpu || string.IsNullOrWhiteSpace(captureBackend)
+                ? "GDI BitBlt"
+                : captureBackend;
+
+            return $"{gpuPart} · Capture: {capturePart} · {SimdTierName} · {LogicalProcessorCount} cores (up to {MaxVisionWorkers} worker(s)) · {ramMb} MB RAM cache.";
         }
     }
 }
@@ -167,6 +209,22 @@ public interface IScreenCapture
     /// Wrappers (decorators) should pass the inner capture's value on.
     /// </summary>
     bool PrefersSmallCaptures => false;
+
+    /// <summary>
+    /// Monotonically increasing compositor frame sequence when backed by a streaming capture source (such as WGC);
+    /// returns <c>0</c> for stateless captures (GDI BitBlt, test doubles).
+    /// </summary>
+    long LatestFrameSequence => 0;
+
+    /// <summary>
+    /// Optional notification raised when a streaming compositor frame arrives; default implementation is a no-op so
+    /// stateless capture implementations and test doubles remain unchanged.
+    /// </summary>
+    event Action? FrameUpdated
+    {
+        add { }
+        remove { }
+    }
 }
 
 /// <summary>Thrown when an image / colour / text is not found (or doesn't go away) in time.</summary>

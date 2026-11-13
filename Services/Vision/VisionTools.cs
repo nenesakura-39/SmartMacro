@@ -139,7 +139,7 @@ public sealed class VisionTools : IVisionTools
     private static readonly TimeSpan LivePreviewRefresh = TimeSpan.FromMilliseconds(100);
 
     private readonly Window _mainWindow;
-    private readonly GdiScreenCapture _capture;
+    private readonly IScreenCapture _capture;
     private readonly string _logsDirectory;
     private readonly IScreenLayout? _layout;
     private readonly IOcrService? _ocr;
@@ -156,7 +156,7 @@ public sealed class VisionTools : IVisionTools
     /// <param name="uiLocator">Windows UI Automation locator for Smart Intent "Locate Target" diagnostics (optional).</param>
     public VisionTools(
         Window mainWindow,
-        GdiScreenCapture capture,
+        IScreenCapture capture,
         string logsDirectory,
         IScreenLayout? layout = null,
         IOcrService? ocr = null,
@@ -249,7 +249,7 @@ public sealed class VisionTools : IVisionTools
         if (FromFrozen(picked) is { } frozenPart) return (CapturedTemplate?)new CapturedTemplate(frozenPart.Bounds, frozenPart.Image);
 
         await Task.Delay(OverlayFadeMs);
-        var frame = _capture.Capture(picked.Rect);
+        var frame = CaptureSync(picked.Rect);
         return (CapturedTemplate?)new CapturedTemplate(frame.Bounds, frame.Image);
     });
 
@@ -264,7 +264,7 @@ public sealed class VisionTools : IVisionTools
             return (PickedColor?)new PickedColor(frozenPixel.Bounds.X, frozenPixel.Bounds.Y, frozenPixel.Image.GetPixel(0, 0));
 
         await Task.Delay(OverlayFadeMs);
-        var frame = _capture.Capture(point);
+        var frame = CaptureSync(point);
         return (PickedColor?)new PickedColor(point.X, point.Y, frame.Image.GetPixel(0, 0));
     });
 
@@ -305,12 +305,12 @@ public sealed class VisionTools : IVisionTools
                 SmartAimHit? found = null;
                 double bestScore = 0;
                 if (local.Width >= template.Width && local.Height >= template.Height)
-                    (found, bestScore) = SmartAim.Locate(step, template, _capture.Capture(local));
+                    (found, bestScore) = SmartAim.Locate(step, template, CaptureSync(local));
                 var foundNearby = found is not null;
                 if (found is null)
                 {
                     // Not where playback would look: try the whole desktop, so the test can say how far it really moved.
-                    var (anywhere, anywhereBest) = SmartAim.Locate(step, template, _capture.Capture(screen));
+                    var (anywhere, anywhereBest) = SmartAim.Locate(step, template, CaptureSync(screen));
                     found = anywhere;
                     bestScore = Math.Max(bestScore, anywhereBest);
                 }
@@ -1109,7 +1109,7 @@ public sealed class VisionTools : IVisionTools
         while (watch.Elapsed < duration)
         {
             var t0 = watch.Elapsed;
-            var frame = _capture.Capture(region);
+            var frame = CaptureSync(region);
             var t1 = watch.Elapsed;
             var reading = tracker.Update(frame.Image);
             var t2 = watch.Elapsed;
@@ -1159,9 +1159,16 @@ public sealed class VisionTools : IVisionTools
     private (ScreenFrame Frame, TimeSpan Time) TimedCapture(ScreenRect region)
     {
         var watch = Stopwatch.StartNew();
-        var frame = _capture.Capture(region);
+        var frame = CaptureSync(region);
         return (frame, watch.Elapsed);
     }
+
+    private ScreenFrame CaptureSync(ScreenRect region) => _capture switch
+    {
+        WindowsGraphicsCaptureService wgc => wgc.Capture(region),
+        GdiScreenCapture gdi => gdi.Capture(region),
+        _ => _capture.CaptureAsync(region, CancellationToken.None).GetAwaiter().GetResult(),
+    };
 
     private static ScreenRect Grow(ScreenRect rect, int by) =>
         new(rect.X - by, rect.Y - by, rect.Width + by * 2, rect.Height + by * 2);

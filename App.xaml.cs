@@ -25,6 +25,7 @@ public partial class App : Application
     private SystemTrayService? _tray;
     private RunModeHost? _runHost;
     private PrecisePlaybackClock? _playbackClock;
+    private WindowsGraphicsCaptureService? _screenCapture;
 
     // Only one SmartMacro may run at a time (two copies would fight over shortcuts and input hooks).
     private const string SingleInstanceName = @"Local\SmartMacro.SingleInstance";
@@ -144,11 +145,15 @@ public partial class App : Application
         var ocr = new WindowsOcrService();
         _log.Info(ocr.StatusText);
         Services.Vision.GpuAccelerator.Initialize();
-        _log.Info(Core.Vision.HardwareAccelerationInfo.StatusText);
         _playbackClock = new PrecisePlaybackClock();
         if (!_playbackClock.HasHighResolutionTimer)
             _log.Warning("High-resolution timer isn't available on this Windows version; playback timing falls back to 1 ms steps.");
-        var screenCapture = new GdiScreenCapture();
+        var screenCapture = new WindowsGraphicsCaptureService(
+            logInfo: msg => _log?.Info(msg),
+            logWarning: (msg, ex) => _log?.Warning(ex is null ? msg : $"{msg} ({ex.Message})"));
+        _screenCapture = screenCapture;
+        _runHost.Exited += (_, _) => _screenCapture?.ReleaseIdleSessions(forceAll: true);
+        _log.Info(Core.Vision.HardwareAccelerationInfo.StatusText);
         var screenInfo = new ScreenInfoProvider(); // monitors + app windows for "where to look"
         var uiAutomation = new Services.Automation.UiAutomationService();
         var automation = new AutomationServices(
@@ -249,7 +254,11 @@ public partial class App : Application
         mainViewModel.Automation.PropertyChanged += (_, e) =>
         {
             if (e.PropertyName is nameof(AutomationViewModel.IsPlaying) or "")
+            {
                 _hotkeys?.SetPauseActive(mainViewModel.Automation.IsPlaying);
+                if (!mainViewModel.Automation.IsPlaying)
+                    _screenCapture?.ReleaseIdleSessions(forceAll: true);
+            }
         };
         mainViewModel.SettingsApplied += (_, settings) =>
         {
@@ -464,6 +473,8 @@ public partial class App : Application
         _runHost?.Dispose();
         _mainViewModel?.Dispose();
         _playbackClock?.Dispose();
+        _screenCapture?.Dispose();
+        _screenCapture = null;
         ScreenCapture.ReleaseAllResources(); // the two shared, lock-protected GDI capture buffers
         DispatcherUnhandledException -= OnDispatcherUnhandledException;
         AppDomain.CurrentDomain.UnhandledException -= OnDomainUnhandledException;

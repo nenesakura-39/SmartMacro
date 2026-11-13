@@ -104,6 +104,9 @@ public sealed class RunModeHost : IRunModeHost, IDisposable
 
     public event EventHandler? StopRequested;
 
+    /// <summary>Raised when playback mode exits and temporary capture overlays/handles can be torn down.</summary>
+    public event EventHandler? Exited;
+
     public void Enter(OverlayKind kind, string text, string? counter = null) =>
         Enter(kind, text, counter, suppressWindowFocus: false);
 
@@ -198,6 +201,8 @@ public sealed class RunModeHost : IRunModeHost, IDisposable
             _mainWindow.Activate();
             _minimizedByUs = false;
         }
+
+        Exited?.Invoke(this, EventArgs.Empty);
     }
 
     public void Dispose()

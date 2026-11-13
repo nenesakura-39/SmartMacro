@@ -423,8 +423,16 @@ public sealed class OverlayAwareScreenCapture : IScreenCapture
 
     public ScreenRect GetVirtualScreen() => _inner.GetVirtualScreen();
 
-    /// <summary>Same as the wrapped capture (GDI: true), so the Hot-Spot fast path captures only the small spot.</summary>
+    /// <summary>Same as the wrapped capture (WGC / GDI: true), so the Hot-Spot fast path captures only the small spot.</summary>
     public bool PrefersSmallCaptures => _inner.PrefersSmallCaptures;
+
+    public long LatestFrameSequence => _inner.LatestFrameSequence;
+
+    public event Action? FrameUpdated
+    {
+        add => _inner.FrameUpdated += value;
+        remove => _inner.FrameUpdated -= value;
+    }
 
     public Task<ScreenFrame> CaptureAsync(ScreenRect region, CancellationToken cancellationToken)
     {
