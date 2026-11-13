@@ -982,7 +982,10 @@ public sealed class AutomationViewModel : ObservableObject, IDisposable
 
             _runStartedUtc = DateTime.UtcNow;
             _progressTimer.Start();
-            _engine.SmoothMouseMoves = _hooks.Settings().SmoothMouseMoves;
+            var runSettings = _hooks.Settings();
+            _engine.SmoothMouseMoves = runSettings.SmoothMouseMoves;
+            _engine.AllowLocalWebhooks = runSettings.AllowLocalWebhooks;
+            _engine.FailureWebhookUrl = runSettings.FailureWebhookUrl;
             using (new HighResolutionTimerScope())
             {
                 result = range switch

@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using SmartMacro.Core.Models;
+using SmartMacro.Core.Network;
 using SmartMacro.Core.Vision;
 using SmartMacro.Mvvm;
 using SmartMacro.Services.Vision;
@@ -313,6 +314,7 @@ public sealed class ScreenshotStepViewModel : StepViewModel
     private readonly ScreenshotStep _step;
     private IVisionTools? _tools;
     private IScreenLayout? _layout;
+    private Func<bool>? _allowLocalWebhooks;
     private string? _testResult;
     private bool _isBusy;
 
@@ -325,6 +327,7 @@ public sealed class ScreenshotStepViewModel : StepViewModel
         UseDefaultFolderCommand = new RelayCommand(() => FolderPath = string.Empty);
         OpenFolderCommand = new RelayCommand(OpenFolder);
         TestSoundCueCommand = new RelayCommand(() => Services.Audio.StudioSoundCuePlayer.Play(_step.SoundCue), () => _step.SoundCue != SoundCueKind.None);
+        TestWebhookCommand = new AsyncRelayCommand(TestWebhookAsync, ex => TestResult = ex.Message, () => !_isBusy && !string.IsNullOrWhiteSpace(_step.WebhookUrl));
     }
 
     public IVisionTools? Tools
@@ -347,12 +350,23 @@ public sealed class ScreenshotStepViewModel : StepViewModel
         }
     }
 
+    public Func<bool>? AllowLocalWebhooks
+    {
+        get => _allowLocalWebhooks;
+        set
+        {
+            _allowLocalWebhooks = value;
+            OnPropertyChanged(nameof(WebhookLocalWarning));
+        }
+    }
+
     public AsyncRelayCommand PickAreaCommand { get; }
     public RelayCommand RefreshWindowsCommand { get; }
     public RelayCommand ChooseFolderCommand { get; }
     public RelayCommand UseDefaultFolderCommand { get; }
     public RelayCommand OpenFolderCommand { get; }
     public RelayCommand TestSoundCueCommand { get; }
+    public AsyncRelayCommand TestWebhookCommand { get; }
 
     public static IReadOnlyList<Choice<SoundCueKind>> SoundCueChoices { get; } = new[]
     {
@@ -503,6 +517,36 @@ public sealed class ScreenshotStepViewModel : StepViewModel
             if (_step.WebhookUrl == normalized) return;
             _step.WebhookUrl = normalized;
             NotifyChanged();
+            OnPropertyChanged(nameof(WebhookLocalWarning));
+            System.Windows.Input.CommandManager.InvalidateRequerySuggested();
+        }
+    }
+
+    public bool AttachScreenshot
+    {
+        get => _step.AttachScreenshot;
+        set
+        {
+            if (_step.AttachScreenshot == value) return;
+            _step.AttachScreenshot = value;
+            NotifyChanged();
+        }
+    }
+
+    public string? WebhookLocalWarning
+    {
+        get
+        {
+            if (string.IsNullOrWhiteSpace(_step.WebhookUrl))
+                return null;
+
+            if (!WebhookSecurity.ValidateUrlSyntax(_step.WebhookUrl, allowLocalNetwork: true, out var uri, out _))
+                return null;
+
+            if (uri is not null && WebhookSecurity.IsLocalHostOrLiteral(uri) && _allowLocalWebhooks?.Invoke() != true)
+                return "Local/private webhook is blocked until 'Allow local network webhooks' is enabled in Settings.";
+
+            return null;
         }
     }
 
@@ -572,5 +616,63 @@ public sealed class ScreenshotStepViewModel : StepViewModel
             _isBusy = false;
             System.Windows.Input.CommandManager.InvalidateRequerySuggested();
         }
+    }
+
+    private async Task TestWebhookAsync()
+    {
+        if (_isBusy || string.IsNullOrWhiteSpace(_step.WebhookUrl))
+            return;
+
+        _isBusy = true;
+        System.Windows.Input.CommandManager.InvalidateRequerySuggested();
+        TestResult = "Sending test webhook…";
+        try
+        {
+            var allowLocal = _allowLocalWebhooks?.Invoke() ?? false;
+            var msg = string.IsNullOrWhiteSpace(_step.NotificationMessage)
+                ? "🧪 SmartMacro test webhook — connection verified."
+                : _step.NotificationMessage.Trim();
+
+            var payload = new WebhookMessagePayload
+            {
+                Content = msg,
+                Title = "🧪 SmartMacro Webhook Test",
+                Details = _step.AttachScreenshot ? "Sample 16×16 test PNG attached." : null,
+                EmbedColor = 0x4ADE80,
+                AttachmentBytes = _step.AttachScreenshot ? BuildSampleTestPngBytes() : null,
+                AttachmentFileName = _step.AttachScreenshot ? "smartmacro-test.png" : null,
+            };
+
+            var result = await WebhookDeliveryService.Shared.SendAsync(
+                _step.WebhookUrl,
+                payload,
+                allowLocal,
+                bypassRateLimit: true).ConfigureAwait(true);
+
+            TestResult = result.Success
+                ? $"✓ {result.Message}"
+                : $"⚠ {result.Message}";
+        }
+        finally
+        {
+            _isBusy = false;
+            System.Windows.Input.CommandManager.InvalidateRequerySuggested();
+        }
+    }
+
+    private static byte[] BuildSampleTestPngBytes()
+    {
+        const int size = 16;
+        var pixels = new byte[size * size * 4];
+        for (var i = 0; i < pixels.Length; i += 4)
+        {
+            // BGRA cyan-teal test badge (#22D3EE)
+            pixels[i] = 0xEE;
+            pixels[i + 1] = 0xD3;
+            pixels[i + 2] = 0x22;
+            pixels[i + 3] = 0xFF;
+        }
+
+        return PngCodec.Encode(new BgraImage(size, size, pixels));
     }
 }

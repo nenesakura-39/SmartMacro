@@ -188,6 +188,10 @@ public sealed class ScreenshotStep : MacroStep
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? WebhookUrl { get; set; }
 
+    /// <summary>v2.0: when true and <see cref="WebhookUrl"/> is set, uploads the captured PNG as an image attachment.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public bool AttachScreenshot { get; set; }
+
     /// <summary>The custom area as a rectangle (only used with <see cref="ScreenshotArea.CustomArea"/>).</summary>
     [JsonIgnore]
     public ScreenRect Region => new(RegionX, RegionY, RegionWidth, RegionHeight);

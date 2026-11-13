@@ -84,14 +84,16 @@ public sealed partial class EditorViewModel : ObservableObject
         Action<string, StatusKind> setStatus,
         Action goToLibrary,
         IFindTextTools? findTextTools = null,
-        IVisionTools? visionTools = null)
+        IVisionTools? visionTools = null,
+        Func<bool>? allowLocalWebhooks = null)
     {
         _screenTools = new ScreenTools(
             findTextTools,
             visionTools,
             screen as Core.Vision.IScreenLayout,
             MacroListProvider: () => GetLibraryMacros?.Invoke() ?? Array.Empty<Macro>(),
-            CurrentMacroIdProvider: () => MacroId);
+            CurrentMacroIdProvider: () => MacroId,
+            AllowLocalWebhooksProvider: allowLocalWebhooks);
         _repository = repository;
         _log = log;
         _dialogs = dialogs;

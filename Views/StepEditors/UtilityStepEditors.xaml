@@ -213,6 +213,43 @@
                         </Grid>
                     </StackPanel>
                 </Border>
+
+                <!-- Step 3: Notification & Webhook -->
+                <Border Background="{DynamicResource StepCardBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="10" Padding="14">
+                    <StackPanel>
+                        <TextBlock Text="3. NOTIFICATION &amp; WEBHOOK (OPTIONAL)" Style="{StaticResource FieldLabel}" FontSize="11" Margin="0,0,0,8" />
+
+                        <TextBlock Text="Notification message (optional, supports {var})" Style="{StaticResource FieldLabel}" Margin="0,0,0,4" />
+                        <TextBox Text="{Binding NotificationMessage, UpdateSourceTrigger=PropertyChanged}"
+                                 Tag="e.g. Looted {gold} gold!" MaxLength="500"
+                                 ToolTip="Logged in the Activity panel and posted to the webhook URL when set."
+                                 AutomationProperties.Name="Screenshot notification message" />
+
+                        <TextBlock Text="HTTPS Webhook URL (Discord / Slack / ntfy)" Style="{StaticResource FieldLabel}" Margin="0,8,0,4" />
+                        <TextBox Text="{Binding WebhookUrl, UpdateSourceTrigger=PropertyChanged}"
+                                 Tag="https://discord.com/api/webhooks/..." MaxLength="500"
+                                 ToolTip="Optional https:// webhook notified after capture. Public HTTPS targets only unless local webhooks are enabled in Settings."
+                                 AutomationProperties.Name="Screenshot webhook URL" />
+
+                        <TextBlock Text="{Binding WebhookLocalWarning}" Foreground="{DynamicResource ErrorBrush}" FontSize="11" Margin="0,4,0,0" TextWrapping="Wrap"
+                                   Visibility="{Binding WebhookLocalWarning, Converter={StaticResource NullToVisibility}}" />
+
+                        <Grid Margin="0,10,0,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <CheckBox IsChecked="{Binding AttachScreenshot}" VerticalAlignment="Center"
+                                      Content="Attach captured PNG image to webhook"
+                                      AutomationProperties.Name="Attach captured PNG image to webhook" />
+                            <Button Grid.Column="1" Command="{Binding TestWebhookCommand}" Margin="8,0,0,0" Padding="10,6"
+                                    ToolTip="Send a test notification to verify this webhook URL and optional image upload."
+                                    AutomationProperties.Name="Test webhook">
+                                <TextBlock Text="🧪 Test Webhook" FontSize="12" />
+                            </Button>
+                        </Grid>
+                    </StackPanel>
+                </Border>
             </StackPanel>
 
             <TextBlock Text="{Binding TestResult}" Style="{StaticResource MutedText}" FontSize="11" Margin="0,8,0,0" TextWrapping="Wrap"

@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Globalization;
 using SmartMacro.Core.Models;
+using SmartMacro.Core.Network;
 using SmartMacro.Core.Ocr;
 using SmartMacro.Core.Targeting;
 using SmartMacro.Core.Vision;
@@ -427,45 +428,74 @@ public sealed partial class PlaybackEngine
             var webhookMsg = noteText.Length > 0
                 ? noteText
                 : $"📸 SmartMacro screenshot saved ({prefix}) at {now:HH:mm:ss}";
-            await TryPostWebhookAsync(step.WebhookUrl.Trim(), webhookMsg, token).ConfigureAwait(false);
+            byte[]? pngBytes = null;
+            string? pngName = null;
+            if (step.AttachScreenshot)
+            {
+                try
+                {
+                    pngBytes = PngCodec.Encode(frame.Image);
+                    pngName = string.IsNullOrWhiteSpace(LastScreenshotPath)
+                        ? $"{prefix}_{now:yyyyMMdd_HHmmss}.png"
+                        : Path.GetFileName(LastScreenshotPath);
+                }
+                catch
+                {
+                    pngBytes = null;
+                }
+            }
+
+            await TryPostWebhookAsync(
+                step.WebhookUrl.Trim(),
+                webhookMsg,
+                pngBytes,
+                pngName,
+                _activeRun?.MacroName,
+                token).ConfigureAwait(false);
         }
     }
 
-    private static readonly System.Net.Http.HttpClient WebhookHttpClient = new()
+    private async Task TryPostWebhookAsync(
+        string webhookUrl,
+        string messageText,
+        byte[]? attachmentBytes,
+        string? attachmentFileName,
+        string? macroName,
+        CancellationToken token)
     {
-        Timeout = TimeSpan.FromSeconds(3),
-    };
-
-    private DateTimeOffset _lastWebhookSentAt = DateTimeOffset.MinValue;
-
-    private async Task TryPostWebhookAsync(string webhookUrl, string messageText, CancellationToken token)
-    {
-        if (!Uri.TryCreate(webhookUrl, UriKind.Absolute, out var uri)
-            || !string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase))
-        {
-            return;
-        }
-
-        var now = DateTimeOffset.UtcNow;
-        if ((now - _lastWebhookSentAt).TotalSeconds < 2.0)
-        {
-            return; // Rate-limit to at most 1 webhook every 2 seconds.
-        }
-
-        _lastWebhookSentAt = now;
         try
         {
-            var escaped = messageText
-                .Replace("\\", "\\\\", StringComparison.Ordinal)
-                .Replace("\"", "\\\"", StringComparison.Ordinal)
-                .Replace("\r", " ", StringComparison.Ordinal)
-                .Replace("\n", "\\n", StringComparison.Ordinal);
-            var payload = $"{{\"content\":\"{escaped}\",\"text\":\"{escaped}\"}}";
-            using var content = new System.Net.Http.StringContent(payload, System.Text.Encoding.UTF8, "application/json");
-            using var response = await WebhookHttpClient.PostAsync(uri, content, token).ConfigureAwait(false);
-            if (response.IsSuccessStatusCode)
+            var service = WebhookClient ?? WebhookDeliveryService.Shared;
+            var payload = new WebhookMessagePayload
             {
-                Message?.Invoke(this, "🌐 Webhook notification sent.");
+                Content = messageText,
+                MacroName = macroName,
+                Title = "📸 SmartMacro Capture",
+                EmbedColor = 0x38BDF8,
+                AttachmentBytes = attachmentBytes,
+                AttachmentFileName = attachmentFileName,
+            };
+
+            var result = await service.SendAsync(
+                webhookUrl,
+                payload,
+                AllowLocalWebhooks,
+                bypassRateLimit: false,
+                token).ConfigureAwait(false);
+
+            if (result.Success)
+            {
+                Message?.Invoke(this, attachmentBytes is { Length: > 0 }
+                    ? "🌐 Webhook notification sent (with screenshot)."
+                    : "🌐 Webhook notification sent.");
+            }
+            else if (result.WasBlocked)
+            {
+                Message?.Invoke(this, $"⚠ Webhook blocked: {result.Message}");
+            }
+            else if (!result.WasRateLimited)
+            {
+                Message?.Invoke(this, $"🌐 Webhook skipped: {result.Message}");
             }
         }
         catch (OperationCanceledException) when (token.IsCancellationRequested)
@@ -475,6 +505,71 @@ public sealed partial class PlaybackEngine
         catch (Exception ex)
         {
             Message?.Invoke(this, $"🌐 Webhook skipped: {ex.Message}");
+        }
+    }
+
+    private async Task TrySendFailureWebhookAsync(
+        string? macroName,
+        string? errorMessage,
+        string? snapshotPath)
+    {
+        if (string.IsNullOrWhiteSpace(FailureWebhookUrl))
+            return;
+
+        try
+        {
+            byte[]? attachmentBytes = null;
+            string? attachmentName = null;
+            if (!string.IsNullOrWhiteSpace(snapshotPath) && File.Exists(snapshotPath))
+            {
+                try
+                {
+                    var info = new FileInfo(snapshotPath);
+                    if (info.Length is > 0 and <= WebhookSecurity.MaxAttachmentBytes)
+                    {
+                        attachmentBytes = await File.ReadAllBytesAsync(snapshotPath).ConfigureAwait(false);
+                        attachmentName = Path.GetFileName(snapshotPath);
+                    }
+                }
+                catch
+                {
+                    // Ignore optional snapshot attachment read failures.
+                }
+            }
+
+            var safeName = string.IsNullOrWhiteSpace(macroName) ? "Unnamed macro" : macroName.Trim();
+            var summary = string.IsNullOrWhiteSpace(errorMessage)
+                ? $"❌ Macro \"{safeName}\" stopped due to an execution failure."
+                : $"❌ Macro \"{safeName}\" failed: {errorMessage.Trim()}";
+
+            var service = WebhookClient ?? WebhookDeliveryService.Shared;
+            var payload = new WebhookMessagePayload
+            {
+                Content = summary,
+                MacroName = safeName,
+                Title = "❌ SmartMacro Execution Failed",
+                EmbedColor = 0xEF4444,
+                AttachmentBytes = attachmentBytes,
+                AttachmentFileName = attachmentName,
+            };
+
+            var result = await service.SendAsync(
+                FailureWebhookUrl.Trim(),
+                payload,
+                AllowLocalWebhooks,
+                bypassRateLimit: true,
+                CancellationToken.None).ConfigureAwait(false);
+
+            if (result.Success)
+                Message?.Invoke(this, "🌐 Failure alert webhook sent.");
+            else if (result.WasBlocked)
+                Message?.Invoke(this, $"⚠ Failure webhook blocked: {result.Message}");
+            else if (!result.WasRateLimited)
+                Message?.Invoke(this, $"🌐 Failure webhook skipped: {result.Message}");
+        }
+        catch (Exception ex)
+        {
+            Message?.Invoke(this, $"🌐 Failure webhook skipped: {ex.Message}");
         }
     }
 

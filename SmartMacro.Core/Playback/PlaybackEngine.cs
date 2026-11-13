@@ -668,6 +668,7 @@ public sealed partial class PlaybackEngine
                 SourceIndexes = span?.SourceIndexes,
                 SourceCount = span?.SourceIndexes is not null ? span.SourceCount : 0,
                 Watchers = watchers,
+                MacroName = macro.Name,
                 ActiveMacroIds = activeIds,
                 RunStartedAt = ActiveTime,
             };
@@ -797,6 +798,10 @@ public sealed partial class PlaybackEngine
             StepStats = run?.StepStats,
             FailureSnapshotPath = LastFailureSnapshotPath,
         };
+        if (result.Outcome == PlaybackOutcome.Failed && !string.IsNullOrWhiteSpace(FailureWebhookUrl))
+        {
+            await TrySendFailureWebhookAsync(macro.Name, result.Error, LastFailureSnapshotPath).ConfigureAwait(false);
+        }
         return releaseError is null ? result : result with { Warning = releaseError };
     }
 

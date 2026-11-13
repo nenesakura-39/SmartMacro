@@ -1,5 +1,6 @@
 using SmartMacro.Core.Input;
 using SmartMacro.Core.Models;
+using SmartMacro.Core.Network;
 using SmartMacro.Core.Targeting;
 using SmartMacro.Core.Vision;
 using SmartMacro.Core.Workflow;
@@ -536,8 +537,16 @@ public static partial class MacroValidator
         if (!string.IsNullOrWhiteSpace(s.WebhookUrl))
         {
             var url = s.WebhookUrl.Trim();
-            if (url.Length > 500 || !Uri.TryCreate(url, UriKind.Absolute, out var uri) || !string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase))
-                issues.Add(Error("Enter a valid https:// webhook URL (or leave it empty).", nameof(ScreenshotStep.WebhookUrl)));
+            if (!WebhookSecurity.ValidateUrlSyntax(url, allowLocalNetwork: true, out var parsedUri, out var syntaxError))
+            {
+                issues.Add(Error(syntaxError ?? "Enter a valid https:// webhook URL (or leave it empty).", nameof(ScreenshotStep.WebhookUrl)));
+            }
+            else if (parsedUri is not null && WebhookSecurity.IsLocalHostOrLiteral(parsedUri))
+            {
+                issues.Add(Warning(
+                    "This webhook targets a local or private network address — enable 'Allow local network webhooks' in Settings before running.",
+                    nameof(ScreenshotStep.WebhookUrl)));
+            }
         }
     }
 

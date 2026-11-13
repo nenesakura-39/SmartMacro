@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.Windows.Input;
 using SmartMacro.Core.Logging;
 using SmartMacro.Core.Models;
+using SmartMacro.Core.Network;
 using SmartMacro.Core.Recording;
 using SmartMacro.Core.Storage;
 using SmartMacro.Mvvm;
@@ -193,6 +194,13 @@ public sealed class SettingsViewModel : ObservableObject
     private bool _minimizeToTrayOnClose;
     private bool _startWithWindows;
     private bool _autoSwitchProfileByWindow = true;
+    private bool _allowLocalWebhooks;
+    private string _failureWebhookUrl = string.Empty;
+    private string _updateManifestUrl = string.Empty;
+    private string? _updateStatusMessage;
+    private string? _failureWebhookTestResult;
+    private bool _isCheckingUpdates;
+    private bool _isTestingFailureWebhook;
     private bool _recordMouseMovement;
     private RecordingMode _recordingMode;
     private RecordingFidelity _recordingFidelity = RecordingFidelity.Exact1To1;
@@ -219,6 +227,8 @@ public sealed class SettingsViewModel : ObservableObject
     private readonly Func<(string? Title, string ProcessName)> _getForegroundContext;
     private readonly Func<IReadOnlyList<string>> _getLibraryProfiles;
     private readonly Func<IReadOnlyList<OpenWindowChoice>> _getOpenWindows;
+    private readonly UpdateCheckService _updateChecker;
+    private readonly WebhookDeliveryService _webhookClient;
     private OpenWindowChoice? _selectedOpenWindow;
 
     public SettingsViewModel(ISettingsStore store, ILogService log, IDialogService dialogs, AppPaths paths,
@@ -226,12 +236,16 @@ public sealed class SettingsViewModel : ObservableObject
         Func<string>? buildDiagnostics = null,
         Func<(string? Title, string ProcessName)>? getForegroundContext = null,
         Func<IReadOnlyList<string>>? getLibraryProfiles = null,
-        Func<IReadOnlyList<OpenWindowChoice>>? getOpenWindows = null)
+        Func<IReadOnlyList<OpenWindowChoice>>? getOpenWindows = null,
+        UpdateCheckService? updateChecker = null,
+        WebhookDeliveryService? webhookClient = null)
     {
         _buildDiagnostics = buildDiagnostics ?? (() => $"{AppInfo.Name} {AppInfo.Version}");
         _getForegroundContext = getForegroundContext ?? (() => (null, string.Empty));
         _getLibraryProfiles = getLibraryProfiles ?? (() => Array.Empty<string>());
         _getOpenWindows = getOpenWindows ?? (() => Array.Empty<OpenWindowChoice>());
+        _updateChecker = updateChecker ?? UpdateCheckService.Shared;
+        _webhookClient = webhookClient ?? WebhookDeliveryService.Shared;
         OcrStatus = ocrStatus;
         IsOcrAvailable = ocrAvailable;
         _store = store;
@@ -254,7 +268,14 @@ public sealed class SettingsViewModel : ObservableObject
         CopyDiagnosticsCommand = new RelayCommand(CopyDiagnostics);
         ExportBackupCommand = new AsyncRelayCommand(ExportBackupAsync, ex => _log.Error("Backup export failed.", ex));
         RestoreBackupCommand = new AsyncRelayCommand(RestoreBackupAsync, ex => _log.Error("Backup restore failed.", ex));
-        CheckForUpdatesCommand = new RelayCommand(CheckForUpdates);
+        CheckForUpdatesCommand = new AsyncRelayCommand(
+            CheckForUpdatesAsync,
+            ex => _log.Warning("Update check failed.", ex),
+            () => !_isCheckingUpdates && UpdateManifestUrlError is null);
+        TestFailureWebhookCommand = new AsyncRelayCommand(
+            TestFailureWebhookAsync,
+            ex => _log.Warning("Failure webhook test failed.", ex),
+            () => !_isTestingFailureWebhook && !string.IsNullOrWhiteSpace(_failureWebhookUrl) && FailureWebhookError is null);
         AddProfileRuleCommand = new RelayCommand(AddBlankProfileRule);
         AddRuleFromWindowProcessCommand = new RelayCommand(
             () => AddRuleFromWindow(preferProcess: true),
@@ -282,7 +303,8 @@ public sealed class SettingsViewModel : ObservableObject
     public RelayCommand SetAccentCommand { get; }
     public AsyncRelayCommand ExportBackupCommand { get; }
     public AsyncRelayCommand RestoreBackupCommand { get; }
-    public RelayCommand CheckForUpdatesCommand { get; }
+    public AsyncRelayCommand CheckForUpdatesCommand { get; }
+    public AsyncRelayCommand TestFailureWebhookCommand { get; }
     public RelayCommand AddProfileRuleCommand { get; }
     public RelayCommand AddRuleFromWindowProcessCommand { get; }
     public RelayCommand AddRuleFromWindowTitleCommand { get; }
@@ -791,13 +813,101 @@ public sealed class SettingsViewModel : ObservableObject
         set { if (SetProperty(ref _smoothMouseMoves, value)) IsDirty = true; }
     }
 
+    /// <summary>Allow HTTPS webhooks to target localhost or private LAN addresses.</summary>
+    public bool AllowLocalWebhooks
+    {
+        get => _allowLocalWebhooks;
+        set
+        {
+            if (!SetProperty(ref _allowLocalWebhooks, value)) return;
+            IsDirty = true;
+            OnPropertyChanged(nameof(FailureWebhookError));
+            OnPropertyChanged(nameof(IsValid));
+            CommandManager.InvalidateRequerySuggested();
+        }
+    }
+
+    /// <summary>Optional HTTPS webhook URL notified automatically on macro execution failure.</summary>
+    public string FailureWebhookUrl
+    {
+        get => _failureWebhookUrl;
+        set
+        {
+            var next = value ?? string.Empty;
+            if (!SetProperty(ref _failureWebhookUrl, next)) return;
+            FailureWebhookTestResult = null;
+            IsDirty = true;
+            OnPropertyChanged(nameof(FailureWebhookError));
+            OnPropertyChanged(nameof(IsValid));
+            CommandManager.InvalidateRequerySuggested();
+        }
+    }
+
+    public string? FailureWebhookError
+    {
+        get
+        {
+            if (string.IsNullOrWhiteSpace(_failureWebhookUrl))
+                return null;
+
+            return WebhookSecurity.ValidateUrlSyntax(_failureWebhookUrl, _allowLocalWebhooks, out _, out var error)
+                ? null
+                : error;
+        }
+    }
+
+    /// <summary>Optional custom HTTPS manifest URL for manual update checks.</summary>
+    public string UpdateManifestUrl
+    {
+        get => _updateManifestUrl;
+        set
+        {
+            var next = value ?? string.Empty;
+            if (!SetProperty(ref _updateManifestUrl, next)) return;
+            IsDirty = true;
+            OnPropertyChanged(nameof(UpdateManifestUrlError));
+            OnPropertyChanged(nameof(IsValid));
+            CommandManager.InvalidateRequerySuggested();
+        }
+    }
+
+    public string? UpdateManifestUrlError
+    {
+        get
+        {
+            if (string.IsNullOrWhiteSpace(_updateManifestUrl))
+                return null;
+
+            return WebhookSecurity.ValidateUrlSyntax(_updateManifestUrl, allowLocalNetwork: false, out _, out var error)
+                ? null
+                : error;
+        }
+    }
+
+    public string? UpdateStatusMessage
+    {
+        get => _updateStatusMessage;
+        private set => SetProperty(ref _updateStatusMessage, value);
+    }
+
+    public string? FailureWebhookTestResult
+    {
+        get => _failureWebhookTestResult;
+        private set => SetProperty(ref _failureWebhookTestResult, value);
+    }
+
     public bool IsDirty
     {
         get => _isDirty;
         private set => SetProperty(ref _isDirty, value);
     }
 
-    public bool IsValid => _defaultDelayMs is >= 0 and <= AppSettings.MaxDefaultDelayMs && HotkeyError is null && RulesError is null;
+    public bool IsValid =>
+        _defaultDelayMs is >= 0 and <= AppSettings.MaxDefaultDelayMs
+        && HotkeyError is null
+        && RulesError is null
+        && FailureWebhookError is null
+        && UpdateManifestUrlError is null;
 
     public string? DelayError => _defaultDelayMs is >= 0 and <= AppSettings.MaxDefaultDelayMs ? null : $"Enter a value from 0 to {AppSettings.MaxDefaultDelayMs:N0} ms.";
 
@@ -1043,6 +1153,10 @@ public sealed class SettingsViewModel : ObservableObject
         _minimizeToTrayOnClose = settings.MinimizeToTrayOnClose;
         _startWithWindows = settings.StartWithWindows;
         _autoSwitchProfileByWindow = settings.AutoSwitchProfileByWindow;
+        _allowLocalWebhooks = settings.AllowLocalWebhooks;
+        _failureWebhookUrl = settings.FailureWebhookUrl ?? string.Empty;
+        _updateManifestUrl = settings.UpdateManifestUrl ?? string.Empty;
+        _failureWebhookTestResult = null;
         ReloadProfileRules(settings.ProfileRules);
         _recordMouseMovement = settings.RecordMouseMovement;
         _recordingMode = settings.RecordingMode;
@@ -1084,6 +1198,9 @@ public sealed class SettingsViewModel : ObservableObject
             MinimizeToTrayOnClose = MinimizeToTrayOnClose,
             StartWithWindows = StartWithWindows,
             AutoSwitchProfileByWindow = AutoSwitchProfileByWindow,
+            AllowLocalWebhooks = AllowLocalWebhooks,
+            FailureWebhookUrl = string.IsNullOrWhiteSpace(FailureWebhookUrl) ? null : FailureWebhookUrl.Trim(),
+            UpdateManifestUrl = string.IsNullOrWhiteSpace(UpdateManifestUrl) ? null : UpdateManifestUrl.Trim(),
             ProfileRules = BuildSavedProfileRules(),
             RecordMouseMovement = RecordMouseMovement,
             RecordingMode = RecordingMode,
@@ -1182,17 +1299,127 @@ public sealed class SettingsViewModel : ObservableObject
     private Task RestoreBackupAsync() =>
         RestoreStudioBackupHandler is not null ? RestoreStudioBackupHandler() : Task.CompletedTask;
 
-    private void CheckForUpdates()
+    private async Task CheckForUpdatesAsync()
+    {
+        if (_isCheckingUpdates)
+            return;
+
+        _isCheckingUpdates = true;
+        CommandManager.InvalidateRequerySuggested();
+        UpdateStatusMessage = "Checking release manifest…";
+        _setStatus("Checking for SmartMacro updates…", StatusKind.Info);
+
+        try
+        {
+            var result = await _updateChecker.CheckForUpdatesAsync(AppInfo.Version, UpdateManifestUrl)
+                .ConfigureAwait(true);
+            UpdateStatusMessage = result.Message;
+
+            switch (result.Outcome)
+            {
+                case UpdateCheckOutcome.UpdateAvailable:
+                {
+                    _setStatus(result.Message, StatusKind.Success);
+                    var lines = new List<string>
+                    {
+                        $"A new version of {AppInfo.Name} is available!",
+                        string.Empty,
+                        $"Installed: v{result.CurrentVersion}",
+                        $"Latest: v{result.LatestVersion}",
+                    };
+                    if (!string.IsNullOrWhiteSpace(result.PublishedAt))
+                        lines.Add($"Published: {result.PublishedAt}");
+                    if (!string.IsNullOrWhiteSpace(result.Sha256))
+                        lines.Add($"SHA-256: {result.Sha256}");
+                    if (!string.IsNullOrWhiteSpace(result.ReleaseNotes))
+                    {
+                        lines.Add(string.Empty);
+                        lines.Add(result.ReleaseNotes);
+                    }
+
+                    lines.Add(string.Empty);
+                    lines.Add("Open the official download page in your browser?");
+                    if (_dialogs.Confirm("Update Available", string.Join(Environment.NewLine, lines)))
+                        TryOpenExternalUrl(result.DownloadUrl ?? UpdateCheckService.OfficialReleasesUrl);
+                    break;
+                }
+
+                case UpdateCheckOutcome.UpToDate:
+                    _setStatus(result.Message, StatusKind.Success);
+                    _dialogs.ShowInfo(
+                        "SmartMacro is up to date",
+                        $"{result.Message}\n\nInstalled version: {AppInfo.Name} {AppInfo.Version}");
+                    break;
+
+                default:
+                    _log.Warning($"Update check reported: {result.Message}");
+                    _setStatus($"Update check unavailable: {result.Message}", StatusKind.Warning);
+                    if (_dialogs.Confirm(
+                            "Update Check Unavailable",
+                            $"{result.Message}\n\nOpen the official GitHub releases page in your browser?"))
+                    {
+                        TryOpenExternalUrl(UpdateCheckService.OfficialReleasesUrl);
+                    }
+                    break;
+            }
+        }
+        finally
+        {
+            _isCheckingUpdates = false;
+            CommandManager.InvalidateRequerySuggested();
+        }
+    }
+
+    private async Task TestFailureWebhookAsync()
+    {
+        if (_isTestingFailureWebhook || string.IsNullOrWhiteSpace(FailureWebhookUrl))
+            return;
+
+        _isTestingFailureWebhook = true;
+        CommandManager.InvalidateRequerySuggested();
+        FailureWebhookTestResult = "Sending test failure alert…";
+
+        try
+        {
+            var payload = new WebhookMessagePayload
+            {
+                Content = "❌ SmartMacro test failure alert — delivery verified.",
+                Title = "🧪 Failure Alert Webhook Test",
+                Details = "This test confirms fatal execution errors can reach this endpoint.",
+                EmbedColor = 0xEF4444,
+            };
+
+            var result = await _webhookClient.SendAsync(
+                FailureWebhookUrl,
+                payload,
+                AllowLocalWebhooks,
+                bypassRateLimit: true).ConfigureAwait(true);
+
+            FailureWebhookTestResult = result.Success
+                ? $"✓ {result.Message}"
+                : $"⚠ {result.Message}";
+
+            _setStatus(
+                result.Success ? "Test failure webhook delivered." : result.Message,
+                result.Success ? StatusKind.Success : StatusKind.Warning);
+        }
+        finally
+        {
+            _isTestingFailureWebhook = false;
+            CommandManager.InvalidateRequerySuggested();
+        }
+    }
+
+    private void TryOpenExternalUrl(string url)
     {
         try
         {
-            _setStatus($"SmartMacro Studio {AppInfo.Version} — opening official release channel…", StatusKind.Info);
-            Process.Start(new ProcessStartInfo("https://discord.gg/CKBk5KnGmk") { UseShellExecute = true });
+            Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
         }
         catch (Exception ex)
         {
-            _log.Warning("Could not open release page.", ex);
-            _setStatus($"You are running {AppInfo.Name} {AppInfo.Version}.", StatusKind.Info);
+            _log.Warning($"Could not open URL '{url}'.", ex);
+            _setStatus($"Could not open browser link: {ex.Message}", StatusKind.Warning);
         }
     }
 }

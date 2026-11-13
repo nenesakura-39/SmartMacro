@@ -39,6 +39,7 @@ public sealed partial class PlaybackEngine
         public Dictionary<Guid, TimeSpan> WatcherLastCheck { get; } = new();
         public Dictionary<Guid, TimeSpan> WatcherLastFired { get; } = new();
         public int CallDepth { get; init; }
+        public string? MacroName { get; init; }
         public HashSet<Guid> ActiveMacroIds { get; init; } = new();
         public bool IsSubRoutine { get; init; }
         public int CheckpointRestarts { get; set; }

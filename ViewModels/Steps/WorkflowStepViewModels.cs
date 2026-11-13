@@ -17,7 +17,8 @@ public sealed record ScreenTools(
     IVisionTools? Vision,
     IScreenLayout? Layout = null,
     Func<IReadOnlyList<Macro>>? MacroListProvider = null,
-    Func<Guid?>? CurrentMacroIdProvider = null)
+    Func<Guid?>? CurrentMacroIdProvider = null,
+    Func<bool>? AllowLocalWebhooksProvider = null)
 {
     public static ScreenTools None { get; } = new(null, null);
 
@@ -78,6 +79,7 @@ public sealed record ScreenTools(
             case ScreenshotStepViewModel screenshot:
                 screenshot.Tools = Vision;
                 screenshot.Layout = Layout;
+                screenshot.AllowLocalWebhooks = AllowLocalWebhooksProvider;
                 break;
             case SetVariableStepViewModel setVar:
                 setVar.Tools = Vision;

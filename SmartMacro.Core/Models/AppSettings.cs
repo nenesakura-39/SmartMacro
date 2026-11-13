@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+using SmartMacro.Core.Network;
 using SmartMacro.Core.Recording;
 
 namespace SmartMacro.Core.Models;
@@ -212,8 +214,19 @@ public sealed class AppSettings
     public bool AutoSwitchProfileByWindow { get; set; } = true;
 
     /// <summary>Optional explicit window-title → profile mapping rules.</summary>
-    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public List<MacroProfileRule>? ProfileRules { get; set; }
+
+    /// <summary>Allow HTTPS webhook delivery to localhost / private LAN addresses (e.g. Home Assistant or local ntfy).</summary>
+    public bool AllowLocalWebhooks { get; set; }
+
+    /// <summary>Optional HTTPS webhook URL notified automatically when a macro stops with an execution failure.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? FailureWebhookUrl { get; set; }
+
+    /// <summary>Optional HTTPS manifest URL override for the manual update checker.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? UpdateManifestUrl { get; set; }
 
     public AppSettings Clone()
     {
@@ -228,6 +241,20 @@ public sealed class AppSettings
     {
         if (DefaultDelayMs < 0) DefaultDelayMs = 0;
         if (DefaultDelayMs > MaxDefaultDelayMs) DefaultDelayMs = MaxDefaultDelayMs;
+
+        FailureWebhookUrl = string.IsNullOrWhiteSpace(FailureWebhookUrl) ? null : FailureWebhookUrl.Trim();
+        if (FailureWebhookUrl is not null
+            && !WebhookSecurity.ValidateUrlSyntax(FailureWebhookUrl, allowLocalNetwork: true, out _, out _))
+        {
+            FailureWebhookUrl = null;
+        }
+
+        UpdateManifestUrl = string.IsNullOrWhiteSpace(UpdateManifestUrl) ? null : UpdateManifestUrl.Trim();
+        if (UpdateManifestUrl is not null
+            && !WebhookSecurity.ValidateUrlSyntax(UpdateManifestUrl, allowLocalNetwork: false, out _, out _))
+        {
+            UpdateManifestUrl = null;
+        }
         if (!Enum.IsDefined(RecordingMode)) RecordingMode = RecordingMode.Smart;
         if (!Enum.IsDefined(RecordingFidelity)) RecordingFidelity = RecordingFidelity.Exact1To1;
         if (!Enum.IsDefined(ComputeEngineMode)) ComputeEngineMode = SmartMacro.Core.Vision.HardwareAccelerationMode.Auto;

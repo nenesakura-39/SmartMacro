@@ -126,7 +126,8 @@ public sealed class MainViewModel : ObservableObject, IDisposable
             setStatus: SetStatus,
             goToLibrary: () => CurrentPage = AppPage.Library,
             findTextTools: automation.FindTextTools,
-            visionTools: automation.VisionTools);
+            visionTools: automation.VisionTools,
+            allowLocalWebhooks: () => _settings.AllowLocalWebhooks);
 
         Library = new LibraryViewModel(
             repository, log, dialogs,

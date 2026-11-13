@@ -1,5 +1,6 @@
 using System.Globalization;
 using SmartMacro.Core.Models;
+using SmartMacro.Core.Network;
 using SmartMacro.Core.Ocr;
 using SmartMacro.Core.Targeting;
 using SmartMacro.Core.Validation;
@@ -26,6 +27,15 @@ public sealed partial class PlaybackEngine
 
     /// <summary>Optional directory where <c>last-failure-snapshot.png</c> is saved when a vision/wait step times out and stops playback.</summary>
     public string? FailureSnapshotDirectory { get; set; }
+
+    /// <summary>Allow HTTPS webhook delivery to localhost and private LAN targets (configured in Settings).</summary>
+    public bool AllowLocalWebhooks { get; set; }
+
+    /// <summary>Optional HTTPS webhook URL notified automatically when macro playback fails.</summary>
+    public string? FailureWebhookUrl { get; set; }
+
+    /// <summary>Optional webhook delivery client override (defaults to <see cref="WebhookDeliveryService.Shared"/>).</summary>
+    public WebhookDeliveryService? WebhookClient { get; set; }
 
     /// <summary>Path to the most recent failure snapshot saved during the current playback run, if any.</summary>
     public string? LastFailureSnapshotPath { get; private set; }
@@ -514,6 +524,7 @@ public sealed partial class PlaybackEngine
             calleeVars)
         {
             CallDepth = callerRun.CallDepth + 1,
+            MacroName = target.Name,
             ActiveMacroIds = activeIds,
             IsSubRoutine = true,
             RunStartedAt = ActiveTime,
