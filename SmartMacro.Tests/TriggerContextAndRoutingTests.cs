@@ -381,4 +381,116 @@ public sealed class TriggerContextAndRoutingTests
         Assert.Single(t3Decisions);
         Assert.Equal(openedMacro.Id, t3Decisions[0].Macro!.Id);
     }
+
+    [Fact]
+    public void MacroProfileRule_ValidateAndSanitize_EnforcesBoundsAndRequiredFields()
+    {
+        Assert.NotNull(new MacroProfileRule { ProfileName = "   ", WindowTitleMatch = "Excel" }.Validate());
+        Assert.NotNull(new MacroProfileRule { ProfileName = new string('p', MacroProfileRule.MaxProfileNameLength + 1), ProcessNameMatch = "Code" }.Validate());
+        Assert.NotNull(new MacroProfileRule { ProfileName = "Work", WindowTitleMatch = "  ", ProcessNameMatch = " " }.Validate());
+        Assert.NotNull(new MacroProfileRule { ProfileName = "Work", WindowTitleMatch = new string('w', MacroProfileRule.MaxMatchLength + 1) }.Validate());
+        Assert.NotNull(new MacroProfileRule { ProfileName = "Work", ProcessNameMatch = new string('x', MacroProfileRule.MaxMatchLength + 1) }.Validate());
+
+        Assert.Null(new MacroProfileRule { ProfileName = "Work", WindowTitleMatch = "Google Docs" }.Validate());
+        Assert.Null(new MacroProfileRule { ProfileName = "Dev", ProcessNameMatch = "Code" }.Validate());
+        Assert.Null(new MacroProfileRule { ProfileName = "Docs", WindowTitleMatch = "Spec", ProcessNameMatch = "chrome" }.Validate());
+
+        var dirtyRule = new MacroProfileRule
+        {
+            Id = Guid.Empty,
+            ProfileName = "  " + new string('a', MacroProfileRule.MaxProfileNameLength + 10) + "  ",
+            WindowTitleMatch = "  Google Docs  ",
+            ProcessNameMatch = "   ",
+        };
+        dirtyRule.Sanitize();
+        Assert.NotEqual(Guid.Empty, dirtyRule.Id);
+        Assert.Equal(MacroProfileRule.MaxProfileNameLength, dirtyRule.ProfileName.Length);
+        Assert.Equal("Google Docs", dirtyRule.WindowTitleMatch);
+        Assert.Null(dirtyRule.ProcessNameMatch);
+    }
+
+    [Fact]
+    public async Task JsonSettingsStore_RoundTripsAndSanitizesProfileRules_PreservingPriorityOrder()
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), "SmartMacro_SettingsRulesTest_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempDir);
+        try
+        {
+            var settingsPath = Path.Combine(tempDir, "settings.json");
+            var store = new JsonSettingsStore(settingsPath);
+
+            var rule1Disabled = new MacroProfileRule
+            {
+                ProfileName = "Paused",
+                ProcessNameMatch = "chrome",
+                Enabled = false,
+            };
+            var rule2Specific = new MacroProfileRule
+            {
+                Id = Guid.Empty,
+                ProfileName = "  WorkDocs  ",
+                WindowTitleMatch = "  Design Doc  ",
+                ProcessNameMatch = " chrome ",
+                Enabled = true,
+            };
+            var rule3Fallback = new MacroProfileRule
+            {
+                ProfileName = "Browser",
+                ProcessNameMatch = "chrome",
+                Enabled = true,
+            };
+            var deadBlankRule = new MacroProfileRule
+            {
+                ProfileName = "   ",
+                WindowTitleMatch = "  ",
+                ProcessNameMatch = null,
+            };
+
+            var settings = new AppSettings
+            {
+                AutoSwitchProfileByWindow = true,
+                ProfileRules = new List<MacroProfileRule> { rule1Disabled, rule2Specific, rule3Fallback, null!, deadBlankRule },
+            };
+
+            // Clone isolates ProfileRules list items deeply.
+            var clone = settings.Clone();
+            clone.ProfileRules![0].ProfileName = "Mutated";
+            Assert.Equal("Paused", settings.ProfileRules![0].ProfileName);
+
+            await store.SaveAsync(settings);
+            var loaded = await store.LoadAsync();
+            Assert.Null(loaded.Warning);
+            Assert.NotNull(loaded.Settings.ProfileRules);
+
+            var loadedRules = loaded.Settings.ProfileRules!;
+            Assert.Equal(3, loadedRules.Count);
+            Assert.False(loadedRules[0].Enabled);
+            Assert.Equal("Paused", loadedRules[0].ProfileName);
+
+            Assert.NotEqual(Guid.Empty, loadedRules[1].Id);
+            Assert.Equal("WorkDocs", loadedRules[1].ProfileName);
+            Assert.Equal("Design Doc", loadedRules[1].WindowTitleMatch);
+            Assert.Equal("chrome", loadedRules[1].ProcessNameMatch);
+
+            Assert.Equal("Browser", loadedRules[2].ProfileName);
+            Assert.Equal("chrome", loadedRules[2].ProcessNameMatch);
+
+            // Verify priority ordering in ProfileRouter: Rule #1 disabled is skipped, #2 wins over #3 on specific doc, #3 wins otherwise.
+            var library = Array.Empty<Macro>();
+            Assert.Equal("WorkDocs", ProfileRouter.ResolveActiveProfile(
+                loadedRules, library, "Design Doc - Google Chrome", null, loaded.Settings.AutoSwitchProfileByWindow, "chrome"));
+            Assert.Equal("Browser", ProfileRouter.ResolveActiveProfile(
+                loadedRules, library, "Release Notes - Google Chrome", null, loaded.Settings.AutoSwitchProfileByWindow, "chrome"));
+
+            // Empty list sanitizes back to null cleanly.
+            loaded.Settings.ProfileRules = new List<MacroProfileRule>();
+            loaded.Settings.Sanitize();
+            Assert.Null(loaded.Settings.ProfileRules);
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+                Directory.Delete(tempDir, recursive: true);
+        }
+    }
 }

@@ -219,7 +219,7 @@ public sealed class AppSettings
     {
         var copy = (AppSettings)MemberwiseClone();
         if (ProfileRules is { } rules)
-            copy.ProfileRules = rules.Select(r => r.Clone()).ToList();
+            copy.ProfileRules = rules.Where(r => r is not null).Select(r => r.Clone()).ToList();
         return copy;
     }
 
@@ -236,6 +236,24 @@ public sealed class AppSettings
         if (!Enum.IsDefined(Accent)) Accent = StudioAccent.NeonBrand;
         if (!Enum.IsDefined(Density)) Density = StudioDensity.Comfortable;
         if (!Enum.IsDefined(ExperienceLevel)) ExperienceLevel = ExperienceLevel.Beginner;
+
+        if (ProfileRules is { } rawRules)
+        {
+            var cleaned = new List<MacroProfileRule>(rawRules.Count);
+            foreach (var rule in rawRules)
+            {
+                if (rule is null) continue;
+                rule.Sanitize();
+                if (string.IsNullOrEmpty(rule.ProfileName)
+                    && string.IsNullOrEmpty(rule.WindowTitleMatch)
+                    && string.IsNullOrEmpty(rule.ProcessNameMatch))
+                {
+                    continue;
+                }
+                cleaned.Add(rule);
+            }
+            ProfileRules = cleaned.Count == 0 ? null : cleaned;
+        }
 
         // Settings saved before the fidelity selector: "don't record mouse movement" becomes Clicks & Keys Only once.
         if (SchemaVersion < 4 && !RecordMouseMovement) RecordingFidelity = RecordingFidelity.ClicksAndKeysOnly;

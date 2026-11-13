@@ -1,4 +1,6 @@
+using System.Collections.ObjectModel;
 using System.Diagnostics;
+using System.Windows.Input;
 using SmartMacro.Core.Logging;
 using SmartMacro.Core.Models;
 using SmartMacro.Core.Recording;
@@ -8,6 +10,170 @@ using SmartMacro.Services;
 using SmartMacro.ViewModels.Steps;
 
 namespace SmartMacro.ViewModels;
+
+/// <summary>Snapshot of an open desktop window offered in the Profile Routing picker.</summary>
+public sealed record OpenWindowChoice(string Title, string ProcessName)
+{
+    public string DisplayLabel =>
+        string.IsNullOrWhiteSpace(ProcessName) ? Title : $"{Title}  [{ProcessName}]";
+}
+
+/// <summary>Editable row ViewModel for one <see cref="MacroProfileRule"/> in Settings.</summary>
+public sealed class ProfileRuleItemViewModel : ObservableObject
+{
+    private readonly Action _changed;
+    private bool _enabled;
+    private string _profileName;
+    private string _windowTitleMatch;
+    private string _processNameMatch;
+    private int _priorityNumber;
+    private bool _canMoveUp;
+    private bool _canMoveDown;
+
+    public ProfileRuleItemViewModel(MacroProfileRule model, Action changed)
+    {
+        ArgumentNullException.ThrowIfNull(model);
+        _changed = changed ?? throw new ArgumentNullException(nameof(changed));
+        Id = model.Id == Guid.Empty ? Guid.NewGuid() : model.Id;
+        _enabled = model.Enabled;
+        _profileName = model.ProfileName ?? string.Empty;
+        _windowTitleMatch = model.WindowTitleMatch ?? string.Empty;
+        _processNameMatch = model.ProcessNameMatch ?? string.Empty;
+    }
+
+    public Guid Id { get; }
+
+    public bool Enabled
+    {
+        get => _enabled;
+        set
+        {
+            if (!SetProperty(ref _enabled, value)) return;
+            OnPropertyChanged(nameof(SummaryText));
+            _changed();
+        }
+    }
+
+    public string ProfileName
+    {
+        get => _profileName;
+        set
+        {
+            if (!SetProperty(ref _profileName, value ?? string.Empty)) return;
+            NotifyRuleChanged();
+        }
+    }
+
+    public string WindowTitleMatch
+    {
+        get => _windowTitleMatch;
+        set
+        {
+            if (!SetProperty(ref _windowTitleMatch, value ?? string.Empty)) return;
+            NotifyRuleChanged();
+        }
+    }
+
+    public string ProcessNameMatch
+    {
+        get => _processNameMatch;
+        set
+        {
+            if (!SetProperty(ref _processNameMatch, value ?? string.Empty)) return;
+            NotifyRuleChanged();
+        }
+    }
+
+    public int PriorityNumber
+    {
+        get => _priorityNumber;
+        private set
+        {
+            if (SetProperty(ref _priorityNumber, value))
+                OnPropertyChanged(nameof(PriorityLabel));
+        }
+    }
+
+    public string PriorityLabel => $"#{_priorityNumber}";
+
+    public bool CanMoveUp
+    {
+        get => _canMoveUp;
+        private set => SetProperty(ref _canMoveUp, value);
+    }
+
+    public bool CanMoveDown
+    {
+        get => _canMoveDown;
+        private set => SetProperty(ref _canMoveDown, value);
+    }
+
+    public string? ValidationError => BuildDraftModel().Validate();
+
+    public bool HasValidationError => !string.IsNullOrEmpty(ValidationError);
+
+    /// <summary>Write-only helper for the quick-pick existing-profile ComboBox.</summary>
+    public string? SelectedPresetProfile
+    {
+        get => null;
+        set
+        {
+            if (!string.IsNullOrWhiteSpace(value))
+                ProfileName = value;
+            OnPropertyChanged();
+        }
+    }
+
+    public string SummaryText
+    {
+        get
+        {
+            var title = WindowTitleMatch.Trim();
+            var proc = ProcessNameMatch.Trim();
+            var profile = string.IsNullOrWhiteSpace(ProfileName) ? "(unnamed profile)" : ProfileName.Trim();
+            var filter = (title.Length > 0, proc.Length > 0) switch
+            {
+                (true, true) => $"\"{title}\" [{proc}]",
+                (true, false) => $"Title: \"{title}\"",
+                (false, true) => $"Process: {proc}",
+                _ => "Any window (incomplete filter)",
+            };
+            var statePrefix = Enabled ? string.Empty : "[Paused] ";
+            return $"{statePrefix}{filter} → {profile}";
+        }
+    }
+
+    public void UpdatePosition(int index, int count)
+    {
+        PriorityNumber = index + 1;
+        CanMoveUp = index > 0;
+        CanMoveDown = index >= 0 && index < count - 1;
+    }
+
+    public MacroProfileRule ToModel()
+    {
+        var model = BuildDraftModel();
+        model.Sanitize();
+        return model;
+    }
+
+    private MacroProfileRule BuildDraftModel() => new()
+    {
+        Id = Id,
+        Enabled = Enabled,
+        ProfileName = ProfileName,
+        WindowTitleMatch = WindowTitleMatch,
+        ProcessNameMatch = string.IsNullOrWhiteSpace(ProcessNameMatch) ? null : ProcessNameMatch,
+    };
+
+    private void NotifyRuleChanged()
+    {
+        OnPropertyChanged(nameof(ValidationError));
+        OnPropertyChanged(nameof(HasValidationError));
+        OnPropertyChanged(nameof(SummaryText));
+        _changed();
+    }
+}
 
 /// <summary>Edits a copy of the settings; nothing is applied until Save.</summary>
 public sealed class SettingsViewModel : ObservableObject
@@ -50,12 +216,22 @@ public sealed class SettingsViewModel : ObservableObject
     private HotkeyBinding _pauseHotkey = HotkeyBinding.DefaultPause;
     private bool _isDirty;
     private readonly Func<string> _buildDiagnostics;
+    private readonly Func<(string? Title, string ProcessName)> _getForegroundContext;
+    private readonly Func<IReadOnlyList<string>> _getLibraryProfiles;
+    private readonly Func<IReadOnlyList<OpenWindowChoice>> _getOpenWindows;
+    private OpenWindowChoice? _selectedOpenWindow;
 
     public SettingsViewModel(ISettingsStore store, ILogService log, IDialogService dialogs, AppPaths paths,
         Action<AppSettings> apply, Action<string, StatusKind> setStatus, string ocrStatus = "", bool ocrAvailable = false,
-        Func<string>? buildDiagnostics = null)
+        Func<string>? buildDiagnostics = null,
+        Func<(string? Title, string ProcessName)>? getForegroundContext = null,
+        Func<IReadOnlyList<string>>? getLibraryProfiles = null,
+        Func<IReadOnlyList<OpenWindowChoice>>? getOpenWindows = null)
     {
         _buildDiagnostics = buildDiagnostics ?? (() => $"{AppInfo.Name} {AppInfo.Version}");
+        _getForegroundContext = getForegroundContext ?? (() => (null, string.Empty));
+        _getLibraryProfiles = getLibraryProfiles ?? (() => Array.Empty<string>());
+        _getOpenWindows = getOpenWindows ?? (() => Array.Empty<OpenWindowChoice>());
         OcrStatus = ocrStatus;
         IsOcrAvailable = ocrAvailable;
         _store = store;
@@ -79,6 +255,23 @@ public sealed class SettingsViewModel : ObservableObject
         ExportBackupCommand = new AsyncRelayCommand(ExportBackupAsync, ex => _log.Error("Backup export failed.", ex));
         RestoreBackupCommand = new AsyncRelayCommand(RestoreBackupAsync, ex => _log.Error("Backup restore failed.", ex));
         CheckForUpdatesCommand = new RelayCommand(CheckForUpdates);
+        AddProfileRuleCommand = new RelayCommand(AddBlankProfileRule);
+        AddRuleFromWindowProcessCommand = new RelayCommand(
+            () => AddRuleFromWindow(preferProcess: true),
+            () => !string.IsNullOrWhiteSpace(SelectedOpenWindow?.ProcessName));
+        AddRuleFromWindowTitleCommand = new RelayCommand(
+            () => AddRuleFromWindow(preferProcess: false),
+            () => !string.IsNullOrWhiteSpace(SelectedOpenWindow?.Title));
+        MoveRuleUpCommand = new RelayCommand(
+            p => MoveRule(p as ProfileRuleItemViewModel, -1),
+            p => p is ProfileRuleItemViewModel r && r.CanMoveUp);
+        MoveRuleDownCommand = new RelayCommand(
+            p => MoveRule(p as ProfileRuleItemViewModel, +1),
+            p => p is ProfileRuleItemViewModel r && r.CanMoveDown);
+        DeleteProfileRuleCommand = new RelayCommand(
+            p => DeleteRule(p as ProfileRuleItemViewModel),
+            p => p is ProfileRuleItemViewModel);
+        RefreshWindowContextCommand = new AsyncRelayCommand(RefreshWindowContextAsync, ex => _log.Warning("Refreshing open windows failed.", ex));
         SetAccentCommand = new RelayCommand(p =>
         {
             if (p is StudioAccent accent) Accent = accent;
@@ -90,6 +283,17 @@ public sealed class SettingsViewModel : ObservableObject
     public AsyncRelayCommand ExportBackupCommand { get; }
     public AsyncRelayCommand RestoreBackupCommand { get; }
     public RelayCommand CheckForUpdatesCommand { get; }
+    public RelayCommand AddProfileRuleCommand { get; }
+    public RelayCommand AddRuleFromWindowProcessCommand { get; }
+    public RelayCommand AddRuleFromWindowTitleCommand { get; }
+    public RelayCommand MoveRuleUpCommand { get; }
+    public RelayCommand MoveRuleDownCommand { get; }
+    public RelayCommand DeleteProfileRuleCommand { get; }
+    public AsyncRelayCommand RefreshWindowContextCommand { get; }
+
+    public ObservableCollection<ProfileRuleItemViewModel> ProfileRules { get; } = new();
+    public ObservableCollection<OpenWindowChoice> OpenWindows { get; } = new();
+    public ObservableCollection<string> KnownProfiles { get; } = new();
 
     /// <summary>Optional delegate wired by <see cref="MainViewModel"/> to export all library macros + settings into a <c>.smbackup</c> archive.</summary>
     public Func<Task>? ExportStudioBackupHandler { get; set; }
@@ -389,7 +593,68 @@ public sealed class SettingsViewModel : ObservableObject
     public bool AutoSwitchProfileByWindow
     {
         get => _autoSwitchProfileByWindow;
-        set { if (SetProperty(ref _autoSwitchProfileByWindow, value)) IsDirty = true; }
+        set
+        {
+            if (!SetProperty(ref _autoSwitchProfileByWindow, value)) return;
+            IsDirty = true;
+            NotifyLiveContextChanged();
+        }
+    }
+
+    public bool HasProfileRules => ProfileRules.Count > 0;
+
+    public bool HasKnownProfiles => KnownProfiles.Count > 0;
+
+    public bool HasOpenWindows => OpenWindows.Count > 0;
+
+    public OpenWindowChoice? SelectedOpenWindow
+    {
+        get => _selectedOpenWindow;
+        set
+        {
+            if (!SetProperty(ref _selectedOpenWindow, value)) return;
+            OnPropertyChanged(nameof(HasSelectedOpenWindow));
+            OnPropertyChanged(nameof(SelectedWindowPreviewDisplay));
+            CommandManager.InvalidateRequerySuggested();
+        }
+    }
+
+    public bool HasSelectedOpenWindow => _selectedOpenWindow is not null;
+
+    public string? RulesError => ProfileRules.Select(r => r.ValidationError).FirstOrDefault(e => e is not null);
+
+    public bool HasRulesError => !string.IsNullOrEmpty(RulesError);
+
+    public string LiveForegroundDisplay
+    {
+        get
+        {
+            var (title, proc) = _getForegroundContext();
+            if (string.IsNullOrWhiteSpace(title) && string.IsNullOrWhiteSpace(proc))
+                return "No external app captured yet (focus another window or pick one below)";
+            if (!string.IsNullOrWhiteSpace(title) && !string.IsNullOrWhiteSpace(proc))
+                return $"{title.Trim()}  [{proc.Trim()}]";
+            return !string.IsNullOrWhiteSpace(title) ? title.Trim() : $"[{proc.Trim()}]";
+        }
+    }
+
+    public string LiveResolvedProfileDisplay
+    {
+        get
+        {
+            var (title, proc) = _getForegroundContext();
+            return DescribeRoutingOutcome(title, proc);
+        }
+    }
+
+    public string SelectedWindowPreviewDisplay
+    {
+        get
+        {
+            if (_selectedOpenWindow is not { } win)
+                return string.Empty;
+            return $"Test match → {DescribeRoutingOutcome(win.Title, win.ProcessName)}";
+        }
     }
 
     /// <summary>
@@ -532,7 +797,7 @@ public sealed class SettingsViewModel : ObservableObject
         private set => SetProperty(ref _isDirty, value);
     }
 
-    public bool IsValid => _defaultDelayMs is >= 0 and <= AppSettings.MaxDefaultDelayMs && HotkeyError is null;
+    public bool IsValid => _defaultDelayMs is >= 0 and <= AppSettings.MaxDefaultDelayMs && HotkeyError is null && RulesError is null;
 
     public string? DelayError => _defaultDelayMs is >= 0 and <= AppSettings.MaxDefaultDelayMs ? null : $"Enter a value from 0 to {AppSettings.MaxDefaultDelayMs:N0} ms.";
 
@@ -560,6 +825,214 @@ public sealed class SettingsViewModel : ObservableObject
         _apply(_saved.Clone());
     }
 
+    private void ReloadProfileRules(IReadOnlyList<MacroProfileRule>? rules)
+    {
+        ProfileRules.Clear();
+        if (rules is { Count: > 0 })
+        {
+            foreach (var rule in rules)
+            {
+                if (rule is not null)
+                    ProfileRules.Add(new ProfileRuleItemViewModel(rule.Clone(), OnProfileRuleEdited));
+            }
+        }
+        UpdateRulePositions();
+        RefreshKnownProfiles();
+        OnPropertyChanged(nameof(HasProfileRules));
+        OnPropertyChanged(nameof(RulesError));
+        OnPropertyChanged(nameof(HasRulesError));
+        OnPropertyChanged(nameof(IsValid));
+        NotifyLiveContextChanged();
+    }
+
+    private void OnProfileRuleEdited()
+    {
+        IsDirty = true;
+        RefreshKnownProfiles();
+        OnPropertyChanged(nameof(RulesError));
+        OnPropertyChanged(nameof(HasRulesError));
+        OnPropertyChanged(nameof(IsValid));
+        NotifyLiveContextChanged();
+        CommandManager.InvalidateRequerySuggested();
+    }
+
+    private void AddBlankProfileRule()
+    {
+        ProfileRules.Add(new ProfileRuleItemViewModel(new MacroProfileRule(), OnProfileRuleEdited));
+        FinalizeRuleCollectionMutation();
+    }
+
+    private void AddRuleFromWindow(bool preferProcess)
+    {
+        if (_selectedOpenWindow is not { } win)
+            return;
+
+        var proc = win.ProcessName?.Trim() ?? string.Empty;
+        var title = win.Title?.Trim() ?? string.Empty;
+        if (preferProcess && proc.Length == 0)
+            return;
+        if (!preferProcess && title.Length == 0)
+            return;
+
+        var suggestedProfile = proc.Length > 0 ? proc : title;
+        if (suggestedProfile.Length > MacroProfileRule.MaxProfileNameLength)
+            suggestedProfile = suggestedProfile[..MacroProfileRule.MaxProfileNameLength];
+
+        var rule = new MacroProfileRule
+        {
+            Enabled = true,
+            ProfileName = suggestedProfile,
+            WindowTitleMatch = preferProcess ? string.Empty : title,
+            ProcessNameMatch = preferProcess ? proc : null,
+        };
+        rule.Sanitize();
+
+        ProfileRules.Add(new ProfileRuleItemViewModel(rule, OnProfileRuleEdited));
+        FinalizeRuleCollectionMutation();
+    }
+
+    private void MoveRule(ProfileRuleItemViewModel? rule, int delta)
+    {
+        if (rule is null) return;
+        var idx = ProfileRules.IndexOf(rule);
+        if (idx < 0) return;
+        var next = idx + delta;
+        if (next < 0 || next >= ProfileRules.Count) return;
+
+        ProfileRules.Move(idx, next);
+        FinalizeRuleCollectionMutation();
+    }
+
+    private void DeleteRule(ProfileRuleItemViewModel? rule)
+    {
+        if (rule is null || !ProfileRules.Remove(rule))
+            return;
+        FinalizeRuleCollectionMutation();
+    }
+
+    private void FinalizeRuleCollectionMutation()
+    {
+        UpdateRulePositions();
+        RefreshKnownProfiles();
+        IsDirty = true;
+        OnPropertyChanged(nameof(HasProfileRules));
+        OnPropertyChanged(nameof(RulesError));
+        OnPropertyChanged(nameof(HasRulesError));
+        OnPropertyChanged(nameof(IsValid));
+        NotifyLiveContextChanged();
+        CommandManager.InvalidateRequerySuggested();
+    }
+
+    private void UpdateRulePositions()
+    {
+        for (var i = 0; i < ProfileRules.Count; i++)
+            ProfileRules[i].UpdatePosition(i, ProfileRules.Count);
+    }
+
+    private void RefreshKnownProfiles()
+    {
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var sorted = new List<string>();
+
+        void AddIfNew(string? raw)
+        {
+            if (string.IsNullOrWhiteSpace(raw)) return;
+            var trimmed = raw.Trim();
+            if (seen.Add(trimmed))
+                sorted.Add(trimmed);
+        }
+
+        foreach (var profile in _getLibraryProfiles())
+            AddIfNew(profile);
+        foreach (var rule in ProfileRules)
+            AddIfNew(rule.ProfileName);
+
+        sorted.Sort(StringComparer.OrdinalIgnoreCase);
+        KnownProfiles.Clear();
+        foreach (var p in sorted)
+            KnownProfiles.Add(p);
+        OnPropertyChanged(nameof(HasKnownProfiles));
+    }
+
+    public async Task RefreshWindowContextAsync()
+    {
+        RefreshKnownProfiles();
+        IReadOnlyList<OpenWindowChoice> windows;
+        try
+        {
+            windows = await Task.Run(() => _getOpenWindows());
+        }
+        catch (Exception ex)
+        {
+            _log.Warning("Could not list open windows for Profile Rules picker.", ex);
+            windows = Array.Empty<OpenWindowChoice>();
+        }
+
+        var prevSelected = _selectedOpenWindow;
+        OpenWindows.Clear();
+        foreach (var win in windows)
+            OpenWindows.Add(win);
+
+        if (prevSelected is not null)
+        {
+            SelectedOpenWindow = OpenWindows.FirstOrDefault(w =>
+                string.Equals(w.Title, prevSelected.Title, StringComparison.Ordinal)
+                && string.Equals(w.ProcessName, prevSelected.ProcessName, StringComparison.OrdinalIgnoreCase));
+        }
+
+        OnPropertyChanged(nameof(HasOpenWindows));
+        NotifyLiveContextChanged();
+    }
+
+    public void NotifyLiveContextChanged()
+    {
+        OnPropertyChanged(nameof(LiveForegroundDisplay));
+        OnPropertyChanged(nameof(LiveResolvedProfileDisplay));
+        OnPropertyChanged(nameof(SelectedWindowPreviewDisplay));
+    }
+
+    private string DescribeRoutingOutcome(string? title, string? processName)
+    {
+        if (!AutoSwitchProfileByWindow)
+            return "All profiles armed (Auto-switch is OFF)";
+
+        if (string.IsNullOrWhiteSpace(title) && string.IsNullOrWhiteSpace(processName))
+            return "Global macros only (waiting for target window)";
+
+        foreach (var rule in ProfileRules)
+        {
+            if (!rule.Enabled || rule.ValidationError is not null)
+                continue;
+            var model = rule.ToModel();
+            if (model.Matches(title, processName))
+                return $"{model.ProfileName}  (matched Rule #{rule.PriorityNumber})";
+        }
+
+        var libraryStubs = KnownProfiles.Select(p => new Macro { Name = p, ProfileName = p }).ToList();
+        var fallbackProfile = ProfileRouter.ResolveActiveProfile(
+            rules: null,
+            library: libraryStubs,
+            foregroundWindowTitle: title,
+            manualProfileFilter: null,
+            autoSwitchByWindow: true,
+            foregroundProcessName: processName);
+
+        return string.IsNullOrWhiteSpace(fallbackProfile)
+            ? "Global macros only (no rule or profile matched)"
+            : $"{fallbackProfile}  (matched macro Profile tag)";
+    }
+
+    private List<MacroProfileRule>? BuildSavedProfileRules()
+    {
+        if (ProfileRules.Count == 0)
+            return null;
+
+        var list = new List<MacroProfileRule>(ProfileRules.Count);
+        foreach (var rule in ProfileRules)
+            list.Add(rule.ToModel());
+        return list;
+    }
+
     private void LoadFrom(AppSettings settings)
     {
         _confirmBeforeDelete = settings.ConfirmBeforeDelete;
@@ -570,6 +1043,7 @@ public sealed class SettingsViewModel : ObservableObject
         _minimizeToTrayOnClose = settings.MinimizeToTrayOnClose;
         _startWithWindows = settings.StartWithWindows;
         _autoSwitchProfileByWindow = settings.AutoSwitchProfileByWindow;
+        ReloadProfileRules(settings.ProfileRules);
         _recordMouseMovement = settings.RecordMouseMovement;
         _recordingMode = settings.RecordingMode;
         _recordingFidelity = settings.RecordingFidelity;
@@ -610,7 +1084,7 @@ public sealed class SettingsViewModel : ObservableObject
             MinimizeToTrayOnClose = MinimizeToTrayOnClose,
             StartWithWindows = StartWithWindows,
             AutoSwitchProfileByWindow = AutoSwitchProfileByWindow,
-            ProfileRules = _saved.ProfileRules is null ? null : new List<MacroProfileRule>(_saved.ProfileRules),
+            ProfileRules = BuildSavedProfileRules(),
             RecordMouseMovement = RecordMouseMovement,
             RecordingMode = RecordingMode,
             RecordingFidelity = RecordingFidelity,

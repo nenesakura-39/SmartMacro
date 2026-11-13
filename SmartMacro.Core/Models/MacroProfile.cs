@@ -9,6 +9,7 @@ namespace SmartMacro.Core.Models;
 public sealed class MacroProfileRule
 {
     public const int MaxProfileNameLength = 60;
+    public const int MaxMatchLength = SmartMacro.Core.Vision.SearchArea.MaxWindowTitleLength;
 
     public Guid Id { get; set; } = Guid.NewGuid();
 
@@ -30,6 +31,43 @@ public sealed class MacroProfileRule
             foregroundProcessName,
             WindowTitleMatch,
             ProcessNameMatch);
+
+    /// <summary>Validates this routing rule, returning a human-readable error message or null when valid.</summary>
+    public string? Validate()
+    {
+        var profile = ProfileName?.Trim() ?? string.Empty;
+        if (profile.Length == 0)
+            return "Enter a target profile name.";
+        if (profile.Length > MaxProfileNameLength)
+            return $"Profile name must be up to {MaxProfileNameLength} characters.";
+
+        var title = WindowTitleMatch?.Trim() ?? string.Empty;
+        var proc = ProcessNameMatch?.Trim() ?? string.Empty;
+        if (title.Length == 0 && proc.Length == 0)
+            return "Enter a window title match, a process name match, or both.";
+        if (title.Length > MaxMatchLength)
+            return $"Window title match must be up to {MaxMatchLength} characters.";
+        if (proc.Length > MaxMatchLength)
+            return $"Process name match must be up to {MaxMatchLength} characters.";
+
+        return null;
+    }
+
+    public void Sanitize()
+    {
+        if (Id == Guid.Empty) Id = Guid.NewGuid();
+        ProfileName = ClampTrim(ProfileName, MaxProfileNameLength);
+        WindowTitleMatch = ClampTrim(WindowTitleMatch, MaxMatchLength);
+        var proc = ClampTrim(ProcessNameMatch, MaxMatchLength);
+        ProcessNameMatch = proc.Length == 0 ? null : proc;
+    }
+
+    private static string ClampTrim(string? raw, int maxLen)
+    {
+        if (string.IsNullOrWhiteSpace(raw)) return string.Empty;
+        var trimmed = raw.Trim();
+        return trimmed.Length > maxLen ? trimmed[..maxLen] : trimmed;
+    }
 
     public MacroProfileRule Clone() => new()
     {

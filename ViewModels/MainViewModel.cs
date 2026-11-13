@@ -66,6 +66,8 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     private bool _isInitialized;
     private string? _lastForegroundTitle;
     private string _lastForegroundProcess = string.Empty;
+    private string? _lastExternalForegroundTitle;
+    private string _lastExternalForegroundProcess = string.Empty;
     private IReadOnlyList<Core.Vision.WindowInfo>? _lastOpenWindows;
     private string? _lastOpenWindowsSignature;
     private bool _hasWindowSnapshot;
@@ -140,8 +142,12 @@ public sealed class MainViewModel : ObservableObject, IDisposable
             playMacro: macro => Automation!.PlayMacroAsync(macro),
             canPlay: () => Automation?.IsIdle ?? false);
 
-        Settings = new SettingsViewModel(settingsStore, log, dialogs, paths, ApplySettings, SetStatus,
-            automation.Ocr.StatusText, automation.Ocr.IsAvailable, () => BuildDiagnostics(paths, automation.Ocr, log))
+        Settings = new SettingsViewModel(
+            settingsStore, log, dialogs, paths, ApplySettings, SetStatus,
+            automation.Ocr.StatusText, automation.Ocr.IsAvailable, () => BuildDiagnostics(paths, automation.Ocr, log),
+            getForegroundContext: GetSettingsForegroundContext,
+            getLibraryProfiles: GetLibraryProfileNames,
+            getOpenWindows: GetSettingsOpenWindows)
         {
             ExportStudioBackupHandler = ExportStudioBackupAsync,
             RestoreStudioBackupHandler = RestoreStudioBackupAsync,
@@ -393,6 +399,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
             OnPropertyChanged(nameof(CurrentPageViewModel));
             OnPropertyChanged(nameof(PageBreadcrumbText));
             if (value == AppPage.Manual) Manual.Refresh(); // shortcut keys may have changed in Settings
+            if (value == AppPage.Settings) _ = Settings.RefreshWindowContextAsync();
         }
     }
 
@@ -714,6 +721,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
 
         _lastForegroundTitle = fgTitle;
         _lastForegroundProcess = normalizedProc;
+        RememberExternalForeground(fgTitle, normalizedProc);
         if (openWindows is not null)
         {
             _lastOpenWindows = openWindows;
@@ -730,7 +738,10 @@ public sealed class MainViewModel : ObservableObject, IDisposable
             return;
 
         if (fgChanged)
+        {
             NotifyHotkeysChanged();
+            Settings?.NotifyLiveContextChanged();
+        }
 
         if (evaluateTriggers && TriggerEngine.IsArmed && !Automation.IsRecording && Library.Items.Count > 0)
             _ = EvaluateBackgroundTriggersWithSnapshotAsync(_lastForegroundTitle, _lastForegroundProcess, _lastOpenWindows);
@@ -751,6 +762,56 @@ public sealed class MainViewModel : ObservableObject, IDisposable
             sb.Append(w.ProcessName);
         }
         return sb.ToString();
+    }
+
+    private void RememberExternalForeground(string? fgTitle, string? fgProc)
+    {
+        if (string.IsNullOrWhiteSpace(fgTitle) && string.IsNullOrWhiteSpace(fgProc))
+            return;
+        _lastExternalForegroundTitle = fgTitle;
+        _lastExternalForegroundProcess = fgProc ?? string.Empty;
+    }
+
+    private (string? Title, string ProcessName) GetSettingsForegroundContext()
+    {
+        if (!string.IsNullOrWhiteSpace(_lastForegroundTitle) || !string.IsNullOrWhiteSpace(_lastForegroundProcess))
+            return (_lastForegroundTitle, _lastForegroundProcess);
+        return (_lastExternalForegroundTitle, _lastExternalForegroundProcess);
+    }
+
+    private IReadOnlyList<string> GetLibraryProfileNames()
+    {
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var list = new List<string>();
+        foreach (var item in Library.Items)
+        {
+            var profile = item.ProfileName;
+            if (!string.IsNullOrWhiteSpace(profile) && seen.Add(profile))
+                list.Add(profile);
+        }
+        return list;
+    }
+
+    private IReadOnlyList<OpenWindowChoice> GetSettingsOpenWindows()
+    {
+        if (_screen is not Core.Vision.IScreenLayout layout)
+            return Array.Empty<OpenWindowChoice>();
+
+        var windows = layout.GetWindows();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var choices = new List<OpenWindowChoice>(windows.Count);
+        foreach (var win in windows)
+        {
+            var title = win.Title?.Trim() ?? string.Empty;
+            var proc = win.ProcessName?.Trim() ?? string.Empty;
+            if (title.Length == 0 && proc.Length == 0)
+                continue;
+            var key = $"{title}\n{proc}";
+            if (seen.Add(key))
+                choices.Add(new OpenWindowChoice(title, proc));
+        }
+        choices.Sort((a, b) => string.Compare(a.DisplayLabel, b.DisplayLabel, StringComparison.OrdinalIgnoreCase));
+        return choices;
     }
 
     public async Task EvaluateBackgroundTriggersAsync()
