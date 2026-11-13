@@ -30,6 +30,8 @@ public sealed class SettingsViewModel : ObservableObject
     private bool _recordMouseMovement;
     private RecordingMode _recordingMode;
     private RecordingFidelity _recordingFidelity = RecordingFidelity.Exact1To1;
+    private SmartMacro.Core.Vision.HardwareAccelerationMode _computeEngineMode = SmartMacro.Core.Vision.HardwareAccelerationMode.Auto;
+    private int _visionMemoryBudgetMb = 256;
     private bool _useRelativeMouseDeltas;
     private bool _keepTapHoldTime;
     private bool _simplifyMousePaths;
@@ -283,8 +285,51 @@ public sealed class SettingsViewModel : ObservableObject
 
     public bool IsOcrAvailable { get; }
 
-    /// <summary>Hardware SIMD &amp; CPU worker telemetry shown on the Settings page.</summary>
-    public string HardwareAccelerationStatus => SmartMacro.Core.Vision.HardwareAccelerationInfo.StatusText;
+    /// <summary>Hardware SIMD, GPU &amp; RAM telemetry shown on the Settings page.</summary>
+    public string HardwareAccelerationStatus =>
+        SmartMacro.Core.Vision.HardwareAccelerationInfo.StatusText;
+
+    public static IReadOnlyList<Choice<SmartMacro.Core.Vision.HardwareAccelerationMode>> ComputeEngineModeChoices { get; } =
+    [
+        new(SmartMacro.Core.Vision.HardwareAccelerationMode.Auto, "Auto (GPU if available + CPU SIMD)"),
+        new(SmartMacro.Core.Vision.HardwareAccelerationMode.CpuOnly, "CPU Only (Zero-GPU · Low-End PC Safe)"),
+        new(SmartMacro.Core.Vision.HardwareAccelerationMode.GpuAccelerated, "GPU Accelerated (D3D11 DXGI + SIMD)")
+    ];
+
+    public IReadOnlyList<Choice<SmartMacro.Core.Vision.HardwareAccelerationMode>> ComputeEngineModes => ComputeEngineModeChoices;
+
+    public SmartMacro.Core.Vision.HardwareAccelerationMode ComputeEngineMode
+    {
+        get => _computeEngineMode;
+        set
+        {
+            if (!SetProperty(ref _computeEngineMode, value)) return;
+            IsDirty = true;
+            OnPropertyChanged(nameof(HardwareAccelerationStatus));
+        }
+    }
+
+    public static IReadOnlyList<Choice<int>> VisionMemoryBudgetChoices { get; } =
+    [
+        new(64, "64 MB (Low-End PC / Light RAM)"),
+        new(128, "128 MB (Balanced)"),
+        new(256, "256 MB (Standard · Default)"),
+        new(512, "512 MB (High-Performance)"),
+        new(1024, "1024 MB (Max Template Cache)")
+    ];
+
+    public IReadOnlyList<Choice<int>> VisionMemoryBudgets => VisionMemoryBudgetChoices;
+
+    public int VisionMemoryBudgetMb
+    {
+        get => _visionMemoryBudgetMb;
+        set
+        {
+            if (!SetProperty(ref _visionMemoryBudgetMb, value)) return;
+            IsDirty = true;
+            OnPropertyChanged(nameof(HardwareAccelerationStatus));
+        }
+    }
 
     public AsyncRelayCommand SaveCommand { get; }
     public RelayCommand RevertCommand { get; }
@@ -528,6 +573,8 @@ public sealed class SettingsViewModel : ObservableObject
         _recordMouseMovement = settings.RecordMouseMovement;
         _recordingMode = settings.RecordingMode;
         _recordingFidelity = settings.RecordingFidelity;
+        _computeEngineMode = settings.ComputeEngineMode;
+        _visionMemoryBudgetMb = settings.VisionMemoryBudgetMb;
         _useRelativeMouseDeltas = settings.UseRelativeMouseDeltas;
         _keepTapHoldTime = settings.KeepTapHoldTime;
         _simplifyMousePaths = settings.SimplifyMousePaths;
@@ -567,6 +614,8 @@ public sealed class SettingsViewModel : ObservableObject
             RecordMouseMovement = RecordMouseMovement,
             RecordingMode = RecordingMode,
             RecordingFidelity = RecordingFidelity,
+            ComputeEngineMode = ComputeEngineMode,
+            VisionMemoryBudgetMb = VisionMemoryBudgetMb,
             UseRelativeMouseDeltas = UseRelativeMouseDeltas,
             KeepTapHoldTime = KeepTapHoldTime,
             SimplifyMousePaths = SimplifyMousePaths,

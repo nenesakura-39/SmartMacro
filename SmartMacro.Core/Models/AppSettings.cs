@@ -96,6 +96,17 @@ public sealed class AppSettings
     public RecordingFidelity RecordingFidelity { get; set; } = RecordingFidelity.Exact1To1;
 
     /// <summary>
+    /// Selects whether vision matching prefers automatic hardware acceleration, strict CPU-only mode
+    /// (for low-end PCs or integrated GPUs), or D3D11/DXGI GPU-assisted mode.
+    /// </summary>
+    public SmartMacro.Core.Vision.HardwareAccelerationMode ComputeEngineMode { get; set; } = SmartMacro.Core.Vision.HardwareAccelerationMode.Auto;
+
+    /// <summary>
+    /// Maximum RAM (in MB, 64–1024) reserved for SmartMacro's decoded image template LRU cache.
+    /// </summary>
+    public int VisionMemoryBudgetMb { get; set; } = 256;
+
+    /// <summary>
     /// "Use relative mouse deltas for 3D camera": every recorded cursor movement becomes a relative mouse move (for
     /// shift-lock / first-person / cursor-locked games). Off (default): every move plays as an absolute X / Y position
     /// (drags of items, sliders and maps never drift); the deltas are still recorded on every Move step, so one step can
@@ -219,6 +230,8 @@ public sealed class AppSettings
         if (DefaultDelayMs > MaxDefaultDelayMs) DefaultDelayMs = MaxDefaultDelayMs;
         if (!Enum.IsDefined(RecordingMode)) RecordingMode = RecordingMode.Smart;
         if (!Enum.IsDefined(RecordingFidelity)) RecordingFidelity = RecordingFidelity.Exact1To1;
+        if (!Enum.IsDefined(ComputeEngineMode)) ComputeEngineMode = SmartMacro.Core.Vision.HardwareAccelerationMode.Auto;
+        VisionMemoryBudgetMb = Math.Clamp(VisionMemoryBudgetMb <= 0 ? 256 : VisionMemoryBudgetMb, 64, 1024);
         if (!Enum.IsDefined(Theme)) Theme = StudioTheme.ObsidianNeon;
         if (!Enum.IsDefined(Accent)) Accent = StudioAccent.NeonBrand;
         if (!Enum.IsDefined(Density)) Density = StudioDensity.Comfortable;

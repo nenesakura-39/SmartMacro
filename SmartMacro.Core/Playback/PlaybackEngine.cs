@@ -658,6 +658,8 @@ public sealed partial class PlaybackEngine
             }
 
             CurrentSpeed = macro.Speed;
+            _input.SetPlaybackSpeed(macro.Speed);
+            _input.SetRapidActionMode(false);
             var activeIds = new HashSet<Guid>();
             if (macro.Id != Guid.Empty) activeIds.Add(macro.Id);
             var current = new RunContext(steps, blocks, macro.Speed, held, new ScreenConditionEvaluator(_probes, rootVariables), totalIterations,
@@ -738,6 +740,8 @@ public sealed partial class PlaybackEngine
         }
         finally
         {
+            _input.SetRapidActionMode(false);
+            _input.SetPlaybackSpeed(1.0);
             // Never leave keys or mouse buttons stuck down (also when stopped inside a loop or a condition check).
             releaseError = held.ReleaseAll(_input);
 

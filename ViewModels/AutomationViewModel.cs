@@ -654,7 +654,9 @@ public sealed class AutomationViewModel : ObservableObject, IDisposable
             IgnoredHotkeys = RecordingHotkeys(settings),
             // The fidelity selector (Exact 1:1 / Smart Optimized / Clicks & Keys Only) decides sampling, simplification and holds.
             Fidelity = settings.RecordingFidelity,
-            SmartTiming = settings.SmartTimingOnRecord,
+            // In Exact 1:1 Replay mode, keep raw recorded pauses exact rather than upgrading pauses after clicks
+            // into screen-settle waits (which inflate 3.1s recordings to ~5s).
+            SmartTiming = settings.RecordingFidelity != RecordingFidelity.Exact1To1 && settings.SmartTimingOnRecord,
             CoalesceTypedText = settings.CoalesceTypedTextOnRecord,
             RelativeMouse = settings.RelativeMouseMode,
             SimplifyMousePath = true, // a few meaningful Move steps instead of one every 30 ms
@@ -739,7 +741,7 @@ public sealed class AutomationViewModel : ObservableObject, IDisposable
             TrimTrailingKeys = settings.RecordHotkey.AllKeys(),
             IgnoredHotkeys = RecordingHotkeys(settings),
             Fidelity = isRhythm ? null : settings.RecordingFidelity,
-            SmartTiming = !isRhythm && settings.SmartTimingOnRecord,
+            SmartTiming = !isRhythm && settings.RecordingFidelity != RecordingFidelity.Exact1To1 && settings.SmartTimingOnRecord,
             CoalesceTypedText = !isRhythm && settings.CoalesceTypedTextOnRecord,
             RelativeMouse = isRhythm ? RelativeMouseMode.Off : settings.RelativeMouseMode,
             RecordMouseMoves = isRhythm || settings.RecordMouseMovement,
@@ -808,6 +810,23 @@ public sealed class AutomationViewModel : ObservableObject, IDisposable
     /// <summary>Plays a specific macro (e.g. from the library's Play button). Ignored if something is already running.</summary>
     public Task PlayMacroAsync(Macro? macro) => PlayMacroAsync(macro, null);
 
+    /// <summary>
+    /// Validates and starts playing <paramref name="macro"/> for a CLI request without blocking dialogs/focus theft
+    /// when requested, synchronously confirming whether playback started or why it could not start.
+    /// </summary>
+    public bool TryStartMacroFromCli(
+        Macro macro,
+        bool suppressDialogsAndFocus,
+        out Task<PlaybackResult?> runTask,
+        out string errorMessage,
+        out bool wasBusy)
+    {
+        ArgumentNullException.ThrowIfNull(macro);
+        var started = TryStartMacroCore(macro, null, suppressDialogsAndFocus, out runTask, out var reason, out wasBusy);
+        errorMessage = reason ?? string.Empty;
+        return started;
+    }
+
     /// <summary>"▶ Run step": plays only the step at <paramref name="stepIndex"/> (or its whole If / Repeat block) once.</summary>
     public Task RunSingleStepAsync(Macro macro, int stepIndex) =>
         PlayMacroAsync(macro, new PlayRange(stepIndex, SingleStep: true));
@@ -821,12 +840,36 @@ public sealed class AutomationViewModel : ObservableObject, IDisposable
 
     private async Task PlayMacroAsync(Macro? macro, PlayRange? range)
     {
-        if (!IsIdle) return;
+        if (!TryStartMacroCore(macro, range, suppressDialogsAndFocus: false, out var runTask, out _, out _))
+            return;
+
+        await runTask;
+    }
+
+    private bool TryStartMacroCore(
+        Macro? macro,
+        PlayRange? range,
+        bool suppressDialogsAndFocus,
+        out Task<PlaybackResult?> runTask,
+        out string? errorReason,
+        out bool wasBusy)
+    {
+        runTask = Task.FromResult<PlaybackResult?>(null);
+        errorReason = null;
+        wasBusy = false;
+
+        if (!IsIdle)
+        {
+            wasBusy = true;
+            errorReason = "SmartMacro is already recording or playing another macro.";
+            return false;
+        }
 
         if (macro is null)
         {
-            _hooks.SetStatus("Open a macro in the editor, or select one in the library, then press Play.", StatusKind.Warning);
-            return;
+            errorReason = "Open a macro in the editor, or select one in the library, then press Play.";
+            _hooks.SetStatus(errorReason, StatusKind.Warning);
+            return false;
         }
 
         var checkedMacro = macro;
@@ -835,8 +878,9 @@ public sealed class AutomationViewModel : ObservableObject, IDisposable
         {
             if (range.StepIndex < 0 || range.StepIndex >= macro.Steps.Count)
             {
-                _hooks.SetStatus("Select a step first.", StatusKind.Warning);
-                return;
+                errorReason = "Select a step first.";
+                _hooks.SetStatus(errorReason, StatusKind.Warning);
+                return false;
             }
 
             if (range.SingleStep)
@@ -865,18 +909,23 @@ public sealed class AutomationViewModel : ObservableObject, IDisposable
         }
         if (issues.HasErrors())
         {
-            var list = string.Join("\n", issues.Where(i => i.Severity == IssueSeverity.Error).Take(8).Select(i => "• " + i.DisplayText));
+            var errors = issues.Where(i => i.Severity == IssueSeverity.Error).ToList();
+            var list = string.Join("\n", errors.Take(8).Select(i => "• " + i.DisplayText));
             var what = range is null ? "this macro" : range.SingleStep ? "this step" : "from this step";
-            _dialogs.ShowWarning($"Can't play {what}", $"Fix these problems first:\n\n{list}");
-            _hooks.SetStatus($"\"{macro.Name}\" can't play {(range is null ? "" : what + " ")}until its problems are fixed.", StatusKind.Error);
-            return;
+            if (!suppressDialogsAndFocus)
+                _dialogs.ShowWarning($"Can't play {what}", $"Fix these problems first:\n\n{list}");
+            errorReason = errors[0].DisplayText;
+            _hooks.SetStatus($"\"{macro.Name}\" can't play {(range is null ? "" : what + " ")}until its problems are fixed: {errorReason}", StatusKind.Error);
+            return false;
         }
 
         if (!_ocr.IsAvailable && WorkflowSteps.UsesTextRecognition(checkedMacro))
         {
-            _dialogs.ShowWarning("Text recognition isn't available", $"This macro has \"Find text\" steps or text conditions, but:\n\n{_ocr.StatusText}");
+            if (!suppressDialogsAndFocus)
+                _dialogs.ShowWarning("Text recognition isn't available", $"This macro has \"Find text\" steps or text conditions, but:\n\n{_ocr.StatusText}");
+            errorReason = $"Text recognition (OCR) isn't available: {_ocr.StatusText}";
             _hooks.SetStatus("Can't play: text recognition (OCR) isn't available on this PC.", StatusKind.Error);
-            return;
+            return false;
         }
 
         _activeSessionId = Interlocked.Increment(ref _playbackSessionId);
@@ -900,7 +949,7 @@ public sealed class AutomationViewModel : ObservableObject, IDisposable
         ActiveStepDetailText = $"Starting \"{_runningMacroName}\"…";
         RunCounterText = PlaybackRunInfo.FormatCounter(1, _configuredRuns);
         StepCounterText = string.Empty;
-        _host.Enter(OverlayKind.Playing, OverlayText(), RunCounterText);
+        _host.Enter(OverlayKind.Playing, OverlayText(), RunCounterText, suppressDialogsAndFocus);
         _host.UpdateHud(BuildHud());
 
         try
@@ -913,22 +962,22 @@ public sealed class AutomationViewModel : ObservableObject, IDisposable
             _log.Warning("The Esc emergency stop could not be enabled; use Ctrl+Shift+F10 or the Stop button.", ex);
         }
 
-        var run = RunPlaybackAsync(macro, range);
-        _runTask = run;
-        await run;
+        runTask = RunPlaybackAsync(macro, range, suppressDialogsAndFocus);
+        _runTask = runTask;
+        return true;
     }
 
-    private async Task RunPlaybackAsync(Macro macro, PlayRange? range)
+    private async Task<PlaybackResult?> RunPlaybackAsync(Macro macro, PlayRange? range, bool suppressDialogs)
     {
         PlaybackResult? result = null;
         try
         {
             // Let the window minimize first so clicks don't land on SmartMacro itself.
-            await Task.Delay(400);
+            await Task.Delay(suppressDialogs ? 50 : 400);
             if (Mode == AutomationMode.Stopping)
             {
                 result = new PlaybackResult(PlaybackOutcome.Stopped, 0, 0);
-                return;
+                return result;
             }
 
             _runStartedUtc = DateTime.UtcNow;
@@ -947,7 +996,7 @@ public sealed class AutomationViewModel : ObservableObject, IDisposable
             // Simulated keys are queued; the target app may still be processing them. If SmartMacro
             // restored itself right away it would grab the keyboard and swallow the rest (e.g. "Sma" instead
             // of "SmartMacro"). Give the app a moment to catch up first.
-            await Task.Delay(SettleBeforeRestoreMs);
+            await Task.Delay(suppressDialogs ? 50 : SettleBeforeRestoreMs);
         }
         catch (Exception ex)
         {
@@ -972,7 +1021,7 @@ public sealed class AutomationViewModel : ObservableObject, IDisposable
             ProgressText = string.Empty;
             IsProgressIndeterminate = false;
             _runTask = null;
-            ReportResult(result);
+            ReportResult(result, suppressDialogs);
             PlaybackFinished?.Invoke(this, (finishedMacroId, result));
             RunCounterText = string.Empty;
             StepCounterText = string.Empty;
@@ -986,9 +1035,11 @@ public sealed class AutomationViewModel : ObservableObject, IDisposable
             OnPropertyChanged(nameof(RunningMacroTitle));
             RefreshTarget();
         }
+
+        return result;
     }
 
-    private void ReportResult(PlaybackResult? result)
+    private void ReportResult(PlaybackResult? result, bool suppressDialogs)
     {
         if (result is null) return;
         var elapsed = DateTime.UtcNow - _runStartedUtc;
@@ -1012,7 +1063,8 @@ public sealed class AutomationViewModel : ObservableObject, IDisposable
             }
             case PlaybackOutcome.Failed:
                 _hooks.SetStatus($"\"{name}\" stopped because of an error: {result.Error}", StatusKind.Error);
-                _dialogs.ShowError("Playback stopped", $"\"{name}\" stopped because of an error:\n\n{result.Error}");
+                if (!suppressDialogs)
+                    _dialogs.ShowError("Playback stopped", $"\"{name}\" stopped because of an error:\n\n{result.Error}");
                 break;
         }
 

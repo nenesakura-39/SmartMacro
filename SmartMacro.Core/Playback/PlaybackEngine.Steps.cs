@@ -855,11 +855,17 @@ public sealed partial class PlaybackEngine
             token.ThrowIfCancellationRequested();
 
             var length = char.IsHighSurrogate(text[i]) && i + 1 < text.Length && char.IsLowSurrogate(text[i + 1]) ? 2 : 1;
+            var t0 = _clock.Elapsed;
             _input.TypeCharacters(text.Substring(i, length));
+            var typedMs = (_clock.Elapsed - t0).TotalMilliseconds;
             i += length - 1;
 
             if (step.CharacterDelayMs > 0 && i < text.Length - 1)
-                await WaitAsync(step.CharacterDelayMs / speed, token).ConfigureAwait(false);
+            {
+                var remainingMs = (step.CharacterDelayMs / speed) - typedMs;
+                if (remainingMs > 0.25)
+                    await WaitAsync(remainingMs, token).ConfigureAwait(false);
+            }
         }
     }
 

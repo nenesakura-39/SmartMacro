@@ -64,39 +64,48 @@ public sealed partial class PlaybackEngine
                     Message?.Invoke(this, result.FoundText + Stats());
 
                     var held = _held ?? throw new InvalidOperationException("Playback isn't running.");
-                    var timing = FoundActionTiming.Of(step);
+                    var timing = FoundActionTiming.ForStep(step, CurrentSpeed);
                     var lastActedX = result.X;
                     var lastActedY = result.Y;
 
-                    if (step.TargetSelection == SearchMatchMode.AllMatches
-                        && step.Action != FoundTextAction.None
-                        && result.EffectiveMatches is { Count: > 1 } multiMatches)
+                    if (timing.Rapid) _input.SetRapidActionMode(true);
+                    try
                     {
-                        var limit = step.MaxMatchesToActOn > 0 ? Math.Min(step.MaxMatchesToActOn, multiMatches.Count) : multiMatches.Count;
-                        for (var i = 0; i < limit; i++)
+                        if (step.TargetSelection == SearchMatchMode.AllMatches
+                            && step.Action != FoundTextAction.None
+                            && result.EffectiveMatches is { Count: > 1 } multiMatches)
                         {
-                            await WaitIfPausedAsync(token).ConfigureAwait(false);
-                            token.ThrowIfCancellationRequested();
-
-                            var mRect = multiMatches[i];
-                            var (mx, my) = (mRect.CenterX, mRect.CenterY);
-                            RememberFound(mx, my, mRect);
-                            lastActedX = mx;
-                            lastActedY = my;
-
-                            await PerformFoundActionAsync(step.Action, mx + step.OffsetX, my + step.OffsetY, step.ActionHoldMs,
-                                timing, held, token, mRect).ConfigureAwait(false);
-
-                            if (i + 1 < limit && step.BetweenMatchesDelayMs > 0)
+                            var limit = step.MaxMatchesToActOn > 0 ? Math.Min(step.MaxMatchesToActOn, multiMatches.Count) : multiMatches.Count;
+                            for (var i = 0; i < limit; i++)
                             {
-                                await WaitAsync(Vary(step.BetweenMatchesDelayMs, HumanizeMinDelayMs), token).ConfigureAwait(false);
+                                await WaitIfPausedAsync(token).ConfigureAwait(false);
+                                token.ThrowIfCancellationRequested();
+
+                                var mRect = multiMatches[i];
+                                var (mx, my) = (mRect.CenterX, mRect.CenterY);
+                                RememberFound(mx, my, mRect);
+                                lastActedX = mx;
+                                lastActedY = my;
+
+                                await PerformFoundActionAsync(step.Action, mx + step.OffsetX, my + step.OffsetY, step.ActionHoldMs,
+                                    timing, held, token, mRect).ConfigureAwait(false);
+
+                                if (i + 1 < limit && step.BetweenMatchesDelayMs > 0)
+                                {
+                                    var gapMs = Math.Max(0, Vary(step.BetweenMatchesDelayMs, HumanizeMinDelayMs) / Math.Max(0.25, CurrentSpeed));
+                                    await WaitAsync(gapMs, token).ConfigureAwait(false);
+                                }
                             }
                         }
+                        else
+                        {
+                            await PerformFoundActionAsync(step.Action, result.X + step.OffsetX, result.Y + step.OffsetY, step.ActionHoldMs,
+                                timing, held, token, result.Match).ConfigureAwait(false);
+                        }
                     }
-                    else
+                    finally
                     {
-                        await PerformFoundActionAsync(step.Action, result.X + step.OffsetX, result.Y + step.OffsetY, step.ActionHoldMs,
-                            timing, held, token, result.Match).ConfigureAwait(false);
+                        if (timing.Rapid) _input.SetRapidActionMode(false);
                     }
 
                     if (step.MoveCursorAwayAfterAction && step.Action is not (FoundTextAction.None or FoundTextAction.Move))
@@ -502,16 +511,51 @@ public sealed partial class PlaybackEngine
         int SettleMs,
         int FoundKey = 0x20,
         string? FoundText = null,
-        int ScrollClicks = 3)
+        int ScrollClicks = 3,
+        bool Rapid = false)
     {
         public static FoundActionTiming Default => new(null, 0, FoundClickHoldMs, DoubleClickGapMs, ClickSettleMs);
 
         /// <summary>Wait for screen change (no click settings of its own): jump, 6 ms rest, 12 ms hold – for things that move fast.</summary>
         public static FoundActionTiming Snappy => new(null, 0, MinTargetClickHoldMs, DoubleClickGapMs, ClickSettleMs);
 
-        public static FoundActionTiming Of(ScreenSearchStep step) =>
-            new(step.MoveStyle, step.MoveDurationMs, step.ClickHoldMs, step.DoubleClickIntervalMs, step.PostActionDelayMs,
-                step.FoundVirtualKey <= 0 ? 0x20 : step.FoundVirtualKey, step.FoundTextToType, step.FoundScrollClicks <= 0 ? 3 : step.FoundScrollClicks);
+        public static FoundActionTiming Of(ScreenSearchStep step) => ForStep(step, 1.0);
+
+        /// <summary>
+        /// Computes live playback timing scaled by <paramref name="speed"/> and switches untouched defaults into
+        /// low-latency rapid click mode whenever sub-50 ms high-frequency polling (&lt; 50 ms) or Fastest strategy is active.
+        /// </summary>
+        public static FoundActionTiming ForStep(ScreenSearchStep step, double speed)
+        {
+            var s = speed > 0 && double.IsFinite(speed) ? speed : 1.0;
+            var rapid = step.CheckIntervalMs < 50 || step.Strategy == VisionSearchStrategy.Fastest;
+            var moveStyle = rapid && step.MoveStyle is null && step.MoveDurationMs == MouseMotionDefaults.MoveDurationMs
+                ? MouseMoveStyle.Instant
+                : step.MoveStyle;
+            var rawMoveMs = rapid && step.MoveStyle is null && step.MoveDurationMs == MouseMotionDefaults.MoveDurationMs
+                ? 0
+                : step.MoveDurationMs;
+            var rawHoldMs = rapid && step.ClickHoldMs == MouseMotionDefaults.ClickHoldMs
+                ? 8
+                : step.ClickHoldMs;
+            var rawDoubleGapMs = rapid && step.DoubleClickIntervalMs == 65
+                ? 25
+                : step.DoubleClickIntervalMs;
+            var rawSettleMs = rapid && step.PostActionDelayMs == MouseMotionDefaults.PostActionDelayMs
+                ? Math.Min(8, Math.Max(0, step.CheckIntervalMs / 3))
+                : step.PostActionDelayMs;
+
+            return new(
+                moveStyle,
+                rawMoveMs > 0 ? Math.Max(0, (int)Math.Round(rawMoveMs / s)) : 0,
+                rawHoldMs > 0 ? Math.Max(rapid ? 2 : 1, (int)Math.Round(rawHoldMs / s)) : 0,
+                rawDoubleGapMs > 0 ? Math.Max(rapid ? 8 : 0, (int)Math.Round(rawDoubleGapMs / s)) : 0,
+                rawSettleMs > 0 ? Math.Max(0, (int)Math.Round(rawSettleMs / s)) : 0,
+                step.FoundVirtualKey <= 0 ? 0x20 : step.FoundVirtualKey,
+                step.FoundTextToType,
+                step.FoundScrollClicks <= 0 ? 3 : step.FoundScrollClicks,
+                rapid);
+        }
     }
 
     /// <summary>
@@ -543,9 +587,9 @@ public sealed partial class PlaybackEngine
         await MoveCursorAsync(x, y, timing.Style, timing.MoveMs, 1.0, onTimeline: false, token).ConfigureAwait(false);
 
         // Reliable game click: the cursor rests on the target for a moment before the press (games read the cursor once
-        // per frame), and the button stays down at least MinTargetClickHoldMs.
-        if (action != FoundTextAction.Move) await WaitAsync(TargetHoverMs, token).ConfigureAwait(false);
-        var clickHold = Math.Max(MinTargetClickHoldMs, timing.HoldMs);
+        // per frame), and the button stays down at least MinTargetClickHoldMs (or 2 ms in rapid reflex mode).
+        if (action != FoundTextAction.Move && !timing.Rapid) await WaitAsync(TargetHoverMs, token).ConfigureAwait(false);
+        var clickHold = Math.Max(timing.Rapid ? 2 : MinTargetClickHoldMs, timing.HoldMs);
         switch (action)
         {
             case FoundTextAction.Click:

@@ -183,14 +183,18 @@ public static class TemplateAutoTuner
                 return "📜 Shuffling / Scrolling Text: O(1) word index + Find-Once-Then-Track (follows the found word as an image at frame rate).";
 
             case VisionScenario.FastReaction:
-                step.CheckIntervalMs = 20;
+                step.CheckIntervalMs = 16;
                 step.Strategy = VisionSearchStrategy.Fastest;
                 step.TimeBudgetMs = 16;
-                step.TrackTarget = true;
-                step.PredictiveClick = true;
-                step.PredictiveLeadMs = 45;
+                step.TrackTarget = false;
+                step.PredictiveClick = false;
+                step.PredictiveLeadMs = 0;
+                step.MoveStyle = MouseMoveStyle.Instant;
+                step.MoveDurationMs = 0;
+                step.ClickHoldMs = 12;
+                step.PostActionDelayMs = 0;
                 step.ConfirmFrames = 0;
-                return "⚡ Instant Reflex: 20 ms high-frequency checks with a 16 ms frame budget and predictive click.";
+                return "⚡ Instant Reflex: 16 ms polling, instant snap, and zero-lag click for rapid-fire targets & QTEs.";
 
             default:
                 return "Custom settings.";

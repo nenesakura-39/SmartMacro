@@ -40,6 +40,9 @@ public interface IRunModeHost
     /// <param name="counter">Optional run counter shown in bold in front of the text, e.g. "Run #3 / ∞".</param>
     void Enter(OverlayKind kind, string text, string? counter = null);
 
+    /// <summary>Enters run mode with optional suppression of main window minimize/restore focus changes (for headless CLI runs).</summary>
+    void Enter(OverlayKind kind, string text, string? counter, bool suppressWindowFocus) => Enter(kind, text, counter);
+
     /// <param name="counter">Optional run counter shown in bold in front of the text, e.g. "Run #3 / ∞".</param>
     void Update(OverlayKind kind, string text, string? counter = null);
 
@@ -101,14 +104,20 @@ public sealed class RunModeHost : IRunModeHost, IDisposable
 
     public event EventHandler? StopRequested;
 
-    public void Enter(OverlayKind kind, string text, string? counter = null)
+    public void Enter(OverlayKind kind, string text, string? counter = null) =>
+        Enter(kind, text, counter, suppressWindowFocus: false);
+
+    public void Enter(OverlayKind kind, string text, string? counter, bool suppressWindowFocus)
     {
         var settings = _settings();
         _minimizedByUs = false;
 
         // Even if it stays visible (or is still animating), OCR must never read SmartMacro's own window.
         NativeMethods.SetExcludedFromCapture(_mainWindow, true);
-        if (settings.MinimizeDuringRun && _mainWindow.WindowState != WindowState.Minimized)
+        if (!suppressWindowFocus
+            && _mainWindow.IsVisible
+            && settings.MinimizeDuringRun
+            && _mainWindow.WindowState != WindowState.Minimized)
         {
             _previousState = _mainWindow.WindowState;
             _mainWindow.WindowState = WindowState.Minimized;

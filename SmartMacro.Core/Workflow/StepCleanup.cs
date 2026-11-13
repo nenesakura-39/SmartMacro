@@ -261,7 +261,7 @@ public static class StepCleanup
                     totalInterKeyDelayMs += pendingDelayMs;
                     interKeyDelayIntervals++;
                 }
-                pendingDelayMs = 0;
+                pendingDelayMs = kp.HoldMs > 0 ? kp.HoldMs : 0;
 
                 if (printableKeys >= 2 && sb.Length >= 2)
                 {
@@ -283,7 +283,7 @@ public static class StepCleanup
                 totalInterKeyDelayMs += pendingDelayMs;
                 interKeyDelayIntervals++;
             }
-            pendingDelayMs = 0;
+            pendingDelayMs = kp.HoldMs > 0 ? kp.HoldMs : 0;
 
             sb.Append(ch);
             printableKeys++;

@@ -726,6 +726,9 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     private void ApplySettings(AppSettings settings)
     {
         _settings = settings;
+        SmartMacro.Core.Vision.HardwareAccelerationInfo.Configure(
+            settings.ComputeEngineMode,
+            settings.VisionMemoryBudgetMb);
         OnPropertyChanged(nameof(ShowLogPanel));
         OnPropertyChanged(nameof(ShowMiniOverlay));
         OnPropertyChanged(nameof(MinimizeWhilePlaying));
@@ -733,6 +736,8 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(RecordingMode));
         OnPropertyChanged(nameof(RecordingFidelity));
         OnPropertyChanged(nameof(IsSidebarPinned));
+        OnPropertyChanged(nameof(HardwareAccelerationStatus));
+        OnPropertyChanged(nameof(HardwareBadgeText));
         Automation?.RefreshShortcuts();
         SettingsApplied?.Invoke(this, settings);
     }
@@ -747,13 +752,22 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     /// <summary>Live SIMD &amp; CPU worker telemetry shown in the Studio status bar.</summary>
     public string HardwareAccelerationStatus => SmartMacro.Core.Vision.HardwareAccelerationInfo.StatusText;
 
-    /// <summary>Short badge for the Studio status bar (e.g. "AVX2 · 4w").</summary>
-    public string HardwareBadgeText =>
-        SmartMacro.Core.Vision.HardwareAccelerationInfo.IsAvx2Supported
-            ? $"⚡ AVX2 · {SmartMacro.Core.Vision.HardwareAccelerationInfo.MaxVisionWorkers}w"
-            : SmartMacro.Core.Vision.HardwareAccelerationInfo.IsSse2Supported
-                ? $"⚡ SSE2 · {SmartMacro.Core.Vision.HardwareAccelerationInfo.MaxVisionWorkers}w"
-                : $"CPU · {SmartMacro.Core.Vision.HardwareAccelerationInfo.MaxVisionWorkers}w";
+    /// <summary>Short badge for the Studio status bar (e.g. "GPU+AVX2 · 4w · 256MB").</summary>
+    public string HardwareBadgeText
+    {
+        get
+        {
+            var workers = SmartMacro.Core.Vision.HardwareAccelerationInfo.MaxVisionWorkers;
+            var simd = SmartMacro.Core.Vision.HardwareAccelerationInfo.IsAvx2Supported
+                ? "AVX2"
+                : SmartMacro.Core.Vision.HardwareAccelerationInfo.IsSse2Supported
+                    ? "SSE2"
+                    : "CPU";
+            var engine = SmartMacro.Core.Vision.HardwareAccelerationInfo.IsGpuActive ? "GPU+" : "";
+            var ramMb = SmartMacro.Core.Vision.HardwareAccelerationInfo.MemoryLimitMb;
+            return $"⚡ {engine}{simd} · {workers}w · {ramMb}MB";
+        }
+    }
 
     /// <summary>Plain-text system info for bug reports (no macro contents, no screenshots).</summary>
     private static string BuildDiagnostics(AppPaths paths, IOcrService ocr, ILogService log)

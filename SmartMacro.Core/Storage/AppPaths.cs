@@ -73,32 +73,18 @@ public sealed class AppPaths
         out string macroTarget,
         out bool exitAfterRun)
     {
-        macroTarget = string.Empty;
-        exitAfterRun = false;
-        if (args is not { Count: > 0 }) return false;
-
-        for (var i = 0; i < args.Count; i++)
+        var parsed = CliCommandLine.Parse(args);
+        if (parsed.Action == CliActionKind.RunMacro
+            && string.IsNullOrEmpty(parsed.ParseError)
+            && !string.IsNullOrWhiteSpace(parsed.MacroTarget))
         {
-            var arg = args[i]?.Trim() ?? string.Empty;
-            if (string.IsNullOrEmpty(arg)) continue;
-
-            if (string.Equals(arg, "--exit-after-run", StringComparison.OrdinalIgnoreCase))
-            {
-                exitAfterRun = true;
-            }
-            else if (string.Equals(arg, "--run", StringComparison.OrdinalIgnoreCase))
-            {
-                if (i + 1 < args.Count && !string.IsNullOrWhiteSpace(args[i + 1]))
-                {
-                    macroTarget = args[++i].Trim().Trim('"');
-                }
-            }
-            else if (arg.StartsWith("--run=", StringComparison.OrdinalIgnoreCase))
-            {
-                macroTarget = arg["--run=".Length..].Trim().Trim('"');
-            }
+            macroTarget = parsed.MacroTarget;
+            exitAfterRun = parsed.ExitAfterRun;
+            return true;
         }
 
-        return !string.IsNullOrWhiteSpace(macroTarget);
+        macroTarget = string.Empty;
+        exitAfterRun = false;
+        return false;
     }
 }

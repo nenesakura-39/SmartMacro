@@ -492,13 +492,34 @@
                             <TextBlock Style="{StaticResource SettingHelp}" Margin="0,6,0,0"
                                        Text="Uses the text recognition built into Windows. Screen captures are processed on this PC only and are never uploaded (only the latest editor 'Test' capture is saved locally in the Logs folder)." />
 
-                            <TextBlock Text="HARDWARE VISION ACCELERATION (ZERO-GPU)" Style="{StaticResource SetupCardTitle}" Margin="0,16,0,6" />
+                            <TextBlock Text="HARDWARE VISION ACCELERATION &amp; MEMORY" Style="{StaticResource SetupCardTitle}" Margin="0,16,0,6" />
                             <StackPanel Orientation="Horizontal">
                                 <TextBlock Text="&#xE945;" Style="{StaticResource IconText}" Foreground="{DynamicResource VisionAccentBrush}" VerticalAlignment="Top" Margin="0,2,8,0" />
                                 <TextBlock Text="{Binding HardwareAccelerationStatus}" FontFamily="{StaticResource MonoFont}" TextWrapping="Wrap" MaxWidth="660" FontSize="12" />
                             </StackPanel>
+                            <Grid Margin="0,10,0,0">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="16" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Grid.Column="0">
+                                    <TextBlock Text="Compute Engine" Style="{StaticResource SettingLabel}" Margin="0,0,0,4" />
+                                    <ComboBox ItemsSource="{Binding ComputeEngineModes}"
+                                              DisplayMemberPath="Label" SelectedValuePath="Value"
+                                              SelectedValue="{Binding ComputeEngineMode, Mode=TwoWay}"
+                                              ToolTip="Choose Auto (GPU if available + CPU SIMD), strict CPU Only for low-end PCs/iGPUs, or GPU Accelerated (D3D11 DXGI)." />
+                                </StackPanel>
+                                <StackPanel Grid.Column="2">
+                                    <TextBlock Text="RAM Template Cache Limit" Style="{StaticResource SettingLabel}" Margin="0,0,0,4" />
+                                    <ComboBox ItemsSource="{Binding VisionMemoryBudgets}"
+                                              DisplayMemberPath="Label" SelectedValuePath="Value"
+                                              SelectedValue="{Binding VisionMemoryBudgetMb, Mode=TwoWay}"
+                                              ToolTip="Control how much RAM SmartMacro reserves for cached image templates. Lower values keep RAM minimal on low-end PCs." />
+                                </StackPanel>
+                            </Grid>
                             <TextBlock Style="{StaticResource SettingHelp}" Margin="0,6,0,0"
-                                       Text="Automatically uses 256-bit AVX2 or 128-bit SSE2 CPU vector instructions and scales parallel vision workers to your processor's core count while reserving 0% of your GPU." />
+                                       Text="Uses 256-bit AVX2 / 128-bit SSE2 CPU SIMD, optional D3D11/DXGI GPU acceleration, and your chosen RAM cache budget so SmartMacro runs smoothly on both low-end laptops and gaming desktops." />
                         </StackPanel>
                     </StackPanel>
                 </Border>

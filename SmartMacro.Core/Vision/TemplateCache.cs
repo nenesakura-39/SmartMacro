@@ -70,7 +70,18 @@ public sealed class TemplateCache
     }
 
     public int Capacity { get; }
-    public long MaxBytes { get; }
+    public long MaxBytes { get; private set; }
+
+    /// <summary>Updates the byte budget at runtime and evicts excess entries immediately.</summary>
+    public void ConfigureMemoryBudget(int memoryLimitMb)
+    {
+        var limitBytes = Math.Clamp(memoryLimitMb, 16, 4096) * 1024L * 1024L;
+        lock (_gate)
+        {
+            MaxBytes = limitBytes;
+            Trim();
+        }
+    }
 
     /// <summary>How many pictures (and remembered errors) are cached right now.</summary>
     public int Count

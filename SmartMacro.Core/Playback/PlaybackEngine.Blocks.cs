@@ -131,6 +131,7 @@ public sealed partial class PlaybackEngine
                 {
                     run.Speed = newSpeed;
                     CurrentSpeed = newSpeed;
+                    _input.SetPlaybackSpeed(newSpeed);
                     Message?.Invoke(this, $"Playback speed changed to {newSpeed:0.##}× (from step {run.StepNumberOf(pc)}).");
                 }
 

@@ -15,9 +15,7 @@ public static class WindowsStartupService
     public const string TrayArgument = "--tray";
 
     public static bool IsStartInTrayCommandLine(IReadOnlyList<string>? args) =>
-        args is { Count: > 0 } && args.Any(a =>
-            string.Equals(a, "--tray", StringComparison.OrdinalIgnoreCase)
-            || string.Equals(a, "--minimized", StringComparison.OrdinalIgnoreCase));
+        Core.Storage.CliCommandLine.Parse(args).StartInTray;
 
     /// <summary>
     /// Parses <c>--run &lt;MacroNameOrPath&gt;</c> (or <c>--run=&lt;MacroNameOrPath&gt;</c>) and optional

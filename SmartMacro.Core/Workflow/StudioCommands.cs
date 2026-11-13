@@ -37,6 +37,9 @@ public enum StudioCommandKind
 
     /// <summary>Inserts the 📚 blueprint <see cref="StudioCommand.Blueprint"/>.</summary>
     AddBlueprint,
+
+    /// <summary>Copies a ready-to-run CLI command (<c>SmartMacro.exe --run ...</c>) for Stream Deck / Task Scheduler.</summary>
+    CopyCliCommand,
 }
 
 /// <summary>
@@ -97,6 +100,7 @@ public static class StudioCommandCatalog
             new("compact", "📐 Toggle Compact Step View", StudioCommandKind.ToggleCompactView, "dense list rows view"),
             new("humanize", "🎲 Toggle Humanize Mode", StudioCommandKind.ToggleHumanize, "random jitter human natural"),
             new("test-step", "🧪 Test Selected Step", StudioCommandKind.TestStep, "try check detect diagnose near miss accuracy", Shortcut: "Ctrl+T"),
+            new("copy-cli-command", "Copy CLI Run Command", StudioCommandKind.CopyCliCommand, "cli command line stream deck task scheduler headless"),
         };
 
         foreach (var speed in PaletteSpeeds)

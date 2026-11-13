@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Threading;
 using SmartMacro.Core.Logging;
@@ -27,20 +28,74 @@ public partial class App : Application
 
     // Only one SmartMacro may run at a time (two copies would fight over shortcuts and input hooks).
     private const string SingleInstanceName = @"Local\SmartMacro.SingleInstance";
-    private const string ActivateEventName = @"Local\SmartMacro.Activate";
+    private const int AttachParentProcess = -1;
     private Mutex? _singleInstance;
-    private EventWaitHandle? _activateEvent;
-    private RegisteredWaitHandle? _activateWait;
+    private CliIpcServer? _ipcServer;
+    private TaskCompletionSource<bool>? _startupReadyTcs;
 
     protected override async void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
+        ShutdownMode = ShutdownMode.OnExplicitShutdown;
 
-        if (!ClaimSingleInstance())
+        var cliRequest = CliCommandLine.Parse(e.Args);
+        if (cliRequest.Action == CliActionKind.Help)
         {
-            Shutdown(0);
+            var help = CliCommandLine.BuildHelpText();
+            if (!TryWriteCliOutput(help))
+                MessageBox.Show(help, "SmartMacro CLI Options", MessageBoxButton.OK, MessageBoxImage.Information);
+            Shutdown(CliExitCodes.Success);
             return;
         }
+
+        if (!string.IsNullOrEmpty(cliRequest.ParseError))
+        {
+            if (!TryWriteCliOutput(cliRequest.ParseError) && !cliRequest.NoFocus)
+                MessageBox.Show(cliRequest.ParseError, "SmartMacro CLI", MessageBoxButton.OK, MessageBoxImage.Warning);
+            Shutdown(CliExitCodes.InvalidOrNotFound);
+            return;
+        }
+
+        if (!ClaimSingleInstanceMutex())
+        {
+            var responseTimeout = cliRequest.Action == CliActionKind.RunMacro && cliRequest.EffectiveWait
+                ? Timeout.InfiniteTimeSpan
+                : TimeSpan.FromSeconds(15);
+
+            var response = await CliIpcClient.SendAsync(
+                CliIpcNames.GetDefaultPipeName(),
+                cliRequest,
+                connectTimeout: TimeSpan.FromMilliseconds(2500),
+                responseTimeout: responseTimeout);
+
+            if (response is null)
+            {
+                const string unreachable = "SmartMacro is already running, but did not respond to CLI IPC.";
+                TryWriteCliOutput(unreachable);
+                Shutdown(CliExitCodes.BusyOrIpcError);
+                return;
+            }
+
+            if (!string.IsNullOrWhiteSpace(response.Message))
+                TryWriteCliOutput(response.Message);
+
+            Shutdown(response.ExitCode);
+            return;
+        }
+
+        if (cliRequest.Action is CliActionKind.Stop or CliActionKind.DisarmTriggers && !cliRequest.StartInTray)
+        {
+            TryWriteCliOutput("SmartMacro is not running.");
+            Shutdown(CliExitCodes.Success);
+            return;
+        }
+
+        _startupReadyTcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        _ipcServer = new CliIpcServer(
+            CliIpcNames.GetDefaultPipeName(),
+            HandleIpcRequestAsync,
+            AfterIpcResponseSentAsync,
+            (msg, ex) => _log?.Warning(msg, ex));
 
         AppPaths paths;
         try
@@ -50,6 +105,7 @@ public partial class App : Application
         }
         catch (Exception ex)
         {
+            _startupReadyTcs.TrySetResult(false);
             MessageBox.Show($"SmartMacro could not create its data folder.\n\n{ex.Message}", "SmartMacro",
                 MessageBoxButton.OK, MessageBoxImage.Error);
             Shutdown(1);
@@ -61,10 +117,9 @@ public partial class App : Application
         AppDomain.CurrentDomain.UnhandledException += OnDomainUnhandledException;
         TaskScheduler.UnobservedTaskException += OnUnobservedTaskException;
 
-        var startInTray = WindowsStartupService.IsStartInTrayCommandLine(e.Args);
-        ShutdownMode = ShutdownMode.OnExplicitShutdown;
+        var startHidden = !cliRequest.ShouldShowMainWindowOnStartup;
         Views.SplashLoadingWindow? splash = null;
-        if (!startInTray)
+        if (!startHidden)
         {
             splash = new Views.SplashLoadingWindow();
             splash.Show();
@@ -88,6 +143,7 @@ public partial class App : Application
         _runHost = new RunModeHost(window, () => viewModel?.CurrentSettings ?? new AppSettings());
         var ocr = new WindowsOcrService();
         _log.Info(ocr.StatusText);
+        Services.Vision.GpuAccelerator.Initialize();
         _log.Info(Core.Vision.HardwareAccelerationInfo.StatusText);
         _playbackClock = new PrecisePlaybackClock();
         if (!_playbackClock.HasHighResolutionTimer)
@@ -141,11 +197,13 @@ public partial class App : Application
             _mainViewModel.SetStatus($"Startup problem: {ex.Message}", StatusKind.Error);
         }
 
-        if (startInTray)
+        if (startHidden)
         {
             _ = new System.Windows.Interop.WindowInteropHelper(window).EnsureHandle();
             window.Hide();
-            _log.Info("Started in system tray (--tray).");
+            _log.Info(cliRequest.StartInTray
+                ? "Started in system tray (--tray)."
+                : "Started hidden in CLI --no-focus mode.");
         }
         else
         {
@@ -204,61 +262,196 @@ public partial class App : Application
                 mainViewModel.SetStatus($"These shortcuts are used by another program and won't work: {string.Join(", ", failed)}. Change them in Settings.", StatusKind.Warning);
         };
 
-        if (WindowsStartupService.TryParseCliRunRequest(e.Args, out var cliTarget, out var exitAfterRun))
+        _startupReadyTcs.TrySetResult(true);
+
+        if (cliRequest.Action != CliActionKind.Activate)
         {
-            await RunCliMacroAsync(mainViewModel, window, cliTarget, exitAfterRun);
+            var cliResponse = await ExecuteCliRequestOnUiThreadAsync(cliRequest, mainViewModel, window);
+            if (cliRequest.Action == CliActionKind.RunMacro && cliRequest.ExitAfterRun)
+            {
+                ShutdownMode = ShutdownMode.OnExplicitShutdown;
+                window.ForceClose();
+                Shutdown(cliResponse.ExitCode);
+            }
         }
     }
 
-    private async Task RunCliMacroAsync(MainViewModel mainViewModel, MainWindow window, string cliTarget, bool exitAfterRun)
+    private async Task<CliCommandResponse> HandleIpcRequestAsync(CliCommandRequest request, CancellationToken ct)
     {
+        if (_startupReadyTcs is null)
+            return new CliCommandResponse(CliExitCodes.BusyOrIpcError, "NotReady", "SmartMacro is still initializing.");
+
+        bool ready;
         try
         {
-            Macro? macroToRun = null;
-            var libraryMatch = mainViewModel.Library.Items.FirstOrDefault(item =>
-                string.Equals(item.Name, cliTarget, StringComparison.OrdinalIgnoreCase)
-                || (Guid.TryParse(cliTarget, out var parsedId) && item.Id == parsedId));
+            ready = await _startupReadyTcs.Task.WaitAsync(TimeSpan.FromSeconds(30), ct).ConfigureAwait(false);
+        }
+        catch
+        {
+            ready = false;
+        }
 
-            if (libraryMatch is not null)
-            {
-                macroToRun = libraryMatch.Macro.CopyWithSteps(libraryMatch.Macro.Steps);
-            }
-            else if (File.Exists(cliTarget))
-            {
-                var rawJson = await File.ReadAllTextAsync(cliTarget);
-                if (MacroFileFormat.TryParse(rawJson, out var parsed, out var parseError) && parsed is not null)
-                    macroToRun = parsed;
-                else
-                    _log?.Warning($"CLI --run could not parse '{cliTarget}': {parseError}");
-            }
+        if (!ready || _mainViewModel is not { } vm || MainWindow is not MainWindow window)
+            return new CliCommandResponse(CliExitCodes.BusyOrIpcError, "NotReady", "SmartMacro is unavailable.");
 
-            if (macroToRun is null)
+        return await await Dispatcher.InvokeAsync(() => ExecuteCliRequestOnUiThreadAsync(request, vm, window));
+    }
+
+    private async Task AfterIpcResponseSentAsync(CliCommandRequest request, CliCommandResponse response)
+    {
+        if (request.Action == CliActionKind.RunMacro
+            && request.ExitAfterRun
+            && response.Status is "Completed" or "Stopped" or "Failed")
+        {
+            await Dispatcher.InvokeAsync(() =>
             {
-                _log?.Warning($"CLI --run target not found: \"{cliTarget}\".");
-                mainViewModel.SetStatus($"CLI --run macro not found: \"{cliTarget}\".", StatusKind.Warning);
-            }
-            else
-            {
-                _log?.Info($"CLI --run starting macro \"{macroToRun.Name}\" (exitAfterRun={exitAfterRun}).");
-                await mainViewModel.Automation.PlayMacroAsync(macroToRun);
-            }
+                ShutdownMode = ShutdownMode.OnExplicitShutdown;
+                (MainWindow as MainWindow)?.ForceClose();
+                Shutdown(response.ExitCode);
+            });
+        }
+    }
+
+    private async Task<CliCommandResponse> ExecuteCliRequestOnUiThreadAsync(
+        CliCommandRequest request,
+        MainViewModel mainViewModel,
+        MainWindow window)
+    {
+        switch (request.Action)
+        {
+            case CliActionKind.Activate:
+                BringToFront();
+                return new CliCommandResponse(CliExitCodes.Success, "Activated", "SmartMacro Studio brought to front.");
+
+            case CliActionKind.ArmTriggers:
+                if (request.ActivateWindow && !request.NoFocus) BringToFront();
+                mainViewModel.AreTriggersArmed = true;
+                _log?.Info("CLI --arm: macro triggers armed.");
+                return new CliCommandResponse(CliExitCodes.Success, "Armed", "Macro triggers armed.");
+
+            case CliActionKind.DisarmTriggers:
+                if (request.ActivateWindow && !request.NoFocus) BringToFront();
+                mainViewModel.AreTriggersArmed = false;
+                _log?.Info("CLI --disarm: macro triggers disarmed.");
+                return new CliCommandResponse(CliExitCodes.Success, "Disarmed", "Macro triggers disarmed.");
+
+            case CliActionKind.Stop:
+                if (request.ActivateWindow && !request.NoFocus) BringToFront();
+                await mainViewModel.Automation.StopAllAsync();
+                _log?.Info("CLI --stop: automation stopped.");
+                return new CliCommandResponse(CliExitCodes.Success, "Stopped", "Automation stopped.");
+
+            case CliActionKind.RunMacro:
+                return await ExecuteCliRunMacroAsync(request, mainViewModel, window);
+
+            default:
+                return new CliCommandResponse(CliExitCodes.InvalidOrNotFound, "Unsupported", $"Unsupported CLI action: {request.Action}.");
+        }
+    }
+
+    private async Task<CliCommandResponse> ExecuteCliRunMacroAsync(
+        CliCommandRequest request,
+        MainViewModel mainViewModel,
+        MainWindow window)
+    {
+        if (request.ActivateWindow && !request.NoFocus)
+            BringToFront();
+
+        if (!mainViewModel.Automation.IsIdle)
+            return new CliCommandResponse(CliExitCodes.BusyOrIpcError, "Busy", "SmartMacro is already recording or playing another macro.");
+
+        Macro? macroToRun;
+        try
+        {
+            macroToRun = await ResolveCliMacroAsync(mainViewModel, request.MacroTarget);
         }
         catch (Exception ex)
         {
-            _log?.Error($"CLI --run failed for \"{cliTarget}\".", ex);
+            _log?.Error($"CLI --run failed while loading \"{request.MacroTarget}\".", ex);
+            return new CliCommandResponse(CliExitCodes.InvalidOrNotFound, "LoadError", ex.Message);
         }
 
-        if (exitAfterRun)
+        if (macroToRun is null)
         {
-            window.ForceClose();
-            Shutdown(0);
+            var msg = $"CLI --run target not found: \"{request.MacroTarget}\".";
+            _log?.Warning(msg);
+            mainViewModel.SetStatus(msg, StatusKind.Warning);
+            return new CliCommandResponse(CliExitCodes.InvalidOrNotFound, "NotFound", msg);
         }
+
+        var suppressDialogsAndFocus = request.NoFocus || request.StartInTray || !window.IsVisible;
+        if (!mainViewModel.Automation.TryStartMacroFromCli(
+                macroToRun,
+                suppressDialogsAndFocus,
+                out var runTask,
+                out var errorMessage,
+                out var wasBusy))
+        {
+            return wasBusy
+                ? new CliCommandResponse(CliExitCodes.BusyOrIpcError, "Busy", errorMessage)
+                : new CliCommandResponse(CliExitCodes.InvalidOrNotFound, "ValidationFailed", errorMessage);
+        }
+
+        _log?.Info($"CLI --run started \"{macroToRun.Name}\" (wait={request.EffectiveWait}, exitAfterRun={request.ExitAfterRun}, noFocus={suppressDialogsAndFocus}).");
+        _ = runTask.ContinueWith(t =>
+        {
+            if (t.Exception is { } ex)
+                _log?.Error($"CLI --run failed for \"{macroToRun.Name}\".", ex);
+        }, TaskScheduler.Default);
+
+        if (!request.EffectiveWait)
+            return new CliCommandResponse(CliExitCodes.Success, "Started", $"Started macro \"{macroToRun.Name}\".");
+
+        var result = await runTask;
+        return result?.Outcome switch
+        {
+            PlaybackOutcome.Completed => new CliCommandResponse(
+                CliExitCodes.Success,
+                "Completed",
+                $"Completed macro \"{macroToRun.Name}\".",
+                result.Outcome),
+            PlaybackOutcome.Stopped => new CliCommandResponse(
+                CliExitCodes.PlaybackFailedOrStopped,
+                "Stopped",
+                $"Stopped macro \"{macroToRun.Name}\".",
+                result.Outcome),
+            _ => new CliCommandResponse(
+                CliExitCodes.PlaybackFailedOrStopped,
+                "Failed",
+                result?.Error ?? $"Macro \"{macroToRun.Name}\" failed.",
+                result?.Outcome ?? PlaybackOutcome.Failed),
+        };
+    }
+
+    private async Task<Macro?> ResolveCliMacroAsync(MainViewModel mainViewModel, string cliTarget)
+    {
+        if (string.IsNullOrWhiteSpace(cliTarget)) return null;
+
+        var trimmed = cliTarget.Trim();
+        var libraryMatch = mainViewModel.Library.Items.FirstOrDefault(item =>
+            string.Equals(item.Name, trimmed, StringComparison.OrdinalIgnoreCase)
+            || (Guid.TryParse(trimmed, out var parsedId) && item.Id == parsedId));
+
+        if (libraryMatch is not null)
+            return MacroJson.Clone(libraryMatch.Macro);
+
+        if (File.Exists(trimmed))
+        {
+            var rawJson = await File.ReadAllTextAsync(trimmed);
+            if (MacroFileFormat.TryParse(rawJson, out var parsed, out var parseError) && parsed is not null)
+                return parsed;
+
+            _log?.Warning($"CLI --run could not parse '{trimmed}': {parseError}");
+        }
+
+        return null;
     }
 
     protected override void OnExit(ExitEventArgs e)
     {
-        _activateWait?.Unregister(null);
-        _activateEvent?.Dispose();
+        _startupReadyTcs?.TrySetResult(false);
+        _ipcServer?.Dispose();
+        _ipcServer = null;
         if (_singleInstance is not null)
         {
             try { _singleInstance.ReleaseMutex(); }
@@ -272,40 +465,49 @@ public partial class App : Application
         _mainViewModel?.Dispose();
         _playbackClock?.Dispose();
         ScreenCapture.ReleaseAllResources(); // the two shared, lock-protected GDI capture buffers
-        DispatcherUnhandledException -=OnDispatcherUnhandledException;
+        DispatcherUnhandledException -= OnDispatcherUnhandledException;
         AppDomain.CurrentDomain.UnhandledException -= OnDomainUnhandledException;
         TaskScheduler.UnobservedTaskException -= OnUnobservedTaskException;
         base.OnExit(e);
     }
 
     /// <summary>
-    /// Returns false if SmartMacro is already running; in that case the running copy is brought to the front.
+    /// Acquires the per-session single-instance mutex. Returns false when SmartMacro is already running.
     /// </summary>
-    private bool ClaimSingleInstance()
+    private bool ClaimSingleInstanceMutex()
     {
         _singleInstance = new Mutex(initiallyOwned: true, SingleInstanceName, out var createdNew);
         if (!createdNew)
         {
             _singleInstance.Dispose();
             _singleInstance = null;
-            try
-            {
-                using var activate = EventWaitHandle.OpenExisting(ActivateEventName);
-                activate.Set();
-            }
-            catch (WaitHandleCannotBeOpenedException)
-            {
-                // The other copy is still starting up; nothing to signal.
-            }
-
             return false;
         }
 
-        _activateEvent = new EventWaitHandle(false, EventResetMode.AutoReset, ActivateEventName);
-        _activateWait = ThreadPool.RegisterWaitForSingleObject(_activateEvent,
-            (_, _) => Dispatcher.InvokeAsync(BringToFront), null, Timeout.Infinite, executeOnlyOnce: false);
         return true;
     }
+
+    private static bool TryWriteCliOutput(string? message)
+    {
+        var attached = AttachConsole(AttachParentProcess);
+        try
+        {
+            if (attached && !string.IsNullOrWhiteSpace(message))
+                Console.WriteLine(message);
+            return attached;
+        }
+        finally
+        {
+            if (attached)
+                FreeConsole();
+        }
+    }
+
+    [DllImport("kernel32.dll")]
+    private static extern bool AttachConsole(int dwProcessId);
+
+    [DllImport("kernel32.dll")]
+    private static extern bool FreeConsole();
 
     private void BringToFront()
     {

@@ -59,6 +59,19 @@ public sealed class Win32InputSimulator : IInputSimulator
     private readonly ILogService? _log;
     private long _lastDiagnosticTick = long.MinValue / 2;
     private long _lastTypedTimestamp; // Stopwatch timestamp of the last typed key release (0 = none yet)
+    private double _speedScale = 1.0;
+    private volatile bool _rapidActionMode;
+
+    public void SetPlaybackSpeed(double speed) =>
+        Volatile.Write(ref _speedScale, double.IsFinite(speed) && speed > 0 ? Math.Clamp(speed, 0.25, 20.0) : 1.0);
+
+    public void SetRapidActionMode(bool enabled) => _rapidActionMode = enabled;
+
+    private double ScaleInterval(double baseMs, double minFloorMs)
+    {
+        var speed = Volatile.Read(ref _speedScale);
+        return speed <= 1.0 ? baseMs : Math.Max(minFloorMs, baseMs / speed);
+    }
 
     // The last absolute cursor move that hasn't been followed by a button change yet (for the settle before a press / release).
     private bool _movedSinceButton;
@@ -190,6 +203,15 @@ public sealed class Win32InputSimulator : IInputSimulator
         var x = _lastMoveX;
         var y = _lastMoveY;
 
+        if (_rapidActionMode)
+        {
+            SendAbsoluteMove(x, y);
+            SetCursorPos(x, y);
+            _lastMoveTimestamp = Stopwatch.GetTimestamp();
+            PreciseSleepUntil(_lastMoveTimestamp, 1.5);
+            return false;
+        }
+
         if (smoothPathArrival)
         {
             // Cursor arrived via a multi-step glide or recorded path: intermediate WM_MOUSEMOVE events already
@@ -205,10 +227,11 @@ public sealed class Win32InputSimulator : IInputSimulator
         // Not before a release: the button is held then (end of a drag) and the wiggle would move the slider.
         if (hoverNudge)
         {
+            var halfHoverMs = ScaleInterval(HoverNudgeMs, 2.0) / 2.0;
             Send(RelativeMove(HoverNudgePx, HoverNudgePx));
-            PreciseSleep(HoverNudgeMs / 2);
+            PreciseSleep(halfHoverMs);
             Send(RelativeMove(-HoverNudgePx, -HoverNudgePx));
-            PreciseSleep(HoverNudgeMs / 2);
+            PreciseSleep(halfHoverMs);
         }
         else
         {
@@ -219,7 +242,7 @@ public sealed class Win32InputSimulator : IInputSimulator
         SendAbsoluteMove(x, y);
         SetCursorPos(x, y);
         _lastMoveTimestamp = Stopwatch.GetTimestamp();
-        PreciseSleepUntil(_lastMoveTimestamp, ButtonSettleMs);
+        PreciseSleepUntil(_lastMoveTimestamp, ScaleInterval(ButtonSettleMs, 3.0));
         return true;
     }
 
@@ -273,10 +296,11 @@ public sealed class Win32InputSimulator : IInputSimulator
         if (down)
         {
             // Second click of a double-click on a jumped-to spot: leave a real gap between the clicks.
+            var minDoubleGap = _rapidActionMode ? 8.0 : ScaleInterval(MinDoubleClickGapMs, 10.0);
             if (!jumped && _jumpClickUp.TryGetValue(button, out var lastUp) && lastUp != 0
-                && (Stopwatch.GetTimestamp() - lastUp) * 1000.0 / Stopwatch.Frequency < MinDoubleClickGapMs)
+                && (Stopwatch.GetTimestamp() - lastUp) * 1000.0 / Stopwatch.Frequency < minDoubleGap)
             {
-                PreciseSleepUntil(lastUp, MinDoubleClickGapMs);
+                PreciseSleepUntil(lastUp, minDoubleGap);
                 jumped = true; // this press belongs to the same "click on a spot", so it is held long enough too
             }
 
@@ -288,10 +312,11 @@ public sealed class Win32InputSimulator : IInputSimulator
             return;
         }
 
-        // Release of a click on a jumped-to spot: keep the button down at least MinClickHoldMs.
+        // Release of a click on a jumped-to spot: keep the button down at least minClickHold.
         if (_jumpClickDown.TryGetValue(button, out var pressedAt) && pressedAt != 0)
         {
-            PreciseSleepUntil(pressedAt, MinClickHoldMs);
+            var minClickHold = _rapidActionMode ? 2.0 : ScaleInterval(MinClickHoldMs, 4.0);
+            PreciseSleepUntil(pressedAt, minClickHold);
             _jumpClickDown[button] = 0;
             Send(MouseInput(flags, mouseData));
             _jumpClickUp[button] = Stopwatch.GetTimestamp();
@@ -464,12 +489,13 @@ public sealed class Win32InputSimulator : IInputSimulator
     {
         if (string.IsNullOrEmpty(text)) return;
 
-        // Give the target window's input queue a moment between characters, even at 0 ms "delay between characters".
+        // Give the target window's input queue a moment between characters, scaled by live playback speed.
         if (_lastTypedTimestamp != 0)
-            PreciseSleepUntil(_lastTypedTimestamp, MinCharacterGapMs);
+            PreciseSleepUntil(_lastTypedTimestamp, ScaleInterval(MinCharacterGapMs, 1.0));
 
         try
         {
+            var keyHoldMs = ScaleInterval(MinKeyHoldMs, 1.0);
             // Enter, Tab and Space are sent as real keys: many apps and games ignore them (or what follows them)
             // when they arrive as Unicode characters.
             var realKey = text switch
@@ -482,7 +508,7 @@ public sealed class Win32InputSimulator : IInputSimulator
             if (realKey != 0)
             {
                 Send(KeyInput(realKey, true));
-                PreciseSleep(MinKeyHoldMs);
+                PreciseSleep(keyHoldMs);
                 Send(KeyInput(realKey, false));
                 return;
             }
@@ -490,7 +516,7 @@ public sealed class Win32InputSimulator : IInputSimulator
             if (text.Length == 1)
             {
                 Send(UnicodeInput(text[0], down: true));
-                PreciseSleep(MinKeyHoldMs);
+                PreciseSleep(keyHoldMs);
                 Send(UnicodeInput(text[0], down: false));
                 return;
             }

@@ -94,6 +94,13 @@ public sealed class SearchRegionRadar : FrameworkElement
         set => SetValue(RegionHeightProperty, value);
     }
 
+    internal static (double Rx, double Ry, double Rw, double Rh) ComputeNormalizedZone(
+        int regionX, int regionY, int regionWidth, int regionHeight,
+        double desktopLeft, double desktopTop, double desktopWidth, double desktopHeight) =>
+        SmartMacro.Core.Vision.SearchRegionLayout.ComputeNormalizedZone(
+            regionX, regionY, regionWidth, regionHeight,
+            desktopLeft, desktopTop, desktopWidth, desktopHeight);
+
     protected override void OnRender(DrawingContext dc)
     {
         var w = ActualWidth;
@@ -121,12 +128,14 @@ public sealed class SearchRegionRadar : FrameworkElement
 
         if (Scope == SearchScope.CustomArea)
         {
-            const double refW = 1920.0;
-            const double refH = 1080.0;
-            var rx = Math.Clamp(RegionX / refW, 0.0, 0.92);
-            var ry = Math.Clamp(RegionY / refH, 0.0, 0.92);
-            var rw = RegionWidth > 0 ? Math.Clamp(RegionWidth / refW, 0.12, 1.0 - rx) : 0.45;
-            var rh = RegionHeight > 0 ? Math.Clamp(RegionHeight / refH, 0.16, 1.0 - ry) : 0.45;
+            var deskLeft = SystemParameters.VirtualScreenLeft;
+            var deskTop = SystemParameters.VirtualScreenTop;
+            var deskW = Math.Max(1.0, SystemParameters.VirtualScreenWidth);
+            var deskH = Math.Max(1.0, SystemParameters.VirtualScreenHeight);
+
+            var (rx, ry, rw, rh) = ComputeNormalizedZone(
+                RegionX, RegionY, RegionWidth, RegionHeight,
+                deskLeft, deskTop, deskW, deskH);
 
             zoneRect = new Rect(
                 monRect.X + rx * monRect.Width,

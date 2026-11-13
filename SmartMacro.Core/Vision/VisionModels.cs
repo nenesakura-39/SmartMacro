@@ -4,12 +4,28 @@ using SmartMacro.Core.Ocr;
 
 namespace SmartMacro.Core.Vision;
 
+/// <summary>Preferred vision & frame-processing compute engine.</summary>
+public enum HardwareAccelerationMode
+{
+    Auto = 0,
+    CpuOnly = 1,
+    GpuAccelerated = 2
+}
+
 /// <summary>
-/// Reports the active CPU SIMD vision tier (AVX2 256-bit, SSE2/Vector128 128-bit, or Scalar) and adaptive worker thread budget
-/// so SmartMacro scales cleanly from 2-core budget laptops and ARM64 devices up to 6-core Ryzen 5 and 16-core Ryzen 9 / Core i9 desktops.
+/// Reports the active CPU SIMD vision tier (AVX2 256-bit, SSE2/Vector128 128-bit, or Scalar), optional GPU adapter,
+/// RAM template-cache budget, and adaptive worker thread budget so SmartMacro scales cleanly from low-end PCs to
+/// dedicated GPU gaming desktops.
 /// </summary>
 public static class HardwareAccelerationInfo
 {
+    private static readonly object Sync = new();
+    private static HardwareAccelerationMode _computeMode = HardwareAccelerationMode.Auto;
+    private static int _memoryLimitMb = 256;
+    private static bool _gpuAvailable;
+    private static string _gpuAdapterName = "";
+    private static int _gpuDedicatedVramMb;
+
     public static bool IsAvx2Supported => Avx2.IsSupported;
 
     public static bool IsSse2Supported => Sse2.IsSupported;
@@ -18,9 +34,67 @@ public static class HardwareAccelerationInfo
 
     public static int LogicalProcessorCount => Math.Max(1, Environment.ProcessorCount);
 
+    public static HardwareAccelerationMode ComputeMode
+    {
+        get { lock (Sync) return _computeMode; }
+    }
+
+    public static int MemoryLimitMb
+    {
+        get { lock (Sync) return _memoryLimitMb; }
+    }
+
+    public static bool GpuAvailable
+    {
+        get { lock (Sync) return _gpuAvailable; }
+    }
+
+    public static string GpuAdapterName
+    {
+        get { lock (Sync) return _gpuAdapterName; }
+    }
+
+    public static int GpuDedicatedVramMb
+    {
+        get { lock (Sync) return _gpuDedicatedVramMb; }
+    }
+
+    /// <summary>True when GPU acceleration is both requested/auto-selected and backed by a hardware D3D11 adapter.</summary>
+    public static bool IsGpuActive
+    {
+        get
+        {
+            lock (Sync)
+                return _gpuAvailable && _computeMode != HardwareAccelerationMode.CpuOnly;
+        }
+    }
+
+    /// <summary>Registers the detected Direct3D 11 / DXGI GPU adapter (called at startup or by tests).</summary>
+    public static void RegisterGpuAdapter(bool available, string? adapterName, int dedicatedVramMb = 0)
+    {
+        lock (Sync)
+        {
+            _gpuAvailable = available;
+            _gpuAdapterName = adapterName?.Trim() ?? "";
+            _gpuDedicatedVramMb = Math.Max(0, dedicatedVramMb);
+        }
+    }
+
+    /// <summary>Applies user compute mode and RAM cache budget immediately.</summary>
+    public static void Configure(HardwareAccelerationMode mode, int memoryLimitMb)
+    {
+        var clampedMb = Math.Clamp(memoryLimitMb, 64, 1024);
+        lock (Sync)
+        {
+            _computeMode = Enum.IsDefined(mode) ? mode : HardwareAccelerationMode.Auto;
+            _memoryLimitMb = clampedMb;
+        }
+        TemplateCache.Shared.ConfigureMemoryBudget(clampedMb);
+    }
+
     /// <summary>
     /// Reserves at least 1 logical processor for the foreground game / OS and caps vision worker threads at 8
-    /// so neither 2-core budget PCs nor 16-core high-end desktops suffer thread-pool contention.
+    /// (or slightly lower on strict 2-core low-end setups) so playback stays responsive without starving the app.
     /// </summary>
     public static int MaxVisionWorkers => Math.Clamp(LogicalProcessorCount - 1, 1, 8);
 
@@ -30,8 +104,35 @@ public static class HardwareAccelerationInfo
         : Vector128.IsHardwareAccelerated ? "Vector128 128-bit SIMD"
         : "Scalar fallback";
 
-    public static string StatusText =>
-        $"Vision hardware acceleration: {SimdTierName} · {LogicalProcessorCount} logical cores (up to {MaxVisionWorkers} vision worker(s)).";
+    public static string StatusText
+    {
+        get
+        {
+            HardwareAccelerationMode mode;
+            int ramMb;
+            bool gpu;
+            string gpuName;
+            int vramMb;
+            lock (Sync)
+            {
+                mode = _computeMode;
+                ramMb = _memoryLimitMb;
+                gpu = _gpuAvailable;
+                gpuName = _gpuAdapterName;
+                vramMb = _gpuDedicatedVramMb;
+            }
+
+            var gpuPart = mode == HardwareAccelerationMode.CpuOnly
+                ? "CPU Only (Zero-GPU forced)"
+                : gpu
+                    ? $"GPU + SIMD ({gpuName}{(vramMb > 0 ? $" · {vramMb} MB VRAM" : "")})"
+                    : mode == HardwareAccelerationMode.GpuAccelerated
+                        ? "GPU requested (D3D11 adapter unavailable · SIMD fallback)"
+                        : "Auto (CPU SIMD)";
+
+            return $"{gpuPart} · {SimdTierName} · {LogicalProcessorCount} cores (up to {MaxVisionWorkers} worker(s)) · {ramMb} MB RAM cache.";
+        }
+    }
 }
 
 /// <summary>

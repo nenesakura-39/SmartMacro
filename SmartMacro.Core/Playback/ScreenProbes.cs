@@ -721,6 +721,10 @@ public sealed class ScreenProbes
                             RawMatchCount = 1,
                         };
                     }
+
+                    // The remembered spot missed (target moved or disappeared): forget it now so
+                    // subsequent poll frames capture the search region in a single pass instead of wasting a spot crop.
+                    hotSpots?.Forget(hotKey);
                 }
             }
 

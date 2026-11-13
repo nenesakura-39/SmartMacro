@@ -40,6 +40,12 @@ public interface IInputSimulator
     /// </summary>
     void TypeCharacters(string text);
 
+    /// <summary>Hints the live playback speed multiplier (0.25x..20x) so internal key/click timing scales smoothly.</summary>
+    void SetPlaybackSpeed(double speed) { }
+
+    /// <summary>Enables/disables minimal-overhead rapid action timing (e.g. high-speed Find Image target clicking).</summary>
+    void SetRapidActionMode(bool enabled) { }
+
     /// <summary>
     /// Where the cursor is right now (physical pixels), if the simulator can tell. Used by a Drag that starts "where
     /// the cursor already is" to glide from there. The default says "unknown" (the drag then jumps to its end).

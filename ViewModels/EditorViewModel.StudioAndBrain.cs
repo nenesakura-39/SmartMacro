@@ -45,6 +45,7 @@ public sealed partial class EditorViewModel : ObservableObject
     public RelayCommand OpenBottomTabCommand { get; }
     public RelayCommand ToggleBreakpointCommand { get; }
     public RelayCommand StepOverCommand { get; }
+    public RelayCommand CopyCliCommand { get; }
 
     /// <summary>True when a step ID has an active debugger breakpoint (F9).</summary>
     public bool HasStepBreakpoint(Guid stepId) => _breakpoints.Contains(stepId);
@@ -82,6 +83,28 @@ public sealed partial class EditorViewModel : ObservableObject
             _setStatus("⏭ Stepping over current step (F10)…", StatusKind.Info);
         else
             _setStatus("Pause playback first (F8 or hit a 🔴 breakpoint), then press F10 to step over one step at a time.", StatusKind.Info);
+    }
+
+    private void CopyCliRunCommand()
+    {
+        if (!HasMacro) return;
+        var target = string.IsNullOrWhiteSpace(Name) ? MacroId.ToString() : Name.Trim();
+        var cli = CliCommandLine.FormatRunCommand(Environment.ProcessPath, target, noFocus: true);
+        try
+        {
+            System.Windows.Clipboard.SetText(cli);
+        }
+        catch (System.Runtime.InteropServices.ExternalException ex)
+        {
+            _log.Warning("The clipboard is busy; could not copy CLI command.", ex);
+            _setStatus("The clipboard is busy (another app is using it). Try copying again.", StatusKind.Warning);
+            return;
+        }
+
+        _setStatus(IsDirty
+            ? $"Copied CLI command (Save first so --run finds it in the Library): {cli}"
+            : $"Copied CLI command for Stream Deck / Task Scheduler: {cli}",
+            StatusKind.Success);
     }
 
     /// <summary>Search filter typed at the top of the Add Step toolbox.</summary>
@@ -742,6 +765,9 @@ public sealed partial class EditorViewModel : ObservableObject
             case StudioCommandKind.SetSpeed when command.Speed > 0:
                 Speed = command.Speed;
                 _setStatus($"⚡ Playback speed {command.Speed.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture)}×.", StatusKind.Info);
+                break;
+            case StudioCommandKind.CopyCliCommand:
+                Run(CopyCliCommand, null, "Open a macro first to copy its CLI run command.");
                 break;
         }
 

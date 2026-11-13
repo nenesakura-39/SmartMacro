@@ -435,6 +435,18 @@
                                                   IsChecked="{Binding DataContext.ShowOverlaysInObs, RelativeSource={RelativeSource AncestorType=Window}}" Margin="0,0,0,6" />
                                         <CheckBox Style="{StaticResource ToggleSwitchCheckBoxStyle}" Content="Minimize main window during playback"
                                                   IsChecked="{Binding DataContext.MinimizeWhilePlaying, RelativeSource={RelativeSource AncestorType=Window}}" />
+
+                                        <Border Height="1" Background="{DynamicResource BorderBrush}" Margin="0,12,0,10" />
+
+                                        <TextBlock Text="CLI &amp; STREAM DECK" Style="{StaticResource OverlineHeaderStyle}" Margin="0,0,0,6" />
+                                        <Button Command="{Binding CopyCliCommand}" HorizontalAlignment="Left" Padding="9,4" FontSize="11.5"
+                                                ToolTip="Copy a command line (--run ... --no-focus) for Task Scheduler, Stream Deck, or desktop shortcuts."
+                                                AutomationProperties.Name="Copy CLI command">
+                                            <StackPanel Orientation="Horizontal">
+                                                <ctrl:StudioIcon Kind="ExternalLink" Size="12" />
+                                                <TextBlock Text="Copy CLI Run Command" Margin="6,0,0,0" />
+                                            </StackPanel>
+                                        </Button>
                                     </StackPanel>
                                 </Border>
                             </Popup>
@@ -1878,6 +1890,13 @@
                                 </DockPanel.Style>
                                 <DockPanel DockPanel.Dock="Top" Margin="0,0,0,6">
                                     <Button DockPanel.Dock="Right" Content="+ Add trigger" Command="{Binding AddTriggerCommand}" Padding="9,3" FontSize="11" />
+                                    <Button DockPanel.Dock="Right" Style="{StaticResource GhostButton}" Command="{Binding CopyCliCommand}" Padding="9,3" FontSize="11" Margin="0,0,6,0"
+                                            ToolTip="Copy a CLI command (--run ... --no-focus) for Task Scheduler, Stream Deck, or shortcuts">
+                                        <StackPanel Orientation="Horizontal">
+                                            <ctrl:StudioIcon Kind="ExternalLink" Size="11" />
+                                            <TextBlock Text="Copy CLI (--run)" Margin="5,0,0,0" />
+                                        </StackPanel>
+                                    </Button>
                                     <TextBlock Text="Per-macro shortcuts (Press Once / Toggle / Hold-to-Run / Repeat-While-Held), schedules, window triggers, and Run Governor conflict rules."
                                                Style="{StaticResource MutedText}" FontSize="11.5" VerticalAlignment="Center" />
                                 </DockPanel>
