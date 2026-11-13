@@ -27,20 +27,25 @@ public static class MacroFileFormat
     public static string Serialize(Macro macro, IReadOnlyList<Macro>? library)
     {
         ArgumentNullException.ThrowIfNull(macro);
+        var preparedMacro = MacroAssetStore.PrepareForSerialization(macro);
         var bundled = CollectReferencedSubMacros(macro, library);
-        var version = MacroDocument.RequiredSchemaVersion(macro);
-        if (bundled.Count > 0)
+        var preparedBundled = new List<Macro>(bundled.Count);
+        foreach (var sub in bundled)
+            preparedBundled.Add(MacroAssetStore.PrepareForSerialization(sub));
+
+        var version = MacroDocument.RequiredSchemaVersion(preparedMacro);
+        if (preparedBundled.Count > 0)
         {
             version = Math.Max(version, 16);
-            foreach (var sub in bundled)
+            foreach (var sub in preparedBundled)
                 version = Math.Max(version, MacroDocument.RequiredSchemaVersion(sub));
         }
 
         return MacroJson.Serialize(new MacroDocument
         {
             SchemaVersion = version,
-            Macro = macro,
-            SubMacros = bundled.Count > 0 ? bundled : null,
+            Macro = preparedMacro,
+            SubMacros = preparedBundled.Count > 0 ? preparedBundled : null,
         });
     }
 
@@ -162,12 +167,17 @@ public static class MacroFileFormat
         }
 
         macro = document.Macro;
+        var internPool = new Dictionary<string, string>(StringComparer.Ordinal);
+        MacroAssetStore.Hydrate(macro, internPool: internPool);
         MigrateLegacyMacro(macro, document.SchemaVersion, migrationNotes);
         if (document.SubMacros is { Count: > 0 } list)
         {
             subMacros = list.Where(m => m is not null).ToList();
             foreach (var sub in subMacros)
+            {
+                MacroAssetStore.Hydrate(sub, internPool: internPool);
                 MigrateLegacyMacro(sub, document.SchemaVersion, migrationNotes);
+            }
         }
 
         error = null;

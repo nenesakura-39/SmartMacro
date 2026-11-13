@@ -28,15 +28,24 @@ public static class MacroJson
 
     public static T? Deserialize<T>(string json) => JsonSerializer.Deserialize<T>(json, Options);
 
-    /// <summary>Deep copy by round-tripping through JSON (keeps the same IDs).</summary>
-    public static Macro Clone(Macro macro) =>
-        Deserialize<Macro>(Serialize(macro)) ?? throw new InvalidOperationException("Failed to copy the macro.");
+    /// <summary>Deep copy of a macro (keeps the same IDs) using structural cloning.</summary>
+    public static Macro Clone(Macro macro)
+    {
+        ArgumentNullException.ThrowIfNull(macro);
+        return macro.DeepClone();
+    }
 
-    /// <summary>Deep copy of one step (keeps the same ID).</summary>
-    public static MacroStep CloneStep(MacroStep step) =>
-        Deserialize<MacroStep>(Serialize<MacroStep>(step)) ?? throw new InvalidOperationException("Failed to copy the step.");
+    /// <summary>Deep copy of one step (keeps the same ID) using structural cloning.</summary>
+    public static MacroStep CloneStep(MacroStep step)
+    {
+        ArgumentNullException.ThrowIfNull(step);
+        return step.Clone();
+    }
 
-    /// <summary>Deep copy of one watcher (keeps the same ID).</summary>
-    public static MacroWatcher CloneWatcher(MacroWatcher watcher) =>
-        Deserialize<MacroWatcher>(Serialize(watcher)) ?? throw new InvalidOperationException("Failed to copy the watcher.");
+    /// <summary>Deep copy of one watcher (keeps the same ID) using structural cloning.</summary>
+    public static MacroWatcher CloneWatcher(MacroWatcher watcher)
+    {
+        ArgumentNullException.ThrowIfNull(watcher);
+        return watcher.Clone();
+    }
 }

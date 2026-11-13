@@ -120,7 +120,7 @@ public sealed partial class EditorViewModel : ObservableObject
     {
         if (!HasMacro) return;
         var models = Steps.Select(s => s.Model).ToList();
-        var before = Snapshot();
+        var before = _history.CaptureState(models);
         var result = StepCleanup.RepairBlockStructure(models); // fixes the copy in place
         if (!result.Changed)
         {
@@ -128,7 +128,7 @@ public sealed partial class EditorViewModel : ObservableObject
             return;
         }
 
-        _history.Record(before);
+        _history.CommitTransition(before, models);
         RaiseHistoryChanged();
 
         // Keep the editors of the steps that stayed (same objects), make new ones for the added End markers.
@@ -209,15 +209,14 @@ public sealed partial class EditorViewModel : ObservableObject
 
     public string RedoTooltip => _history.CanRedo ? "Redo (Ctrl+Y)" : "Redo (Ctrl+Y) — nothing to redo";
 
-    /// <summary>The step list as a snapshot string (for Undo / Redo).</summary>
-    private string Snapshot() => StepSnapshots.Capture(Steps.Select(s => s.Model));
+    /// <summary>The step models right now (as a flat list).</summary>
+    private List<MacroStep> CurrentStepModels() => Steps.Select(s => s.Model).ToList();
 
     /// <summary>Call right before a structural edit, so it can be undone.</summary>
     private void RecordUndo()
     {
         if (!HasMacro) return;
-        _history.Record(Snapshot());
-        RaiseHistoryChanged();
+        _history.BeginEdit(CurrentStepModels());
     }
 
     private void RaiseHistoryChanged()
@@ -231,35 +230,25 @@ public sealed partial class EditorViewModel : ObservableObject
 
     private void Undo()
     {
-        if (!HasMacro || !_history.TryUndo(Snapshot(), out var snapshot)) return;
-        RestoreSnapshot(snapshot);
+        if (!HasMacro || !_history.TryUndo(CurrentStepModels(), out var restored)) return;
+        RestoreSteps(restored);
         RaiseHistoryChanged();
         _setStatus($"Undone.{(_history.CanUndo ? $" {_history.UndoCount} more change(s) can be undone." : "")} Ctrl+Y redoes it.", StatusKind.Info);
     }
 
     private void Redo()
     {
-        if (!HasMacro || !_history.TryRedo(Snapshot(), out var snapshot)) return;
-        RestoreSnapshot(snapshot);
+        if (!HasMacro || !_history.TryRedo(CurrentStepModels(), out var restored)) return;
+        RestoreSteps(restored);
         RaiseHistoryChanged();
         _setStatus("Redone.", StatusKind.Info);
     }
 
-    /// <summary>Puts a snapshot back into the list, keeping the selection on the same step (by ID) where possible.</summary>
-    private void RestoreSnapshot(string snapshot)
+    /// <summary>Puts restored steps back into the list, keeping the selection on the same step (by ID) where possible.</summary>
+    private void RestoreSteps(List<MacroStep> restored)
     {
         var selectedId = SelectedStep?.Id;
         var selectedIndex = SelectedStep is null ? -1 : Steps.IndexOf(SelectedStep);
-        List<MacroStep> restored;
-        try
-        {
-            restored = StepSnapshots.Restore(snapshot);
-        }
-        catch (Exception ex) when (ex is System.Text.Json.JsonException or NotSupportedException)
-        {
-            _log.Error("An undo snapshot couldn't be read.", ex);
-            return;
-        }
 
         ReplaceSteps(restored);
         _selection.Clear();
@@ -446,7 +435,7 @@ public sealed partial class EditorViewModel : ObservableObject
             scope = "the selected steps";
         }
 
-        var before = Snapshot();
+        var before = _history.CaptureState(models);
         var result = StepCleanup.CollapseMouseMoves(models, first, last);
         if (result.RemovedSteps <= 0)
         {
@@ -454,7 +443,7 @@ public sealed partial class EditorViewModel : ObservableObject
             return;
         }
 
-        _history.Record(before);
+        _history.CommitTransition(before, result.Steps);
         RaiseHistoryChanged();
 
         var existing = new Dictionary<MacroStep, StepViewModel>(ReferenceEqualityComparer.Instance);
@@ -491,7 +480,7 @@ public sealed partial class EditorViewModel : ObservableObject
             scope = "the selected steps";
         }
 
-        var before = Snapshot();
+        var before = _history.CaptureState(models);
         var result = StepCleanup.CoalesceKeystrokesToTypeText(models, first, last);
         if (result.CreatedTypeSteps <= 0)
         {
@@ -499,7 +488,7 @@ public sealed partial class EditorViewModel : ObservableObject
             return;
         }
 
-        _history.Record(before);
+        _history.CommitTransition(before, result.Steps);
         RaiseHistoryChanged();
 
         var existing = new Dictionary<MacroStep, StepViewModel>(ReferenceEqualityComparer.Instance);

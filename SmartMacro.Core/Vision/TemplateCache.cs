@@ -1,3 +1,7 @@
+using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
+using System.Security.Cryptography;
+
 namespace SmartMacro.Core.Vision;
 
 /// <summary>
@@ -34,7 +38,15 @@ public sealed class TemplateCache
         Template = 2,
     }
 
-    private readonly record struct Key(Format Format, int Width, int Height, int Length, int Hash);
+    private readonly record struct Key(Format Format, int Width, int Height, int Length, ulong DigestLo, ulong DigestHi);
+
+    private sealed class DigestBox(ulong lo, ulong hi)
+    {
+        public ulong Lo { get; } = lo;
+        public ulong Hi { get; } = hi;
+    }
+
+    private static readonly ConditionalWeakTable<string, DigestBox> s_digestCache = new();
 
     private sealed class Entry
     {
@@ -128,12 +140,18 @@ public sealed class TemplateCache
         TryGetTemplate(data, width, height, out var image, out _) ? image : null;
 
     /// <summary>Base64 PNG text → pixels (decoded at most once while it stays cached).</summary>
-    public bool TryGetPng(string? base64, out BgraImage? image, out string? error)
+    public bool TryGetPng(string? base64, out BgraImage? image, out string? error) =>
+        TryGetPng(base64, assetId: null, out image, out error);
+
+    /// <summary>Base64 PNG text (optionally annotated with an asset ID) → pixels, verified by exact content match.</summary>
+    public bool TryGetPng(string? base64, string? assetId, out BgraImage? image, out string? error)
     {
+        _ = assetId;
         // Nothing to decode: answer directly (cheap) instead of filling the cache with empty keys.
         if (string.IsNullOrWhiteSpace(base64)) return PngCodec.TryDecodeBase64(base64, out image, out error);
 
-        var key = new Key(Format.Png, 0, 0, base64.Length, base64.GetHashCode());
+        var digest = GetDigest(base64);
+        var key = new Key(Format.Png, 0, 0, base64.Length, digest.Lo, digest.Hi);
         return Lookup(key, base64, static (text, _, _) =>
         {
             var ok = PngCodec.TryDecodeBase64(text, out var decoded, out var reason);
@@ -142,16 +160,36 @@ public sealed class TemplateCache
     }
 
     /// <summary><see cref="TemplateCodec"/> text of the given size → pixels (decoded at most once while it stays cached).</summary>
-    public bool TryGetTemplate(string? data, int width, int height, out BgraImage? image, out string? error)
+    public bool TryGetTemplate(string? data, int width, int height, out BgraImage? image, out string? error) =>
+        TryGetTemplate(data, assetId: null, width, height, out image, out error);
+
+    /// <summary><see cref="TemplateCodec"/> text (optionally annotated with an asset ID) of the given size → pixels, verified by exact content match.</summary>
+    public bool TryGetTemplate(string? data, string? assetId, int width, int height, out BgraImage? image, out string? error)
     {
+        _ = assetId;
         if (string.IsNullOrEmpty(data)) return TemplateCodec.TryDecode(data, width, height, out image, out error);
 
-        var key = new Key(Format.Template, width, height, data.Length, data.GetHashCode());
+        var digest = GetDigest(data);
+        var key = new Key(Format.Template, width, height, data.Length, digest.Lo, digest.Hi);
         return Lookup(key, data, static (text, w, h) =>
         {
             var ok = TemplateCodec.TryDecode(text, w, h, out var decoded, out var reason);
             return (ok ? decoded : null, ok ? null : reason ?? "The stored image is damaged.");
         }, width, height, out image, out error);
+    }
+
+    private static DigestBox GetDigest(string text)
+    {
+        if (s_digestCache.TryGetValue(text, out var existing))
+        {
+            return existing;
+        }
+
+        Span<byte> hash = stackalloc byte[32];
+        SHA256.HashData(MemoryMarshal.AsBytes(text.AsSpan()), hash);
+        var lo = BitConverter.ToUInt64(hash[..8]);
+        var hi = BitConverter.ToUInt64(hash.Slice(8, 8));
+        return s_digestCache.GetValue(text, _ => new DigestBox(lo, hi));
     }
 
     /// <summary>Forgets every cached picture (tests; or to free memory).</summary>

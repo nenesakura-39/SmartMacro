@@ -195,6 +195,9 @@ public abstract class MacroStep
 
     [JsonIgnore]
     public abstract StepKind Kind { get; }
+
+    /// <summary>Creates an independent structural copy of this step (retaining the same <see cref="Id"/>).</summary>
+    public virtual MacroStep Clone() => (MacroStep)MemberwiseClone();
 }
 
 /// <summary>How a <see cref="DelayStep"/> decides when to move on (v1.1 Adaptive Timing).</summary>
@@ -405,6 +408,10 @@ public sealed class MouseClickStep : MacroStep
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? TargetThumbnailBase64 { get; set; }
 
+    /// <summary>Optional key into <see cref="Macro.Assets"/> when serialized with deduplicated snapshots.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? SnapshotAssetId { get; set; }
+
     /// <summary>
     /// Where inside the thumbnail the click was (px from its left / top edge). The middle, unless the click was near a
     /// screen edge and the picture had to be shifted to stay on screen. Null = the middle.
@@ -503,6 +510,14 @@ public sealed class MouseClickStep : MacroStep
 
     [JsonIgnore]
     public override StepKind Kind => StepKind.MouseClick;
+
+    /// <inheritdoc />
+    public override MacroStep Clone()
+    {
+        var copy = (MouseClickStep)MemberwiseClone();
+        copy.Target = Target?.Clone();
+        return copy;
+    }
 }
 
 /// <summary>
@@ -807,6 +822,13 @@ public sealed class TemplateVariant
     public int Width { get; set; }
     public int Height { get; set; }
     public string Data { get; set; } = string.Empty;
+
+    /// <summary>Optional key into <see cref="Macro.Assets"/> when serialized with deduplicated templates.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? TemplateAssetId { get; set; }
+
+    /// <summary>Creates a structural copy of this variant.</summary>
+    public TemplateVariant Clone() => (TemplateVariant)MemberwiseClone();
 }
 
 /// <summary>
@@ -1075,6 +1097,14 @@ public abstract class ScreenSearchStep : MacroStep
         || MaxMatchesToActOn > 0
         || _betweenMatchesDelayMs is not null
         || !string.IsNullOrWhiteSpace(CountVariableName);
+
+    /// <inheritdoc />
+    public override MacroStep Clone()
+    {
+        var copy = (ScreenSearchStep)MemberwiseClone();
+        copy.FailurePolicy = FailurePolicy?.Clone();
+        return copy;
+    }
 }
 
 /// <summary>
@@ -1173,6 +1203,10 @@ public sealed class FindImageStep : ScreenSearchStep
     /// <summary>The stored picture: B, G, R bytes per pixel, zlib-compressed, Base64. Empty until captured.</summary>
     public string TemplateData { get; set; } = string.Empty;
 
+    /// <summary>Optional key into <see cref="Macro.Assets"/> when serialized with deduplicated templates.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? TemplateAssetId { get; set; }
+
     /// <summary>How similar a spot must be (50-100 %). 90 is a good start; lower it for slightly changing images.</summary>
     public int MinSimilarityPercent { get; set; } = 90;
 
@@ -1245,6 +1279,25 @@ public sealed class FindImageStep : ScreenSearchStep
 
     [JsonIgnore]
     public override StepKind Kind => StepKind.FindImage;
+
+    /// <inheritdoc />
+    public override MacroStep Clone()
+    {
+        var copy = (FindImageStep)base.Clone();
+        if (AdditionalTemplates is not null)
+        {
+            var variants = new List<TemplateVariant>(AdditionalTemplates.Count);
+            foreach (var variant in AdditionalTemplates)
+            {
+                if (variant is not null)
+                {
+                    variants.Add(variant.Clone());
+                }
+            }
+            copy.AdditionalTemplates = variants;
+        }
+        return copy;
+    }
 }
 
 /// <summary>
@@ -1373,6 +1426,38 @@ public sealed class InputSequenceStep : MacroStep
 
     [JsonIgnore]
     public override StepKind Kind => StepKind.InputSequence;
+
+    /// <inheritdoc />
+    public override MacroStep Clone()
+    {
+        var copy = (InputSequenceStep)MemberwiseClone();
+        copy.Events = Events is null ? new List<InputEvent>() : new List<InputEvent>(Events);
+        if (MouseSegments is not null)
+        {
+            var segments = new List<MouseSegment>(MouseSegments.Count);
+            foreach (var segment in MouseSegments)
+            {
+                if (segment is not null)
+                {
+                    segments.Add(segment.Clone());
+                }
+            }
+            copy.MouseSegments = segments;
+        }
+        if (ClickTargets is not null)
+        {
+            var targets = new List<SequenceClickTarget>(ClickTargets.Count);
+            foreach (var target in ClickTargets)
+            {
+                if (target is not null)
+                {
+                    targets.Add(target.Clone());
+                }
+            }
+            copy.ClickTargets = targets;
+        }
+        return copy;
+    }
 }
 
 /// <summary>
@@ -1388,6 +1473,10 @@ public sealed class SequenceClickTarget
     [JsonPropertyName("thumbnail")]
     public string TargetThumbnailBase64 { get; set; } = string.Empty;
 
+    /// <summary>Optional key into <see cref="Macro.Assets"/> when serialized with deduplicated snapshots.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? SnapshotAssetId { get; set; }
+
     public int AnchorX { get; set; }
 
     public int AnchorY { get; set; }
@@ -1395,4 +1484,12 @@ public sealed class SequenceClickTarget
     /// <summary>Optional Intent fingerprint for this click, preserved when breaking a recorded sequence into steps.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public Targeting.TargetFingerprint? Target { get; set; }
+
+    /// <summary>Creates a structural copy of this sequence click target.</summary>
+    public SequenceClickTarget Clone()
+    {
+        var copy = (SequenceClickTarget)MemberwiseClone();
+        copy.Target = Target?.Clone();
+        return copy;
+    }
 }

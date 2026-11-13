@@ -63,6 +63,13 @@ public sealed class WaitForChangeStep : MacroStep
 
     [JsonIgnore]
     public override StepKind Kind => StepKind.WaitForChange;
+
+    public override MacroStep Clone()
+    {
+        var copy = (WaitForChangeStep)base.Clone();
+        copy.FailurePolicy = FailurePolicy?.Clone();
+        return copy;
+    }
 }
 
 /// <summary>Optional window placement / tiling action for <see cref="FocusWindowStep"/> (v1.7 "Workbench").</summary>
@@ -123,6 +130,17 @@ public sealed class FocusWindowStep : MacroStep
 
     [JsonIgnore]
     public override StepKind Kind => StepKind.FocusWindow;
+
+    /// <inheritdoc />
+    public override MacroStep Clone()
+    {
+        var copy = (FocusWindowStep)MemberwiseClone();
+        if (FailurePolicy is not null)
+        {
+            copy.FailurePolicy = FailurePolicy.Clone();
+        }
+        return copy;
+    }
 }
 
 /// <summary>What a Screenshot step captures.</summary>

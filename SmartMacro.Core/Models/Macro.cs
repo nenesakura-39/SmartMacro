@@ -156,6 +156,13 @@ public sealed class Macro
             : string.Empty;
 
     /// <summary>
+    /// Optional content-addressed asset table mapping short SHA-256 IDs (<c>sha256-...</c>) to Base64 payloads,
+    /// deduplicating repeated template images and click thumbnails across steps in saved macro files.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public Dictionary<string, string>? Assets { get; set; }
+
+    /// <summary>
     /// A shallow copy of this macro (same ID, name, speed, target window, Humanize, …) that plays
     /// <paramref name="steps"/> instead of its own list. The steps themselves aren't copied. Used by "Play from here",
     /// which plays a cleaned-up slice of the list with all the macro's other settings.
@@ -165,6 +172,23 @@ public sealed class Macro
         ArgumentNullException.ThrowIfNull(steps);
         var copy = (Macro)MemberwiseClone();
         copy.Steps = steps;
+        return copy;
+    }
+
+    /// <summary>
+    /// Fast structural deep clone preserving IDs and sharing immutable string payloads (including Base64 image data)
+    /// while isolating all mutable collections and nested step/condition objects.
+    /// </summary>
+    public Macro DeepClone()
+    {
+        var copy = (Macro)MemberwiseClone();
+        copy.Steps = Steps is null
+            ? new List<MacroStep>()
+            : Steps.Select(s => s?.Clone()!).ToList();
+        copy.Variables = Variables?.Select(v => v?.Clone()!).ToList();
+        copy.Watchers = Watchers?.Select(w => w?.Clone()!).ToList();
+        copy.Triggers = Triggers?.Select(t => t?.Clone()!).ToList();
+        copy.Assets = Assets is null ? null : new Dictionary<string, string>(Assets, StringComparer.Ordinal);
         return copy;
     }
 }
@@ -285,9 +309,9 @@ public sealed class MacroDocument
         || macro.ClickJitterPx is not null || macro.DelayJitterPercent is not null
         || macro.ReferenceWidth != 0 || macro.ReferenceHeight != 0;
 
-    /// <summary>True if the macro declares Triggers or a ProfileName added in format 17.</summary>
+    /// <summary>True if the macro declares Triggers, ProfileName, or a deduplicated Assets table added in format 17.</summary>
     private static bool UsesVersion17MacroFeatures(Macro macro) =>
-        macro.Triggers is { Count: > 0 } || !string.IsNullOrWhiteSpace(macro.ProfileName);
+        macro.Triggers is { Count: > 0 } || !string.IsNullOrWhiteSpace(macro.ProfileName) || macro.Assets is { Count: > 0 };
 
     /// <summary>True if the macro declares Variables or Watchers added in format 16.</summary>
     private static bool UsesVersion16MacroFeatures(Macro macro) =>

@@ -441,4 +441,12 @@ public sealed class FeedbackLoopStep : MacroStep
 
     [JsonIgnore]
     public override StepKind Kind => StepKind.FeedbackLoop;
+
+    public override MacroStep Clone()
+    {
+        var copy = (FeedbackLoopStep)base.Clone();
+        copy.CompleteWhen = CompleteWhen?.Clone();
+        copy.FailWhen = FailWhen?.Clone();
+        return copy;
+    }
 }

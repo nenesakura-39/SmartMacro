@@ -145,6 +145,14 @@ public sealed class CallMacroStep : MacroStep
 
     [JsonIgnore]
     public override StepKind Kind => StepKind.CallMacro;
+
+    public override MacroStep Clone()
+    {
+        var copy = (CallMacroStep)base.Clone();
+        copy.Inputs = Inputs?.Select(i => i?.Clone()!).ToList();
+        copy.Outputs = Outputs?.Select(o => o?.Clone()!).ToList();
+        return copy;
+    }
 }
 
 /// <summary>What a macro-level <see cref="MacroWatcher"/> does when its condition triggers between steps.</summary>
@@ -203,4 +211,15 @@ public sealed class MacroWatcher
 
     /// <summary>Minimum pause before this same watcher may fire again (ms). Default 2000 ms.</summary>
     public int CooldownMs { get; set; } = 2_000;
+
+    /// <summary>Creates a deep copy of this watcher.</summary>
+    public MacroWatcher Clone()
+    {
+        var copy = (MacroWatcher)MemberwiseClone();
+        if (Condition is not null)
+        {
+            copy.Condition = Condition.Clone();
+        }
+        return copy;
+    }
 }

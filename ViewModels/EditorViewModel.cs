@@ -47,8 +47,8 @@ public sealed partial class EditorViewModel : ObservableObject
     private List<StepViewModel> _selection = new(); // all selected steps (the list allows Ctrl / Shift selection)
     private bool _addAtEnd;
 
-    // Undo / Redo of structural edits (snapshots of the step list taken before each edit).
-    private readonly UndoHistory _history = new();
+    // Undo / Redo of structural edits (bounded prefix/suffix structural deltas of cloned steps).
+    private readonly StepEditHistory _history = new();
 
     // Studio UI view state (never saved, never played): folded If / Repeat blocks (by step ID, so it survives Undo /
     // Redo, moves and reloads of the list), the search box, the filter pill and the compact list mode.
@@ -1114,6 +1114,10 @@ public sealed partial class EditorViewModel : ObservableObject
     private void Touch()
     {
         if (!HasMacro) return;
+        if (_history.HasPendingEdit && _history.CommitPending(Steps.Select(s => s.Model).ToList()))
+        {
+            RaiseHistoryChanged();
+        }
         IsDirty = true;
         Revalidate();
     }

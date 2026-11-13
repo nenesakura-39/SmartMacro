@@ -136,6 +136,16 @@ public sealed class Condition
         check.WhenNotFound = TextNotFoundBehavior.Continue;
         return check;
     }
+
+    /// <summary>Deep structural copy sharing immutable string fields while isolating nested checks and comparisons.</summary>
+    public Condition Clone()
+    {
+        var copy = (Condition)MemberwiseClone();
+        copy.Check = Check?.Clone();
+        copy.Comparison = Comparison?.Clone();
+        copy.SecondCondition = SecondCondition?.Clone();
+        return copy;
+    }
 }
 
 /// <summary>
@@ -222,6 +232,17 @@ public sealed class IfStep : MacroStep
 
     [JsonIgnore]
     public override StepKind Kind => StepKind.If;
+
+    /// <inheritdoc />
+    public override MacroStep Clone()
+    {
+        var copy = (IfStep)MemberwiseClone();
+        if (Condition is not null)
+        {
+            copy.Condition = Condition.Clone();
+        }
+        return copy;
+    }
 }
 
 /// <summary>"When found, also:" choices of an If step (see <see cref="IfStep.WhenFoundAction"/>).</summary>
@@ -358,6 +379,17 @@ public sealed class RepeatStep : MacroStep
 
     [JsonIgnore]
     public override StepKind Kind => StepKind.Repeat;
+
+    /// <inheritdoc />
+    public override MacroStep Clone()
+    {
+        var copy = (RepeatStep)MemberwiseClone();
+        if (Condition is not null)
+        {
+            copy.Condition = Condition.Clone();
+        }
+        return copy;
+    }
 }
 
 /// <summary>End of a Repeat block: goes back to its Repeat step for the next turn.</summary>
