@@ -45,6 +45,10 @@ public enum StudioCommandKind
     StepOver,
     StepInto,
     StepOut,
+
+    /// <summary>Plan 10: wrap selection in Group … End Group, or extract Group into a sub-macro.</summary>
+    WrapInGroup,
+    ExtractGroupToSubMacro,
 }
 
 /// <summary>
@@ -86,6 +90,7 @@ public static class StudioCommandCatalog
             Add("add-find-text", "➕ Add: Find Text (OCR)", StepKind.FindText, "ocr read words vision search look"),
             Add("add-if", "➕ Add: If Condition ... End If", StepKind.If, "condition branch logic else when"),
             Add("add-repeat", "➕ Add: Repeat Loop ... End Repeat", StepKind.Repeat, "loop times while until logic"),
+            Add("add-group", "➕ Add: Group Section ... End Group", StepKind.BeginGroup, "group region folder section collapse organize"),
             Add("add-click", "➕ Add: Mouse Click", StepKind.MouseClick, "mouse press button tap"),
             Add("add-move", "➕ Add: Move Mouse", StepKind.MouseMove, "mouse cursor position glide"),
             Add("add-key", "➕ Add: Key Press", StepKind.KeyPress, "keyboard hotkey type button"),
@@ -109,6 +114,8 @@ public static class StudioCommandCatalog
             new("debug-step-over", "⏭ Debug: Step Over", StudioCommandKind.StepOver, "debugger pause step over next", Shortcut: "F10"),
             new("debug-step-into", "⏬ Debug: Step Into Sub-Macro", StudioCommandKind.StepInto, "debugger pause step into submacro call stack", Shortcut: "F11"),
             new("debug-step-out", "⏫ Debug: Step Out of Sub-Macro", StudioCommandKind.StepOut, "debugger pause step out return submacro", Shortcut: "Shift+F11"),
+            new("wrap-group", "📦 Wrap Selection in Group", StudioCommandKind.WrapInGroup, "group region section fold collapse organize wrap", Shortcut: "Ctrl+Shift+G"),
+            new("extract-group", "🧩 Extract Group to Sub-Macro", StudioCommandKind.ExtractGroupToSubMacro, "extract submacro call macro refactor group region"),
         };
 
         foreach (var speed in PaletteSpeeds)

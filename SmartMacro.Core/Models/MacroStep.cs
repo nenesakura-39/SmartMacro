@@ -38,6 +38,10 @@ public enum StepKind
 
     // Pro Flow Control (see WorkflowSteps.cs).
     FlowControl,
+
+    // Collapsible Section / Group Markers (see WorkflowSteps.cs).
+    BeginGroup,
+    EndGroup,
 }
 
 public enum MacroMouseButton
@@ -183,6 +187,8 @@ public static class MouseMotionDefaults
 [JsonDerivedType(typeof(CheckpointStep), "checkpoint")]
 [JsonDerivedType(typeof(CallMacroStep), "callMacro")]
 [JsonDerivedType(typeof(FlowControlStep), "flowControl")]
+[JsonDerivedType(typeof(BeginGroupStep), "beginGroup")]
+[JsonDerivedType(typeof(EndGroupStep), "endGroup")]
 public abstract class MacroStep
 {
     public Guid Id { get; set; } = Guid.NewGuid();

@@ -1,4 +1,5 @@
 using SmartMacro.Core.Models;
+using SmartMacro.Core.Storage;
 using SmartMacro.Core.Validation;
 using SmartMacro.Core.Vision;
 using SmartMacro.Mvvm;
@@ -18,7 +19,8 @@ public sealed record ScreenTools(
     IScreenLayout? Layout = null,
     Func<IReadOnlyList<Macro>>? MacroListProvider = null,
     Func<Guid?>? CurrentMacroIdProvider = null,
-    Func<bool>? AllowLocalWebhooksProvider = null)
+    Func<bool>? AllowLocalWebhooksProvider = null,
+    Func<Guid, IReadOnlyList<SharedTemplateCandidate>>? SharedTemplatesProvider = null)
 {
     public static ScreenTools None { get; } = new(null, null);
 
@@ -52,6 +54,7 @@ public sealed record ScreenTools(
                 break;
             case FindImageStepViewModel findImage:
                 findImage.Tools = Vision;
+                findImage.SharedTemplatesProvider = SharedTemplatesProvider;
                 break;
             case FindColorStepViewModel findColor:
                 findColor.Tools = Vision;
@@ -329,6 +332,12 @@ public sealed class ConditionViewModel : ObservableObject
             ? "\"Test detection now\" shows whether it's found. With \"is NOT on screen\" the condition is true when it is NOT found."
             : "\"Test detection now\" shows whether it's found. The condition is true when it is found.";
 
+    public void RefreshSharedTemplates()
+    {
+        _checkEditor?.RefreshSharedTemplates();
+        _secondCondition?.RefreshSharedTemplates();
+    }
+
     private void RebuildCheckEditor()
     {
         if (_checkEditor is not null)
@@ -518,6 +527,8 @@ public sealed class IfStepViewModel : StepViewModel
         get => Condition.Tools;
         set => Condition.Tools = value;
     }
+
+    public override void RefreshSharedTemplates() => Condition.RefreshSharedTemplates();
 }
 
 /// <summary>Editor for a Repeat step: how many times / while / until, and the safety limits.</summary>
@@ -656,9 +667,11 @@ public sealed class RepeatStepViewModel : StepViewModel
             : null;
         OnPropertyChanged(nameof(KeepCheckingForMs));
     }
+
+    public override void RefreshSharedTemplates() => Condition?.RefreshSharedTemplates();
 }
 
-/// <summary>Else / End If / End Repeat: nothing to set, just an explanation.</summary>
+/// <summary>Else / End If / End Repeat / End Group: nothing to set, just an explanation.</summary>
 public sealed class BlockMarkerStepViewModel : StepViewModel
 {
     public BlockMarkerStepViewModel(MacroStep step) : base(step)
@@ -670,10 +683,58 @@ public sealed class BlockMarkerStepViewModel : StepViewModel
         ElseStep => "The steps between Else and End If run when the If's condition is false. The steps between the If and Else run when it is true. An If doesn't need an Else.",
         EndIfStep => "Marks the end of an If block. Playback continues here after either part of the If.",
         EndRepeatStep => "Marks the end of a Repeat block. Playback goes back to the Repeat step, which decides whether to run another turn.",
+        EndGroupStep => "Marks the end of a Group section. Execution simply continues to the next step with zero overhead.",
         _ => string.Empty,
     };
 
-    public string DisableHint => "Turning this marker off has no effect. To skip a whole block, turn off its If or Repeat step instead.";
+    public string DisableHint => Model is EndGroupStep
+        ? "Turning this marker off has no effect. To skip a whole Group section, turn off its Group header step instead."
+        : "Turning this marker off has no effect. To skip a whole block, turn off its If or Repeat step instead.";
+}
+
+/// <summary>Editor for <see cref="BeginGroupStep"/>: collapsible section title, accent tag color, and group helpers.</summary>
+public sealed class BeginGroupStepViewModel : StepViewModel
+{
+    private readonly BeginGroupStep _step;
+
+    public BeginGroupStepViewModel(BeginGroupStep step) : base(step)
+    {
+        _step = step;
+    }
+
+    public static IReadOnlyList<Choice<string>> ColorChoices { get; } = new[]
+    {
+        new Choice<string>("#0EA5E9", "Sky Cyan (Default)"),
+        new Choice<string>("#10B981", "Emerald"),
+        new Choice<string>("#8B5CF6", "Violet"),
+        new Choice<string>("#F59E0B", "Amber"),
+        new Choice<string>("#EC4899", "Rose"),
+        new Choice<string>("#64748B", "Slate"),
+    };
+
+    public string GroupTitle
+    {
+        get => _step.Title;
+        set
+        {
+            var next = value ?? string.Empty;
+            if (_step.Title == next) return;
+            _step.Title = next;
+            NotifyChanged();
+        }
+    }
+
+    public string ColorHex
+    {
+        get => string.IsNullOrWhiteSpace(_step.ColorHex) ? BeginGroupStep.DefaultColorHex : _step.ColorHex;
+        set
+        {
+            var next = string.IsNullOrWhiteSpace(value) ? BeginGroupStep.DefaultColorHex : value.Trim();
+            if (_step.ColorHex == next) return;
+            _step.ColorHex = next;
+            NotifyChanged();
+        }
+    }
 }
 
 /// <summary>Editor for <see cref="FlowControlStep"/> (Break loop / Continue loop / Stop macro).</summary>

@@ -141,7 +141,10 @@ public sealed class MainViewModel : ObservableObject, IDisposable
             },
             setStatus: SetStatus,
             playMacro: macro => Automation!.PlayMacroAsync(macro),
-            canPlay: () => Automation?.IsIdle ?? false);
+            canPlay: () => Automation?.IsIdle ?? false,
+            getSettings: () => _settings,
+            isOcrAvailable: () => automation.Ocr.IsAvailable,
+            getScreenBounds: () => _screen.GetVirtualScreen());
 
         Settings = new SettingsViewModel(
             settingsStore, log, dialogs, paths, ApplySettings, SetStatus,

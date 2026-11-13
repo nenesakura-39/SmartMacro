@@ -8,6 +8,7 @@ using SmartMacro.Core.Logging;
 using SmartMacro.Core.Models;
 using SmartMacro.Core.Storage;
 using SmartMacro.Core.Validation;
+using SmartMacro.Core.Vision;
 using SmartMacro.Mvvm;
 using SmartMacro.Services;
 
@@ -198,6 +199,10 @@ public sealed class LibraryViewModel : ObservableObject
     private readonly Action<string, StatusKind> _setStatus;
     private readonly Func<Macro, Task>? _playMacro;
     private readonly Func<bool> _canPlay;
+    private readonly Func<AppSettings>? _getSettings;
+    private readonly Func<bool>? _isOcrAvailable;
+    private readonly Func<ScreenBounds?>? _getScreenBounds;
+    private readonly ObservableCollection<LibraryAuditEntry> _auditEntries = new();
 
     private const string ImportFileFilter = "SmartMacro macro (*.smacro;*.smartmacro;*.json)|*.smacro;*.smartmacro;*.json|All files (*.*)|*.*";
     private const string ExportFileFilter = "SmartMacro macro (*.smacro)|*.smacro|All files (*.*)|*.*";
@@ -208,6 +213,8 @@ public sealed class LibraryViewModel : ObservableObject
     private string? _loadProblemText;
     private LibrarySortMode _sortMode = LibrarySortMode.PinnedAndName;
     private bool _isTrashOpen;
+    private bool _isAuditOpen;
+    private LibraryAuditReport? _auditReport;
 
     public static IReadOnlyList<Steps.Choice<LibrarySortMode>> SortChoices { get; } = new[]
     {
@@ -251,10 +258,16 @@ public sealed class LibraryViewModel : ObservableObject
         Action<Guid> afterDelete,
         Action<string, StatusKind> setStatus,
         Func<Macro, Task>? playMacro = null,
-        Func<bool>? canPlay = null)
+        Func<bool>? canPlay = null,
+        Func<AppSettings>? getSettings = null,
+        Func<bool>? isOcrAvailable = null,
+        Func<ScreenBounds?>? getScreenBounds = null)
     {
         _playMacro = playMacro;
         _canPlay = canPlay ?? (() => true);
+        _getSettings = getSettings;
+        _isOcrAvailable = isOcrAvailable;
+        _getScreenBounds = getScreenBounds;
         _repository = repository;
         _log = log;
         _dialogs = dialogs;
@@ -293,6 +306,10 @@ public sealed class LibraryViewModel : ObservableObject
                 FocusInspectorNameRequested?.Invoke(this, EventArgs.Empty);
             },
             HasTarget);
+        AuditLibraryCommand = new RelayCommand(() => RunAudit(updateStatus: true));
+        CloseAuditCommand = new RelayCommand(() => IsAuditOpen = false);
+        OpenAuditEntryCommand = new AsyncRelayCommand(OpenAuditEntryAsync, HandleError, p => p is LibraryAuditEntry { MacroId: not null });
+        Items.CollectionChanged += (_, _) => { if (IsAuditOpen && !IsLoading) RunAudit(updateStatus: false); };
     }
 
     private void ApplySortDescriptions()
@@ -404,6 +421,80 @@ public sealed class LibraryViewModel : ObservableObject
     public AsyncRelayCommand RestoreTrashItemCommand { get; }
     public AsyncRelayCommand DeleteTrashItemCommand { get; }
     public AsyncRelayCommand EmptyTrashCommand { get; }
+    public RelayCommand AuditLibraryCommand { get; }
+    public RelayCommand CloseAuditCommand { get; }
+    public AsyncRelayCommand OpenAuditEntryCommand { get; }
+
+    public ObservableCollection<LibraryAuditEntry> AuditEntries => _auditEntries;
+
+    public bool IsAuditOpen
+    {
+        get => _isAuditOpen;
+        set
+        {
+            if (SetProperty(ref _isAuditOpen, value))
+                OnPropertyChanged(nameof(AuditButtonText));
+        }
+    }
+
+    public LibraryAuditReport? AuditReport
+    {
+        get => _auditReport;
+        private set
+        {
+            if (SetProperty(ref _auditReport, value))
+            {
+                OnPropertyChanged(nameof(AuditSummaryText));
+                OnPropertyChanged(nameof(HasAuditEntries));
+                OnPropertyChanged(nameof(IsAuditHealthy));
+            }
+        }
+    }
+
+    public string AuditSummaryText => _auditReport?.SummaryText
+        ?? "Click \"🩺 Audit Library\" to scan every macro for broken links, hotkey collisions, and portability warnings.";
+
+    public bool HasAuditEntries => _auditEntries.Count > 0;
+
+    public bool IsAuditHealthy => _auditReport is { IsHealthy: true };
+
+    public string AuditButtonText => IsAuditOpen ? "🩺 Refresh Audit" : "🩺 Audit Library";
+
+    public void RunAudit(bool updateStatus = true)
+    {
+        var macros = Items.Select(i => i.Macro).ToList();
+        var report = LibraryAuditService.Audit(
+            macros,
+            _getSettings?.Invoke(),
+            _isOcrAvailable?.Invoke() ?? true,
+            _getScreenBounds?.Invoke());
+
+        _auditEntries.Clear();
+        foreach (var entry in report.Entries)
+            _auditEntries.Add(entry);
+
+        AuditReport = report;
+        IsAuditOpen = true;
+        OnPropertyChanged(nameof(HasAuditEntries));
+        OnPropertyChanged(nameof(IsAuditHealthy));
+        OnPropertyChanged(nameof(AuditSummaryText));
+
+        if (updateStatus)
+        {
+            var kind = report.ErrorCount > 0 || report.WarningCount > 0
+                ? StatusKind.Warning
+                : StatusKind.Success;
+            _setStatus(report.SummaryText, kind);
+        }
+    }
+
+    private async Task OpenAuditEntryAsync(object? parameter)
+    {
+        if (parameter is not LibraryAuditEntry { MacroId: Guid macroId }) return;
+        var item = Items.FirstOrDefault(i => i.Id == macroId);
+        if (item is not null) SelectedItem = item;
+        await _openInEditor(macroId);
+    }
 
     public MacroListItemViewModel? SelectedItem
     {
@@ -456,7 +547,11 @@ public sealed class LibraryViewModel : ObservableObject
         get => _isLoading;
         private set
         {
-            if (SetProperty(ref _isLoading, value)) RaiseStateChanged();
+            if (SetProperty(ref _isLoading, value))
+            {
+                RaiseStateChanged();
+                if (!value && IsAuditOpen) RunAudit(updateStatus: false);
+            }
         }
     }
 

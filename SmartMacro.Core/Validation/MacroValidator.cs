@@ -246,12 +246,12 @@ public static partial class MacroValidator
 
             if (step is ScreenSearchStep search)
             {
-                var hasLaterEnabledStep = macro.Steps.Skip(i + 1).Any(later => later is { Enabled: true } && later is not (ElseStep or EndIfStep or EndRepeatStep));
+                var hasLaterEnabledStep = macro.Steps.Skip(i + 1).Any(later => later is { Enabled: true } && later is not (ElseStep or EndIfStep or EndRepeatStep or BeginGroupStep or EndGroupStep));
                 if (!search.Enabled && hasLaterEnabledStep)
                     issues.Add(new ValidationIssue(IssueSeverity.Warning,
                         "This Find step is turned off, so the steps after it run without waiting for anything. Turn it on, or use an If step to guard them.", i, step.Id, nameof(MacroStep.Enabled)));
                 else if (search.Enabled && search.EffectiveFailureAction == StepFailureAction.SkipNextStep
-                         && (i + 1 >= macro.Steps.Count || macro.Steps[i + 1] is ElseStep or EndIfStep or EndRepeatStep))
+                         && (i + 1 >= macro.Steps.Count || macro.Steps[i + 1] is ElseStep or EndIfStep or EndRepeatStep or EndGroupStep))
                     issues.Add(new ValidationIssue(IssueSeverity.Warning,
                         "\"Skip the next step\" has nothing to skip here: there's no step right after this one in the same block.", i, step.Id, nameof(ScreenSearchStep.WhenNotFound)));
             }
@@ -641,9 +641,9 @@ public static partial class MacroValidator
             var step = steps[i];
             switch (step)
             {
-                case ElseStep or EndIfStep or EndRepeatStep when !step.Enabled:
+                case ElseStep or EndIfStep or EndRepeatStep or EndGroupStep when !step.Enabled:
                     issues.Add(new ValidationIssue(IssueSeverity.Warning,
-                        "Turning off an Else / End step has no effect. To skip a whole block, turn off its If or Repeat step.", i, step.Id, nameof(MacroStep.Enabled)));
+                        "Turning off an Else / End step has no effect. To skip a whole block or group, turn off its opening step.", i, step.Id, nameof(MacroStep.Enabled)));
                     break;
 
                 case RepeatStep { Enabled: true } when !HasEnabledStepBetween(steps, i, blocks.EndOf(i)):
@@ -654,6 +654,11 @@ public static partial class MacroValidator
                 case IfStep { Enabled: true } when !HasEnabledStepBetween(steps, i, blocks.EndOf(i)):
                     issues.Add(new ValidationIssue(IssueSeverity.Warning,
                         "This If block has no enabled steps inside, so it does nothing.", i, step.Id, "Block"));
+                    break;
+
+                case BeginGroupStep { Enabled: true } when !HasEnabledStepBetween(steps, i, blocks.EndOf(i)):
+                    issues.Add(new ValidationIssue(IssueSeverity.Warning,
+                        "This Group has no enabled steps inside.", i, step.Id, "Block"));
                     break;
             }
         }

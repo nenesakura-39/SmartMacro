@@ -1,7 +1,9 @@
+using System.Collections.ObjectModel;
 using System.Runtime.CompilerServices;
 using SmartMacro.Core.Input;
 using SmartMacro.Core.Models;
 using SmartMacro.Core.Ocr;
+using SmartMacro.Core.Storage;
 using SmartMacro.Core.Validation;
 using SmartMacro.Core.Vision;
 using SmartMacro.Mvvm;
@@ -981,12 +983,43 @@ public sealed class FindTextStepViewModel : ScreenSearchStepViewModel
     protected override void ShowSpot(ScreenPoint point) => _tools?.ShowSpot(point);
 }
 
+/// <summary>A reusable captured image found elsewhere in the current macro, offered in the Find Image template picker.</summary>
+public sealed class SharedTemplateChoice
+{
+    public SharedTemplateChoice(
+        string label,
+        string sourceSummary,
+        string templateData,
+        int width,
+        int height,
+        System.Windows.Media.ImageSource? preview)
+    {
+        Label = label;
+        SourceSummary = sourceSummary;
+        TemplateData = templateData;
+        TemplateWidth = width;
+        TemplateHeight = height;
+        Preview = preview;
+    }
+
+    public string Label { get; }
+    public string SourceSummary { get; }
+    public string TemplateData { get; }
+    public int TemplateWidth { get; }
+    public int TemplateHeight { get; }
+    public System.Windows.Media.ImageSource? Preview { get; }
+    public string DimensionsText => $"{TemplateWidth} × {TemplateHeight} px";
+}
+
 /// <summary>Editor for "Find image": capture the picture, choose where and how strictly to search, test it.</summary>
 public sealed class FindImageStepViewModel : ScreenSearchStepViewModel
 {
     private readonly FindImageStep _step;
+    private readonly ObservableCollection<SharedTemplateChoice> _sharedTemplates = new();
     private IVisionTools? _tools;
     private System.Windows.Media.ImageSource? _preview;
+    private Func<Guid, IReadOnlyList<SharedTemplateCandidate>>? _sharedTemplatesProvider;
+    private SharedTemplateChoice? _selectedSharedTemplate;
 
     public FindImageStepViewModel(FindImageStep step) : base(step)
     {
@@ -994,11 +1027,87 @@ public sealed class FindImageStepViewModel : ScreenSearchStepViewModel
         CaptureTemplateCommand = new AsyncRelayCommand(CaptureTemplateAsync, ex => TestResult = ex.Message, () => _tools is not null && !IsBusy);
         TestCommand = new AsyncRelayCommand(TestAsync, ex => TestResult = ex.Message, () => _tools is not null && !IsBusy);
         AutoTuneCommand = new RelayCommand(AutoTuneFromTemplate, () => HasTemplate && !IsBusy);
+        ApplySharedTemplateCommand = new RelayCommand(
+            p => ApplySharedTemplate(p as SharedTemplateChoice ?? SelectedSharedTemplate),
+            p => (p is SharedTemplateChoice || SelectedSharedTemplate is not null) && !IsBusy);
+        RefreshSharedTemplatesCommand = new RelayCommand(_ => RefreshSharedTemplates(), _ => _sharedTemplatesProvider is not null);
     }
 
     public AsyncRelayCommand CaptureTemplateCommand { get; }
     public AsyncRelayCommand TestCommand { get; }
     public RelayCommand AutoTuneCommand { get; }
+    public RelayCommand ApplySharedTemplateCommand { get; }
+    public RelayCommand RefreshSharedTemplatesCommand { get; }
+
+    /// <summary>Provides reusable captured templates from other steps in the active macro.</summary>
+    public Func<Guid, IReadOnlyList<SharedTemplateCandidate>>? SharedTemplatesProvider
+    {
+        get => _sharedTemplatesProvider;
+        set
+        {
+            _sharedTemplatesProvider = value;
+            RefreshSharedTemplates();
+        }
+    }
+
+    /// <summary>Reusable templates available in the active macro (Plan 10 Shared Macro Template Gallery).</summary>
+    public ObservableCollection<SharedTemplateChoice> SharedTemplates => _sharedTemplates;
+
+    public bool HasSharedTemplates => _sharedTemplates.Count > 0;
+
+    public SharedTemplateChoice? SelectedSharedTemplate
+    {
+        get => _selectedSharedTemplate;
+        set
+        {
+            if (SetProperty(ref _selectedSharedTemplate, value))
+                System.Windows.Input.CommandManager.InvalidateRequerySuggested();
+        }
+    }
+
+    public override void RefreshSharedTemplates()
+    {
+        var previousData = _selectedSharedTemplate?.TemplateData;
+        _sharedTemplates.Clear();
+        if (_sharedTemplatesProvider is not null)
+        {
+            foreach (var candidate in _sharedTemplatesProvider(_step.Id))
+            {
+                var preview = SmartMacro.Converters.FrozenBitmapCache.FromTemplate(
+                    candidate.TemplateData, candidate.Width, candidate.Height);
+                _sharedTemplates.Add(new SharedTemplateChoice(
+                    candidate.Label,
+                    candidate.SourceDetail,
+                    candidate.TemplateData,
+                    candidate.Width,
+                    candidate.Height,
+                    preview));
+            }
+        }
+
+        SelectedSharedTemplate = (!string.IsNullOrEmpty(previousData)
+                ? _sharedTemplates.FirstOrDefault(t => string.Equals(t.TemplateData, previousData, StringComparison.Ordinal))
+                : null)
+            ?? _sharedTemplates.FirstOrDefault();
+
+        OnPropertyChanged(nameof(HasSharedTemplates));
+        System.Windows.Input.CommandManager.InvalidateRequerySuggested();
+    }
+
+    private void ApplySharedTemplate(SharedTemplateChoice? choice)
+    {
+        if (choice is null || string.IsNullOrEmpty(choice.TemplateData)) return;
+        _step.TemplateData = choice.TemplateData;
+        _step.TemplateWidth = choice.TemplateWidth;
+        _step.TemplateHeight = choice.TemplateHeight;
+        _step.TemplateAssetId = null;
+        RefreshPreview();
+        OnPropertyChanged(nameof(HasTemplate));
+        OnPropertyChanged(nameof(TemplateInfo));
+        NotifyChanged(nameof(TemplatePreview));
+        System.Windows.Input.CommandManager.InvalidateRequerySuggested();
+        TestResult = $"Reused image ({choice.TemplateWidth} × {choice.TemplateHeight}) from {choice.SourceSummary}. Click \"Test now\" to check it.";
+    }
 
     public static IReadOnlyList<Choice<ImageDetectorKind>> Detectors { get; } = new[]
     {
@@ -1168,10 +1277,12 @@ public sealed class FindImageStepViewModel : ScreenSearchStepViewModel
         _step.TemplateWidth = image.Width;
         _step.TemplateHeight = image.Height;
         _step.TemplateData = TemplateCodec.Encode(image);
+        _step.TemplateAssetId = null;
         RefreshPreview();
         OnPropertyChanged(nameof(HasTemplate));
         OnPropertyChanged(nameof(TemplateInfo));
         NotifyChanged(nameof(TemplatePreview));
+        System.Windows.Input.CommandManager.InvalidateRequerySuggested();
 
         var b = captured.Bounds;
         TestResult = $"Image captured ({image.Width} × {image.Height}) at ({b.X}, {b.Y}). Tip: a search area around where it appears makes the search faster. Click \"Test now\" to check it.";

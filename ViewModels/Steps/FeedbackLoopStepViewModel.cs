@@ -1101,6 +1101,12 @@ public sealed class FeedbackLoopStepViewModel : StepViewModel
         set { if (_step.WhenFailed == value) return; _step.WhenFailed = value; NotifyChanged(); }
     }
 
+    public override void RefreshSharedTemplates()
+    {
+        _completeCondition?.RefreshSharedTemplates();
+        _failCondition?.RefreshSharedTemplates();
+    }
+
     // ---------------- Helpers ----------------
 
     private bool CanUseTools() => _tools.Vision is not null && !_isBusy;

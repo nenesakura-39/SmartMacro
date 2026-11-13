@@ -1331,6 +1331,12 @@ public sealed partial class EditorViewModel : ObservableObject
             case StudioCommandKind.StepOut:
                 Run(StepOutCommand, null, "Open a macro and pause inside a sub-macro first to Step Out (Shift+F11).");
                 break;
+            case StudioCommandKind.WrapInGroup:
+                Run(WrapInGroupCommand, null, "Select one or more steps first to wrap them in a Group (Ctrl+Shift+G).");
+                break;
+            case StudioCommandKind.ExtractGroupToSubMacro:
+                Run(ExtractGroupToSubMacroCommand, null, "Select a Group section (or step inside one) first to extract it to a sub-macro.");
+                break;
         }
 
         void Run(System.Windows.Input.ICommand target, object? parameter, string unavailable)
@@ -1448,7 +1454,7 @@ public sealed partial class EditorViewModel : ObservableObject
 
         Touch();
         var what = targets.Count == 1 ? "the step" : $"{targets.Count} steps";
-        var block = targets.Count > selected.Count ? " (the whole If / Repeat block)" : "";
+        var block = targets.Count > selected.Count ? " (the whole block)" : "";
         _setStatus($"Turned {(turnOn ? "on" : "off")} {what}{block}. Space switches it back.", StatusKind.Info);
     }
 

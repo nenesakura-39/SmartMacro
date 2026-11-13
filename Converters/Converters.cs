@@ -242,7 +242,8 @@ public static class StepCategories
         StepKind.FindText or StepKind.FindImage or StepKind.FindColor or StepKind.WaitForChange => Vision,
         StepKind.FocusWindow or StepKind.Screenshot => Utility,
         StepKind.SetVariable or StepKind.Checkpoint or StepKind.CallMacro => Memory,
-        StepKind.If or StepKind.Else or StepKind.EndIf or StepKind.Repeat or StepKind.EndRepeat or StepKind.FlowControl => Logic,
+        StepKind.If or StepKind.Else or StepKind.EndIf or StepKind.Repeat or StepKind.EndRepeat
+            or StepKind.BeginGroup or StepKind.EndGroup or StepKind.FlowControl => Logic,
         StepKind.FeedbackLoop => Feedback,
         _ => Recorded,
     };

@@ -364,5 +364,6 @@ FodyWeavers.xsd
 
 # SmartMacro local outputs & release bundles
 publish/
+release/
 Claude outputs/
 *.zip

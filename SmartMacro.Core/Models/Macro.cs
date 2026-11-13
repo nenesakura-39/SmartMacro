@@ -277,6 +277,7 @@ public sealed class MacroDocument
                 FocusWindowStep { SnapLayout: not WindowSnapLayout.KeepCurrent } => 17,
                 ScreenshotStep s when s.SoundCue != SoundCueKind.None || s.AttachScreenshot || !string.IsNullOrWhiteSpace(s.NotificationMessage) || !string.IsNullOrWhiteSpace(s.WebhookUrl) => 17,
                 _ when WorkflowSteps.ConditionOf(step) is { HasSecondCondition: true } => 17,
+                BeginGroupStep or EndGroupStep => 17,
                 _ when UsesVersion16StepFeatures(step) => 16,
                 _ when UsesVersion15Features(step) => 15,
                 MouseMoveStep { UseRelativeDelta: true } => 14,

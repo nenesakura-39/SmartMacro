@@ -1,14 +1,14 @@
 # SmartMacro – Project Status / Handoff
 
-_Last updated: 2026-11-13 (**Plans 1–9 Complete** — WGC Capture & SIMD FFT Pipeline, Context-Scoped Triggers, Profile Rules UI, Single-Instance CLI IPC, Asset Deduplication & Shallow Cloning, Background Input & UIA Actions, Hardened Webhooks & Update Checker, Debugger 2.0, WPF/Service Automated Test Suite (`SmartMacro.App.Tests`), Editor Pane & `TemplateMatcher` Modularization, and Repo/CI Hygiene:
-**built + tested with `tools\verify.cmd`: 0 warnings, 0 errors, 1393 Core + 18 WPF/App = 1411 / 1411 passed**.)
+_Last updated: 2026-11-13 (**Plans 1–10 Complete** — WGC Capture & SIMD FFT Pipeline, Context-Scoped Triggers, Profile Rules UI, Single-Instance CLI IPC, Asset Deduplication & Shallow Cloning, Background Input & UIA Actions, Hardened Webhooks & Update Checker, Debugger 2.0, WPF/Service Automated Test Suite (`SmartMacro.App.Tests`), Editor Pane & `TemplateMatcher` Modularization, Repo/CI Hygiene, Collapsible Workflow Groups & Sub-Macro Extraction, Shared Macro Template Gallery, and 1-Click Library Health & Portability Audit:
+**built + tested with `tools\verify.cmd`: 0 warnings, 0 errors, 1399 Core + 23 WPF/App = 1422 / 1422 passed**.)
 Developer: Riku (リク) · Brand: KuroLogic_
 
 ## Current status at a glance (2026-11-13)
 | Area | Build + automated tests | User / tester feedback | Committed |
 |---|---|---|---|
 | Stages 1–4 & Editor UX | passed: 0 warnings, 0 errors | tried by owner; future user/tester feedback & bugs will be logged in one consolidated feedback document | yes |
-| SmartMacro 1.0.0 Evergreen AAA Edition + Plans 1–9 | passed: 0 warnings, 0 errors, **1393 + 18 / 1411** (`tools\verify.cmd`) | Plan 10 remaining | pending |
+| SmartMacro 1.0.0 Evergreen AAA Edition + Plans 1–10 | passed: 0 warnings, 0 errors, **1399 + 23 / 1422** (`tools\verify.cmd`) | All 10 improvement plans complete & cross-checked | pending |
 | Release documents (`release-docs/`: EULA, LICENSE, notices, README) | passed marker & version checks (`1.0.0`, reset from internal 1.8.0) | – | pending |
 
 ## SmartMacro 1.0.0 — Evergreen AAA Edition (2026-11-09): **built + tested** (`tools\verify.cmd`: 0 warnings, 0 errors, **1284 / 1284 passed**)

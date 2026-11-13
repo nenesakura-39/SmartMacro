@@ -103,8 +103,8 @@ public static class StepListEditing
             (position == InsertPosition.AfterSelected || blocks.StartOf(selectedIndex) >= 0))
             return selectedIndex;
 
-        var insideOrOpener = selected is IfStep or ElseStep or RepeatStep || blocks.Depth[selectedIndex] > 0;
-        if (insideOrOpener && (position == InsertPosition.AfterSelected || newKind is StepKind.If or StepKind.Repeat or StepKind.Else))
+        var insideOrOpener = selected is IfStep or ElseStep or RepeatStep or BeginGroupStep || blocks.Depth[selectedIndex] > 0;
+        if (insideOrOpener && (position == InsertPosition.AfterSelected || newKind is StepKind.If or StepKind.Repeat or StepKind.Else or StepKind.BeginGroup))
             return selectedIndex + 1;
 
         return InsertIndex(steps.Count, selectedIndex, position);
@@ -244,7 +244,7 @@ public static class StepListEditing
         int start = first, end = last;
         for (var i = start; i <= end; i++) // end can grow while looping: nested folded blocks are covered too
         {
-            if (steps[i] is not (IfStep or RepeatStep) || !collapsed.Contains(steps[i].Id)) continue;
+            if (steps[i] is not (IfStep or RepeatStep or BeginGroupStep) || !collapsed.Contains(steps[i].Id)) continue;
             var blockEnd = blocks.EndOf(i);
             if (blockEnd > end) end = blockEnd;
         }
@@ -310,7 +310,7 @@ public static class StepListEditing
             changed = false;
             for (var i = start; i <= end; i++)
             {
-                var blockStart = steps[i] is IfStep or RepeatStep ? i : blocks.StartOf(i);
+                var blockStart = steps[i] is IfStep or RepeatStep or BeginGroupStep ? i : blocks.StartOf(i);
                 if (blockStart < 0) continue;
                 var blockEnd = blocks.EndOf(blockStart);
                 if (blockStart < start) { start = blockStart; changed = true; }
@@ -337,20 +337,23 @@ public static class StepListEditing
 
         var blocks = BlockStructure.Analyze(steps);
         var added = 0;
-        bool addedIf = false, addedRepeat = false;
+        bool addedIf = false, addedRepeat = false, addedGroup = false;
         foreach (var index in remove.ToList())
         {
-            if (steps[index] is not (IfStep or EndIfStep or RepeatStep or EndRepeatStep)) continue;
-            var start = steps[index] is IfStep or RepeatStep ? index : blocks.StartOf(index);
+            if (steps[index] is not (IfStep or EndIfStep or RepeatStep or EndRepeatStep or BeginGroupStep or EndGroupStep)) continue;
+            var start = steps[index] is IfStep or RepeatStep or BeginGroupStep ? index : blocks.StartOf(index);
             if (start < 0) continue; // an orphan End: deleting it alone fixes the list
 
-            var isIf = steps[start] is IfStep;
+            var opener = steps[start];
+            var isIf = opener is IfStep;
+            var isGroup = opener is BeginGroupStep;
             var partners = new[] { start, blocks.EndOf(start), isIf ? blocks.ElseOf(start) : -1 };
             foreach (var partner in partners)
             {
                 if (partner < 0 || !remove.Add(partner)) continue;
                 added++;
                 if (isIf) addedIf = true;
+                else if (isGroup) addedGroup = true;
                 else addedRepeat = true;
             }
         }
@@ -358,9 +361,11 @@ public static class StepListEditing
         string? note = null;
         if (added > 0)
         {
-            var what = addedIf && addedRepeat
-                ? "the matching If / Else / End If and Repeat / End Repeat"
-                : addedIf ? "the matching If / Else / End If" : "the matching Repeat / End Repeat";
+            var names = new List<string>(3);
+            if (addedIf) names.Add("If / Else / End If");
+            if (addedRepeat) names.Add("Repeat / End Repeat");
+            if (addedGroup) names.Add("Group / End Group");
+            var what = $"the matching {string.Join(" and ", names)}";
             note = $"Also removed {what} marker{(added == 1 ? "" : "s")}, so no block is left half open." +
                    (remove.Count < steps.Count ? " The steps inside were kept." : "");
         }
@@ -387,7 +392,7 @@ public static class StepListEditing
         var foldedBlocks = 0;
         foreach (var index in picked)
         {
-            if (steps[index] is not (IfStep or RepeatStep) || !collapsed.Contains(steps[index].Id)) continue;
+            if (steps[index] is not (IfStep or RepeatStep or BeginGroupStep) || !collapsed.Contains(steps[index].Id)) continue;
             var end = blocks.EndOf(index);
             if (end <= index) continue;
             foldedBlocks++;
@@ -479,7 +484,7 @@ public static class StepListEditing
         foreach (var index in targets.ToList())
         {
             if (!WorkflowSteps.IsBlockStep(steps[index])) continue;
-            var start = steps[index] is IfStep or RepeatStep ? index : blocks.StartOf(index);
+            var start = steps[index] is IfStep or RepeatStep or BeginGroupStep ? index : blocks.StartOf(index);
             var end = start >= 0 ? blocks.EndOf(start) : -1;
             if (start < 0 || end < 0) continue;
             for (var i = start; i <= end; i++) targets.Add(i);
@@ -489,8 +494,8 @@ public static class StepListEditing
     }
 
     /// <summary>
-    /// Checks whether a standalone Else, End If or End Repeat may be inserted at <paramref name="index"/>: it must
-    /// close (or split) an If / Repeat that is still open there, and it must not leave another marker without its
+    /// Checks whether a standalone Else, End If, End Repeat or End Group may be inserted at <paramref name="index"/>: it must
+    /// close (or split) a block that is still open there, and it must not leave another marker without its
     /// partner. Returns null when it's fine, otherwise a plain-English reason (the step is then not added).
     /// Other step kinds always return null.
     /// </summary>
@@ -498,7 +503,7 @@ public static class StepListEditing
     {
         ArgumentNullException.ThrowIfNull(steps);
         ArgumentNullException.ThrowIfNull(marker);
-        if (marker is not (ElseStep or EndIfStep or EndRepeatStep)) return null;
+        if (marker is not (ElseStep or EndIfStep or EndRepeatStep or EndGroupStep)) return null;
         index = Math.Clamp(index, 0, steps.Count);
 
         var before = BlockStructure.Analyze(steps);
@@ -516,6 +521,8 @@ public static class StepListEditing
                         "Select a step inside an If block first, or add an If (it comes with its End If).",
             EndIfStep => $"An End If closes an If block, but no If is waiting for its End If {position}. " +
                          "Add an If instead (it comes with its End If), or select a step inside the If you want to close.",
+            EndGroupStep => $"An End Group closes a Group section, but no Group is waiting for its End Group {position}. " +
+                            "Add a Group instead (it comes with its End Group), or select a step inside the Group you want to close.",
             _ => $"An End Repeat closes a Repeat block, but no Repeat is waiting for its End Repeat {position}. " +
                  "Add a Repeat instead (it comes with its End Repeat), or select a step inside the Repeat you want to close.",
         };
@@ -550,7 +557,7 @@ public static class StepListEditing
     {
         for (var i = 0; i < beforeSteps.Count; i++)
         {
-            if (beforeSteps[i] is not (IfStep or RepeatStep)) continue;
+            if (beforeSteps[i] is not (IfStep or RepeatStep or BeginGroupStep)) continue;
             var j = -1;
             for (var k = 0; k < afterSteps.Count; k++)
             {

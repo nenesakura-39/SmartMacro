@@ -93,7 +93,8 @@ public sealed partial class EditorViewModel : ObservableObject
             screen as Core.Vision.IScreenLayout,
             MacroListProvider: () => GetLibraryMacros?.Invoke() ?? Array.Empty<Macro>(),
             CurrentMacroIdProvider: () => MacroId,
-            AllowLocalWebhooksProvider: allowLocalWebhooks);
+            AllowLocalWebhooksProvider: allowLocalWebhooks,
+            SharedTemplatesProvider: stepId => MacroTemplateGallery.Collect(BuildMacro(), excludeStepId: stepId));
         _repository = repository;
         _log = log;
         _dialogs = dialogs;
@@ -133,6 +134,9 @@ public sealed partial class EditorViewModel : ObservableObject
         GoToLibraryCommand = new RelayCommand(goToLibrary);
         WrapInIfCommand = new RelayCommand(() => WrapSelection(StepKind.If), () => HasMacro && SelectedStep is not null);
         WrapInRepeatCommand = new RelayCommand(() => WrapSelection(StepKind.Repeat), () => HasMacro && SelectedStep is not null);
+        WrapInGroupCommand = new RelayCommand(() => WrapSelection(StepKind.BeginGroup), () => HasMacro && SelectedStep is not null);
+        RunGroupCommand = new AsyncRelayCommand(RunSelectedGroupAsync, HandleUnexpectedError, () => CanRunNow && TryFindEnclosingGroup(out _, out _));
+        ExtractGroupToSubMacroCommand = new AsyncRelayCommand(ExtractGroupToSubMacroAsync, HandleUnexpectedError, () => HasMacro && TryFindEnclosingGroup(out _, out _));
         CleanUpMousePathsCommand = new RelayCommand(CleanUpMousePaths, () => HasMacro && Steps.Any(s => s.Model is MouseMoveStep));
         MergeKeysToTextCommand = new RelayCommand(MergeKeystrokesToText, () => HasMacro && Steps.Count(s => s.Model is KeyPressStep) >= 2);
         AddPatternCommand = new RelayCommand(p => AddPattern(p, AddAtEnd ? InsertPosition.AtEnd : InsertPosition.AfterSelected), p => HasMacro && p is QuickPattern);
@@ -571,6 +575,9 @@ public sealed partial class EditorViewModel : ObservableObject
     public RelayCommand GoToLibraryCommand { get; }
     public RelayCommand WrapInIfCommand { get; }
     public RelayCommand WrapInRepeatCommand { get; }
+    public RelayCommand WrapInGroupCommand { get; }
+    public AsyncRelayCommand RunGroupCommand { get; }
+    public AsyncRelayCommand ExtractGroupToSubMacroCommand { get; }
 
     /// <summary>"Clean up mouse paths": recorded Delay + Move runs become at most Delay + Move + Delay (see StepCleanup).</summary>
     public RelayCommand CleanUpMousePathsCommand { get; }
@@ -679,8 +686,9 @@ public sealed partial class EditorViewModel : ObservableObject
                     if (value.HasInspectorTabs)
                         value.ApplyPreferredInspectorTab(_preferredInspectorTab);
                     value.PropertyChanged += OnSelectedStepPropertyChanged;
-                    if (value.Model is IfStep or ElseStep or RepeatStep || value.IndentLevel > 0)
+                    if (value.Model is IfStep or ElseStep or RepeatStep or BeginGroupStep || value.IndentLevel > 0)
                         AddAtEnd = false;
+                    RefreshStepSharedTemplates(value);
                 }
                 UpdateBlockPartnerHighlights();
                 SyncSelectedBreakpointEditor();
@@ -1178,18 +1186,40 @@ public sealed partial class EditorViewModel : ObservableObject
 
     private void UpdateBlockPairing(BlockStructure blocks)
     {
-        // Guide rails: amber inside an If / Else, violet inside a Repeat (the innermost block a row is in).
-        var rails = StepListView.EnclosingBlockKinds(Steps.Select(s => s.Model).ToList());
+        // Guide rails: amber inside an If / Else, violet inside a Repeat, Group accent color inside a Group.
+        var models = Steps.Select(s => s.Model).ToList();
+        var rails = StepListView.EnclosingBlockKinds(models);
+        var openBlocks = new List<MacroStep>();
         for (var i = 0; i < Steps.Count; i++)
         {
+            var step = models[i];
+            switch (step)
+            {
+                case EndIfStep when openBlocks.Count > 0 && openBlocks[^1] is IfStep:
+                case EndRepeatStep when openBlocks.Count > 0 && openBlocks[^1] is RepeatStep:
+                case EndGroupStep when openBlocks.Count > 0 && openBlocks[^1] is BeginGroupStep:
+                    openBlocks.RemoveAt(openBlocks.Count - 1);
+                    break;
+            }
+
             var depth = blocks.Depth[i];
+            var railKind = depth > 0 ? rails[i] : BlockRailKind.None;
+            var groupHex = railKind == BlockRailKind.Group
+                && openBlocks.LastOrDefault() is BeginGroupStep enclosingGroup
+                ? (string.IsNullOrWhiteSpace(enclosingGroup.ColorHex) ? BeginGroupStep.DefaultColorHex : enclosingGroup.ColorHex)
+                : null;
             Steps[i].IndentLevel = depth;
-            Steps[i].BlockRailKind = depth > 0 ? rails[i] : BlockRailKind.None;
+            Steps[i].BlockRailKind = railKind;
+            Steps[i].SetCustomGroupColorHex(groupHex);
             Steps[i].SetBlockInfo(null, 0, Math.Max(0, depth - 1), null, null);
+
+            if (step is IfStep or RepeatStep or BeginGroupStep)
+                openBlocks.Add(step);
         }
 
         var ifCounter = 0;
         var repeatCounter = 0;
+        var regionCounter = 0;
         var groupCounter = 0;
 
         for (var i = 0; i < Steps.Count; i++)
@@ -1220,6 +1250,23 @@ public sealed partial class EditorViewModel : ObservableObject
                     var endIdx = blocks.EndOf(i);
                     if (endIdx >= 0 && endIdx < Steps.Count)
                         Steps[endIdx].SetBlockInfo(repeatCounter, groupKey, depth, $"#{repeatCounter}", $"End Repeat #{repeatCounter}");
+                    break;
+                }
+                case BeginGroupStep g:
+                {
+                    regionCounter++;
+                    groupCounter++;
+                    var groupKey = groupCounter;
+                    var groupColor = string.IsNullOrWhiteSpace(g.ColorHex) ? BeginGroupStep.DefaultColorHex : g.ColorHex;
+                    var titleLabel = string.IsNullOrWhiteSpace(g.Title) ? $"Group #{regionCounter}" : g.Title.Trim();
+                    Steps[i].SetCustomGroupColorHex(groupColor);
+                    Steps[i].SetBlockInfo(regionCounter, groupKey, depth, $"G{regionCounter}", titleLabel);
+                    var endIdx = blocks.EndOf(i);
+                    if (endIdx >= 0 && endIdx < Steps.Count)
+                    {
+                        Steps[endIdx].SetCustomGroupColorHex(groupColor);
+                        Steps[endIdx].SetBlockInfo(regionCounter, groupKey, depth, $"G{regionCounter}", $"End Group #{regionCounter}");
+                    }
                     break;
                 }
             }

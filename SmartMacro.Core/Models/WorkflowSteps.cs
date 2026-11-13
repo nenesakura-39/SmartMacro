@@ -429,10 +429,35 @@ public sealed class FlowControlStep : MacroStep
 }
 
 /// <summary>Small helpers for the screen checks inside steps (used by validation, file versions and the app).</summary>
+/// <summary>Opens a collapsible named region (<see cref="BeginGroupStep"/> … <see cref="EndGroupStep"/>). Zero execution overhead.</summary>
+public sealed class BeginGroupStep : MacroStep
+{
+    public const int MaxTitleLength = 100;
+    public const string DefaultColorHex = "#0EA5E9";
+
+    public string Title { get; set; } = "Group";
+
+    public string ColorHex { get; set; } = DefaultColorHex;
+
+    [JsonIgnore]
+    public override StepKind Kind => StepKind.BeginGroup;
+}
+
+/// <summary>Closes a <see cref="BeginGroupStep"/> section. Zero execution overhead.</summary>
+public sealed class EndGroupStep : MacroStep
+{
+    [JsonIgnore]
+    public override StepKind Kind => StepKind.EndGroup;
+}
+
 public static class WorkflowSteps
 {
-    /// <summary>True for If / Else / End If / Repeat / End Repeat.</summary>
-    public static bool IsBlockStep(MacroStep? step) => step is IfStep or ElseStep or EndIfStep or RepeatStep or EndRepeatStep;
+    /// <summary>True for If / Else / End If / Repeat / End Repeat / Begin Group / End Group.</summary>
+    public static bool IsBlockStep(MacroStep? step) =>
+        step is IfStep or ElseStep or EndIfStep or RepeatStep or EndRepeatStep or BeginGroupStep or EndGroupStep;
+
+    /// <summary>True for <see cref="BeginGroupStep"/> / <see cref="EndGroupStep"/> section markers.</summary>
+    public static bool IsGroupStep(MacroStep? step) => step is BeginGroupStep or EndGroupStep;
 
     /// <summary>The condition of an If / Repeat step (null for other steps, or Repeat Times).</summary>
     public static Condition? ConditionOf(MacroStep? step) => step switch

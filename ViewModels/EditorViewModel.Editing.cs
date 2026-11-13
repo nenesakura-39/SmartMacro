@@ -358,11 +358,12 @@ public sealed partial class EditorViewModel : ObservableObject
         var step = CreateStepViewModel(model);
         Steps.Insert(index, step);
 
-        // If and Repeat come with their End, so the new block is complete straight away.
+        // If, Repeat and Group come with their closing marker, so the new block is complete straight away.
         var closer = kind switch
         {
             StepKind.If => MacroFactory.CreateStep(StepKind.EndIf),
             StepKind.Repeat => MacroFactory.CreateStep(StepKind.EndRepeat),
+            StepKind.BeginGroup => MacroFactory.CreateStep(StepKind.EndGroup),
             _ => null,
         };
         if (closer is not null) Steps.Insert(index + 1, CreateStepViewModel(closer));
@@ -407,7 +408,14 @@ public sealed partial class EditorViewModel : ObservableObject
 
         RecordUndo();
         var opener = CreateStepViewModel(MacroFactory.CreateStep(kind));
-        var closer = CreateStepViewModel(MacroFactory.CreateStep(kind == StepKind.If ? StepKind.EndIf : StepKind.EndRepeat));
+        var closerKind = kind switch
+        {
+            StepKind.If => StepKind.EndIf,
+            StepKind.Repeat => StepKind.EndRepeat,
+            StepKind.BeginGroup => StepKind.EndGroup,
+            _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unsupported wrap block kind."),
+        };
+        var closer = CreateStepViewModel(MacroFactory.CreateStep(closerKind));
         Steps.Insert(last + 1, closer);
         Steps.Insert(first, opener);
         SelectedStep = opener;
@@ -677,5 +685,134 @@ public sealed partial class EditorViewModel : ObservableObject
         if (plan.TookWholeBlocks || Math.Abs(plan.NewFirst - plan.First) > 1)
             _setStatus($"{what} {where}{blocks}.", StatusKind.Info);
     }
+
+    // ---------------- Plan 10: Workflow Group actions & Shared Template Gallery refresh ----------------
+
+    private bool TryFindEnclosingGroup(out int beginIndex, out int endIndex)
+    {
+        beginIndex = endIndex = -1;
+        if (!HasMacro || SelectedStep is null) return false;
+
+        var selectedIdx = Steps.IndexOf(SelectedStep);
+        if (selectedIdx < 0) return false;
+
+        var models = Steps.Select(s => s.Model).ToList();
+        var blocks = BlockStructure.Analyze(models);
+        for (var i = selectedIdx; i >= 0; i--)
+        {
+            if (models[i] is BeginGroupStep)
+            {
+                var pairEnd = blocks.EndOf(i);
+                if (pairEnd > i && pairEnd >= selectedIdx)
+                {
+                    beginIndex = i;
+                    endIndex = pairEnd;
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private Task RunSelectedGroupAsync()
+    {
+        if (RunSingleStepHandler is null || !TryFindEnclosingGroup(out var beginIndex, out var endIndex))
+            return Task.CompletedTask;
+
+        var title = (Steps[beginIndex].Model as BeginGroupStep)?.Title;
+        var label = string.IsNullOrWhiteSpace(title) ? $"Group ({endIndex - beginIndex - 1} steps)" : $"Group \"{title.Trim()}\"";
+        var macro = MacroJson.Clone(BuildMacro());
+        macro.Steps[beginIndex].Enabled = true;
+        _setStatus($"Running {label}…", StatusKind.Info);
+        return RunSingleStepHandler(macro, beginIndex);
+    }
+
+    private async Task ExtractGroupToSubMacroAsync()
+    {
+        if (!HasMacro || !TryFindEnclosingGroup(out var beginIndex, out var endIndex)) return;
+
+        var innerCount = endIndex - beginIndex - 1;
+        if (innerCount <= 0)
+        {
+            _setStatus("This Group is empty — add steps inside it before extracting it to a sub-macro.", StatusKind.Warning);
+            return;
+        }
+
+        // Hydrate a clone first in case any extracted image steps still carry TemplateAssetId references.
+        var sourceMacro = MacroJson.Clone(BuildMacro());
+        if (_saved?.Assets is { Count: > 0 } savedAssets)
+        {
+            sourceMacro.Assets = new Dictionary<string, string>(savedAssets, StringComparer.Ordinal);
+            SmartMacro.Core.Storage.MacroAssetStore.Hydrate(sourceMacro);
+        }
+
+        var innerModels = sourceMacro.Steps
+            .Skip(beginIndex + 1)
+            .Take(innerCount)
+            .Select(MacroJson.CloneStep)
+            .ToList();
+
+        var innerCheck = BlockStructure.Analyze(innerModels);
+        if (!innerCheck.IsValid)
+        {
+            _setStatus("Fix the block structure inside this Group before extracting it to a sub-macro.", StatusKind.Warning);
+            return;
+        }
+
+        var rawTitle = (Steps[beginIndex].Model as BeginGroupStep)?.Title;
+        var baseName = string.IsNullOrWhiteSpace(rawTitle) ? "Extracted Group" : rawTitle.Trim();
+        var existingNames = (GetLibraryMacros?.Invoke() ?? Array.Empty<Macro>())
+            .Select(m => m.Name)
+            .Append(Name);
+
+        var subMacro = MacroFactory.CreateNew(existingNames, baseName);
+        subMacro.Steps.Clear();
+        subMacro.Steps.AddRange(innerModels);
+
+        await _repository.SaveAsync(subMacro);
+        _onSaved(MacroJson.Clone(subMacro));
+
+        RecordUndo();
+        _collapsed.Remove(Steps[beginIndex].Model.Id);
+        var callStep = new CallMacroStep
+        {
+            Enabled = Steps[beginIndex].Model.Enabled,
+            TargetMacroId = subMacro.Id,
+            TargetMacroName = subMacro.Name,
+        };
+        var callVm = CreateStepViewModel(callStep);
+
+        var updatedModels = Steps.Select(s => s.Model).ToList();
+        updatedModels.RemoveRange(beginIndex, endIndex - beginIndex + 1);
+        updatedModels.Insert(beginIndex, callStep);
+
+        var existingVms = new Dictionary<MacroStep, StepViewModel>(ReferenceEqualityComparer.Instance);
+        foreach (var vm in Steps) existingVms[vm.Model] = vm;
+        foreach (var old in Steps) old.Modified -= OnStepModified;
+
+        _suspendStepsChanged = true;
+        try
+        {
+            Steps.Clear();
+            foreach (var model in updatedModels)
+                Steps.Add(ReferenceEquals(model, callStep) ? callVm : existingVms[model]);
+        }
+        finally
+        {
+            _suspendStepsChanged = false;
+        }
+        OnStepsChanged(Steps, new NotifyCollectionChangedEventArgs(NotifyCollectionChangedAction.Reset));
+
+        SetSelection(new[] { callVm });
+        SelectedStep = callVm;
+        SelectStepsRequested?.Invoke(this, new[] { callVm });
+        Touch();
+        RefreshSubMacroLinks();
+        _log.Info($"Extracted Group \"{baseName}\" ({innerCount} step(s)) into sub-macro \"{subMacro.Name}\".");
+        _setStatus($"Extracted {innerCount} step(s) into sub-macro \"{subMacro.Name}\" and replaced the Group with Call Macro. Ctrl+Z restores the Group steps.", StatusKind.Success);
+    }
+
+    private void RefreshStepSharedTemplates(StepViewModel step) => step.RefreshSharedTemplates();
 
 }

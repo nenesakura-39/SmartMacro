@@ -189,8 +189,13 @@ public static partial class MacroValidator
                 }
                 break;
 
-            case ElseStep or EndIfStep or EndRepeatStep:
+            case ElseStep or EndIfStep or EndRepeatStep or EndGroupStep:
                 break; // nothing to set; their place in the list is checked by ValidateBlocks
+
+            case BeginGroupStep g:
+                if (!string.IsNullOrEmpty(g.Title) && g.Title.Length > BeginGroupStep.MaxTitleLength)
+                    issues.Add(Warning($"Group titles longer than {BeginGroupStep.MaxTitleLength} characters are shortened in the list.", nameof(BeginGroupStep.Title)));
+                break;
 
             case RepeatStep r:
                 ValidateRepeat(issues, r, screen);

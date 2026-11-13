@@ -200,7 +200,7 @@ public sealed partial class PlaybackEngine
 
                 var stepStartedAt = ActiveTime;
                 var prevExecuted = run.StepsExecuted;
-                var attemptedStep = step.Enabled && step is not (ElseStep or EndIfStep or EndRepeatStep);
+                var attemptedStep = step.Enabled && step is not (ElseStep or EndIfStep or EndRepeatStep or BeginGroupStep or EndGroupStep);
                 _currentStepVisionScore = null;
                 var traceOutcome = ExecutionTraceOutcome.Executed;
                 string? traceDetail = null;
@@ -245,6 +245,15 @@ public sealed partial class PlaybackEngine
                         break;
 
                     case EndIfStep:
+                        pc++;
+                        break;
+
+                    case BeginGroupStep groupStep:
+                        // A disabled Group skips all steps inside it; an enabled Group has zero runtime overhead.
+                        pc = groupStep.Enabled ? pc + 1 : blocks.EndOf(pc) + 1;
+                        break;
+
+                    case EndGroupStep:
                         pc++;
                         break;
 
@@ -506,8 +515,8 @@ public sealed partial class PlaybackEngine
         if (next >= steps.Count) return next;
         return steps[next] switch
         {
-            IfStep or RepeatStep => blocks.EndOf(next) + 1,
-            ElseStep or EndIfStep or EndRepeatStep => next,
+            IfStep or RepeatStep or BeginGroupStep => blocks.EndOf(next) + 1,
+            ElseStep or EndIfStep or EndRepeatStep or EndGroupStep => next,
             _ => next + 1,
         };
     }

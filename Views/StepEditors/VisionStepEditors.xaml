@@ -152,6 +152,56 @@
                         </Button>
                         <ComboBox Style="{StaticResource FreezeComboBox}" Margin="0,0,0,6" />
                     </WrapPanel>
+
+                    <!-- Plan 10: Shared Macro Template Gallery -->
+                    <Border Visibility="{Binding HasSharedTemplates, Converter={StaticResource BoolToVisibility}}"
+                            Margin="0,10,0,0" Padding="10,8" CornerRadius="8"
+                            Background="{DynamicResource SurfaceBrush}"
+                            BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1">
+                        <StackPanel>
+                            <DockPanel Margin="0,0,0,6">
+                                <Button DockPanel.Dock="Right" Style="{StaticResource GhostButton}" Padding="6,2" FontSize="11"
+                                        Command="{Binding RefreshSharedTemplatesCommand}"
+                                        ToolTip="Scan this macro again for captured images"
+                                        AutomationProperties.Name="Refresh shared image templates">
+                                    <TextBlock Text="↻" />
+                                </Button>
+                                <TextBlock Text="🖼 Reuse captured image from this macro" Style="{StaticResource FieldLabel}" Margin="0" VerticalAlignment="Center" />
+                            </DockPanel>
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="8" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <ComboBox Grid.Column="0"
+                                          ItemsSource="{Binding SharedTemplates}"
+                                          SelectedItem="{Binding SelectedSharedTemplate, Mode=TwoWay}"
+                                          AutomationProperties.Name="Shared templates in this macro">
+                                    <ComboBox.ItemTemplate>
+                                        <DataTemplate>
+                                            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                                <Border Width="28" Height="22" CornerRadius="4" Margin="0,0,8,0"
+                                                        Background="{DynamicResource PanelBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1">
+                                                    <Image Source="{Binding Preview}" Stretch="Uniform" />
+                                                </Border>
+                                                <StackPanel>
+                                                    <TextBlock Text="{Binding Label}" FontSize="11.5" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                                                    <TextBlock Text="{Binding DimensionsText}" Style="{StaticResource MutedText}" FontSize="10.5" />
+                                                </StackPanel>
+                                            </StackPanel>
+                                        </DataTemplate>
+                                    </ComboBox.ItemTemplate>
+                                </ComboBox>
+                                <Button Grid.Column="2" Style="{StaticResource GhostButton}" Padding="10,5" FontSize="11.5"
+                                        Command="{Binding ApplySharedTemplateCommand}"
+                                        ToolTip="Apply the selected image from this macro without re-capturing"
+                                        AutomationProperties.Name="Use selected shared image">
+                                    <TextBlock Text="Use image" />
+                                </Button>
+                            </Grid>
+                        </StackPanel>
+                    </Border>
                 </StackPanel>
             </Border>
 

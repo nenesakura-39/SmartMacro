@@ -231,6 +231,13 @@
                                 <TextBlock Text="Repeat" Margin="4,0,0,0" />
                             </StackPanel>
                         </Button>
+                        <Button Style="{StaticResource GhostButton}" Command="{Binding WrapInGroupCommand}" Padding="7,4" FontSize="11"
+                                ToolTip="Wrap selected steps in a collapsible Group … End Group section (Ctrl+Shift+G)">
+                            <StackPanel Orientation="Horizontal">
+                                <ctrl:StudioIcon Kind="Folder" Size="12" Foreground="{DynamicResource LogicAccentBrush}" />
+                                <TextBlock Text="Group" Margin="4,0,0,0" />
+                            </StackPanel>
+                        </Button>
                         <Button Style="{StaticResource GhostButton}" Command="{Binding CleanUpMousePathsCommand}" Padding="7,4" FontSize="11"
                                 ToolTip="Clean up redundant mouse movement steps">
                             <StackPanel Orientation="Horizontal">
@@ -438,6 +445,9 @@
                             <Separator />
                             <MenuItem Header="Wrap in If" InputGestureText="Ctrl+Shift+I" Command="{Binding WrapInIfCommand}" />
                             <MenuItem Header="Wrap in Repeat" InputGestureText="Ctrl+Shift+R" Command="{Binding WrapInRepeatCommand}" />
+                            <MenuItem Header="Wrap in Group" InputGestureText="Ctrl+Shift+G" Command="{Binding WrapInGroupCommand}" />
+                            <MenuItem Header="▶ Run Group" Command="{Binding RunGroupCommand}" />
+                            <MenuItem Header="🧩 Extract Group to Sub-Macro" Command="{Binding ExtractGroupToSubMacroCommand}" />
                             <MenuItem Header="Clean up mouse paths" Command="{Binding CleanUpMousePathsCommand}" />
                             <Separator />
                             <MenuItem Header="Duplicate" InputGestureText="Ctrl+D" Command="{Binding DuplicateStepCommand}" />
@@ -447,6 +457,7 @@
                     <ListBox.InputBindings>
                         <KeyBinding Key="F5" Modifiers="Control" Command="{Binding RunStepCommand}" />
                         <KeyBinding Key="F5" Modifiers="Shift" Command="{Binding PlayFromSelectedCommand}" />
+                        <KeyBinding Key="G" Modifiers="Control+Shift" Command="{Binding WrapInGroupCommand}" />
                         <KeyBinding Key="F9" Command="{Binding ToggleBreakpointCommand}" />
                         <KeyBinding Key="F10" Command="{Binding StepOverCommand}" />
                         <KeyBinding Key="F11" Command="{Binding StepIntoCommand}" />
@@ -904,6 +915,13 @@
                             <StackPanel Orientation="Horizontal">
                                 <ctrl:StudioIcon Kind="LoopRepeat" Size="11" Foreground="{DynamicResource LogicAccentBrush}" />
                                 <TextBlock Text="Wrap Repeat" Margin="4,0,0,0" />
+                            </StackPanel>
+                        </Button>
+                        <Button Style="{StaticResource GhostButton}" Command="{Binding WrapInGroupCommand}" Padding="8,4" FontSize="11" Margin="2,0,0,0"
+                                ToolTip="Wrap selected steps in a collapsible Group section (Ctrl+Shift+G)">
+                            <StackPanel Orientation="Horizontal">
+                                <ctrl:StudioIcon Kind="Folder" Size="11" Foreground="{DynamicResource LogicAccentBrush}" />
+                                <TextBlock Text="Wrap Group" Margin="4,0,0,0" />
                             </StackPanel>
                         </Button>
                         <Button Style="{StaticResource GhostButton}" Command="{Binding DuplicateStepCommand}" Padding="8,4" FontSize="11" Margin="2,0,0,0"

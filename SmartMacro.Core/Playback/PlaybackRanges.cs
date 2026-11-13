@@ -27,11 +27,11 @@ public static class PlaybackRanges
 
         var start = steps[index] switch
         {
-            ElseStep or EndIfStep or EndRepeatStep when blocks.StartOf(index) >= 0 => blocks.StartOf(index),
+            ElseStep or EndIfStep or EndRepeatStep or EndGroupStep when blocks.StartOf(index) >= 0 => blocks.StartOf(index),
             _ => index,
         };
 
-        return steps[start] is IfStep or RepeatStep && blocks.EndOf(start) >= 0
+        return steps[start] is IfStep or RepeatStep or BeginGroupStep && blocks.EndOf(start) >= 0
             ? (start, blocks.EndOf(start) + 1)
             : (start, start + 1);
     }
@@ -111,7 +111,7 @@ public static class PlaybackRanges
             var step = steps[i];
             switch (step)
             {
-                case IfStep or RepeatStep:
+                case IfStep or RepeatStep or BeginGroupStep:
                     open.Add(step);
                     Keep(i);
                     break;
@@ -137,12 +137,13 @@ public static class PlaybackRanges
 
                 case EndIfStep when open.Count > 0 && open[^1] is IfStep:
                 case EndRepeatStep when open.Count > 0 && open[^1] is RepeatStep:
+                case EndGroupStep when open.Count > 0 && open[^1] is BeginGroupStep:
                     open.RemoveAt(open.Count - 1);
                     Keep(i);
                     break;
 
-                case EndIfStep or EndRepeatStep:
-                    droppedMarkers++; // its If / Repeat is above the start
+                case EndIfStep or EndRepeatStep or EndGroupStep:
+                    droppedMarkers++; // its If / Repeat / Group is above the start
                     break;
 
                 default:

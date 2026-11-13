@@ -231,6 +231,9 @@ public abstract class StepViewModel : ObservableObject
 
     public bool HasTelemetryBadge => !string.IsNullOrEmpty(_telemetryBadgeText);
 
+    /// <summary>Refreshes any per-macro shared template choices offered by this step editor.</summary>
+    public virtual void RefreshSharedTemplates() { }
+
     // ---------------- Studio UI: folding, search and filter (view state only; never saved, never played) ----------------
 
     private bool _isCollapsed;
@@ -353,8 +356,12 @@ public abstract class StepViewModel : ObservableObject
 
     private static readonly System.Windows.Media.Brush IfRailBrush = CreateFrozenBrush(0xF5, 0x9E, 0x0B);     // amber
     private static readonly System.Windows.Media.Brush RepeatRailBrush = CreateFrozenBrush(0x8B, 0x5C, 0xF6); // violet
+    private static readonly System.Windows.Media.Brush GroupRailBrush = CreateFrozenBrush(0x0E, 0xA5, 0xE9);  // sky cyan
 
     private Core.Workflow.BlockRailKind _railKind;
+    private string? _customGroupColorHex;
+    private System.Windows.Media.Brush? _customGroupSolidBrush;
+    private System.Windows.Media.Brush? _customGroupSoftBrush;
     private double _executionProgress;
     private bool _showExecutionProgress;
 
@@ -373,14 +380,41 @@ public abstract class StepViewModel : ObservableObject
         }
     }
 
-    /// <summary>"#F59E0B" (amber) inside an If / Else, "#8B5CF6" (violet) inside a Repeat, empty at the top level.</summary>
-    public string BlockRailColorHex => Core.Workflow.StepListView.RailColorHex(_railKind);
+    internal void SetCustomGroupColorHex(string? hex)
+    {
+        var normalized = string.IsNullOrWhiteSpace(hex) ? null : hex.Trim();
+        if (string.Equals(_customGroupColorHex, normalized, StringComparison.OrdinalIgnoreCase)) return;
+
+        _customGroupColorHex = normalized;
+        if (normalized is not null && RgbColor.TryParse(normalized, out var rgb))
+        {
+            _customGroupSolidBrush = CreateFrozenBrush(rgb.R, rgb.G, rgb.B);
+            _customGroupSoftBrush = CreateFrozenBrush(0x2E, rgb.R, rgb.G, rgb.B);
+        }
+        else
+        {
+            _customGroupSolidBrush = null;
+            _customGroupSoftBrush = null;
+        }
+
+        OnPropertyChanged(nameof(BlockRailColorHex));
+        OnPropertyChanged(nameof(BlockRailBrush));
+        OnPropertyChanged(nameof(BlockAccentBrush));
+        OnPropertyChanged(nameof(BlockBadgeBackgroundBrush));
+    }
+
+    /// <summary>"#F59E0B" (amber) inside an If / Else, "#8B5CF6" (violet) inside a Repeat, Group color inside a Group, empty at the top level.</summary>
+    public string BlockRailColorHex => _railKind == Core.Workflow.BlockRailKind.Group
+        && !string.IsNullOrEmpty(_customGroupColorHex)
+        ? _customGroupColorHex
+        : Core.Workflow.StepListView.RailColorHex(_railKind);
 
     /// <summary>The rail colour as a frozen brush (what the 2.5 px guide rail draws with).</summary>
     public System.Windows.Media.Brush? BlockRailBrush => _railKind switch
     {
         Core.Workflow.BlockRailKind.If => IfRailBrush,
         Core.Workflow.BlockRailKind.Repeat => RepeatRailBrush,
+        Core.Workflow.BlockRailKind.Group => _customGroupSolidBrush ?? GroupRailBrush,
         _ => null,
     };
 
@@ -456,9 +490,15 @@ public abstract class StepViewModel : ObservableObject
         internal set => SetProperty(ref _isBlockPartnerHighlighted, value);
     }
 
-    public System.Windows.Media.Brush BlockAccentBrush => DepthAccentBrushes[Math.Abs(_blockDepth) % DepthAccentBrushes.Length];
+    public System.Windows.Media.Brush BlockAccentBrush =>
+        Model is BeginGroupStep or EndGroupStep && _customGroupSolidBrush is not null
+            ? _customGroupSolidBrush
+            : DepthAccentBrushes[Math.Abs(_blockDepth) % DepthAccentBrushes.Length];
 
-    public System.Windows.Media.Brush BlockBadgeBackgroundBrush => DepthBadgeBrushes[Math.Abs(_blockDepth) % DepthBadgeBrushes.Length];
+    public System.Windows.Media.Brush BlockBadgeBackgroundBrush =>
+        Model is BeginGroupStep or EndGroupStep && _customGroupSoftBrush is not null
+            ? _customGroupSoftBrush
+            : DepthBadgeBrushes[Math.Abs(_blockDepth) % DepthBadgeBrushes.Length];
 
     internal void SetBlockInfo(int? pairId, int groupKey, int depth, string? badgeText, string? fullBadgeText)
     {
@@ -529,7 +569,7 @@ public abstract class StepViewModel : ObservableObject
     public virtual bool HasRecoveryTab => IsStandalone;
 
     /// <summary>True when the segmented 3-tab switcher is shown in the Inspector header.</summary>
-    public bool HasInspectorTabs => IsStandalone && !(Model is ElseStep or EndIfStep or EndRepeatStep);
+    public bool HasInspectorTabs => IsStandalone && !(Model is ElseStep or EndIfStep or EndRepeatStep or EndGroupStep);
 
     /// <summary>Applies the editor's sticky preferred tab (falling back to Setup when this step has no Tune tab).</summary>
     internal void ApplyPreferredInspectorTab(int preferredTab)
@@ -599,16 +639,16 @@ public abstract class StepViewModel : ObservableObject
 
     // ---------------- Connected Logic Block Brackets & Inline Card Quick-Edit ----------------
 
-    public bool IsBlockStart => Model is IfStep or RepeatStep;
+    public bool IsBlockStart => Model is IfStep or RepeatStep or BeginGroupStep;
     public bool IsBlockMid => Model is ElseStep;
-    public bool IsBlockEnd => Model is EndIfStep or EndRepeatStep;
+    public bool IsBlockEnd => Model is EndIfStep or EndRepeatStep or EndGroupStep;
 
     /// <summary>Connected bracket glyph drawn on the block rail for visual flow clarity.</summary>
     public string BlockBracketGlyph => Model switch
     {
-        IfStep or RepeatStep => "╭─",
+        IfStep or RepeatStep or BeginGroupStep => "╭─",
         ElseStep => "├─",
-        EndIfStep or EndRepeatStep => "╰─",
+        EndIfStep or EndRepeatStep or EndGroupStep => "╰─",
         _ => IsInsideBlock ? "│" : string.Empty,
     };
 
@@ -867,6 +907,7 @@ public abstract class StepViewModel : ObservableObject
         FindImageStep img => $"{img.MinSimilarityPercent}% match",
         FindColorStep col => col.Color,
         RepeatStep { Mode: RepeatMode.Times } r => $"×{r.Count}",
+        BeginGroupStep g => string.IsNullOrWhiteSpace(g.Title) ? "Group" : g.Title.Trim(),
         _ => null,
     };
 
@@ -982,7 +1023,8 @@ public abstract class StepViewModel : ObservableObject
         InputSequenceStep q => new InputSequenceStepViewModel(q),
         IfStep i => new IfStepViewModel(i),
         RepeatStep r => new RepeatStepViewModel(r),
-        ElseStep or EndIfStep or EndRepeatStep => new BlockMarkerStepViewModel(step),
+        BeginGroupStep g => new BeginGroupStepViewModel(g),
+        ElseStep or EndIfStep or EndRepeatStep or EndGroupStep => new BlockMarkerStepViewModel(step),
         FeedbackLoopStep f => new FeedbackLoopStepViewModel(f),
         WaitForChangeStep w => new WaitForChangeStepViewModel(w),
         FocusWindowStep w => new FocusWindowStepViewModel(w),

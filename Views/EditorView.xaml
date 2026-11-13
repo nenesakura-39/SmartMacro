@@ -89,6 +89,7 @@
         <KeyBinding Key="F3" Modifiers="Shift" Command="{Binding PreviousMatchCommand}" />
         <KeyBinding Key="K" Modifiers="Control" Command="{Binding ToggleCommandPaletteCommand}" />
         <KeyBinding Key="T" Modifiers="Control" Command="{Binding TestSelectedStepCommand}" />
+        <KeyBinding Key="G" Modifiers="Control+Shift" Command="{Binding WrapInGroupCommand}" />
     </UserControl.InputBindings>
 
     <Grid>

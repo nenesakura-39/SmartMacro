@@ -145,6 +145,8 @@ public class AssetAndCloneTests
                 new EndIfStep(),
                 new RepeatStep { Mode = RepeatMode.Times, Count = 2, Condition = compoundCondition.Clone() },
                 new EndRepeatStep(),
+                new BeginGroupStep { Title = "Setup Phase", ColorHex = "#10B981" },
+                new EndGroupStep(),
                 new FlowControlStep { Action = FlowControlAction.ContinueLoop },
                 new FeedbackLoopStep
                 {

@@ -168,4 +168,60 @@
         </StackPanel>
     </DataTemplate>
 
+    <!-- ===================================== BEGIN GROUP ===================================== -->
+    <DataTemplate DataType="{x:Type steps:BeginGroupStepViewModel}">
+        <StackPanel>
+            <ContentControl Content="{Binding}" ContentTemplate="{StaticResource StepHeaderTemplate}" Focusable="False" />
+
+            <StackPanel Visibility="{Binding ShowSetupSection, Converter={StaticResource BoolToVisibility}}">
+                <Border Style="{StaticResource SetupCard}">
+                    <StackPanel>
+                        <TextBlock Text="📂 WORKFLOW GROUP &amp; SUB-MACRO EXTRACTION" Style="{StaticResource SetupCardTitle}" />
+                        <TextBlock Text="Organize related steps into a collapsible, color-coded section. Turning off this Group header disables its entire section; playback inside runs with zero overhead."
+                                   Style="{StaticResource MutedText}" FontSize="11.5" TextWrapping="Wrap" Margin="0,6,0,0" />
+
+                        <TextBlock Text="Group title" Style="{StaticResource FieldLabel}" Margin="0,10,0,4" />
+                        <TextBox Text="{Binding GroupTitle, UpdateSourceTrigger=PropertyChanged}"
+                                 Tag="e.g. Login Sequence, Loot Sweep, Form Fill"
+                                 MaxLength="200"
+                                 AutomationProperties.Name="Group title" />
+
+                        <TextBlock Text="Accent tag color" Style="{StaticResource FieldLabel}" Margin="0,10,0,4" />
+                        <ComboBox ItemsSource="{x:Static steps:BeginGroupStepViewModel.ColorChoices}"
+                                  SelectedValuePath="Value"
+                                  SelectedValue="{Binding ColorHex}"
+                                  AutomationProperties.Name="Group accent color">
+                            <ComboBox.ItemTemplate>
+                                <DataTemplate>
+                                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                        <Border Width="12" Height="12" CornerRadius="6" Background="{Binding Value}" Margin="0,0,8,0"
+                                                BorderBrush="{DynamicResource BorderStrongBrush}" BorderThickness="1" />
+                                        <TextBlock Text="{Binding Label}" VerticalAlignment="Center" />
+                                    </StackPanel>
+                                </DataTemplate>
+                            </ComboBox.ItemTemplate>
+                        </ComboBox>
+
+                        <WrapPanel Margin="0,12,0,0">
+                            <Button Style="{StaticResource GhostButton}" Margin="0,0,8,6"
+                                    Command="{Binding DataContext.RunGroupCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                    ToolTip="Play only the steps inside this Group once"
+                                    AutomationProperties.Name="Run group">
+                                <TextBlock Text="▶ Run Group" />
+                            </Button>
+                            <Button Style="{StaticResource PrimaryButton}" Margin="0,0,0,6"
+                                    Command="{Binding DataContext.ExtractGroupToSubMacroCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                    ToolTip="Save the steps inside this Group as a reusable sub-macro and replace the Group with a Call Macro step (Ctrl+Z undoes the canvas replacement)"
+                                    AutomationProperties.Name="Extract group to sub-macro">
+                                <TextBlock Text="🧩 Extract Group to Sub-Macro" />
+                            </Button>
+                        </WrapPanel>
+                    </StackPanel>
+                </Border>
+            </StackPanel>
+
+            <ContentControl Content="{Binding}" ContentTemplate="{StaticResource StepFooterTemplate}" Focusable="False" />
+        </StackPanel>
+    </DataTemplate>
+
 </ResourceDictionary>

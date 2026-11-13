@@ -153,6 +153,18 @@ public static class StepCatalog
             "\uE8B7",
             "Breaks out of the innermost Repeat loop, skips to its next turn (Continue), or stops the macro cleanly."),
         new(
+            StepKind.BeginGroup,
+            StepCategory.Logic,
+            StepDescriber.DisplayName(StepKind.BeginGroup),
+            "\uE8F1",
+            "Organizes steps inside a named, collapsible Group / Region section with zero runtime overhead. Adding it from the toolbox adds Group and End Group."),
+        new(
+            StepKind.EndGroup,
+            StepCategory.Logic,
+            StepDescriber.DisplayName(StepKind.EndGroup),
+            "\uE70E",
+            "Closes a Group section."),
+        new(
             StepKind.SetVariable,
             StepCategory.Brain,
             StepDescriber.DisplayName(StepKind.SetVariable),

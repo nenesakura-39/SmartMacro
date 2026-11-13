@@ -72,6 +72,7 @@ public sealed class BlockStructure
             {
                 case IfStep:
                 case RepeatStep:
+                case BeginGroupStep:
                     result._depth[i] = open.Count;
                     if (open.Count >= MaxDepth)
                         problems.Add(new BlockProblem(i,
@@ -116,6 +117,10 @@ public sealed class BlockStructure
                     Close<RepeatStep>(steps, result, open, problems, i, "End Repeat", "Repeat");
                     break;
 
+                case EndGroupStep:
+                    Close<BeginGroupStep>(steps, result, open, problems, i, "End Group", "Group");
+                    break;
+
                 case FlowControlStep { Action: FlowControlAction.ExitLoop or FlowControlAction.ContinueLoop } fc:
                     result._depth[i] = open.Count;
                     if (!open.Any(idx => steps[idx] is RepeatStep))
@@ -135,9 +140,12 @@ public sealed class BlockStructure
         // Anything still open at the end is missing its End.
         foreach (var index in open)
         {
-            problems.Add(steps[index] is IfStep
-                ? new BlockProblem(index, "This If has no End If. Add an End If after the steps that belong to it.")
-                : new BlockProblem(index, "This Repeat has no End Repeat. Add an End Repeat after the steps that belong to it."));
+            problems.Add(steps[index] switch
+            {
+                IfStep => new BlockProblem(index, "This If has no End If. Add an End If after the steps that belong to it."),
+                RepeatStep => new BlockProblem(index, "This Repeat has no End Repeat. Add an End Repeat after the steps that belong to it."),
+                _ => new BlockProblem(index, "This Group has no End Group. Add an End Group after the steps that belong to it."),
+            });
         }
 
         result.Problems = problems.OrderBy(p => p.StepIndex).ToList();

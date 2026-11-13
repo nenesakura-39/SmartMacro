@@ -534,8 +534,8 @@ public static class StepCleanup
 
         var output = new List<MacroStep>(steps.Count + 4);
         var open = new List<OpenBlock>(); // innermost last
-        int orphanElse = 0, orphanEndIf = 0, orphanEndRepeat = 0, extraElse = 0;
-        int earlyEndIf = 0, earlyEndRepeat = 0, finalEndIf = 0, finalEndRepeat = 0;
+        int orphanElse = 0, orphanEndIf = 0, orphanEndRepeat = 0, orphanEndGroup = 0, extraElse = 0;
+        int earlyEndIf = 0, earlyEndRepeat = 0, earlyEndGroup = 0, finalEndIf = 0, finalEndRepeat = 0, finalEndGroup = 0;
         var firstChanged = -1;
 
         void MarkChanged()
@@ -551,9 +551,13 @@ public static class StepCleanup
                 MarkChanged();
                 var inner = open[^1];
                 open.RemoveAt(open.Count - 1);
-                output.Add(inner.IsIf ? new EndIfStep() : new EndRepeatStep());
-                if (inner.IsIf) earlyEndIf++;
-                else earlyEndRepeat++;
+                output.Add(CreateCloser(inner.Kind));
+                switch (inner.Kind)
+                {
+                    case StepKind.If: earlyEndIf++; break;
+                    case StepKind.Repeat: earlyEndRepeat++; break;
+                    default: earlyEndGroup++; break;
+                }
             }
         }
 
@@ -561,14 +565,14 @@ public static class StepCleanup
         {
             switch (step)
             {
-                case IfStep or RepeatStep:
-                    open.Add(new OpenBlock(step is IfStep));
+                case IfStep or RepeatStep or BeginGroupStep:
+                    open.Add(new OpenBlock(step.Kind));
                     output.Add(step);
                     break;
 
                 case ElseStep:
                 {
-                    var target = FindOpen(open, isIf: true);
+                    var target = FindOpen(open, StepKind.If);
                     if (target < 0)
                     {
                         MarkChanged();
@@ -589,15 +593,24 @@ public static class StepCleanup
                     break;
                 }
 
-                case EndIfStep or EndRepeatStep:
+                case EndIfStep or EndRepeatStep or EndGroupStep:
                 {
-                    var isIf = step is EndIfStep;
-                    var target = FindOpen(open, isIf);
+                    var expectedOpener = step switch
+                    {
+                        EndIfStep => StepKind.If,
+                        EndRepeatStep => StepKind.Repeat,
+                        _ => StepKind.BeginGroup,
+                    };
+                    var target = FindOpen(open, expectedOpener);
                     if (target < 0)
                     {
                         MarkChanged();
-                        if (isIf) orphanEndIf++;
-                        else orphanEndRepeat++;
+                        switch (expectedOpener)
+                        {
+                            case StepKind.If: orphanEndIf++; break;
+                            case StepKind.Repeat: orphanEndRepeat++; break;
+                            default: orphanEndGroup++; break;
+                        }
                         break;
                     }
 
@@ -617,23 +630,30 @@ public static class StepCleanup
         for (var k = open.Count - 1; k >= 0; k--)
         {
             MarkChanged();
-            output.Add(open[k].IsIf ? new EndIfStep() : new EndRepeatStep());
-            if (open[k].IsIf) finalEndIf++;
-            else finalEndRepeat++;
+            output.Add(CreateCloser(open[k].Kind));
+            switch (open[k].Kind)
+            {
+                case StepKind.If: finalEndIf++; break;
+                case StepKind.Repeat: finalEndRepeat++; break;
+                default: finalEndGroup++; break;
+            }
         }
 
         var repairs = new List<string>();
         if (orphanEndIf > 0) repairs.Add($"Removed {StepCount(orphanEndIf, "orphan 'End If'")} (no If was open above).");
         if (orphanEndRepeat > 0) repairs.Add($"Removed {StepCount(orphanEndRepeat, "orphan 'End Repeat'")} (no Repeat was open above).");
+        if (orphanEndGroup > 0) repairs.Add($"Removed {StepCount(orphanEndGroup, "orphan 'End Group'")} (no Group was open above).");
         if (orphanElse > 0) repairs.Add($"Removed {StepCount(orphanElse, "orphan 'Else'")} (no If was open above).");
         if (extraElse > 0) repairs.Add($"Removed {StepCount(extraElse, "extra 'Else'")} (an If can only have one Else).");
         if (earlyEndIf > 0) repairs.Add($"Added {StepCount(earlyEndIf, "missing 'End If'")} where an inner If overlapped its outer block.");
         if (earlyEndRepeat > 0) repairs.Add($"Added {StepCount(earlyEndRepeat, "missing 'End Repeat'")} where an inner Repeat overlapped its outer block.");
+        if (earlyEndGroup > 0) repairs.Add($"Added {StepCount(earlyEndGroup, "missing 'End Group'")} where an inner Group overlapped its outer block.");
         if (finalEndIf > 0) repairs.Add($"Added {StepCount(finalEndIf, "missing 'End If'")} at the end to close unclosed If blocks.");
         if (finalEndRepeat > 0) repairs.Add($"Added {StepCount(finalEndRepeat, "missing 'End Repeat'")} at the end to close unclosed Repeat blocks.");
+        if (finalEndGroup > 0) repairs.Add($"Added {StepCount(finalEndGroup, "missing 'End Group'")} at the end to close unclosed Group sections.");
 
-        var removed = orphanElse + orphanEndIf + orphanEndRepeat + extraElse;
-        var added = earlyEndIf + earlyEndRepeat + finalEndIf + finalEndRepeat;
+        var removed = orphanElse + orphanEndIf + orphanEndRepeat + orphanEndGroup + extraElse;
+        var added = earlyEndIf + earlyEndRepeat + earlyEndGroup + finalEndIf + finalEndRepeat + finalEndGroup;
         if (removed + added > 0)
         {
             steps.Clear();
@@ -651,19 +671,26 @@ public static class StepCleanup
         return RepairBlockStructure(steps.ToList()).Changed;
     }
 
-    private sealed class OpenBlock(bool isIf)
+    private sealed class OpenBlock(StepKind kind)
     {
-        public bool IsIf { get; } = isIf;
+        public StepKind Kind { get; } = kind;
 
         public bool HasElse { get; set; }
     }
 
+    private static MacroStep CreateCloser(StepKind openerKind) => openerKind switch
+    {
+        StepKind.If => new EndIfStep(),
+        StepKind.Repeat => new EndRepeatStep(),
+        _ => new EndGroupStep(),
+    };
+
     // The innermost open block of the wanted kind, or -1 (index into the open list).
-    private static int FindOpen(List<OpenBlock> open, bool isIf)
+    private static int FindOpen(List<OpenBlock> open, StepKind kind)
     {
         for (var k = open.Count - 1; k >= 0; k--)
         {
-            if (open[k].IsIf == isIf) return k;
+            if (open[k].Kind == kind) return k;
         }
 
         return -1;

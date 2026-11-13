@@ -30,6 +30,8 @@ public static class StepDescriber
         StepKind.Checkpoint => "Checkpoint",
         StepKind.CallMacro => "Call sub-macro",
         StepKind.FlowControl => "Flow control",
+        StepKind.BeginGroup => "Group",
+        StepKind.EndGroup => "End Group",
         _ => kind.ToString(),
     };
 
@@ -61,6 +63,8 @@ public static class StepDescriber
         CheckpointStep cp => $"🏁 Checkpoint \"{Preview(cp.Name)}\"",
         CallMacroStep call => DescribeCallMacro(call),
         FlowControlStep fc => DescribeFlowControl(fc),
+        BeginGroupStep g => $"📦 Group \"{(string.IsNullOrWhiteSpace(g.Title) ? "Untitled" : Preview(g.Title))}\"",
+        EndGroupStep => "End of the Group section",
         _ => step.GetType().Name,
     };
 

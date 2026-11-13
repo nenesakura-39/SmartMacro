@@ -31,6 +31,9 @@ public enum BlockRailKind
 
     /// <summary>Inside a Repeat loop: violet rail.</summary>
     Repeat,
+
+    /// <summary>Inside a collapsible Group section: sky cyan rail.</summary>
+    Group,
 }
 
 /// <summary>
@@ -49,8 +52,8 @@ public sealed record CollapseResult(IReadOnlyList<bool> Hidden, IReadOnlyList<in
 /// </summary>
 public static class StepListView
 {
-    /// <summary>True for steps that can be folded (If and Repeat).</summary>
-    public static bool CanCollapse(MacroStep? step) => step is IfStep or RepeatStep;
+    /// <summary>True for steps that can be folded (If, Repeat, and Group).</summary>
+    public static bool CanCollapse(MacroStep? step) => step is IfStep or RepeatStep or BeginGroupStep;
 
     /// <summary>
     /// Which steps are folded away when the If / Repeat steps whose IDs are in <paramref name="collapsed"/> are collapsed:
@@ -105,6 +108,7 @@ public static class StepListView
             {
                 case EndIfStep when open.Count > 0 && open[^1] is IfStep:
                 case EndRepeatStep when open.Count > 0 && open[^1] is RepeatStep:
+                case EndGroupStep when open.Count > 0 && open[^1] is BeginGroupStep:
                     open.RemoveAt(open.Count - 1);
                     break;
             }
@@ -117,20 +121,22 @@ public static class StepListView
             {
                 IfStep => BlockRailKind.If,
                 RepeatStep => BlockRailKind.Repeat,
+                BeginGroupStep => BlockRailKind.Group,
                 _ => BlockRailKind.None,
             };
 
-            if (step is IfStep or RepeatStep) open.Add(step);
+            if (step is IfStep or RepeatStep or BeginGroupStep) open.Add(step);
         }
 
         return result;
     }
 
-    /// <summary>The rail colour: amber for If / Else, violet for Repeat (empty for none).</summary>
+    /// <summary>The rail colour: amber for If / Else, violet for Repeat, sky for Group (empty for none).</summary>
     public static string RailColorHex(BlockRailKind kind) => kind switch
     {
         BlockRailKind.If => "#F59E0B",
         BlockRailKind.Repeat => "#8B5CF6",
+        BlockRailKind.Group => "#0EA5E9",
         _ => string.Empty,
     };
 
@@ -150,6 +156,7 @@ public static class StepListView
         {
             StepFilter.VisionAndLogic => step.Kind is StepKind.FindText or StepKind.FindImage or StepKind.FindColor or StepKind.FeedbackLoop
                 or StepKind.WaitForChange or StepKind.If or StepKind.Else or StepKind.EndIf or StepKind.Repeat or StepKind.EndRepeat
+                or StepKind.BeginGroup or StepKind.EndGroup
                 or StepKind.SetVariable or StepKind.Checkpoint or StepKind.CallMacro or StepKind.FlowControl,
             StepFilter.Mouse => step.Kind is StepKind.MouseMove or StepKind.MouseClick or StepKind.MouseScroll or StepKind.InputSequence,
             StepFilter.Keyboard => step.Kind is StepKind.KeyPress or StepKind.TypeText or StepKind.InputSequence,
