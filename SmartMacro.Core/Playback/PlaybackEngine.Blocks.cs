@@ -413,7 +413,7 @@ public sealed partial class PlaybackEngine
                             // Smooth mouse: a fixed Delay right before a cursor jump glides there (see SmoothMouseMoves),
                             // except while a mouse button is held down (so window/title-bar drags don't move during pauses).
                             _glideTarget = step is DelayStep { Mode: DelayMode.Fixed } && run.Held.Buttons.Count == 0 && pc + 1 < steps.Count ? JumpTargetOf(steps[pc + 1]) : null;
-                            _glideDuringDelay = step is DelayStep { Mode: DelayMode.Fixed } delay && run.Held.Buttons.Count == 0 && pc + 1 < steps.Count ? RecordedGlideAfter(delay, steps[pc + 1]) : null;
+                            _glideDuringDelay = step is DelayStep { Mode: DelayMode.Fixed } delay && pc + 1 < steps.Count ? RecordedGlideAfter(delay, steps[pc + 1]) : null;
                             Report(run, pc, loops);
                             if (IsDeadlineSynced(step))
                                 await ExecuteDeadlineSyncedAsync(step, run.Speed, run.Held, token).ConfigureAwait(false);

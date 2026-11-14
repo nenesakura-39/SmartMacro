@@ -243,10 +243,13 @@ public sealed class Win32InputSimulator : IInputSimulator
 
         if (dragging)
         {
-            // End of a drag (button held): land cleanly on the final drag coordinate via SendInput without SetCursorPos
-            // or a -1 px wiggle that would jerk the dragged window / title bar before MouseUp.
-            SendAbsoluteMove(x, y, noCoalesce: true);
-            PreciseSleepUntil(_lastMoveTimestamp, _rapidActionMode ? 1.5 : 4.0);
+            // End of a drag (button held): ensure the cursor has arrived at the final drag coordinate via closed-loop
+            // relative motion without switching to an uncoalesced absolute jump or a -1 px wiggle before MouseUp.
+            if (GetCursorPos(out var cur) && (Math.Abs(x - cur.X) > 1 || Math.Abs(y - cur.Y) > 1))
+            {
+                MoveMouseDraggedClosedLoop(x, y);
+            }
+            PreciseSleepUntil(_lastMoveTimestamp, _rapidActionMode ? 1.5 : 5.0);
             return false;
         }
 
@@ -324,15 +327,27 @@ public sealed class Win32InputSimulator : IInputSimulator
     /// </summary>
     private void MoveMouseDraggedClosedLoop(int targetX, int targetY)
     {
+        // Give the target window's thread (e.g. DefWindowProc WM_NCLBUTTONDOWN or WinUI 3 PointerPressed) time to
+        // register the button press before the very first drag movement arrives.
+        var isFirstMoveAfterPress = !_movedSinceButton && _lastButtonTimestamp != 0;
+        if (isFirstMoveAfterPress)
+        {
+            PreciseSleepUntil(_lastButtonTimestamp, _rapidActionMode ? 1.5 : 10.0);
+        }
+
         var hasCursor = GetCursorPos(out var cur);
         var startX = hasCursor ? cur.X : (_lastMoveTimestamp != 0 ? _lastMoveX : targetX);
         var startY = hasCursor ? cur.Y : (_lastMoveTimestamp != 0 ? _lastMoveY : targetY);
 
         var subSteps = DragStepPlanner.ComputeSubSteps((startX, startY), (targetX, targetY));
         var relativeResponsive = hasCursor;
+        var interStepPauseMs = !_rapidActionMode && subSteps.Count > 1
+            ? Math.Clamp(10.0 / subSteps.Count, 0.35, 0.85)
+            : 0.0;
 
-        foreach (var step in subSteps)
+        for (var idx = 0; idx < subSteps.Count; idx++)
         {
+            var step = subSteps[idx];
             if (relativeResponsive)
             {
                 for (var attempt = 0; attempt < 3; attempt++)
@@ -376,6 +391,17 @@ public sealed class Win32InputSimulator : IInputSimulator
             if (!relativeResponsive)
             {
                 SendAbsoluteMove(step.X, step.Y, noCoalesce: false);
+            }
+
+            if (idx == 0 && isFirstMoveAfterPress && subSteps.Count > 1)
+            {
+                // The first sub-step crosses SM_CXDRAG / SM_CYDRAG (4 px) and causes Win32 DefWindowProc to enter its
+                // modal SC_MOVE tracking loop; a brief pause lets SC_MOVE initialize before subsequent sub-steps arrive.
+                PreciseSleep(_rapidActionMode ? 0.5 : 2.0);
+            }
+            else if (interStepPauseMs > 0.0 && idx + 1 < subSteps.Count)
+            {
+                PreciseSleep(interStepPauseMs);
             }
         }
 

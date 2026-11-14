@@ -51,7 +51,8 @@ public sealed partial class PlaybackEngine
                 _glideDuringDelay = null;
                 ClampTimelineBacklog();
                 var deadline = _timelineTarget + TimeSpan.FromTicks((long)Math.Round(d.DurationMs / speed * TimeSpan.TicksPerMillisecond));
-                await MoveCursorAsync(next.X, next.Y, next.MoveStyle, d.DurationMs, speed, onTimeline: true, token).ConfigureAwait(false);
+                var nextTarget = ApplyActiveDragShift((next.X, next.Y), held);
+                await MoveCursorAsync(nextTarget.X, nextTarget.Y, next.MoveStyle, d.DurationMs, speed, onTimeline: true, token).ConfigureAwait(false);
                 _glideAbsorbedBy = next;
                 if (_timelineTarget < deadline)
                 {
@@ -225,7 +226,8 @@ public sealed partial class PlaybackEngine
                         (aimSpot, aimBounds) = await SmartAimAsync(c, token).ConfigureAwait(false);
                         SyncTimelineToNow(); // looking takes as long as it takes; the click's own timing starts now
                     }
-                    else if (c.Action == MouseClickAction.Up && _activeDragShifts.TryGetValue(c.Button, out var upShift))
+
+                    if (aimBounds.IsEmpty && c.Action == MouseClickAction.Up && _activeDragShifts.TryGetValue(c.Button, out var upShift))
                     {
                         aimSpot = (c.X + upShift.ShiftX, c.Y + upShift.ShiftY);
                     }
