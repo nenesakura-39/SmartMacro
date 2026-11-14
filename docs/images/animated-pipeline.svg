@@ -1,0 +1,71 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 920 132" width="100%" height="132">
+  <defs>
+    <linearGradient id="cardBg" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#111827" />
+      <stop offset="100%" stop-color="#0b0f19" />
+    </linearGradient>
+
+    <linearGradient id="pipeLine" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#f43f5e" />
+      <stop offset="33%" stop-color="#a855f7" />
+      <stop offset="66%" stop-color="#22d3ee" />
+      <stop offset="100%" stop-color="#10b981" />
+    </linearGradient>
+
+    <filter id="neonGlow" x="-25%" y="-25%" width="150%" height="150%">
+      <feGaussianBlur stdDeviation="3.5" result="blur" />
+      <feComposite in="SourceGraphic" in2="blur" operator="over" />
+    </filter>
+  </defs>
+
+  <!-- Connecting Pipeline Track -->
+  <line x1="120" y1="66" x2="800" y2="66" stroke="#1e293b" stroke-width="4" stroke-linecap="round" />
+  <line x1="120" y1="66" x2="800" y2="66" stroke="url(#pipeLine)" stroke-width="2" stroke-dasharray="8 6" opacity="0.75">
+    <animate attributeName="stroke-dashoffset" from="28" to="0" dur="1.2s" repeatCount="indefinite" />
+  </line>
+
+  <!-- Traveling Energy Packet -->
+  <circle cx="120" cy="66" r="6" fill="#22d3ee" filter="url(#neonGlow)">
+    <animate attributeName="cx" values="115;345;575;805;115" keyTimes="0;0.28;0.56;0.84;1" dur="5.2s" repeatCount="indefinite" />
+    <animate attributeName="fill" values="#f43f5e;#a855f7;#22d3ee;#10b981;#f43f5e" keyTimes="0;0.28;0.56;0.84;1" dur="5.2s" repeatCount="indefinite" />
+  </circle>
+
+  <!-- STAGE 1: RECORD -->
+  <g transform="translate(16, 16)">
+    <rect width="198" height="100" rx="12" fill="url(#cardBg)" stroke="#f43f5e" stroke-width="1.6" />
+    <circle cx="26" cy="28" r="5" fill="#f43f5e" filter="url(#neonGlow)">
+      <animate attributeName="opacity" values="1;0.25;1" dur="1.1s" repeatCount="indefinite" />
+    </circle>
+    <text x="40" y="33" font-family="'Segoe UI', sans-serif" font-size="13.5" font-weight="700" fill="#fda4af">1. HIT RECORD</text>
+    <text x="18" y="58" font-family="'Segoe UI', sans-serif" font-size="11.5" fill="#cbd5e1">Click, drag windows,</text>
+    <text x="18" y="75" font-family="'Segoe UI', sans-serif" font-size="11.5" fill="#cbd5e1">type text &amp; play</text>
+    <text x="18" y="91" font-family="Consolas, monospace" font-size="10" fill="#f43f5e">Ctrl + Shift + F9</text>
+  </g>
+
+  <!-- STAGE 2: 1-CLICK POLISH -->
+  <g transform="translate(246, 16)">
+    <rect width="198" height="100" rx="12" fill="url(#cardBg)" stroke="#a855f7" stroke-width="1.6" />
+    <text x="18" y="33" font-family="'Segoe UI', sans-serif" font-size="13.5" font-weight="700" fill="#d8b4fe">✨ 2. AUTO-POLISH</text>
+    <text x="18" y="58" font-family="'Segoe UI', sans-serif" font-size="11.5" fill="#cbd5e1">900 raw inputs become</text>
+    <text x="18" y="75" font-family="'Segoe UI', sans-serif" font-size="11.5" fill="#cbd5e1">clean Drag &amp; Type blocks</text>
+    <text x="18" y="91" font-family="Consolas, monospace" font-size="10" fill="#c084fc">94% noise removed</text>
+  </g>
+
+  <!-- STAGE 3: SMART INTENT -->
+  <g transform="translate(476, 16)">
+    <rect width="198" height="100" rx="12" fill="url(#cardBg)" stroke="#22d3ee" stroke-width="1.6" />
+    <text x="18" y="33" font-family="'Segoe UI', sans-serif" font-size="13.5" font-weight="700" fill="#67e8f9">🧭 3. SMART INTENT</text>
+    <text x="18" y="58" font-family="'Segoe UI', sans-serif" font-size="11.5" fill="#cbd5e1">Window moved? Resized?</text>
+    <text x="18" y="75" font-family="'Segoe UI', sans-serif" font-size="11.5" fill="#cbd5e1">5-tier relocator finds it</text>
+    <text x="18" y="91" font-family="Consolas, monospace" font-size="10" fill="#22d3ee">UIA → OCR → Img → Win</text>
+  </g>
+
+  <!-- STAGE 4: PLAY & DEBUG -->
+  <g transform="translate(706, 16)">
+    <rect width="198" height="100" rx="12" fill="url(#cardBg)" stroke="#10b981" stroke-width="1.6" />
+    <text x="18" y="33" font-family="'Segoe UI', sans-serif" font-size="13.5" font-weight="700" fill="#6ee7b7">🚀 4. PLAY &amp; DEBUG</text>
+    <text x="18" y="58" font-family="'Segoe UI', sans-serif" font-size="11.5" fill="#cbd5e1">Sub-ms replay, live HUD</text>
+    <text x="18" y="75" font-family="'Segoe UI', sans-serif" font-size="11.5" fill="#cbd5e1">&amp; F9/F10/F11 debugger</text>
+    <text x="18" y="91" font-family="Consolas, monospace" font-size="10" fill="#10b981">Esc = Instant Stop</text>
+  </g>
+</svg>

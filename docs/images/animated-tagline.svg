@@ -1,0 +1,62 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 920 68" width="100%" height="68">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#090d16" />
+      <stop offset="50%" stop-color="#0f172a" />
+      <stop offset="100%" stop-color="#090d16" />
+    </linearGradient>
+
+    <linearGradient id="neonBorder" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#22d3ee">
+        <animate attributeName="stop-color" values="#22d3ee;#a855f7;#10b981;#22d3ee" dur="6s" repeatCount="indefinite" />
+      </stop>
+      <stop offset="50%" stop-color="#a855f7">
+        <animate attributeName="stop-color" values="#a855f7;#10b981;#22d3ee;#a855f7" dur="6s" repeatCount="indefinite" />
+      </stop>
+      <stop offset="100%" stop-color="#10b981">
+        <animate attributeName="stop-color" values="#10b981;#22d3ee;#a855f7;#10b981" dur="6s" repeatCount="indefinite" />
+      </stop>
+    </linearGradient>
+
+    <linearGradient id="textShimmer" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#e2e8f0" />
+      <stop offset="45%" stop-color="#22d3ee" />
+      <stop offset="55%" stop-color="#c084fc" />
+      <stop offset="100%" stop-color="#e2e8f0" />
+      <animateTransform attributeName="gradientTransform" type="translate" from="-1 0" to="1 0" dur="4.5s" repeatCount="indefinite" />
+    </linearGradient>
+
+    <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="3" result="blur" />
+      <feComposite in="SourceGraphic" in2="blur" operator="over" />
+    </filter>
+  </defs>
+
+  <!-- Outer Card -->
+  <rect x="6" y="6" width="908" height="56" rx="14" fill="url(#bgGrad)" stroke="url(#neonBorder)" stroke-width="1.6" />
+
+  <!-- Subtle Scanning Laser Line -->
+  <line x1="20" y1="62" x2="160" y2="62" stroke="#22d3ee" stroke-width="2.2" stroke-linecap="round" filter="url(#glow)">
+    <animate attributeName="x1" values="20;760;20" dur="5s" repeatCount="indefinite" />
+    <animate attributeName="x2" values="160;900;160" dur="5s" repeatCount="indefinite" />
+  </line>
+
+  <!-- Left & Right Pulsing Telemetry Dots -->
+  <circle cx="34" cy="34" r="5" fill="#22d3ee" filter="url(#glow)">
+    <animate attributeName="opacity" values="1;0.35;1" dur="1.8s" repeatCount="indefinite" />
+  </circle>
+  <circle cx="886" cy="34" r="5" fill="#10b981" filter="url(#glow)">
+    <animate attributeName="opacity" values="0.35;1;0.35" dur="1.8s" repeatCount="indefinite" />
+  </circle>
+
+  <!-- Main Animated Tagline -->
+  <text x="460" y="39"
+        text-anchor="middle"
+        font-family="'Segoe UI', -apple-system, BlinkMacSystemFont, Roboto, Helvetica, Arial, sans-serif"
+        font-size="16.5"
+        font-weight="700"
+        letter-spacing="1.2"
+        fill="url(#textShimmer)">
+    ⚡ RECORD LIKE A HUMAN   ·   👁 SEE LIKE AN AI   ·   🐞 DEBUG LIKE AN IDE
+  </text>
+</svg>
