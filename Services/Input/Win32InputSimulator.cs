@@ -131,6 +131,8 @@ public sealed class Win32InputSimulator : IInputSimulator
     ///    can be 1 px off). While a mouse button is held (window title-bar drag / slider drag), SetCursorPos is
     ///    skipped so it never pre-empts SendInput's movement delta inside Windows' modal SC_MOVE / pointer drag loop.
     /// </summary>
+    private double _dragRelativeGain = 1.0;
+
     public void MoveMouse(int x, int y)
     {
         using var dpi = PhysicalPixelsScope.Enter();
@@ -149,11 +151,18 @@ public sealed class Win32InputSimulator : IInputSimulator
             return;
         }
 
-        SendAbsoluteMove(x, y, noCoalesce: dragging);
+        if (dragging)
+        {
+            MoveMouseDraggedClosedLoop(x, y);
+        }
+        else
+        {
+            SendAbsoluteMove(x, y, noCoalesce: false);
 
-        if (!dragging && !SetCursorPos(x, y))
-            throw new InputSimulationException(
-                $"Windows refused to move the mouse (error {Marshal.GetLastWin32Error()}). This can happen when the screen is locked or a secure window is open.");
+            if (!SetCursorPos(x, y))
+                throw new InputSimulationException(
+                    $"Windows refused to move the mouse (error {Marshal.GetLastWin32Error()}). This can happen when the screen is locked or a secure window is open.");
+        }
 
         var stepDistPx = Math.Sqrt((double)(x - _lastMoveX) * (x - _lastMoveX) + (double)(y - _lastMoveY) * (y - _lastMoveY));
         if (_movedSinceButton)
@@ -305,10 +314,83 @@ public sealed class Win32InputSimulator : IInputSimulator
         Send(RelativeMove(dx, dy));
     }
 
+    /// <summary>
+    /// Moves the cursor while a mouse button is held down using stepped, closed-loop relative
+    /// <c>MOUSEEVENTF_MOVE</c> packets (without <c>MOUSEEVENTF_ABSOLUTE</c> or <c>SetCursorPos</c>)
+    /// so Win32 modal title-bar move loops (<c>WM_NCLBUTTONDOWN</c> / <c>SC_MOVE</c>), WinUI 3
+    /// <c>InputNonClientPointerSource</c>, WPF <c>DragMove()</c>, and Chromium drag trackers receive
+    /// continuous hardware-like pointer motion. Falls back to coalesced absolute <c>SendInput</c>
+    /// sub-steps if the session does not move the OS cursor on relative <c>SendInput</c>.
+    /// </summary>
+    private void MoveMouseDraggedClosedLoop(int targetX, int targetY)
+    {
+        var hasCursor = GetCursorPos(out var cur);
+        var startX = hasCursor ? cur.X : (_lastMoveTimestamp != 0 ? _lastMoveX : targetX);
+        var startY = hasCursor ? cur.Y : (_lastMoveTimestamp != 0 ? _lastMoveY : targetY);
+
+        var subSteps = DragStepPlanner.ComputeSubSteps((startX, startY), (targetX, targetY));
+        var relativeResponsive = hasCursor;
+
+        foreach (var step in subSteps)
+        {
+            if (relativeResponsive)
+            {
+                for (var attempt = 0; attempt < 3; attempt++)
+                {
+                    if (!GetCursorPos(out cur))
+                    {
+                        relativeResponsive = false;
+                        break;
+                    }
+
+                    var errX = step.X - cur.X;
+                    var errY = step.Y - cur.Y;
+                    if (Math.Abs(errX) <= 1 && Math.Abs(errY) <= 1)
+                        break;
+
+                    var (dx, dy) = DragStepPlanner.ComputeClosedLoopRelativeDelta(
+                        step.X, step.Y, cur.X, cur.Y, _dragRelativeGain);
+                    if (dx == 0 && dy == 0)
+                        break;
+
+                    Send(RelativeMove(dx, dy));
+
+                    if (GetCursorPos(out var after))
+                    {
+                        var actualMoved = Math.Sqrt(
+                            (double)(after.X - cur.X) * (after.X - cur.X) +
+                            (double)(after.Y - cur.Y) * (after.Y - cur.Y));
+                        var sentMag = Math.Sqrt((double)dx * dx + (double)dy * dy);
+                        if (actualMoved < 0.5 && (Math.Abs(errX) > 2 || Math.Abs(errY) > 2))
+                        {
+                            // Session ignored relative SendInput or hit a clip boundary; fall back to coalesced absolute sub-step.
+                            SendAbsoluteMove(step.X, step.Y, noCoalesce: false);
+                            break;
+                        }
+
+                        _dragRelativeGain = DragStepPlanner.AdaptGain(_dragRelativeGain, sentMag, actualMoved);
+                    }
+                }
+            }
+
+            if (!relativeResponsive)
+            {
+                SendAbsoluteMove(step.X, step.Y, noCoalesce: false);
+            }
+        }
+
+        if (GetCursorPos(out var finalPos) &&
+            (Math.Abs(targetX - finalPos.X) > 2 || Math.Abs(targetY - finalPos.Y) > 2))
+        {
+            var residual = DragStepPlanner.ComputeClosedLoopRelativeDelta(
+                targetX, targetY, finalPos.X, finalPos.Y, _dragRelativeGain, maxDeltaPx: 8);
+            if (residual.Dx != 0 || residual.Dy != 0)
+                Send(RelativeMove(residual.Dx, residual.Dy));
+        }
+    }
+
     public void MouseButton(MacroMouseButton button, bool down)
     {
-        // Remember a press before sending it (so a press that half-arrived is still released), forget a release after.
-        if (down) _held.NoteButton(button, true);
         MouseButtonCore(button, down);
         if (!down) _held.NoteButton(button, false);
     }
@@ -344,6 +426,9 @@ public sealed class Win32InputSimulator : IInputSimulator
 
             EnsureTargetWindowActivated(button);
             DiagnoseClickTarget(button);
+            // Remember a press right before sending it (so pre-press SettleBeforeButton / window activation
+            // are not treated as mid-drag moves, while a press that half-arrived is still released on stop).
+            _held.NoteButton(button, true);
             Send(MouseInput(flags, mouseData));
             _jumpClickDown[button] = jumped ? Stopwatch.GetTimestamp() : 0;
             _jumpClickUp[button] = 0;

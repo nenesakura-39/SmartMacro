@@ -157,14 +157,63 @@ public sealed class EditorViewModelTests
             }
 
             vm.CopySelectedStepCommand.Execute(null);
-            if (!Clipboard.ContainsText())
-                return;
-
             vm.PasteStepCommand.Execute(null);
             Assert.Equal(2, vm.Steps.Count);
             Assert.NotEqual(vm.Steps[0].Id, vm.Steps[1].Id);
             Assert.Equal(StepKind.Delay, vm.Steps[1].Kind);
             Assert.Equal(420, ((DelayStep)vm.Steps[1].Model).DurationMs);
+        });
+    }
+
+    [Fact]
+    public void PolishWorkflowCommand_And_ExpandDragToMovesCommand_WorkWithUndoRedo()
+    {
+        StaTestRunner.Run(() =>
+        {
+            var (vm, _, _, _, _) = CreateHarness();
+            vm.Load(new Macro
+            {
+                Name = "Recorded Notepad Flow",
+                Steps =
+                [
+                    new DelayStep { DurationMs = 30 },
+                    new DelayStep { DurationMs = 40 },
+                    new KeyPressStep { VirtualKey = 0x41, Action = KeyAction.Press },
+                    new DelayStep { DurationMs = 20 },
+                    new KeyPressStep { VirtualKey = 0x42, Action = KeyAction.Press },
+                    new MouseClickStep { Button = MacroMouseButton.Left, Action = MouseClickAction.Down, X = 100, Y = 100 },
+                    new DelayStep { DurationMs = 50 },
+                    new MouseMoveStep { X = 200, Y = 100 },
+                    new DelayStep { DurationMs = 50 },
+                    new MouseClickStep { Button = MacroMouseButton.Left, Action = MouseClickAction.Up, X = 300, Y = 100 },
+                ],
+            });
+
+            Assert.Equal(10, vm.Steps.Count);
+            Assert.True(vm.PolishWorkflowCommand.CanExecute(null));
+
+            vm.PolishWorkflowCommand.Execute(null);
+            // Merged 2 delays -> 1 Delay, merged 2 keys -> 1 TypeText, coalesced linear drag -> 1 MouseClick(Drag) => 3 steps total
+            Assert.Equal(3, vm.Steps.Count);
+            Assert.Equal(StepKind.Delay, vm.Steps[0].Kind);
+            Assert.Equal(StepKind.TypeText, vm.Steps[1].Kind);
+            Assert.Equal(StepKind.MouseClick, vm.Steps[2].Kind);
+
+            var dragVm = Assert.IsType<SmartMacro.ViewModels.Steps.MouseClickStepViewModel>(vm.Steps[2]);
+            Assert.True(dragVm.IsDrag);
+
+            vm.SelectedStep = dragVm;
+            Assert.True(vm.ExpandDragToMovesCommand.CanExecute(dragVm));
+            vm.ExpandDragToMovesCommand.Execute(dragVm);
+            Assert.True(vm.Steps.Count > 5);
+
+            // Undo ExpandDragToMoves -> back to 3 polished steps
+            vm.UndoCommand.Execute(null);
+            Assert.Equal(3, vm.Steps.Count);
+
+            // Undo PolishWorkflow -> back to original 10 steps
+            vm.UndoCommand.Execute(null);
+            Assert.Equal(10, vm.Steps.Count);
         });
     }
 

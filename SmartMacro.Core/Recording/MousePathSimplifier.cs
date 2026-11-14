@@ -89,15 +89,20 @@ public static class MousePathSimplifier
     {
         var anchors = new SortedSet<int> { first, last };
 
-        // Drags: never leave a gap longer than keepEveryMs between kept points.
+        // Drags: never leave a gap longer than keepEveryMs between kept points that actually moved.
         if (keepEveryMs > 0)
         {
             var lastKeptTime = events[first].TimeMs;
+            var lastKeptX = events[first].X;
+            var lastKeptY = events[first].Y;
             for (var k = first + 1; k <= last; k++)
             {
                 if (events[k].TimeMs - lastKeptTime < keepEveryMs) continue;
+                if (events[k].X == lastKeptX && events[k].Y == lastKeptY) continue;
                 anchors.Add(k);
                 lastKeptTime = events[k].TimeMs;
+                lastKeptX = events[k].X;
+                lastKeptY = events[k].Y;
             }
         }
 

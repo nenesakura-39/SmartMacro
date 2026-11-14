@@ -672,6 +672,8 @@ public sealed class AutomationViewModel : ObservableObject, IDisposable
 
         if (limitReached)
             _log.Warning($"The recording hit the limit of {WindowsInputRecorder.MaxEvents:N0} events; input after that was not recorded.");
+        if (_recorder.ElevatedTargetWarning is { Length: > 0 } elevatedWarning)
+            _log.Warning(elevatedWarning);
 
         if (steps.Count == 0)
         {
@@ -680,7 +682,8 @@ public sealed class AutomationViewModel : ObservableObject, IDisposable
             return;
         }
 
-        _log.Info($"Recorded {raw.Count:N0} input events → {steps.Count:N0} steps.");
+        var metrics = RecordingPostProcessor.AnalyzeConversion(raw, steps);
+        _log.Info(metrics.FormatSummary());
         LogClickSnapshots(steps);
         await _hooks.RecordingFinished(steps);
         RefreshTarget();
@@ -762,6 +765,8 @@ public sealed class AutomationViewModel : ObservableObject, IDisposable
             _log.Warning($"The recording hit the limit of {SmartRecordingConverter.MaxRecordedEvents:N0} events; input after that was not recorded.");
         if (_smartRecorder is SmartInputRecorder { LastHandlerError: { } handlerError })
             _log.Warning("Some input couldn't be read during recording; the recording may be incomplete.", handlerError);
+        if (_smartRecorder.ElevatedTargetWarning is { Length: > 0 } smartElevatedWarning)
+            _log.Warning(smartElevatedWarning);
 
         if (result.Steps.Count == 0)
         {

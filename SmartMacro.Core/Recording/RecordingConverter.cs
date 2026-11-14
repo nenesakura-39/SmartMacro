@@ -47,6 +47,12 @@ public interface IInputRecorder
 
     int StartY => 0;
 
+    /// <summary>
+    /// Optional warning message when the user clicked inside an elevated (Administrator) window while SmartMacro
+    /// was running un-elevated (Windows UIPI).
+    /// </summary>
+    string? ElevatedTargetWarning => null;
+
     void Start();
 
     /// <summary>Stops recording and returns everything captured, oldest first.</summary>
@@ -162,6 +168,17 @@ public sealed class RecordingOptions
     /// so exact coordinate recordings keep the fingerprint for manual upgrade without moving clicks during playback.
     /// </summary>
     public bool AutoEnableSmartIntent { get; init; } = true;
+
+    /// <summary>
+    /// When true, straight-line <c>Down → Moves → Up</c> drags are coalesced into a single <see cref="MouseClickAction.Drag"/> step.
+    /// </summary>
+    public bool CoalesceLinearDrags { get; init; }
+
+    /// <summary>
+    /// When true, multi-waypoint or oscillating <c>Down → Moves → Up</c> drags are wrapped in a collapsible
+    /// <see cref="BeginGroupStep"/> / <see cref="EndGroupStep"/> block.
+    /// </summary>
+    public bool GroupRecordedDrags { get; init; }
 }
 
 /// <summary>
@@ -201,7 +218,11 @@ public static class RecordingConverter
         }
 
         var simplified = options.SimplifyMousePath && options.RecordMouseMoves;
-        if (simplified) events = MousePathSimplifier.Simplify(events, options.PathTolerancePx, options.RestMs);
+        if (simplified)
+        {
+            events = RecordingPostProcessor.DeduplicateStationaryMoves(events, out _);
+            events = MousePathSimplifier.Simplify(events, options.PathTolerancePx, options.RestMs);
+        }
         if (options.CollapseMousePaths && options.RecordMouseMoves) events = CollapseFreeMoves(events);
 
         var steps = new List<MacroStep>();
@@ -409,11 +430,14 @@ public static class RecordingConverter
                     else
                     {
                         // Pre-click anchor: the press always happens at the exact spot where the button went down.
-                        Emit(new MouseClickStep
-                            {
-                                Button = e.Button, Action = MouseClickAction.Down, X = e.X, Y = e.Y, UseCurrentPosition = relativeAlways,
-                            },
-                            e.TimeMs, e.TimeMs);
+                        var downStep = new MouseClickStep
+                        {
+                            Button = e.Button, Action = MouseClickAction.Down, X = e.X, Y = e.Y, UseCurrentPosition = relativeAlways,
+                        };
+                        var isDragStart = up >= 0 && FarthestFromStart(events, i, up) > options.MaxClickDistance;
+                        if (isDragStart)
+                            ClickSnapshots.Attach(downStep, e.ClickedTarget, options.AutoEnableSmartIntent);
+                        Emit(downStep, e.TimeMs, e.TimeMs);
                         if (!buttonsDown.Contains(e.Button)) buttonsDown.Add(e.Button);
                         NoteButtonPosition(e.X, e.Y);
                     }
@@ -536,6 +560,9 @@ public static class RecordingConverter
 
         if (options.CoalesceTypedText && steps.Count > 1)
             steps = Workflow.StepCleanup.CoalesceKeystrokesToTypeText(steps, 0, steps.Count - 1).Steps;
+
+        if ((options.CoalesceLinearDrags || options.GroupRecordedDrags) && steps.Count > 1)
+            steps = RecordingPostProcessor.StructureRecordedDrags(steps, options.CoalesceLinearDrags, options.GroupRecordedDrags).Steps;
 
         return steps;
     }

@@ -685,4 +685,96 @@ public static partial class MacroValidator
             issues.Add(Error("The macro has no enabled steps to run."));
         return issues;
     }
+
+    /// <summary>
+    /// Audits a macro's mouse button hold hygiene and mid-drag movement geometry:
+    /// <list type="bullet">
+    /// <item>Detects unbalanced <see cref="MouseClickAction.Down"/> without a matching <see cref="MouseClickAction.Up"/> (or vice versa).</item>
+    /// <item>Detects large single-step instant <see cref="MouseMoveStep"/> jumps (&gt; 250 px) while a mouse button is held.</item>
+    /// </list>
+    /// </summary>
+    public static IReadOnlyList<ValidationIssue> ValidateInputHygiene(Macro macro)
+    {
+        ArgumentNullException.ThrowIfNull(macro);
+        var issues = new List<ValidationIssue>();
+        if (macro.Steps is not { Count: > 0 } steps)
+            return issues;
+
+        var heldButtons = new Dictionary<MacroMouseButton, (int StepIndex, Guid StepId, int LastX, int LastY, bool HasCoords)>();
+        var sawBranching = false;
+
+        for (var i = 0; i < steps.Count; i++)
+        {
+            var step = steps[i];
+            if (step is null || !step.Enabled)
+                continue;
+
+            if (step is IfStep or ElseStep or EndIfStep or RepeatStep or EndRepeatStep or FlowControlStep)
+            {
+                sawBranching = true;
+            }
+
+            switch (step)
+            {
+                case MouseClickStep { Action: MouseClickAction.Down } down:
+                    heldButtons[down.Button] = (i, down.Id, down.X, down.Y, !down.UseCurrentPosition && !down.UseLastFoundText);
+                    break;
+
+                case MouseClickStep { Action: MouseClickAction.Up } up:
+                    if (!heldButtons.Remove(up.Button) && !sawBranching)
+                    {
+                        issues.Add(new ValidationIssue(
+                            IssueSeverity.Warning,
+                            $"This step releases the {up.Button} mouse button, but no matching 'Press {up.Button} button' step appears above it.",
+                            i,
+                            up.Id,
+                            nameof(MouseClickStep.Action)));
+                    }
+                    break;
+
+                case MouseMoveStep
+                {
+                    UseRelativeDelta: false,
+                    TargetMode: ClickTargetMode.Coordinates,
+                    MoveStyle: null or MouseMoveStyle.Instant
+                } move when heldButtons.Count > 0:
+                {
+                    foreach (var kvp in heldButtons.ToList())
+                    {
+                        var info = kvp.Value;
+                        if (info.HasCoords)
+                        {
+                            var dx = move.X - info.LastX;
+                            var dy = move.Y - info.LastY;
+                            var dist = Math.Sqrt((double)dx * dx + (double)dy * dy);
+                            if (dist > 250.0)
+                            {
+                                issues.Add(new ValidationIssue(
+                                    IssueSeverity.Warning,
+                                    $"This step jumps {dist:0} px in one instant step while the {kvp.Key} mouse button is held. Use 'Polish' or a Drag step with Smooth glide so windows and sliders track the drag smoothly.",
+                                    i,
+                                    move.Id,
+                                    nameof(MouseMoveStep.MoveStyle)));
+                            }
+                        }
+
+                        heldButtons[kvp.Key] = (info.StepIndex, info.StepId, move.X, move.Y, true);
+                    }
+                    break;
+                }
+            }
+        }
+
+        foreach (var (button, info) in heldButtons)
+        {
+            issues.Add(new ValidationIssue(
+                IssueSeverity.Warning,
+                $"This step presses the {button} mouse button down, but no matching 'Release {button} button' step follows it in the workflow.",
+                info.StepIndex,
+                info.StepId,
+                nameof(MouseClickStep.Action)));
+        }
+
+        return issues;
+    }
 }

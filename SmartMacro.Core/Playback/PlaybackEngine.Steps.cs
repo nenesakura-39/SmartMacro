@@ -96,10 +96,13 @@ public sealed partial class PlaybackEngine
                 break;
 
             case MouseMoveStep m when ReferenceEquals(_glideAbsorbedBy, m):
+            {
                 // Its glide already happened during the Delay before it: just make sure it ends exactly on the spot.
                 _glideAbsorbedBy = null;
-                if (_cursor != (m.X, m.Y)) MoveTo(m.X, m.Y);
+                var absorbedTo = ApplyActiveDragShift((m.X, m.Y), held);
+                if (_cursor != absorbedTo) MoveTo(absorbedTo.X, absorbedTo.Y);
                 break;
+            }
 
             case MouseMoveStep m when m.TargetMode != ClickTargetMode.Coordinates:
             {
@@ -115,9 +118,12 @@ public sealed partial class PlaybackEngine
             }
 
             case MouseMoveStep m:
+            {
                 _glideAbsorbedBy = null;
-                await MoveCursorAsync(m.X, m.Y, m.MoveStyle, m.MoveDurationMs, speed, onTimeline: true, token).ConfigureAwait(false);
+                var shiftedMove = ApplyActiveDragShift((m.X, m.Y), held);
+                await MoveCursorAsync(shiftedMove.X, shiftedMove.Y, m.MoveStyle, m.MoveDurationMs, speed, onTimeline: true, token).ConfigureAwait(false);
                 break;
+            }
 
             case MouseClickStep c:
                 (int X, int Y)? start = null; // where the click happens, if known (needed for a smooth drag)
@@ -219,6 +225,10 @@ public sealed partial class PlaybackEngine
                         (aimSpot, aimBounds) = await SmartAimAsync(c, token).ConfigureAwait(false);
                         SyncTimelineToNow(); // looking takes as long as it takes; the click's own timing starts now
                     }
+                    else if (c.Action == MouseClickAction.Up && _activeDragShifts.TryGetValue(c.Button, out var upShift))
+                    {
+                        aimSpot = (c.X + upShift.ShiftX, c.Y + upShift.ShiftY);
+                    }
 
                     (int X, int Y) clickAt = jitters ? Jitter(aimSpot.X, aimSpot.Y, aimBounds) : aimSpot;
                     await MoveCursorAsync(clickAt.X, clickAt.Y, c.MoveStyle, c.MoveDurationMs, speed, onTimeline: true, token).ConfigureAwait(false);
@@ -282,10 +292,15 @@ public sealed partial class PlaybackEngine
                         await WaitAfterClickAsync(c, speed, token).ConfigureAwait(false);
                         break;
                     case MouseClickAction.Down:
+                        if (onFoundTarget && start is { } foundDown && !c.UseCurrentPosition && !c.UseLastFoundText)
+                            _activeDragShifts[c.Button] = (foundDown.X - c.X, foundDown.Y - c.Y);
+                        else
+                            _activeDragShifts.Remove(c.Button);
                         _input.MouseButton(c.Button, true);
                         held.Buttons.Add(c.Button);
                         break;
                     case MouseClickAction.Up:
+                        _activeDragShifts.Remove(c.Button);
                         _input.MouseButton(c.Button, false);
                         held.Buttons.Remove(c.Button);
                         break;
@@ -300,8 +315,13 @@ public sealed partial class PlaybackEngine
                         await WaitAfterClickAsync(c, speed, token).ConfigureAwait(false);
                         break;
                     case MouseClickAction.Drag:
-                        await DragAsync(c, start, speed, held, token).ConfigureAwait(false);
+                    {
+                        var dragShift = onFoundTarget && start is { } foundDrag && !c.UseCurrentPosition && !c.UseLastFoundText
+                            ? (foundDrag.X - c.X, foundDrag.Y - c.Y)
+                            : (0, 0);
+                        await DragAsync(c, start, dragShift, speed, held, token).ConfigureAwait(false);
                         break;
+                    }
                 }
 
                 // Deadline-synced: the time Windows took to send the click is taken out of the next Delay, not added.
@@ -466,39 +486,102 @@ public sealed partial class PlaybackEngine
         }
     }
 
+    private (int X, int Y) ApplyActiveDragShift((int X, int Y) point, HeldInput held)
+    {
+        if (held.Buttons.Count == 0 || _activeDragShifts.Count == 0)
+            return point;
+
+        foreach (var btn in held.Buttons)
+        {
+            if (_activeDragShifts.TryGetValue(btn, out var shift) && (shift.ShiftX != 0 || shift.ShiftY != 0))
+            {
+                return (point.X + shift.ShiftX, point.Y + shift.ShiftY);
+            }
+        }
+
+        return point;
+    }
+
     /// <summary>Time between cursor updates while dragging (about 120 per second, so sliders follow smoothly).</summary>
     public static readonly TimeSpan DragStepInterval = TimeSpan.FromMilliseconds(8);
 
     /// <summary>
-    /// Drag: press at the start, move the cursor to (EndX, EndY) in small even steps over DragDurationMs (on the
-    /// timeline, so Speed applies and Pause / Stop work in between), release at the end. Every step is a real move
-    /// event with the button held, which is what sliders and drag-and-drop listen for. If the start isn't known (the
-    /// cursor position couldn't be read), the cursor goes straight to the end.
+    /// Drag: press at the start, move the cursor to (EndX, EndY) (translated by <paramref name="shift"/> when Smart Intent
+    /// or Smart-Aim relocated the drag's start point) in small steps over DragDurationMs (on the timeline, so Speed
+    /// applies and Pause / Stop work in between), release at the end. Supports <see cref="MouseMoveStyle.SmoothGlide"/>
+    /// and <see cref="MouseMoveStyle.HumanCurve"/> trajectories via <see cref="MouseMotion.Plan"/>.
     /// </summary>
-    private async Task DragAsync(MouseClickStep c, (int X, int Y)? start, double speed, HeldInput held, CancellationToken token)
+    private async Task DragAsync(
+        MouseClickStep c,
+        (int X, int Y)? start,
+        (int ShiftX, int ShiftY) shift,
+        double speed,
+        HeldInput held,
+        CancellationToken token)
     {
         _input.MouseButton(c.Button, true);
         held.Buttons.Add(c.Button);
 
+        var end = (X: c.EndX + shift.ShiftX, Y: c.EndY + shift.ShiftY);
         var duration = TimeSpan.FromMilliseconds(Vary(Math.Max(0, c.DragDurationMs) / speed));
-        var steps = start is null ? 1 : Math.Max(1, (int)Math.Ceiling(duration / DragStepInterval));
-        var stepTime = duration / steps;
-        for (var i = 1; i <= steps; i++)
+
+        if (start is { } curveFrom
+            && duration > TimeSpan.Zero
+            && c.MoveStyle is { } dragStyle
+            && dragStyle is MouseMoveStyle.SmoothGlide or MouseMoveStyle.HumanCurve)
         {
-            if (stepTime > TimeSpan.Zero)
+            var arc = 0.0;
+            if ((_humanize && dragStyle == MouseMoveStyle.SmoothGlide) || dragStyle == MouseMoveStyle.HumanCurve)
             {
-                AdvanceTimeline(stepTime); // burst-safe: each drag point keeps at least half its spacing
-                await WaitForTimelineAsync(token).ConfigureAwait(false);
+                var length = Math.Sqrt(Math.Pow(end.X - curveFrom.X, 2) + Math.Pow(end.Y - curveFrom.Y, 2));
+                arc = Math.Min(length * HumanizeArc, HumanizeMaxArcPixels);
             }
 
-            if (start is { } from && i < steps)
+            var plan = MouseMotion.Plan(curveFrom, end, dragStyle, duration, DragStepInterval, arc);
+            var previousAt = TimeSpan.Zero;
+            (int X, int Y)? sent = curveFrom;
+            var moved = false;
+
+            foreach (var point in plan)
             {
-                var t = i / (double)steps;
-                MoveTo((int)Math.Round(from.X + (c.EndX - from.X) * t), (int)Math.Round(from.Y + (c.EndY - from.Y) * t));
+                var wait = point.At - previousAt;
+                previousAt = point.At;
+                if (wait > TimeSpan.Zero)
+                {
+                    AdvanceTimeline(wait);
+                    await WaitForTimelineAsync(token).ConfigureAwait(false);
+                }
+
+                if (sent == (point.X, point.Y)) continue;
+                MoveTo(point.X, point.Y);
+                sent = (point.X, point.Y);
+                moved = true;
             }
-            else
+
+            if (!moved || sent != end)
+                MoveTo(end.X, end.Y);
+        }
+        else
+        {
+            var steps = start is null ? 1 : Math.Max(1, (int)Math.Ceiling(duration / DragStepInterval));
+            var stepTime = duration / steps;
+            for (var i = 1; i <= steps; i++)
             {
-                MoveTo(c.EndX, c.EndY); // always end exactly on the target
+                if (stepTime > TimeSpan.Zero)
+                {
+                    AdvanceTimeline(stepTime); // burst-safe: each drag point keeps at least half its spacing
+                    await WaitForTimelineAsync(token).ConfigureAwait(false);
+                }
+
+                if (start is { } from && i < steps)
+                {
+                    var t = i / (double)steps;
+                    MoveTo((int)Math.Round(from.X + (end.X - from.X) * t), (int)Math.Round(from.Y + (end.Y - from.Y) * t));
+                }
+                else
+                {
+                    MoveTo(end.X, end.Y); // always end exactly on the target
+                }
             }
         }
 

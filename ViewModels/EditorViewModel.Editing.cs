@@ -259,6 +259,8 @@ public sealed partial class EditorViewModel : ObservableObject
 
     // ---------------- Copy / Paste (Ctrl+C / Ctrl+V) ----------------
 
+    private static string? _inProcessClipboardText;
+
     /// <summary>Copies the selected steps (a single If / Repeat takes its whole block) to the clipboard.</summary>
     public RelayCommand CopySelectedStepCommand { get; }
 
@@ -278,15 +280,14 @@ public sealed partial class EditorViewModel : ObservableObject
         }
 
         var text = StepClipboard.Serialize(indexes.Select(i => models[i]).ToList());
+        _inProcessClipboardText = text;
         try
         {
             System.Windows.Clipboard.SetText(text);
         }
         catch (System.Runtime.InteropServices.ExternalException ex)
         {
-            _log.Warning("The clipboard is busy; try copying again.", ex);
-            _setStatus("The clipboard is busy (another app is using it). Try Ctrl+C again.", StatusKind.Warning);
-            return;
+            _log.Warning("The OS clipboard is busy; copied steps are still ready to paste inside SmartMacro.", ex);
         }
 
         _setStatus(indexes.Count == 1 ? $"Copied step {indexes[0] + 1}. Press Ctrl+V to paste it here or in another macro."
@@ -303,10 +304,11 @@ public sealed partial class EditorViewModel : ObservableObject
         }
         catch (System.Runtime.InteropServices.ExternalException ex)
         {
-            _log.Warning("The clipboard is busy; try pasting again.", ex);
+            _log.Warning("The clipboard is busy; using in-app copied steps.", ex);
         }
 
-        if (!StepClipboard.TryParse(text, out var pasted, out var error))
+        if (!StepClipboard.TryParse(text, out var pasted, out var error)
+            && (_inProcessClipboardText is null || !StepClipboard.TryParse(_inProcessClipboardText, out pasted, out error)))
         {
             _setStatus(error ?? "Nothing to paste.", StatusKind.Warning);
             return;
@@ -520,6 +522,100 @@ public sealed partial class EditorViewModel : ObservableObject
         SelectedStep = keepSelected ?? Steps.ElementAtOrDefault(Math.Min(first, Steps.Count - 1));
         Touch();
         _setStatus($"⌨ Merged keystrokes into {result.CreatedTypeSteps} Type text step(s) in {scope} ({result.RemovedSteps:N0} fewer steps). Ctrl+Z undoes it.", StatusKind.Success);
+    }
+
+    /// <summary>
+    /// "✨ Polish": runs <see cref="StepCleanup.PolishRecordedWorkflow"/> on the selection (if 2+ steps are selected) or
+    /// the entire macro, coalescing printable keystrokes, structuring linear/multi-point drags, collapsing free mouse paths,
+    /// and merging consecutive delays in a single undoable operation.
+    /// </summary>
+    private void PolishRecordedWorkflow()
+    {
+        if (!HasMacro || Steps.Count < 2) return;
+        var selected = SelectedInOrder();
+        var models = Steps.Select(s => s.Model).ToList();
+        var first = 0;
+        var last = models.Count - 1;
+        var scope = "the macro";
+        if (selected.Count > 1)
+        {
+            first = Steps.IndexOf(selected[0]);
+            last = Steps.IndexOf(selected[^1]);
+            scope = "the selected steps";
+        }
+
+        var before = _history.CaptureState(models);
+        var result = StepCleanup.PolishRecordedWorkflow(models, first, last);
+        if (result.TotalChanges <= 0)
+        {
+            _setStatus($"Nothing to polish in {scope}: keystrokes, drags, mouse paths, and delays are already clean.", StatusKind.Info);
+            return;
+        }
+
+        _history.CommitTransition(before, result.Steps);
+        RaiseHistoryChanged();
+
+        var existing = new Dictionary<MacroStep, StepViewModel>(ReferenceEqualityComparer.Instance);
+        foreach (var vm in Steps) existing[vm.Model] = vm;
+        var keepSelected = SelectedStep is { } current && result.Steps.Contains(current.Model) ? current : null;
+        foreach (var old in Steps) old.Modified -= OnStepModified;
+        _suspendStepsChanged = true;
+        try
+        {
+            Steps.Clear();
+            foreach (var step in result.Steps)
+                Steps.Add(existing.TryGetValue(step, out var kept) ? kept : CreateStepViewModel(step));
+        }
+        finally
+        {
+            _suspendStepsChanged = false;
+        }
+        OnStepsChanged(Steps, new NotifyCollectionChangedEventArgs(NotifyCollectionChangedAction.Reset));
+
+        _selection.Clear();
+        SelectedStep = keepSelected ?? Steps.ElementAtOrDefault(Math.Min(first, Steps.Count - 1));
+        Touch();
+
+        var parts = new List<string>();
+        if (result.CreatedTypeSteps > 0) parts.Add($"{result.CreatedTypeSteps} Type text");
+        if (result.CoalescedDrags > 0) parts.Add($"{result.CoalescedDrags} linear drag(s)");
+        if (result.GroupedDrags > 0) parts.Add($"{result.GroupedDrags} grouped drag(s)");
+        if (result.CollapsedMoveRuns > 0) parts.Add($"{result.CollapsedMoveRuns} mouse path(s)");
+        if (result.MergedDelays > 0) parts.Add($"{result.MergedDelays} merged delay(s)");
+        _setStatus($"✨ Polished {scope}: {string.Join(", ", parts)}. Ctrl+Z undoes it.", StatusKind.Success);
+    }
+
+    /// <summary>
+    /// "✂ Expand Drag → Move steps": replaces a <see cref="MouseClickAction.Drag"/> step with explicit
+    /// <c>Down → Delay + MouseMove… → Up</c> steps so individual waypoints can be edited.
+    /// </summary>
+    private void ExpandDragToMoves(object? parameter)
+    {
+        var clickVm = parameter as MouseClickStepViewModel ?? SelectedStep as MouseClickStepViewModel;
+        if (!HasMacro || clickVm is not { IsDrag: true } || clickVm.Model is not MouseClickStep dragStep)
+            return;
+
+        var index = Steps.IndexOf(clickVm);
+        if (index < 0) return;
+
+        var expanded = StepCleanup.ExpandDragStepToMoves(dragStep);
+        if (expanded.Count <= 1) return;
+
+        RecordUndo();
+        Steps.RemoveAt(index);
+        var added = new List<StepViewModel>(expanded.Count);
+        for (var i = 0; i < expanded.Count; i++)
+        {
+            var vm = CreateStepViewModel(expanded[i]);
+            Steps.Insert(index + i, vm);
+            added.Add(vm);
+        }
+
+        _selection = added;
+        SelectedStep = added[0];
+        SelectStepsRequested?.Invoke(this, added);
+        Touch();
+        _setStatus($"✂ Expanded Drag step into {added.Count} steps (Press, waypoints, Release). Ctrl+Z undoes it.", StatusKind.Success);
     }
 
     /// <summary>

@@ -202,6 +202,18 @@
                             <controls:StudioNumberBox Value="{Binding DragDurationMs}" Unit="ms" Step="50" Minimum="0" Maximum="60000"
                                                       Presets="150,300,500,1000"
                                                       AutomationProperties.Name="Drag duration in milliseconds" />
+                            <TextBlock Text="Drag trajectory style" Style="{StaticResource FieldLabel}" Margin="0,8,0,4" />
+                            <ComboBox ItemsSource="{x:Static steps:StepViewModel.MoveStyles}" DisplayMemberPath="Label" SelectedValuePath="Value"
+                                      SelectedValue="{Binding MoveStyle}" AutomationProperties.Name="Drag trajectory style" />
+                            <Button Command="{Binding DataContext.ExpandDragToMovesCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                    CommandParameter="{Binding}" HorizontalAlignment="Left" Margin="0,8,0,0" Padding="10,5"
+                                    ToolTip="Expand this Drag step into explicit Press, intermediate Move/Delay waypoints, and Release steps"
+                                    AutomationProperties.Name="Expand Drag into Move steps">
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock Text="✂" FontSize="12" />
+                                    <TextBlock Text="Expand Drag into Move steps" Margin="6,0,0,0" />
+                                </StackPanel>
+                            </Button>
                         </StackPanel>
                     </StackPanel>
                 </Border>

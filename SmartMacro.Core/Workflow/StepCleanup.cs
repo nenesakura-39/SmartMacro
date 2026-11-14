@@ -754,4 +754,201 @@ public static class StepCleanup
 
         return added;
     }
+
+    /// <summary>
+    /// Summary of a 1-click "Polish Recorded Workflow" pass over a macro or step selection.
+    /// </summary>
+    public sealed record PolishWorkflowResult(
+        List<MacroStep> Steps,
+        int MergedDelays,
+        int CreatedTypeSteps,
+        int CoalescedDrags,
+        int GroupedDrags,
+        int CollapsedMoveRuns)
+    {
+        public int TotalChanges => MergedDelays + CreatedTypeSteps + CoalescedDrags + GroupedDrags + CollapsedMoveRuns;
+    }
+
+    /// <summary>
+    /// Runs a comprehensive, zero-timing-loss cleanup pass on a recorded workflow (or a selected range):
+    /// 1. Coalesces printable <see cref="KeyPressStep"/> runs into <see cref="TypeTextStep"/> steps,
+    /// 2. Coalesces simple straight-line drags into <see cref="MouseClickAction.Drag"/> steps and wraps multi-point drags
+    ///    into collapsible <see cref="BeginGroupStep"/> / <see cref="EndGroupStep"/> sections,
+    /// 3. Collapses free mouse movement runs outside drags,
+    /// 4. Merges consecutive fixed <see cref="DelayStep"/> steps while keeping exact total wait durations.
+    /// </summary>
+    public static PolishWorkflowResult PolishRecordedWorkflow(
+        IReadOnlyList<MacroStep> steps,
+        int firstIndex = 0,
+        int? lastIndex = null,
+        bool coalesceLinearDrags = true,
+        bool groupMultiPointDrags = true)
+    {
+        ArgumentNullException.ThrowIfNull(steps);
+        if (steps.Count == 0)
+            return new PolishWorkflowResult(new List<MacroStep>(), 0, 0, 0, 0, 0);
+
+        var start = Math.Clamp(firstIndex, 0, steps.Count - 1);
+        var end = Math.Clamp(lastIndex ?? (steps.Count - 1), start, steps.Count - 1);
+
+        var slice = steps.Skip(start).Take(end - start + 1).ToList();
+
+        var keyRes = CoalesceKeystrokesToTypeText(slice, 0, slice.Count - 1);
+        slice = keyRes.Steps;
+
+        var dragRes = RecordingPostProcessor.StructureRecordedDrags(
+            slice,
+            0,
+            Math.Max(0, slice.Count - 1),
+            coalesceLinearDrags: coalesceLinearDrags,
+            groupMultiPointDrags: groupMultiPointDrags);
+        slice = dragRes.Steps;
+
+        var moveRes = CollapseMouseMoves(slice, 0, Math.Max(0, slice.Count - 1));
+        slice = moveRes.Steps;
+
+        slice = MergeConsecutiveDelays(slice, out var mergedDelays);
+
+        var combined = new List<MacroStep>(steps.Count);
+        for (var i = 0; i < start; i++) combined.Add(steps[i]);
+        combined.AddRange(slice);
+        for (var i = end + 1; i < steps.Count; i++) combined.Add(steps[i]);
+
+        return new PolishWorkflowResult(
+            Steps: combined,
+            MergedDelays: mergedDelays,
+            CreatedTypeSteps: keyRes.CreatedTypeSteps,
+            CoalescedDrags: dragRes.CoalescedDrags,
+            GroupedDrags: dragRes.GroupedDrags,
+            CollapsedMoveRuns: moveRes.CollapsedRuns);
+    }
+
+    /// <summary>
+    /// Merges adjacent enabled, uncommented <see cref="DelayStep"/> steps with <see cref="DelayMode.Fixed"/>
+    /// into a single <see cref="DelayStep"/> with the exact summed duration.
+    /// </summary>
+    public static List<MacroStep> MergeConsecutiveDelays(IReadOnlyList<MacroStep> steps, out int mergedCount)
+    {
+        mergedCount = 0;
+        if (steps is null || steps.Count == 0)
+            return new List<MacroStep>();
+
+        var result = new List<MacroStep>(steps.Count);
+        var i = 0;
+        while (i < steps.Count)
+        {
+            if (steps[i] is DelayStep { Mode: DelayMode.Fixed, Enabled: true, Comment: null or "" } first)
+            {
+                long totalMs = Math.Max(0, first.DurationMs);
+                var j = i + 1;
+                while (j < steps.Count && steps[j] is DelayStep { Mode: DelayMode.Fixed, Enabled: true, Comment: null or "" } next)
+                {
+                    totalMs += Math.Max(0, next.DurationMs);
+                    mergedCount++;
+                    j++;
+                }
+
+                if (j == i + 1)
+                {
+                    result.Add(first);
+                }
+                else
+                {
+                    AddDelay(result, totalMs);
+                }
+
+                i = j;
+                continue;
+            }
+
+            result.Add(steps[i]);
+            i++;
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// Expands a single <see cref="MouseClickAction.Drag"/> step into an explicit sequence of
+    /// <c>MouseClick(Down) → Delay + MouseMove… → MouseClick(Up)</c> steps so the user can fine-tune individual
+    /// waypoints on the workflow canvas.
+    /// </summary>
+    public static List<MacroStep> ExpandDragStepToMoves(MouseClickStep dragStep, int stepIntervalMs = 25)
+    {
+        ArgumentNullException.ThrowIfNull(dragStep);
+        if (dragStep.Action != MouseClickAction.Drag)
+            return new List<MacroStep> { dragStep };
+
+        var intervalMs = Math.Clamp(stepIntervalMs, 8, 200);
+        var durationMs = Math.Max(intervalMs, dragStep.DragDurationMs);
+        var style = dragStep.MoveStyle ?? MouseMoveStyle.SmoothGlide;
+
+        var down = new MouseClickStep
+        {
+            Enabled = dragStep.Enabled,
+            Comment = dragStep.Comment,
+            Button = dragStep.Button,
+            Action = MouseClickAction.Down,
+            X = dragStep.X,
+            Y = dragStep.Y,
+            UseCurrentPosition = dragStep.UseCurrentPosition,
+            OffsetX = dragStep.OffsetX,
+            OffsetY = dragStep.OffsetY,
+            TargetThumbnailBase64 = dragStep.TargetThumbnailBase64,
+            SnapshotAssetId = dragStep.SnapshotAssetId,
+            TargetAnchorX = dragStep.TargetAnchorX,
+            TargetAnchorY = dragStep.TargetAnchorY,
+            SmartAimAtTarget = dragStep.SmartAimAtTarget,
+            SmartAimAccuracy = dragStep.SmartAimAccuracy,
+            SmartAimRadiusPx = dragStep.SmartAimRadiusPx,
+            Target = dragStep.Target?.Clone(),
+            UseSmartIntent = dragStep.UseSmartIntent,
+        };
+
+        var result = new List<MacroStep> { down };
+        var from = (X: dragStep.X, Y: dragStep.Y);
+        var to = (X: dragStep.EndX, Y: dragStep.EndY);
+
+        var plan = Playback.MouseMotion.Plan(
+            from,
+            to,
+            style == MouseMoveStyle.Instant ? MouseMoveStyle.SmoothGlide : style,
+            TimeSpan.FromMilliseconds(durationMs),
+            TimeSpan.FromMilliseconds(intervalMs));
+
+        var prevMs = 0;
+        var lastPt = from;
+        foreach (var pt in plan)
+        {
+            var atMs = (int)Math.Round(pt.At.TotalMilliseconds);
+            var waitMs = Math.Max(1, atMs - prevMs);
+            if ((pt.X, pt.Y) == lastPt && pt != plan[^1])
+                continue;
+
+            result.Add(new DelayStep
+            {
+                Enabled = dragStep.Enabled,
+                DurationMs = waitMs,
+            });
+            result.Add(new MouseMoveStep
+            {
+                Enabled = dragStep.Enabled,
+                X = pt.X,
+                Y = pt.Y,
+            });
+            prevMs = atMs;
+            lastPt = (pt.X, pt.Y);
+        }
+
+        result.Add(new MouseClickStep
+        {
+            Enabled = dragStep.Enabled,
+            Button = dragStep.Button,
+            Action = MouseClickAction.Up,
+            X = dragStep.EndX,
+            Y = dragStep.EndY,
+        });
+
+        return result;
+    }
 }

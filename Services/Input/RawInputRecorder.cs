@@ -96,6 +96,9 @@ public sealed class RawInputRecorder : IRelativeInputRecorder, IDisposable
     /// <summary>Last error inside the WM_INPUT handler of the latest recording (the handler never throws into Windows).</summary>
     public Exception? LastHandlerError => (_session ?? _lastSession)?.LastHandlerError;
 
+    /// <summary>Warning message when a click hit an elevated (Administrator) window while SmartMacro ran un-elevated.</summary>
+    public string? ElevatedTargetWarning => (_session ?? _lastSession)?.ElevatedTargetWarning;
+
     public void Start()
     {
         if (IsRecording) throw new InvalidOperationException("Already recording.");
@@ -254,6 +257,8 @@ public sealed class RawInputRecorder : IRelativeInputRecorder, IDisposable
         public bool LimitReached => _limitReached;
 
         public Exception? LastHandlerError { get; private set; }
+
+        public string? ElevatedTargetWarning { get; private set; }
 
         public List<CapturedInputEvent> Snapshot()
         {
@@ -539,8 +544,17 @@ public sealed class RawInputRecorder : IRelativeInputRecorder, IDisposable
             // Smart Click Snapshot: one small picture per press, only while the cursor is visible and free (a hidden /
             // locked cursor means a 3D camera, where a picture of the screen centre isn't "what was clicked").
             ClickTargetSnapshot? target = null;
-            if ((buttonFlags & ButtonDownMask) != 0 && _snapshots is not null && !_cursorHidden && !_cursorConfined)
-                target = _snapshots.TryCapture(x, y);
+            if ((buttonFlags & ButtonDownMask) != 0 && !_cursorHidden && !_cursorConfined)
+            {
+                if (ElevatedTargetWarning is null && WindowApi.IsPointInElevatedWindowWhileUnprivileged(x, y, out var elevatedWin))
+                {
+                    ElevatedTargetWarning =
+                        $"Target window \"{elevatedWin}\" is running as Administrator while SmartMacro is not. Windows UIPI may ignore simulated input or drop recorded hotkeys in that window — restart SmartMacro as Administrator if needed.";
+                }
+
+                if (_snapshots is not null)
+                    target = _snapshots.TryCapture(x, y);
+            }
 
             if ((buttonFlags & RI_MOUSE_LEFT_BUTTON_DOWN) != 0) Add(InputEvent.ButtonDown(timeUs, MacroMouseButton.Left, x, y), cursorFlags, target);
             if ((buttonFlags & RI_MOUSE_LEFT_BUTTON_UP) != 0) Add(InputEvent.ButtonUp(timeUs, MacroMouseButton.Left, x, y), cursorFlags);
@@ -715,6 +729,9 @@ public sealed class SmartInputRecorder : ISmartInputRecorder, IDisposable
 
     /// <summary>Last error inside the WM_INPUT handler of the latest recording.</summary>
     public Exception? LastHandlerError => _recorder.LastHandlerError;
+
+    /// <summary>Warning message when a click hit an elevated (Administrator) window while SmartMacro ran un-elevated.</summary>
+    public string? ElevatedTargetWarning => _recorder.ElevatedTargetWarning;
 
     public void Start() => _recorder.Start();
 

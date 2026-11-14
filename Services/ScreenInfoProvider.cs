@@ -502,4 +502,89 @@ internal static class WindowApi
         if (substringProcActive != IntPtr.Zero) return substringProcActive;
         return substringProcMinimized;
     }
+
+    private const uint TOKEN_QUERY = 0x0008;
+    private const int TokenElevationClass = 20;
+
+    [DllImport("advapi32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool OpenProcessToken(IntPtr ProcessHandle, uint DesiredAccess, out IntPtr TokenHandle);
+
+    [DllImport("advapi32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetTokenInformation(
+        IntPtr TokenHandle,
+        int TokenInformationClass,
+        out int TokenInformation,
+        int TokenInformationLength,
+        out int ReturnLength);
+
+    /// <summary>
+    /// Checks whether the window at physical screen coordinates <c>(x, y)</c> belongs to an elevated (Administrator)
+    /// process while SmartMacro itself is running un-elevated (which triggers Windows UIPI blocking during playback).
+    /// Strictly read-only and never throws.
+    /// </summary>
+    public static bool IsPointInElevatedWindowWhileUnprivileged(int x, int y, out string? windowDescription)
+    {
+        windowDescription = null;
+        if (Environment.IsPrivilegedProcess)
+            return false;
+
+        try
+        {
+            var child = NativeMethods.WindowFromPoint(new NativeMethods.POINT { X = x, Y = y });
+            if (child == IntPtr.Zero) return false;
+            var root = NativeMethods.GetAncestor(child, NativeMethods.GA_ROOT);
+            var hwnd = root != IntPtr.Zero ? root : child;
+
+            _ = NativeMethods.GetWindowThreadProcessId(hwnd, out var pid);
+            if (pid == 0 || pid == OwnProcessId) return false;
+
+            var hProc = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid);
+            if (hProc == IntPtr.Zero)
+            {
+                // Access denied on PROCESS_QUERY_LIMITED_INFORMATION for another desktop window strongly indicates elevation.
+                if (Marshal.GetLastWin32Error() == 5)
+                {
+                    windowDescription = ReadWindowTitle(hwnd, 80) ?? $"PID {pid}";
+                    return true;
+                }
+                return false;
+            }
+
+            try
+            {
+                if (!OpenProcessToken(hProc, TOKEN_QUERY, out var hToken) || hToken == IntPtr.Zero)
+                    return false;
+
+                try
+                {
+                    if (GetTokenInformation(hToken, TokenElevationClass, out var isElevated, sizeof(int), out _)
+                        && isElevated != 0)
+                    {
+                        var title = ReadWindowTitle(hwnd, 80);
+                        var proc = ReadProcessName(pid);
+                        windowDescription = !string.IsNullOrWhiteSpace(title)
+                            ? title
+                            : !string.IsNullOrWhiteSpace(proc) ? proc : $"PID {pid}";
+                        return true;
+                    }
+                }
+                finally
+                {
+                    CloseHandle(hToken);
+                }
+            }
+            finally
+            {
+                CloseHandle(hProc);
+            }
+        }
+        catch
+        {
+            // Diagnostic probe only; never disrupt recording.
+        }
+
+        return false;
+    }
 }

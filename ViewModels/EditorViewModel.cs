@@ -139,6 +139,8 @@ public sealed partial class EditorViewModel : ObservableObject
         ExtractGroupToSubMacroCommand = new AsyncRelayCommand(ExtractGroupToSubMacroAsync, HandleUnexpectedError, () => HasMacro && TryFindEnclosingGroup(out _, out _));
         CleanUpMousePathsCommand = new RelayCommand(CleanUpMousePaths, () => HasMacro && Steps.Any(s => s.Model is MouseMoveStep));
         MergeKeysToTextCommand = new RelayCommand(MergeKeystrokesToText, () => HasMacro && Steps.Count(s => s.Model is KeyPressStep) >= 2);
+        PolishWorkflowCommand = new RelayCommand(PolishRecordedWorkflow, () => HasMacro && Steps.Count >= 2);
+        ExpandDragToMovesCommand = new RelayCommand(ExpandDragToMoves, p => HasMacro && (p as MouseClickStepViewModel ?? SelectedStep as MouseClickStepViewModel) is { IsDrag: true });
         AddPatternCommand = new RelayCommand(p => AddPattern(p, AddAtEnd ? InsertPosition.AtEnd : InsertPosition.AfterSelected), p => HasMacro && p is QuickPattern);
 
         UndoCommand = new RelayCommand(Undo, () => HasMacro && _history.CanUndo);
@@ -584,6 +586,12 @@ public sealed partial class EditorViewModel : ObservableObject
 
     /// <summary>"⌨ Merge keys → Type Text": recorded printable KeyPress runs become TypeTextStep (see StepCleanup).</summary>
     public RelayCommand MergeKeysToTextCommand { get; }
+
+    /// <summary>"✨ Polish": 1-click cleanup of keystrokes, drags, mouse paths, and consecutive delays (see StepCleanup).</summary>
+    public RelayCommand PolishWorkflowCommand { get; }
+
+    /// <summary>"✂ Expand Drag → Move steps": breaks a single Drag step into Down, intermediate Move/Delay waypoints, and Up.</summary>
+    public RelayCommand ExpandDragToMovesCommand { get; }
 
     public bool HasMacro => _saved is not null;
 

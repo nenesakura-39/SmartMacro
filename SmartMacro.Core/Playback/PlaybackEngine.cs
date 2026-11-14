@@ -185,6 +185,11 @@ public sealed partial class PlaybackEngine
     // every turn. Per run. (The decoded thumbnails live in the shared TemplateCache.)
     private readonly Dictionary<Guid, string> _smartAimLastNote = new();
 
+    // Window-shift-invariant drag offset per held button: when a MouseClick(Down) relocates via Smart Intent / Smart-Aim
+    // from its recorded (X, Y) to (foundX, foundY), subsequent coordinate MouseMoveSteps and the matching MouseClick(Up)
+    // while that button remains held are translated by the same (ShiftX, ShiftY) delta so relative drag distance is preserved.
+    private readonly Dictionary<MacroMouseButton, (int ShiftX, int ShiftY)> _activeDragShifts = new();
+
     // Vision Engine Turbo – Hot-Spot fast path: where each image search found its picture last time. Kept for the whole
     // playback session (poll iterations, loop turns, macro repeats); cleared when a new playback starts.
     private readonly HotSpotMemory _hotSpots = new();
@@ -814,6 +819,7 @@ public sealed partial class PlaybackEngine
                     _glideTarget = null;
                     _glideDuringDelay = null;
                     _glideAbsorbedBy = null;
+                    _activeDragShifts.Clear();
                     await RunStepsAsync(current, token).ConfigureAwait(false);
                     if (current.TotalIterations is null || iteration < current.TotalIterations)
                     {
@@ -841,6 +847,7 @@ public sealed partial class PlaybackEngine
         }
         finally
         {
+            _activeDragShifts.Clear();
             _input.SetRapidActionMode(false);
             _input.SetPlaybackSpeed(1.0);
             // Never leave keys or mouse buttons stuck down (also when stopped inside a loop or a condition check).

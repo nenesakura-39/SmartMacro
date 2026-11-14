@@ -159,7 +159,10 @@ public static class ClickSnapshots
         if (snapshot.Fingerprint is { HasAnySignal: true } fp)
         {
             step.Target = fp.Clone();
-            if (autoEnableSmartIntent && !step.UseCurrentPosition && !step.UseLastFoundText && step.Action == MouseClickAction.Click)
+            if (autoEnableSmartIntent
+                && !step.UseCurrentPosition
+                && !step.UseLastFoundText
+                && step.Action is MouseClickAction.Click or MouseClickAction.Down or MouseClickAction.Drag)
             {
                 step.UseSmartIntent = true;
             }

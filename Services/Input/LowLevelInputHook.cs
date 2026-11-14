@@ -285,6 +285,8 @@ public sealed class WindowsInputRecorder : IInputRecorder, IDisposable
 
     public int StartY { get; private set; }
 
+    public string? ElevatedTargetWarning { get; private set; }
+
     public void Start()
     {
         if (IsRecording) throw new InvalidOperationException("Already recording.");
@@ -294,6 +296,7 @@ public sealed class WindowsInputRecorder : IInputRecorder, IDisposable
         _keyDownTimestamps.Clear();
         _snapshots.Reset();
         LimitReached = false;
+        ElevatedTargetWarning = null;
 
         // Sub-millisecond event times from one Stopwatch clock (see RecordingClock), and the 1 ms Windows timer while
         // recording, so the UI thread that runs the hook wakes up on time.
@@ -411,6 +414,12 @@ public sealed class WindowsInputRecorder : IInputRecorder, IDisposable
         var time = _clock?.ToMilliseconds(e.Timestamp) ?? 0;
 
         // Smart Click Snapshot: the hook runs before the clicked app sees the press, so this is the button as clicked.
+        if (e.Kind == RawInputKind.MouseDown && ElevatedTargetWarning is null
+            && WindowApi.IsPointInElevatedWindowWhileUnprivileged(e.X, e.Y, out var elevatedWin))
+        {
+            ElevatedTargetWarning =
+                $"Target window \"{elevatedWin}\" is running as Administrator while SmartMacro is not. Windows UIPI may ignore simulated input or drop recorded hotkeys in that window — restart SmartMacro as Administrator if needed.";
+        }
         var target = e.Kind == RawInputKind.MouseDown ? _snapshots.TryCapture(e.X, e.Y) : null;
         _events.Add(new RawInputEvent(time, e.Kind, e.X, e.Y, e.Button, e.Delta, e.VirtualKey, target, e.ScanCode, e.Extended));
     }

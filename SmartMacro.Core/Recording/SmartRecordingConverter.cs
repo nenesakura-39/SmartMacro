@@ -24,6 +24,12 @@ public interface ISmartInputRecorder
 
     int StartY { get; }
 
+    /// <summary>
+    /// Optional warning message when the user clicked inside an elevated (Administrator) window while SmartMacro
+    /// was running un-elevated (Windows UIPI).
+    /// </summary>
+    string? ElevatedTargetWarning => null;
+
     void Start();
 
     /// <summary>Stops recording and returns everything captured, in the order it arrived.</summary>
@@ -108,6 +114,18 @@ public sealed class SmartRecordingOptions
     /// <see cref="MouseClickStep.UseSmartIntent"/>.
     /// </summary>
     public bool AutoEnableSmartIntent { get; init; } = true;
+
+    /// <summary>
+    /// When true, straight-line <c>Down → Moves → Up</c> drags in editable cursor parts are coalesced into a single
+    /// <see cref="MouseClickAction.Drag"/> step.
+    /// </summary>
+    public bool CoalesceLinearDrags { get; init; }
+
+    /// <summary>
+    /// When true, multi-waypoint or oscillating <c>Down → Moves → Up</c> drags in editable cursor parts are wrapped in a
+    /// collapsible <see cref="BeginGroupStep"/> / <see cref="EndGroupStep"/> block.
+    /// </summary>
+    public bool GroupRecordedDrags { get; init; }
 }
 
 /// <summary>What a smart recording turned into, for the log and the status bar.</summary>
@@ -490,6 +508,8 @@ public static class SmartRecordingConverter
             SmartTiming = options.SmartTiming,
             CoalesceTypedText = options.CoalesceTypedText,
             AutoEnableSmartIntent = options.AutoEnableSmartIntent,
+            CoalesceLinearDrags = options.CoalesceLinearDrags,
+            GroupRecordedDrags = options.GroupRecordedDrags,
             StartX = hasStart ? options.StartX : null,
             StartY = hasStart ? options.StartY : null,
         });
@@ -523,6 +543,7 @@ public static class SmartRecordingConverter
             {
                 DelayStep d => d.DurationMs,
                 MouseClickStep { Action: MouseClickAction.Click } c => c.HoldMs,
+                MouseClickStep { Action: MouseClickAction.Drag } c => c.DragDurationMs,
                 KeyPressStep { Action: KeyAction.Press } k => k.HoldMs,
                 TypeTextStep t => Math.Max(0L, ((t.Text?.Length ?? 0) - 1L) * Math.Max(0, t.CharacterDelayMs)),
                 _ => 0,

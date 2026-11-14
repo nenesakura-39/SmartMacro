@@ -168,6 +168,17 @@ public static class LibraryAuditService
                     issue.Message));
             }
 
+            foreach (var issue in MacroValidator.ValidateInputHygiene(macro))
+            {
+                entries.Add(new LibraryAuditEntry(
+                    LibraryAuditSeverity.Warning,
+                    "Input Hygiene",
+                    macro.Id,
+                    macroName,
+                    issue.StepIndex is int idx ? idx + 1 : null,
+                    issue.Message));
+            }
+
             if (!isOcrAvailable && WorkflowSteps.UsesTextRecognition(macro))
             {
                 entries.Add(new LibraryAuditEntry(
