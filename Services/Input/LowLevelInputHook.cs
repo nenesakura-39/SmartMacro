@@ -306,15 +306,18 @@ public sealed class WindowsInputRecorder : IInputRecorder, IDisposable
         _boundsTimer = new System.Windows.Threading.DispatcherTimer { Interval = OwnWindowRefreshInterval };
         _boundsTimer.Tick += (_, _) => OwnWindowBounds.Refresh();
         _boundsTimer.Start();
-        if (GetCursorPos(out var pt))
+        using (var dpi = PhysicalPixelsScope.Enter())
         {
-            StartX = pt.X;
-            StartY = pt.Y;
-        }
-        else
-        {
-            StartX = 0;
-            StartY = 0;
+            if (GetCursorPos(out var pt))
+            {
+                StartX = pt.X;
+                StartY = pt.Y;
+            }
+            else
+            {
+                StartX = 0;
+                StartY = 0;
+            }
         }
 
         var hook = new LowLevelInputHook(mouse: true, keyboard: true);

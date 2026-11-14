@@ -100,10 +100,13 @@ public sealed class RawInputRecorder : IRelativeInputRecorder, IDisposable
     {
         if (IsRecording) throw new InvalidOperationException("Already recording.");
 
-        if (GetCursorPos(out var cursor))
+        using (var dpi = PhysicalPixelsScope.Enter())
         {
-            StartX = cursor.X;
-            StartY = cursor.Y;
+            if (GetCursorPos(out var cursor))
+            {
+                StartX = cursor.X;
+                StartY = cursor.Y;
+            }
         }
 
         ClickSnapshotter? snapshots = null;
@@ -299,6 +302,7 @@ public sealed class RawInputRecorder : IRelativeInputRecorder, IDisposable
 
         private void ThreadMain()
         {
+            using var dpi = PhysicalPixelsScope.Enter();
             var className = "SmartMacroRawInput_" + Guid.NewGuid().ToString("N");
             var hInstance = GetModuleHandle(null);
             var classRegistered = false;
@@ -512,12 +516,14 @@ public sealed class RawInputRecorder : IRelativeInputRecorder, IDisposable
             }
 
             var buttonsChanged = (buttonFlags & ButtonMask) != 0;
-            if (buttonsChanged || timeUs - _cursorStateUs >= CursorStateIntervalUs) RefreshCursorState(timeUs);
+            var cursorMoved = _hasLastCursor && (cursor.X != _lastCursorX || cursor.Y != _lastCursorY);
+            if (buttonsChanged || (_cursorHidden && cursorMoved) || timeUs - _cursorStateUs >= CursorStateIntervalUs)
+                RefreshCursorState(timeUs);
 
             var cursorFlags = CursorFlags.None;
             if (_cursorHidden) cursorFlags |= CursorFlags.Hidden;
             if (_cursorConfined) cursorFlags |= CursorFlags.ConfinedToSpot;
-            var stuck = _hasLastCursor && cursor.X == _lastCursorX && cursor.Y == _lastCursorY;
+            var stuck = _hasLastCursor && !cursorMoved;
             if (stuck && (dx != 0 || dy != 0) && IsAgainstEdge(cursor, dx, dy)) cursorFlags |= CursorFlags.AtEdge;
             _hasLastCursor = true;
             _lastCursorX = cursor.X;
@@ -597,13 +603,8 @@ public sealed class RawInputRecorder : IRelativeInputRecorder, IDisposable
             (dx < 0 && p.X <= r.Left) || (dx > 0 && p.X >= r.Right - 1) ||
             (dy < 0 && p.Y <= r.Top) || (dy > 0 && p.Y >= r.Bottom - 1);
 
-        private static bool IsOwnWindowAt(POINT p)
-        {
-            var hwnd = WindowFromPoint(p);
-            if (hwnd == IntPtr.Zero) return false;
-            GetWindowThreadProcessId(hwnd, out var pid);
-            return pid == OwnProcessId;
-        }
+        private static bool IsOwnWindowAt(POINT p) =>
+            LowLevelInputHook.IsOwnWindow(WindowFromPoint(p));
 
         /// <summary>
         /// Key up: WM_KEYUP or WM_SYSKEYUP (Windows sends the SYS versions while Alt is held, e.g. Tab in Alt+Tab, and

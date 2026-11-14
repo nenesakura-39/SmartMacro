@@ -155,6 +155,13 @@ public sealed class RecordingOptions
     /// &lt;= 600 ms) into a single <see cref="TypeTextStep"/>. Off by default for programmatic callers.
     /// </summary>
     public bool CoalesceTypedText { get; init; }
+
+    /// <summary>
+    /// Whether recorded clicks with a captured <see cref="ClickTargetFingerprint"/> automatically turn on
+    /// <see cref="MouseClickStep.UseSmartIntent"/>. True by default; turned off by <see cref="RecordingFidelity.Exact1To1"/>
+    /// so exact coordinate recordings keep the fingerprint for manual upgrade without moving clicks during playback.
+    /// </summary>
+    public bool AutoEnableSmartIntent { get; init; } = true;
 }
 
 /// <summary>
@@ -392,7 +399,7 @@ public static class RecordingConverter
                             HoldMs = hold, UseCurrentPosition = relativeAlways,
                         };
                         // Smart Click Snapshot: remember what was clicked (shown in the editor, used by Smart-Aim).
-                        ClickSnapshots.Attach(click, e.ClickedTarget);
+                        ClickSnapshots.Attach(click, e.ClickedTarget, options.AutoEnableSmartIntent);
                         // The click covers the time until its release, or its (minimum) hold if that's longer, so the
                         // next Delay starts where playback really is and the total time stays exact.
                         Emit(click, e.TimeMs, Math.Max(events[up].TimeMs, e.TimeMs + hold));

@@ -108,6 +108,7 @@ public sealed class Win32InputSimulator : IInputSimulator
     /// <summary>Where the cursor is now (physical pixels; the app is per-monitor DPI aware). Used by Drag "from the cursor".</summary>
     public bool TryGetCursorPosition(out int x, out int y)
     {
+        using var dpi = PhysicalPixelsScope.Enter();
         if (GetCursorPos(out var point))
         {
             x = point.X;
@@ -126,13 +127,31 @@ public sealed class Win32InputSimulator : IInputSimulator
     ///    teleports the cursor: Windows asks the window under it to update, but apps that track the mouse from
     ///    the input stream (Raw Input, as many games and game UIs do) never hear about it, so their UI still
     ///    thinks the mouse is where it was and the next click lands on the old spot.
-    /// 2. SetCursorPos to the same point, to land on the exact pixel (normalized coordinates can be 1 px off).
+    /// 2. SetCursorPos to the same point when no button is held, to land on the exact pixel (normalized coordinates
+    ///    can be 1 px off). While a mouse button is held (window title-bar drag / slider drag), SetCursorPos is
+    ///    skipped so it never pre-empts SendInput's movement delta inside Windows' modal SC_MOVE / pointer drag loop.
     /// </summary>
     public void MoveMouse(int x, int y)
     {
-        SendAbsoluteMove(x, y);
+        using var dpi = PhysicalPixelsScope.Enter();
+        var dragging = _held.HeldButtons.Count > 0;
 
-        if (!SetCursorPos(x, y))
+        // If an earlier Move step already placed the cursor at (x, y) and no button event happened since,
+        // preserve _lastMoveTimestamp so the time already spent resting at (x, y) counts toward settle.
+        if (!dragging && _movedSinceButton && x == _lastMoveX && y == _lastMoveY)
+        {
+            var restedMs = (Stopwatch.GetTimestamp() - _lastMoveTimestamp) * 1000.0 / Stopwatch.Frequency;
+            if (restedMs >= 8.0)
+            {
+                _movesSinceButtonCount = Math.Max(_movesSinceButtonCount, 2);
+                _lastMoveStepDistPx = 0;
+            }
+            return;
+        }
+
+        SendAbsoluteMove(x, y, noCoalesce: dragging);
+
+        if (!dragging && !SetCursorPos(x, y))
             throw new InputSimulationException(
                 $"Windows refused to move the mouse (error {Marshal.GetLastWin32Error()}). This can happen when the screen is locked or a secure window is open.");
 
@@ -142,7 +161,7 @@ public sealed class Win32InputSimulator : IInputSimulator
             _movesSinceButtonCount++;
             _lastMoveStepDistPx = stepDistPx;
         }
-        else if (stepDistPx <= 4.0 && _lastButtonTimestamp != 0
+        else if (!dragging && stepDistPx <= 4.0 && _lastButtonTimestamp != 0
                  && (Stopwatch.GetTimestamp() - _lastButtonTimestamp) * 1000.0 / Stopwatch.Frequency <= 350.0)
         {
             // Stationary repeat click at the same spot (autoclick / spam click): cursor is already hovering here,
@@ -155,7 +174,7 @@ public sealed class Win32InputSimulator : IInputSimulator
         else
         {
             _movesSinceButtonCount = 1;
-            _lastMoveStepDistPx = double.MaxValue;
+            _lastMoveStepDistPx = dragging ? stepDistPx : double.MaxValue;
         }
 
         _movedSinceButton = true;
@@ -163,12 +182,12 @@ public sealed class Win32InputSimulator : IInputSimulator
         _lastMoveX = x;
         _lastMoveY = y;
 
-        if (_log is not null && GetCursorPos(out var actual) && (actual.X != x || actual.Y != y))
+        if (!dragging && _log is not null && GetCursorPos(out var actual) && (actual.X != x || actual.Y != y))
             Diagnose($"Mouse moved to ({x}, {y}) but the cursor is at ({actual.X}, {actual.Y}). Another program (for example a game that locks the mouse) moved or confined it.");
     }
 
     /// <summary>One SendInput absolute move (a real mouse-input event, so WM_MOUSEMOVE / Raw Input see it).</summary>
-    private static void SendAbsoluteMove(int x, int y)
+    private static void SendAbsoluteMove(int x, int y, bool noCoalesce = false)
     {
         var left = GetSystemMetrics(SM_XVIRTUALSCREEN);
         var top = GetSystemMetrics(SM_YVIRTUALSCREEN);
@@ -176,6 +195,8 @@ public sealed class Win32InputSimulator : IInputSimulator
         var height = GetSystemMetrics(SM_CYVIRTUALSCREEN);
         if (width > 1 && height > 1)
         {
+            var flags = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK
+                        | (noCoalesce ? MOUSEEVENTF_MOVE_NOCOALESCE : 0u);
             Send(new INPUT
             {
                 type = INPUT_MOUSE,
@@ -185,7 +206,7 @@ public sealed class Win32InputSimulator : IInputSimulator
                     {
                         dx = AbsoluteMouseMath.Normalize(x, left, width),
                         dy = AbsoluteMouseMath.Normalize(y, top, height),
-                        dwFlags = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK,
+                        dwFlags = flags,
                         dwExtraInfo = SmartMacroInputTag,
                     },
                 },
@@ -202,12 +223,23 @@ public sealed class Win32InputSimulator : IInputSimulator
     private bool SettleBeforeButton(bool hoverNudge = true)
     {
         if (!_movedSinceButton) return false;
+        using var dpi = PhysicalPixelsScope.Enter();
+        var dragging = !hoverNudge && _held.HeldButtons.Count > 0;
         var smoothPathArrival = _movesSinceButtonCount >= 2 && _lastMoveStepDistPx <= 28;
         _movedSinceButton = false;
         _movesSinceButtonCount = 0;
 
         var x = _lastMoveX;
         var y = _lastMoveY;
+
+        if (dragging)
+        {
+            // End of a drag (button held): land cleanly on the final drag coordinate via SendInput without SetCursorPos
+            // or a -1 px wiggle that would jerk the dragged window / title bar before MouseUp.
+            SendAbsoluteMove(x, y, noCoalesce: true);
+            PreciseSleepUntil(_lastMoveTimestamp, _rapidActionMode ? 1.5 : 4.0);
+            return false;
+        }
 
         if (_rapidActionMode)
         {
@@ -343,6 +375,7 @@ public sealed class Win32InputSimulator : IInputSimulator
         if (button is not (MacroMouseButton.Left or MacroMouseButton.Right)) return;
         try
         {
+            using var dpi = PhysicalPixelsScope.Enter();
             if (!GetCursorPos(out var point)) return;
             var root = GetAncestor(WindowFromPoint(point), GA_ROOT);
             if (root == IntPtr.Zero) return;
@@ -372,6 +405,7 @@ public sealed class Win32InputSimulator : IInputSimulator
         if (_log is null) return;
         try
         {
+            using var dpi = PhysicalPixelsScope.Enter();
             if (!GetCursorPos(out var point)) return;
             var problems = new List<string>();
 

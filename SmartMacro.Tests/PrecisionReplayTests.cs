@@ -3,6 +3,7 @@ using SmartMacro.Core.Models;
 using SmartMacro.Core.Playback;
 using SmartMacro.Core.Recording;
 using SmartMacro.Core.Storage;
+using SmartMacro.Core.Targeting;
 using SmartMacro.Core.Validation;
 using SmartMacro.Core.Workflow;
 
@@ -328,5 +329,70 @@ public class PrecisionReplayTests
         var (input, _) = await PlayAsync(steps);
         Assert.Equal(new[] { "move 640,360", "mouse Left down", "mouse Left up" }, input.Calls);
         Assert.Equal(550, (input.Times[2] - input.Times[1]).TotalMilliseconds, 3);
+    }
+
+    [Fact]
+    public void Exact_1to1_keeps_click_fingerprint_for_inspection_without_auto_enabling_smart_intent()
+    {
+        var snapshot = new ClickTargetSnapshot(new byte[] { 1, 2, 3 }, 1, 1)
+        {
+            Fingerprint = new TargetFingerprint
+            {
+                WindowTitle = "Untitled - Notepad",
+                ElementName = "Text Editor",
+                ControlType = "Button",
+            },
+        };
+        var raw = new[]
+        {
+            new RawInputEvent(0, RawInputKind.MouseDown, 320, 240, MacroMouseButton.Left, ClickedTarget: snapshot),
+            new RawInputEvent(35, RawInputKind.MouseUp, 320, 240, MacroMouseButton.Left),
+        };
+
+        var exactSteps = RecordingConverter.Convert(raw, new RecordingOptions
+        {
+            Fidelity = RecordingFidelity.Exact1To1,
+            CoalesceTypedText = true,
+        });
+        var exactClick = Assert.Single(exactSteps.OfType<MouseClickStep>());
+        Assert.NotNull(exactClick.Target);
+        Assert.Equal("Untitled - Notepad", exactClick.Target!.WindowTitle);
+        Assert.False(exactClick.UseSmartIntent);
+
+        var smartSteps = RecordingConverter.Convert(raw, new RecordingOptions
+        {
+            Fidelity = RecordingFidelity.SmartOptimized,
+        });
+        var smartClick = Assert.Single(smartSteps.OfType<MouseClickStep>());
+        Assert.NotNull(smartClick.Target);
+        Assert.True(smartClick.UseSmartIntent);
+
+        var applied = RecordingFidelityPresets.Apply(new RecordingOptions { CoalesceTypedText = true }, RecordingFidelity.SmartOptimized);
+        Assert.True(applied.CoalesceTypedText);
+        Assert.True(applied.AutoEnableSmartIntent);
+    }
+
+    [Fact]
+    public async Task Smooth_mouse_moves_never_pre_glide_during_a_delay_while_a_mouse_button_is_held()
+    {
+        // Step-by-step window title-bar drag: Down at (200, 100), pause 100 ms, Move to (500, 100), Up at (500, 100).
+        // SmoothMouseMoves must NOT glide the cursor toward (500, 100) during the 100 ms pause while Left is held down.
+        var steps = new MacroStep[]
+        {
+            new MouseClickStep { Button = MacroMouseButton.Left, Action = MouseClickAction.Down, X = 200, Y = 100 },
+            new DelayStep { DurationMs = 100 },
+            new MouseMoveStep { X = 500, Y = 100 },
+            new MouseClickStep { Button = MacroMouseButton.Left, Action = MouseClickAction.Up, X = 500, Y = 100 },
+        };
+
+        var clock = new FakeClock();
+        var input = new FakeInput { Clock = clock };
+        var engine = new PlaybackEngine(input, clock) { SmoothMouseMoves = true };
+
+        var result = await engine.RunAsync(Flow.Macro(steps));
+
+        Assert.Equal(PlaybackOutcome.Completed, result.Outcome);
+        Assert.Equal(new[] { "move 200,100", "mouse Left down", "move 500,100", "move 500,100", "mouse Left up" }, input.Calls);
+        Assert.Equal(100.0, input.Times[2].TotalMilliseconds, 3);
     }
 }

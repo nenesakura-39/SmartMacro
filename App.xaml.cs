@@ -152,7 +152,7 @@ public partial class App : Application
             logInfo: msg => _log?.Info(msg),
             logWarning: (msg, ex) => _log?.Warning(ex is null ? msg : $"{msg} ({ex.Message})"));
         _screenCapture = screenCapture;
-        _runHost.Exited += (_, _) => _screenCapture?.ReleaseIdleSessions(forceAll: true);
+        _runHost.Exited += (_, _) => _screenCapture?.ReleaseIdleSessions(forceAll: false);
         _log.Info(Core.Vision.HardwareAccelerationInfo.StatusText);
         var screenInfo = new ScreenInfoProvider(); // monitors + app windows for "where to look"
         var uiAutomation = new Services.Automation.UiAutomationService();

@@ -68,7 +68,7 @@ public sealed partial class PlaybackEngine
                 break;
 
             case DelayStep d:
-                if (SmoothMouseMoves && _glideTarget is { } target && d.DurationMs > 0)
+                if (SmoothMouseMoves && held.Buttons.Count == 0 && _glideTarget is { } target && d.DurationMs > 0)
                 {
                     // Wait for the first part of the Delay, then glide to the next step's spot during the rest.
                     var total = Vary(d.DurationMs / speed, HumanizeMinDelayMs);

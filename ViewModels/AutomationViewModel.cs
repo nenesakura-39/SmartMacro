@@ -654,10 +654,11 @@ public sealed class AutomationViewModel : ObservableObject, IDisposable
             IgnoredHotkeys = RecordingHotkeys(settings),
             // The fidelity selector (Exact 1:1 / Smart Optimized / Clicks & Keys Only) decides sampling, simplification and holds.
             Fidelity = settings.RecordingFidelity,
-            // In Exact 1:1 Replay mode, keep raw recorded pauses exact rather than upgrading pauses after clicks
-            // into screen-settle waits (which inflate 3.1s recordings to ~5s).
+            // In Exact 1:1 Replay mode, keep raw recorded pauses, individual key presses, and exact click coordinates
+            // rather than upgrading pauses into screen-settle waits, coalescing typing, or auto-enabling Smart Intent.
             SmartTiming = settings.RecordingFidelity != RecordingFidelity.Exact1To1 && settings.SmartTimingOnRecord,
-            CoalesceTypedText = settings.CoalesceTypedTextOnRecord,
+            CoalesceTypedText = settings.RecordingFidelity != RecordingFidelity.Exact1To1 && settings.CoalesceTypedTextOnRecord,
+            AutoEnableSmartIntent = settings.RecordingFidelity != RecordingFidelity.Exact1To1 && settings.CaptureClickIntent,
             RelativeMouse = settings.RelativeMouseMode,
             SimplifyMousePath = true, // a few meaningful Move steps instead of one every 30 ms
             CollapseMousePaths = false, // Desktop-only mode keeps simplified mouse paths so pure movements & oscillations work
@@ -742,7 +743,8 @@ public sealed class AutomationViewModel : ObservableObject, IDisposable
             IgnoredHotkeys = RecordingHotkeys(settings),
             Fidelity = isRhythm ? null : settings.RecordingFidelity,
             SmartTiming = !isRhythm && settings.RecordingFidelity != RecordingFidelity.Exact1To1 && settings.SmartTimingOnRecord,
-            CoalesceTypedText = !isRhythm && settings.CoalesceTypedTextOnRecord,
+            CoalesceTypedText = !isRhythm && settings.RecordingFidelity != RecordingFidelity.Exact1To1 && settings.CoalesceTypedTextOnRecord,
+            AutoEnableSmartIntent = !isRhythm && settings.RecordingFidelity != RecordingFidelity.Exact1To1 && settings.CaptureClickIntent,
             RelativeMouse = isRhythm ? RelativeMouseMode.Off : settings.RelativeMouseMode,
             RecordMouseMoves = isRhythm || settings.RecordMouseMovement,
             KeepHoldTime = isRhythm || settings.KeepTapHoldTime,

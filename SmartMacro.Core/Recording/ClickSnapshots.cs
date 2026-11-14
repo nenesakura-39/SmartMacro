@@ -144,7 +144,7 @@ public static class ClickSnapshots
     }
 
     /// <summary>Puts a recorded snapshot and/or Intent fingerprint on a click step.</summary>
-    public static void Attach(MouseClickStep step, ClickTargetSnapshot? snapshot)
+    public static void Attach(MouseClickStep step, ClickTargetSnapshot? snapshot, bool autoEnableSmartIntent = true)
     {
         ArgumentNullException.ThrowIfNull(step);
         if (snapshot is null) return;
@@ -159,7 +159,7 @@ public static class ClickSnapshots
         if (snapshot.Fingerprint is { HasAnySignal: true } fp)
         {
             step.Target = fp.Clone();
-            if (!step.UseCurrentPosition && !step.UseLastFoundText && step.Action == MouseClickAction.Click)
+            if (autoEnableSmartIntent && !step.UseCurrentPosition && !step.UseLastFoundText && step.Action == MouseClickAction.Click)
             {
                 step.UseSmartIntent = true;
             }

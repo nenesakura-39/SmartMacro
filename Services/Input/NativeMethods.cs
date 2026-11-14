@@ -15,6 +15,7 @@ internal static class NativeMethods
     public const uint INPUT_KEYBOARD = 1;
 
     public const uint MOUSEEVENTF_MOVE = 0x0001;
+    public const uint MOUSEEVENTF_MOVE_NOCOALESCE = 0x2000;
     public const uint MOUSEEVENTF_VIRTUALDESK = 0x4000;
     public const uint MOUSEEVENTF_ABSOLUTE = 0x8000;
     public const uint MOUSEEVENTF_LEFTDOWN = 0x0002;

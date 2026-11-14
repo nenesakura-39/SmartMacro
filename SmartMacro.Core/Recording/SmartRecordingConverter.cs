@@ -102,6 +102,12 @@ public sealed class SmartRecordingOptions
     /// into a single <see cref="TypeTextStep"/>.
     /// </summary>
     public bool CoalesceTypedText { get; init; }
+
+    /// <summary>
+    /// Whether recorded clicks with a captured <see cref="ClickTargetFingerprint"/> automatically turn on
+    /// <see cref="MouseClickStep.UseSmartIntent"/>.
+    /// </summary>
+    public bool AutoEnableSmartIntent { get; init; } = true;
 }
 
 /// <summary>What a smart recording turned into, for the log and the status bar.</summary>
@@ -333,11 +339,22 @@ public static class SmartRecordingConverter
         var keys = new HashSet<(int, int, bool)>();
         var buttons = new HashSet<MacroMouseButton>();
         var atomStart = 0;
-        var atomRelative = false;
+        var relativeMoves = 0;
+        var cursorMoves = 0;
+        var anyRelativeNonMove = false;
         for (var i = 0; i < events.Count; i++)
         {
             var e = events[i].Input;
-            if (modes[i] == MouseMovementMode.Relative) atomRelative = true;
+            if (e.Kind == InputEventKind.MouseMove)
+            {
+                if (modes[i] == MouseMovementMode.Relative) relativeMoves++;
+                else cursorMoves++;
+            }
+            else if (modes[i] == MouseMovementMode.Relative)
+            {
+                anyRelativeNonMove = true;
+            }
+
             switch (e.Kind)
             {
                 case InputEventKind.KeyDown: keys.Add((e.VirtualKey, e.ScanCode, e.Extended)); break;
@@ -348,14 +365,25 @@ public static class SmartRecordingConverter
 
             if (keys.Count == 0 && buttons.Count == 0)
             {
+                var atomRelative = (relativeMoves + cursorMoves) > 0
+                    ? relativeMoves > cursorMoves
+                    : anyRelativeNonMove;
                 atoms.Add(new Chunk(atomStart, i, atomRelative));
                 atomStart = i + 1;
-                atomRelative = false;
+                relativeMoves = 0;
+                cursorMoves = 0;
+                anyRelativeNonMove = false;
             }
         }
 
         // Normalize() releases everything at the end, so this is only a safety net.
-        if (atomStart < events.Count) atoms.Add(new Chunk(atomStart, events.Count - 1, atomRelative));
+        if (atomStart < events.Count)
+        {
+            var atomRelative = (relativeMoves + cursorMoves) > 0
+                ? relativeMoves > cursorMoves
+                : anyRelativeNonMove;
+            atoms.Add(new Chunk(atomStart, events.Count - 1, atomRelative));
+        }
 
         var chunks = Join(atoms);
 
@@ -461,6 +489,7 @@ public static class SmartRecordingConverter
             RelativeMouse = options.RelativeMouse,
             SmartTiming = options.SmartTiming,
             CoalesceTypedText = options.CoalesceTypedText,
+            AutoEnableSmartIntent = options.AutoEnableSmartIntent,
             StartX = hasStart ? options.StartX : null,
             StartY = hasStart ? options.StartY : null,
         });

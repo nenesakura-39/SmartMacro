@@ -91,6 +91,8 @@ public static class RecordingFidelityPresets
             IgnoredHotkeys = options.IgnoredHotkeys,
             RelativeMouse = options.RelativeMouse,
             SmartTiming = options.SmartTiming,
+            CoalesceTypedText = options.CoalesceTypedText,
+            AutoEnableSmartIntent = f != RecordingFidelity.Exact1To1 && options.AutoEnableSmartIntent,
             StartX = options.StartX,
             StartY = options.StartY,
             TrimTrailingKeys = options.TrimTrailingKeys,

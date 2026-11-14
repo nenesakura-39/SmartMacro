@@ -538,9 +538,14 @@ public sealed class UiAutomationService : IUiElementLocator
                 var coversMostOfWindow = !windowBounds.IsEmpty
                                          && !rawBounds.IsEmpty
                                          && (long)rawBounds.Width * rawBounds.Height >= (long)windowBounds.Width * windowBounds.Height * 60 / 100;
+                // A full-window document or text editor surface (e.g. Notepad's RichEditD2DPT "Edit" canvas) is not a discrete
+                // button/control anchor — recording a click inside it should not relocate future clicks to the center of the editor.
+                var isLargeTextSurface = coversMostOfWindow
+                                         && (string.Equals(rawControlType, "Edit", StringComparison.OrdinalIgnoreCase)
+                                             || string.Equals(rawControlType, "Document", StringComparison.OrdinalIgnoreCase));
 
-                // Keep UIA element metadata only when it represents a specific control (not an entire game canvas / window).
-                if (!isRootContainer && (!coversMostOfWindow || InteractiveControlTypes.Contains(rawControlType)))
+                // Keep UIA element metadata only when it represents a specific control (not an entire game canvas / window / document).
+                if (!isRootContainer && !isLargeTextSurface && (!coversMostOfWindow || InteractiveControlTypes.Contains(rawControlType)))
                 {
                     elementName = CleanField(info.Name);
                     automationId = CleanField(info.AutomationId);

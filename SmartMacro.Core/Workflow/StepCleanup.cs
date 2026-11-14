@@ -444,7 +444,7 @@ public static class StepCleanup
     /// "Convert to Find image &amp; click" work on them. The comment goes to the first step; a turned-off step gives
     /// turned-off steps. Throws <see cref="InvalidOperationException"/> with the reason when it can't.
     /// </summary>
-    public static List<MacroStep> ExpandInputSequence(InputSequenceStep step)
+    public static List<MacroStep> ExpandInputSequence(InputSequenceStep step, bool autoEnableSmartIntent = true)
     {
         if (WhyNotExpandable(step) is { } problem) throw new InvalidOperationException(problem);
 
@@ -500,6 +500,7 @@ public static class StepCleanup
             KeepHoldTime = true,
             SimplifyMousePath = true,
             MaxTapDurationMs = MacroValidator.MaxHoldMs,
+            AutoEnableSmartIntent = autoEnableSmartIntent,
             StartX = step.MoveCursorToStart ? step.StartX : null,
             StartY = step.MoveCursorToStart ? step.StartY : null,
         }));

@@ -93,6 +93,7 @@ public sealed class RunModeHost : IRunModeHost, IDisposable
     private HudClickHook? _clickHook;
     private bool _minimizedByUs;
     private WindowState _previousState = WindowState.Normal;
+    private IntPtr _lastExternalForegroundHwnd;
 
     public RunModeHost(Window mainWindow, Func<AppSettings> settings)
     {
@@ -114,6 +115,7 @@ public sealed class RunModeHost : IRunModeHost, IDisposable
     {
         var settings = _settings();
         _minimizedByUs = false;
+        RememberExternalForeground(ref _lastExternalForegroundHwnd);
 
         // Even if it stays visible (or is still animating), OCR must never read SmartMacro's own window.
         NativeMethods.SetExcludedFromCapture(_mainWindow, true);
@@ -125,6 +127,15 @@ public sealed class RunModeHost : IRunModeHost, IDisposable
             _previousState = _mainWindow.WindowState;
             _mainWindow.WindowState = WindowState.Minimized;
             _minimizedByUs = true;
+        }
+
+        if (kind != OverlayKind.Recording
+            && !suppressWindowFocus
+            && _lastExternalForegroundHwnd != IntPtr.Zero
+            && !LowLevelInputHook.IsOwnWindow(_lastExternalForegroundHwnd)
+            && (_minimizedByUs || LowLevelInputHook.IsOwnWindow(NativeMethods.GetForegroundWindow())))
+        {
+            ScreenInfoProvider.FocusWindowHandle(_lastExternalForegroundHwnd, restoreIfMinimized: false);
         }
 
         if (settings.ShowRunOverlay)
@@ -195,6 +206,7 @@ public sealed class RunModeHost : IRunModeHost, IDisposable
         _feedbackTelemetry?.HideNow();
         _overlay?.Hide();
         NativeMethods.SetExcludedFromCapture(_mainWindow, false);
+        RememberExternalForeground(ref _lastExternalForegroundHwnd);
         if (_minimizedByUs)
         {
             _mainWindow.WindowState = _previousState;
@@ -203,6 +215,13 @@ public sealed class RunModeHost : IRunModeHost, IDisposable
         }
 
         Exited?.Invoke(this, EventArgs.Empty);
+    }
+
+    private static void RememberExternalForeground(ref IntPtr slot)
+    {
+        var fg = NativeMethods.GetForegroundWindow();
+        if (fg != IntPtr.Zero && !LowLevelInputHook.IsOwnWindow(fg))
+            slot = fg;
     }
 
     public void Dispose()

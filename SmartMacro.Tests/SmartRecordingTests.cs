@@ -527,4 +527,65 @@ public class SmartRecordingTests
 
         Assert.Equal(RecordingMode.Smart, new AppSettings().RecordingMode);
     }
+
+    // ---------------- Notepad / desktop stability regressions ----------------
+
+    [Fact]
+    public void Desktop_typing_with_transient_hidden_cursor_packets_stays_editable_steps()
+    {
+        // Windows "Hide pointer while typing" hides the cursor when typing in Notepad. When the user touches the mouse,
+        // the first 1–3 raw packets may arrive while CursorFlags.Hidden is still set or while the cursor travels freely.
+        var events = new List<CapturedInputEvent>
+        {
+            Down(0, 300, 200),
+            Up(40_000, 300, 200),
+            KeyDown(100_000, W, WScan),
+            KeyUp(140_000, W, WScan),
+            KeyDown(180_000, A, 0x1E),
+            KeyUp(220_000, A, 0x1E),
+            // User nudges the mouse after typing: 2 transient Hidden packets while cursor moves, then visible Free moves.
+            Hidden(300_000, 3, 1, 303, 201),
+            Hidden(308_000, 4, 1, 307, 202),
+            Free(316_000, 5, 1, 312, 203),
+            Free(324_000, 5, 1, 317, 204),
+            Free(332_000, 5, 1, 322, 205),
+            Down(400_000, 322, 205),
+            Up(440_000, 322, 205),
+        };
+
+        var result = SmartRecordingConverter.Convert(events);
+
+        Assert.Equal(0, result.RecordedInputParts);
+        Assert.Equal(0, result.RelativeSegments);
+        Assert.DoesNotContain(result.Steps, s => s is InputSequenceStep);
+        Assert.Equal(2, result.Steps.OfType<MouseClickStep>().Count());
+        Assert.Equal(2, result.Steps.OfType<KeyPressStep>().Count());
+    }
+
+    [Fact]
+    public void Slow_high_dpi_mouse_move_and_left_drag_window_move_stay_editable_steps()
+    {
+        // High-DPI mice moving slowly across a window title bar can emit raw counts (Dx=2) where occasional samples
+        // don't cross an integer screen pixel (previous.X == current.X), while the cursor travels monotonically right.
+        var events = new List<CapturedInputEvent>
+        {
+            Free(0, 4, 0, 400, 120),
+            Down(10_000, 400, 120, MacroMouseButton.Left),
+            new(InputEvent.Move(20_000, 2, 0, 400, 120)), // sub-pixel stall at drag start
+            Free(30_000, 3, 0, 402, 120),
+            Free(40_000, 3, 0, 405, 120),
+            new(InputEvent.Move(50_000, 2, 0, 405, 120)), // single sub-pixel sample mid-drag
+            Free(60_000, 4, 0, 409, 120),
+            Free(70_000, 4, 0, 413, 120),
+            Free(80_000, 4, 0, 417, 120),
+            Up(100_000, 417, 120, MacroMouseButton.Left),
+        };
+
+        var result = SmartRecordingConverter.Convert(events);
+
+        Assert.Equal(0, result.RecordedInputParts);
+        Assert.DoesNotContain(result.Steps, s => s is InputSequenceStep);
+        Assert.Contains(result.Steps.OfType<MouseClickStep>(), c => c.Action == MouseClickAction.Down);
+        Assert.Contains(result.Steps.OfType<MouseClickStep>(), c => c.Action == MouseClickAction.Up);
+    }
 }

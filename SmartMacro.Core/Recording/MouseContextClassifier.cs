@@ -52,6 +52,12 @@ public sealed class MouseContextOptions
 
     /// <summary>Parts shorter than this are merged into a neighbour (e.g. the cursor reappearing after typing).</summary>
     public int MinSegmentUs { get; init; } = 60_000;
+
+    /// <summary>
+    /// Minimum contiguous hidden-cursor move samples required before <see cref="CursorFlags.Hidden"/> alone marks a
+    /// stretch as camera movement (ignores 1–5 transient hidden packets from Windows "Hide pointer while typing").
+    /// </summary>
+    public int MinHiddenRunSamples { get; init; } = 6;
 }
 
 /// <summary>
@@ -121,6 +127,10 @@ public static class MouseContextClassifier
             sumDy[k + 1] = sumDy[k] + e.Dy;
         }
 
+        // Identify which Hidden-flagged moves belong to a real hidden-cursor camera run (as opposed to a few packets
+        // while Windows' "Hide pointer while typing" still has the cursor hidden in Notepad).
+        var sustainedHidden = MarkSustainedHiddenMoves(events, moves, options);
+
         var back = 0;    // first sample of the window ending at i
         var forward = 0; // last sample of the window starting at i
         for (var i = 0; i < n; i++)
@@ -134,7 +144,7 @@ public static class MouseContextClassifier
                 forward++;
 
             // 1. Strong signals for this sample alone.
-            if ((current.Cursor & CursorFlags.Hidden) != 0)
+            if (sustainedHidden[i])
             {
                 labels[i] = MouseMovementMode.Relative;
                 evidence[i] = MouseContextEvidence.HiddenCursor;
@@ -151,14 +161,26 @@ public static class MouseContextClassifier
             // 2. The movement just before and just after this sample. Both agreeing is the normal case. Near a change
             //    (cursor starts / stops being locked) they disagree, and this sample's own movement decides, so a
             //    camera turn never loses its first or last moments to the free-cursor part next to it.
-            var before = Judge(events, moves, sumDx, sumDy, back, i, options);
-            var after = Judge(events, moves, sumDx, sumDy, i, forward, options);
-            var own = JudgeSample(events, moves, i);
+            var before = Judge(events, moves, sumDx, sumDy, sustainedHidden, back, i, options);
+            var after = Judge(events, moves, sumDx, sumDy, sustainedHidden, i, forward, options);
+            var own = JudgeSample(events, moves, sustainedHidden, i);
 
             Verdict? verdict;
-            if (before is { } b && after is { } a && b.Mode == a.Mode) verdict = b;
-            else if (own is { } o) verdict = o;
-            else verdict = before ?? after;
+            if (before is { } b && after is { } a)
+            {
+                verdict = b.Mode == a.Mode ? b : (own ?? b);
+            }
+            else if ((before ?? after) is { } single)
+            {
+                // Single-packet sub-pixel jitter (integer X/Y unchanged for 1 packet) must not override a free-cursor window.
+                verdict = single.Mode == MouseMovementMode.Relative && own is { } o ? o : single;
+            }
+            else
+            {
+                verdict = IsSustainedLockedStreak(events, moves, sustainedHidden, i, options)
+                    ? new Verdict(MouseMovementMode.Relative, MouseContextEvidence.LockedCursor)
+                    : null;
+            }
 
             if (verdict is { } v)
             {
@@ -191,9 +213,101 @@ public static class MouseContextClassifier
 
     private readonly record struct Verdict(MouseMovementMode Mode, MouseContextEvidence Evidence);
 
+    private static bool[] MarkSustainedHiddenMoves(IReadOnlyList<CapturedInputEvent> events, List<int> moves, MouseContextOptions options)
+    {
+        var n = moves.Count;
+        var result = new bool[n];
+        var minSamples = Math.Max(1, options.MinHiddenRunSamples);
+        var i = 0;
+        while (i < n)
+        {
+            if ((events[moves[i]].Cursor & CursorFlags.Hidden) == 0)
+            {
+                i++;
+                continue;
+            }
+
+            var start = i;
+            long absRaw = 0;
+            int minX = int.MaxValue, minY = int.MaxValue, maxX = int.MinValue, maxY = int.MinValue;
+            var allHavePos = true;
+            while (i < n && (events[moves[i]].Cursor & CursorFlags.Hidden) != 0)
+            {
+                var e = events[moves[i]].Input;
+                absRaw += Math.Abs((long)e.Dx) + Math.Abs((long)e.Dy);
+                if (e.HasPosition)
+                {
+                    minX = Math.Min(minX, e.X);
+                    maxX = Math.Max(maxX, e.X);
+                    minY = Math.Min(minY, e.Y);
+                    maxY = Math.Max(maxY, e.Y);
+                }
+                else
+                {
+                    allHavePos = false;
+                }
+
+                i++;
+            }
+
+            var count = i - start;
+            var durationUs = events[moves[i - 1]].Input.TimeUs - events[moves[start]].Input.TimeUs;
+            double span = 0;
+            if (allHavePos && maxX >= minX && maxY >= minY)
+            {
+                double w = (long)maxX - minX;
+                double h = (long)maxY - minY;
+                span = Math.Sqrt(w * w + h * h);
+            }
+
+            // A genuine hidden-cursor camera turn has enough samples/duration (or lacks cursor positions) and does not
+            // freely travel across the desktop like a cursor waking up after typing in Notepad.
+            var cursorTraveledFreely = allHavePos && span > options.LockedSlackPixels && span >= options.FreeRatio * absRaw;
+            if (!cursorTraveledFreely && (count >= minSamples || durationUs >= options.MinSegmentUs || !allHavePos) && absRaw >= options.MinRawMotion / 2)
+            {
+                for (var k = start; k < i; k++) result[k] = true;
+            }
+        }
+
+        return result;
+    }
+
+    private static bool IsSustainedLockedStreak(IReadOnlyList<CapturedInputEvent> events, List<int> moves, bool[] sustainedHidden,
+        int index, MouseContextOptions options)
+    {
+        var center = events[moves[index]].Input;
+        if (!center.HasPosition) return true;
+        int start = index, end = index;
+        while (start > 0)
+        {
+            var prev = events[moves[start - 1]];
+            if (sustainedHidden[start - 1] || (prev.Cursor & (CursorFlags.ConfinedToSpot | CursorFlags.AtEdge)) != 0) break;
+            if (!prev.Input.HasPosition || prev.Input.X != center.X || prev.Input.Y != center.Y) break;
+            start--;
+        }
+
+        while (end + 1 < moves.Count)
+        {
+            var next = events[moves[end + 1]];
+            if (sustainedHidden[end + 1] || (next.Cursor & (CursorFlags.ConfinedToSpot | CursorFlags.AtEdge)) != 0) break;
+            if (!next.Input.HasPosition || next.Input.X != center.X || next.Input.Y != center.Y) break;
+            end++;
+        }
+
+        if (end - start + 1 < 6) return false;
+        long absRaw = 0;
+        for (var k = start + 1; k <= end; k++)
+        {
+            var e = events[moves[k]].Input;
+            absRaw += Math.Abs((long)e.Dx) + Math.Abs((long)e.Dy);
+        }
+
+        return absRaw >= options.MinRawMotion;
+    }
+
     /// <summary>Judges the samples first..last (needs at least two, real movement, and usable positions).</summary>
     private static Verdict? Judge(IReadOnlyList<CapturedInputEvent> events, List<int> moves, long[] sumDx, long[] sumDy,
-        int first, int last, MouseContextOptions options)
+        bool[] sustainedHidden, int first, int last, MouseContextOptions options)
     {
         if (last <= first) return null;
 
@@ -203,10 +317,17 @@ public static class MouseContextClassifier
         var raw = Math.Sqrt(rawX * rawX + rawY * rawY);
         if (raw < options.MinRawMotion) return null;
 
-        if (!TryGetExtent(events, moves, first, last, out var extent)) return null;
+        if (!TryGetExtent(events, moves, sustainedHidden, first, last, out var extent, out var smoothDesktopTravel)) return null;
 
         if (extent <= options.LockedSlackPixels + options.LockedRatio * raw)
+        {
+            // High-DPI mice at low Windows pointer speed can move smoothly > LockedSlackPixels with extent / raw < 0.12.
+            // If the cursor traveled monotonically across several pixels without snapping back, treat it as free cursor.
+            if (extent > options.LockedSlackPixels && smoothDesktopTravel)
+                return new Verdict(MouseMovementMode.CursorPosition, MouseContextEvidence.FreeCursor);
+
             return new Verdict(MouseMovementMode.Relative, MouseContextEvidence.LockedCursor);
+        }
         if (extent >= options.FreeRatio * raw)
             return new Verdict(MouseMovementMode.CursorPosition, MouseContextEvidence.FreeCursor);
         return null;
@@ -216,13 +337,16 @@ public static class MouseContextClassifier
     /// One sample on its own: the mouse moved but the cursor didn't (locked), or the cursor moved (free).
     /// Unknown at the start, without positions, or when the cursor is stuck on an edge.
     /// </summary>
-    private static Verdict? JudgeSample(IReadOnlyList<CapturedInputEvent> events, List<int> moves, int i)
+    private static Verdict? JudgeSample(IReadOnlyList<CapturedInputEvent> events, List<int> moves, bool[] sustainedHidden, int i)
     {
         if (i == 0) return null;
         var previous = events[moves[i - 1]];
         var current = events[moves[i]];
         if (!previous.Input.HasPosition || !current.Input.HasPosition) return null;
-        if (previous.Cursor != CursorFlags.None || current.Cursor != CursorFlags.None) return null;
+        if (sustainedHidden[i - 1] || sustainedHidden[i]) return null;
+        if ((previous.Cursor & (CursorFlags.ConfinedToSpot | CursorFlags.AtEdge)) != 0
+            || (current.Cursor & (CursorFlags.ConfinedToSpot | CursorFlags.AtEdge)) != 0)
+            return null;
         if (current.Input.Dx == 0 && current.Input.Dy == 0) return null;
 
         var cursorMoved = previous.Input.X != current.Input.X || previous.Input.Y != current.Input.Y;
@@ -235,23 +359,51 @@ public static class MouseContextClassifier
     /// Size (diagonal of the bounding box, in pixels) of the area the cursor covered in the window. False when the
     /// window can't be judged: a sample has no position, was hidden / confined, or the cursor was stuck on an edge.
     /// </summary>
-    private static bool TryGetExtent(IReadOnlyList<CapturedInputEvent> events, List<int> moves, int start, int end, out double extent)
+    private static bool TryGetExtent(IReadOnlyList<CapturedInputEvent> events, List<int> moves, bool[] sustainedHidden,
+        int start, int end, out double extent, out bool smoothDesktopTravel)
     {
         extent = 0;
+        smoothDesktopTravel = false;
         int minX = int.MaxValue, minY = int.MaxValue, maxX = int.MinValue, maxY = int.MinValue;
+        var distinctSteps = 0;
+        var hadSnapBack = false;
+        var firstPos = events[moves[start]].Input;
+        var prevX = firstPos.X;
+        var prevY = firstPos.Y;
+
         for (var k = start; k <= end; k++)
         {
             var c = events[moves[k]];
-            if (!c.Input.HasPosition || c.Cursor != CursorFlags.None) return false;
+            if (!c.Input.HasPosition || sustainedHidden[k] || (c.Cursor & (CursorFlags.ConfinedToSpot | CursorFlags.AtEdge)) != 0)
+                return false;
             minX = Math.Min(minX, c.Input.X);
             maxX = Math.Max(maxX, c.Input.X);
             minY = Math.Min(minY, c.Input.Y);
             maxY = Math.Max(maxY, c.Input.Y);
+
+            if (k > start)
+            {
+                var stepX = c.Input.X - prevX;
+                var stepY = c.Input.Y - prevY;
+                if (stepX != 0 || stepY != 0)
+                {
+                    distinctSteps++;
+                    // If the cursor jumped opposite to the physical mouse delta, a game snapped the cursor back.
+                    if ((stepX != 0 && c.Input.Dx != 0 && Math.Sign(stepX) != Math.Sign(c.Input.Dx))
+                        || (stepY != 0 && c.Input.Dy != 0 && Math.Sign(stepY) != Math.Sign(c.Input.Dy)))
+                    {
+                        hadSnapBack = true;
+                    }
+                }
+                prevX = c.Input.X;
+                prevY = c.Input.Y;
+            }
         }
 
         double w = (long)maxX - minX;
         double h = (long)maxY - minY;
         extent = Math.Sqrt(w * w + h * h);
+        smoothDesktopTravel = !hadSnapBack && distinctSteps >= 3;
         return true;
     }
 
