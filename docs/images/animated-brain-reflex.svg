@@ -1,0 +1,84 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 920 186" width="100%" height="186">
+  <defs>
+    <linearGradient id="cardBg" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#111827" />
+      <stop offset="100%" stop-color="#0b0f19" />
+    </linearGradient>
+
+    <linearGradient id="audioGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#10b981" />
+      <stop offset="65%" stop-color="#22d3ee" />
+      <stop offset="100%" stop-color="#f43f5e" />
+    </linearGradient>
+
+    <filter id="glow" x="-25%" y="-25%" width="150%" height="150%">
+      <feGaussianBlur stdDeviation="3" result="blur" />
+      <feComposite in="SourceGraphic" in2="blur" operator="over" />
+    </filter>
+  </defs>
+
+  <!-- LEFT PANEL: BRAIN 2.0 + WASAPI AUDIO -->
+  <rect x="12" y="10" width="440" height="166" rx="12" fill="url(#cardBg)" stroke="#ec4899" stroke-width="1.5" />
+  <text x="28" y="34" font-family="'Segoe UI', sans-serif" font-size="13" font-weight="700" fill="#f9a8d4">
+    🧠 BRAIN 2.0: LIVE VARIABLES, OCR &amp; WASAPI AUDIO METER
+  </text>
+
+  <!-- Animated WASAPI Audio Peak Meter -->
+  <text x="28" y="60" font-family="'Segoe UI', sans-serif" font-size="11" font-weight="600" fill="#cbd5e1">🔊 WASAPI System Audio Peak (0–100%)</text>
+  <rect x="28" y="68" width="404" height="18" rx="5" fill="#090d16" stroke="#1e293b" />
+  <rect x="30" y="70" width="180" height="14" rx="4" fill="url(#audioGrad)">
+    <animate attributeName="width" values="95;365;140;390;110;95" keyTimes="0;0.22;0.45;0.68;0.88;1" dur="3.6s" repeatCount="indefinite" />
+  </rect>
+  <!-- Threshold Trigger Line at 70% -->
+  <line x1="312" y1="64" x2="312" y2="90" stroke="#f43f5e" stroke-width="2" />
+  <text x="318" y="61" font-family="Consolas, monospace" font-size="9.5" fill="#fda4af">Trigger &gt; 70%</text>
+
+  <!-- Live Variable Pills -->
+  <rect x="28" y="100" width="128" height="34" rx="7" fill="#0f172a" stroke="#334155" />
+  <text x="38" y="114" font-family="Consolas, monospace" font-size="9.5" fill="#94a3b8">{ocr_number}</text>
+  <text x="38" y="128" font-family="Consolas, monospace" font-size="11" font-weight="700" fill="#67e8f9">12,480</text>
+
+  <rect x="166" y="100" width="128" height="34" rx="7" fill="#0f172a" stroke="#334155" />
+  <text x="176" y="114" font-family="Consolas, monospace" font-size="9.5" fill="#94a3b8">{bar_fill_pct}</text>
+  <text x="176" y="128" font-family="Consolas, monospace" font-size="11" font-weight="700" fill="#6ee7b7">86.4%</text>
+
+  <rect x="304" y="100" width="128" height="34" rx="7" fill="#0f172a" stroke="#334155" />
+  <text x="314" y="114" font-family="Consolas, monospace" font-size="9.5" fill="#94a3b8">Watcher / Recovery</text>
+  <text x="314" y="128" font-family="Consolas, monospace" font-size="11" font-weight="700" fill="#f9a8d4">● Armed</text>
+
+  <text x="28" y="158" font-family="Consolas, monospace" font-size="10.5" fill="#94a3b8">
+    Sources: OCR · Bar Fill % · WASAPI Audio · Random · Window · CSV · Call Stack
+  </text>
+
+  <!-- RIGHT PANEL: GHOST BACKGROUND INPUT & SCOPED TRIGGERS -->
+  <rect x="468" y="10" width="440" height="166" rx="12" fill="url(#cardBg)" stroke="#22d3ee" stroke-width="1.5" />
+  <text x="484" y="34" font-family="'Segoe UI', sans-serif" font-size="13" font-weight="700" fill="#67e8f9">
+    👻 GHOST BACKGROUND INPUT + SCOPED CONTEXT ROUTER
+  </text>
+
+  <!-- Foreground Window (User keeps working) -->
+  <rect x="488" y="52" width="166" height="82" rx="7" fill="#0f172a" stroke="#10b981" stroke-width="1.5" />
+  <rect x="488" y="52" width="166" height="20" rx="7" fill="#064e3b" />
+  <text x="498" y="66" font-family="'Segoe UI', sans-serif" font-size="10" font-weight="700" fill="#ecfdf5">Your Active App (Focused)</text>
+  <text x="498" y="90" font-family="'Segoe UI', sans-serif" font-size="10.5" fill="#cbd5e1">Cursor stays 100% yours!</text>
+  <text x="498" y="108" font-family="Consolas, monospace" font-size="10" fill="#6ee7b7">✓ Zero Focus Steal</text>
+
+  <!-- Animated Ghost Packet Streaming to Background Window -->
+  <line x1="658" y1="93" x2="718" y2="93" stroke="#a855f7" stroke-width="2" stroke-dasharray="5 4" />
+  <circle cx="660" cy="93" r="5" fill="#c084fc" filter="url(#glow)">
+    <animate attributeName="cx" values="658;718;658" keyTimes="0;0.75;1" dur="1.8s" repeatCount="indefinite" />
+    <animate attributeName="opacity" values="1;1;0" keyTimes="0;0.75;1" dur="1.8s" repeatCount="indefinite" />
+  </circle>
+  <text x="688" y="82" text-anchor="middle" font-family="Consolas, monospace" font-size="9" fill="#d8b4fe">PostMessage</text>
+
+  <!-- Background Target Window -->
+  <rect x="722" y="52" width="166" height="82" rx="7" fill="#0f172a" stroke="#a855f7" stroke-width="1.5" stroke-dasharray="5 3" />
+  <rect x="722" y="52" width="166" height="20" rx="7" fill="#3b0764" />
+  <text x="732" y="66" font-family="'Segoe UI', sans-serif" font-size="10" font-weight="700" fill="#f3e8ff">👻 Background Window</text>
+  <text x="732" y="90" font-family="'Segoe UI', sans-serif" font-size="10.5" fill="#cbd5e1">Receives Clicks &amp; Text</text>
+  <text x="732" y="108" font-family="Consolas, monospace" font-size="10" fill="#d8b4fe">Win32 / UI Automation</text>
+
+  <text x="484" y="158" font-family="Consolas, monospace" font-size="10.5" fill="#94a3b8">
+    Scoped Hotkeys · Auto-Profile Switch · CLI IPC: SmartMacro.exe --run "Name"
+  </text>
+</svg>

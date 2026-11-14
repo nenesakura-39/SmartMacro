@@ -1,0 +1,106 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 920 218" width="100%" height="218">
+  <defs>
+    <linearGradient id="cardBg" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#111827" />
+      <stop offset="100%" stop-color="#0b0f19" />
+    </linearGradient>
+
+    <filter id="glow" x="-25%" y="-25%" width="150%" height="150%">
+      <feGaussianBlur stdDeviation="3" result="blur" />
+      <feComposite in="SourceGraphic" in2="blur" operator="over" />
+    </filter>
+  </defs>
+
+  <!-- LEFT PANEL: 5-TIER SMART INTENT WATERFALL -->
+  <rect x="12" y="10" width="440" height="198" rx="12" fill="url(#cardBg)" stroke="#22d3ee" stroke-width="1.5" />
+  <text x="28" y="34" font-family="'Segoe UI', sans-serif" font-size="13" font-weight="700" fill="#67e8f9">
+    🧭 5-TIER SMART INTENT WATERFALL (FASTEST → FALLBACK)
+  </text>
+
+  <!-- Scanning Highlight Bar -->
+  <rect x="24" y="44" width="416" height="26" rx="6" fill="#22d3ee" opacity="0.14">
+    <animate attributeName="y" values="44;74;104;134;164;44" keyTimes="0;0.2;0.4;0.6;0.8;1" dur="6s" repeatCount="indefinite" />
+  </rect>
+
+  <!-- Tier 1 -->
+  <rect x="24" y="44" width="416" height="26" rx="6" fill="none" stroke="#1e293b" stroke-width="1" />
+  <circle cx="38" cy="57" r="4" fill="#10b981" />
+  <text x="50" y="61" font-family="'Segoe UI', sans-serif" font-size="11.5" font-weight="700" fill="#f8fafc">Tier 1 · UI Automation</text>
+  <text x="190" y="61" font-family="'Segoe UI', sans-serif" font-size="11" fill="#94a3b8">Finds control by ID / Name anywhere</text>
+  <text x="428" y="61" text-anchor="end" font-family="Consolas, monospace" font-size="10.5" fill="#10b981">~2 ms</text>
+
+  <!-- Tier 2 -->
+  <rect x="24" y="74" width="416" height="26" rx="6" fill="none" stroke="#1e293b" stroke-width="1" />
+  <circle cx="38" cy="87" r="4" fill="#22d3ee" />
+  <text x="50" y="91" font-family="'Segoe UI', sans-serif" font-size="11.5" font-weight="700" fill="#f8fafc">Tier 2 · OCR Text Anchor</text>
+  <text x="190" y="91" font-family="'Segoe UI', sans-serif" font-size="11" fill="#94a3b8">Reads label text + applies offset</text>
+  <text x="428" y="91" text-anchor="end" font-family="Consolas, monospace" font-size="10.5" fill="#22d3ee">~15 ms</text>
+
+  <!-- Tier 3 -->
+  <rect x="24" y="104" width="416" height="26" rx="6" fill="none" stroke="#1e293b" stroke-width="1" />
+  <circle cx="38" cy="117" r="4" fill="#a855f7" />
+  <text x="50" y="121" font-family="'Segoe UI', sans-serif" font-size="11.5" font-weight="700" fill="#f8fafc">Tier 3 · Multi-Scale Image</text>
+  <text x="190" y="121" font-family="'Segoe UI', sans-serif" font-size="11" fill="#94a3b8">Matches 56×56 snap at 75%–150% DPI</text>
+  <text x="428" y="121" text-anchor="end" font-family="Consolas, monospace" font-size="10.5" fill="#c084fc">~18 ms</text>
+
+  <!-- Tier 4 -->
+  <rect x="24" y="134" width="416" height="26" rx="6" fill="none" stroke="#1e293b" stroke-width="1" />
+  <circle cx="38" cy="147" r="4" fill="#f59e0b" />
+  <text x="50" y="151" font-family="'Segoe UI', sans-serif" font-size="11.5" font-weight="700" fill="#f8fafc">Tier 4 · Window Anchor</text>
+  <text x="190" y="151" font-family="'Segoe UI', sans-serif" font-size="11" fill="#94a3b8">Scales with moved/resized app window</text>
+  <text x="428" y="151" text-anchor="end" font-family="Consolas, monospace" font-size="10.5" fill="#fbbf24">0 ms</text>
+
+  <!-- Tier 5 -->
+  <rect x="24" y="164" width="416" height="26" rx="6" fill="none" stroke="#1e293b" stroke-width="1" />
+  <circle cx="38" cy="177" r="4" fill="#64748b" />
+  <text x="50" y="181" font-family="'Segoe UI', sans-serif" font-size="11.5" font-weight="700" fill="#f8fafc">Tier 5 · Recorded X / Y</text>
+  <text x="190" y="181" font-family="'Segoe UI', sans-serif" font-size="11" fill="#94a3b8">Exact physical pixel fallback</text>
+  <text x="428" y="181" text-anchor="end" font-family="Consolas, monospace" font-size="10.5" fill="#94a3b8">0 ms</text>
+
+  <!-- RIGHT PANEL: LIVE WINDOW RELOCATION & CLOSED-LOOP DRAG -->
+  <rect x="468" y="10" width="440" height="198" rx="12" fill="url(#cardBg)" stroke="#10b981" stroke-width="1.5" />
+  <text x="484" y="34" font-family="'Segoe UI', sans-serif" font-size="13" font-weight="700" fill="#6ee7b7">
+    🖱 WINDOW RELOCATION + CLOSED-LOOP STEPPED DRAG
+  </text>
+
+  <!-- Ghost Recorded Window (Old Position) -->
+  <g opacity="0.42">
+    <rect x="488" y="54" width="136" height="86" rx="6" fill="#0f172a" stroke="#64748b" stroke-width="1.2" stroke-dasharray="4 3" />
+    <rect x="488" y="54" width="136" height="20" rx="6" fill="#1e293b" />
+    <text x="496" y="68" font-family="'Segoe UI', sans-serif" font-size="9.5" fill="#94a3b8">Recorded @ (100, 80)</text>
+    <text x="556" y="104" text-anchor="middle" font-family="'Segoe UI', sans-serif" font-size="10" fill="#64748b">Old Spot</text>
+  </g>
+
+  <!-- Animated Relocation Arrow -->
+  <path d="M 560 64 Q 615 42 665 78" fill="none" stroke="#22d3ee" stroke-width="1.6" stroke-dasharray="5 4">
+    <animate attributeName="stroke-dashoffset" from="18" to="0" dur="1s" repeatCount="indefinite" />
+  </path>
+  <text x="615" y="54" text-anchor="middle" font-family="Consolas, monospace" font-size="9.5" fill="#22d3ee">Relocated (+ShiftX, +ShiftY)</text>
+
+  <!-- Live Moved & Dragged Window -->
+  <g>
+    <animateTransform attributeName="transform" type="translate"
+                      values="0,0; 0,0; 92,0; -24,0; 0,0"
+                      keyTimes="0; 0.25; 0.62; 0.88; 1"
+                      dur="4.8s" repeatCount="indefinite" />
+
+    <rect x="652" y="72" width="148" height="92" rx="7" fill="#0f172a" stroke="#10b981" stroke-width="1.8" />
+    <rect x="652" y="72" width="148" height="22" rx="7" fill="#064e3b" />
+    <circle cx="664" cy="83" r="3.5" fill="#10b981" />
+    <text x="674" y="87" font-family="'Segoe UI', sans-serif" font-size="10" font-weight="700" fill="#ecfdf5">Notepad — Title Bar</text>
+    <text x="664" y="114" font-family="Consolas, monospace" font-size="10" fill="#a7f3d0">Hello SmartMacro!</text>
+    <text x="664" y="132" font-family="'Segoe UI', sans-serif" font-size="9.5" fill="#6ee7b7">✓ Crossed SM_CXDRAG</text>
+    <text x="664" y="148" font-family="'Segoe UI', sans-serif" font-size="9.5" fill="#6ee7b7">✓ Stepped Relative Move</text>
+
+    <!-- Pulsing Cursor Lock on Title Bar -->
+    <circle cx="726" cy="83" r="6" fill="none" stroke="#22d3ee" stroke-width="2" filter="url(#glow)">
+      <animate attributeName="r" values="4;8;4" dur="1.2s" repeatCount="indefinite" />
+    </circle>
+    <circle cx="726" cy="83" r="2.5" fill="#22d3ee" />
+  </g>
+
+  <!-- Bottom Telemetry Strip -->
+  <text x="484" y="192" font-family="Consolas, monospace" font-size="10.5" fill="#94a3b8">
+    10ms Press Settle → Cross Drag Threshold → Closed-Loop Sub-Steps → Release Settle
+  </text>
+</svg>
