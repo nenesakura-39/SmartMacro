@@ -7,28 +7,59 @@
 [![Platform](https://img.shields.io/badge/Windows-10%20%2F%2011%20(x64)-0ea5e9?style=for-the-badge&logo=windows&logoColor=white)](https://github.com)
 [![Runtime](https://img.shields.io/badge/.NET-10%20WPF-6366f1?style=for-the-badge&logo=dotnet&logoColor=white)](https://dotnet.microsoft.com)
 [![Version](https://img.shields.io/badge/Release-v1.0.0-22d3ee?style=for-the-badge)](https://github.com)
-[![Tests](https://img.shields.io/badge/Automated%20Tests-1%2C424%20Passing-10b981?style=for-the-badge)](tools/verify.cmd)
-[![Privacy](https://img.shields.io/badge/Local--First-Zero%20Cloud-a855f7?style=for-the-badge)](#requirements--installation)
+[![Tests](https://img.shields.io/badge/Automated%20Tests-1%2C438%20Passing-10b981?style=for-the-badge)](tools/verify.cmd)
+[![Privacy](https://img.shields.io/badge/100%25%20Local-Zero%20Cloud-a855f7?style=for-the-badge)](#requirements--installation)
 
-**All-round AAA desktop & game macro IDE for Windows — record, detect, branch, and debug workflows visually.**
+### **Record like a human. See like an AI. Debug like an IDE.**
 
-Developer: **Riku (リク)** · Studio: **KuroLogic** · Built with `.NET 10` (WPF, `win-x64`)
+**The local-first Windows automation studio built for both high-FPS gaming (*Arena*) and daily desktop power workflows (*Workbench*).**
 
-[Visual Tour](#visual-tour) · [Key Capabilities](#key-capabilities) · [Architecture](#system-architecture) · [Keyboard Shortcuts](#keyboard-shortcuts) · [Build & Verify](#requirements--installation) · [Community](#community--support)
+Developer: **Riku (リク)** · Studio: **KuroLogic** · Built with `.NET 10` (`WPF`, `win-x64`)
+
+[Why SmartMacro?](#why-smartmacro-studio) · [Visual Tour](#visual-tour) · [30-Second Quick Start](#30-second-quick-start) · [Superpowers](#core-superpowers) · [Architecture](#system-architecture) · [Shortcuts](#keyboard-shortcuts) · [Build & CLI](#requirements--installation)
 
 </div>
 
 ---
 
-SmartMacro Studio is a **100% local-first** Windows automation IDE built for both **daily productivity ("Workbench")** and **high-FPS gaming ("Arena")**. Capture desktop and 3D raw mouse input on one timeline, convert recordings into structured visual blocks, locate occluded or moving targets with **Vision Pipeline 2.0**, stabilize fast minigames at **120 FPS** with a **Smart Predictive PD Servo**, track typed variables & **WASAPI** audio peaks, trigger macros via hotkeys, schedules, or window events, and step-debug every branch interactively — with **zero scripting required** and **zero cloud uploads**.
+## Why SmartMacro Studio?
+
+Most macro tools force an annoying trade-off:
+- **Tiny coordinate recorders** break the second a window moves 10 pixels, a loading spinner lags by half a second, or you try to drag a window across the screen.
+- **Heavy scripting languages** make you write 150 lines of brittle boilerplate just to find an icon, read a number, and loop.
+
+**SmartMacro Studio** gives you the best of both worlds — **one-click recording** that turns messy input into clean, visual workflow blocks, backed by **GPU screen capture**, **5-tier target relocation**, **120 FPS minigame physics**, and a **real call-stack debugger**.
+
+<table>
+  <tr>
+    <td width="50%" valign="top">
+      <h3>🎮 Mode 1: The Arena (Gaming & Minigames)</h3>
+      <ul>
+        <li><strong>Dual-Stream Recording:</strong> Seamlessly mixes 2D inventory/menu clicks with 3D locked-cursor camera turns (<code>WM_INPUT</code>) on a single sub-millisecond timeline.</li>
+        <li><strong>120 FPS Predictive PD Servo:</strong> Stabilizes momentum/gravity minigame bars with real-time velocity estimation, stopping-distance braking, and PWM hover pulses.</li>
+        <li><strong>Vision 2.0 + SIMD FFT:</strong> Spots moving or 40%-occluded targets through particle storms, tracks them with a 2D Kalman filter, and leads clicks ahead of motion.</li>
+        <li><strong>Zero-Stuck-Key Guarantee:</strong> Physical <code>Esc</code> emergency stop + <code>HeldInputTracker</code> ensures no key or mouse button is ever left held down.</li>
+      </ul>
+    </td>
+    <td width="50%" valign="top">
+      <h3>💼 Mode 2: The Workbench (Desktop & Apps)</h3>
+      <ul>
+        <li><strong>🧭 5-Tier Smart Intent Relocator:</strong> Finds buttons even after windows move, resize, or change DPI (<code>UI Automation → OCR → Multi-Scale Image → Window Anchor → X/Y</code>).</li>
+        <li><strong>Closed-Loop Window & UI Dragging:</strong> Moves Win32 title bars, WinUI 3 apps, WPF windows, and Chromium sliders smoothly — and shifts the entire drag trajectory if the window started in a new spot.</li>
+        <li><strong>✨ 1-Click Workflow Polish:</strong> Merges raw keystrokes into editable <code>Type text</code> steps, structures drags into <code>Drag</code> or collapsible <code>Group</code> blocks, and folds redundant moves.</li>
+        <li><strong>👻 Background Input & CLI:</strong> Click and type into background windows without stealing focus, or launch macros from Stream Deck / scripts via <code>--run</code>.</li>
+      </ul>
+    </td>
+  </tr>
+</table>
 
 ---
 
 ## Visual Tour
 
-### 1. 3-Pane Workflow Editor, Vision 2.0 & Live Debugger
+### 1. 3-Pane Workflow IDE, Vision 2.0 & Live Call-Stack Debugger
 
-> Build complex automation visually with collapsible **`Group … End Group`** blocks (`Ctrl+Shift+G`), block-indented guides, a right-edge **Workflow Minimap**, **`F9` / `F10` / `F11`** breakpoints and stepping, **per-step profiler badges** (`×N · ms`), and **Live Brain Variables** docked at the bottom.
+> Group long recordings into color-coded **`Group … End Group`** sections (`Ctrl+Shift+G`), polish raw recordings in 1 click (**`✨ Polish`**), set conditional breakpoints (`F9`), step into sub-macros (`F11`), and watch **Live Brain Variables** update in real time.
 
 <p align="center">
   <img src="docs/images/studio-editor.png" alt="SmartMacro Studio 3-Pane Workflow Editor with collapsible groups, Find image crosshair preview, F9 breakpoint, per-step timing telemetry, and Live Brain Variables dock" width="100%" />
@@ -43,18 +74,18 @@ SmartMacro Studio is a **100% local-first** Windows automation IDE built for bot
         <img src="docs/images/studio-library.png" alt="SmartMacro Macro Library with Workflow Fingerprint strips and Inspector" width="100%" />
       </a>
       <br />
-      <strong>Obsidian Neon Macro Library & Inspector</strong>
+      <strong>Obsidian Neon Library & Workflow Fingerprints</strong>
       <br />
-      Organize routines across <em>Arena</em> & <em>Workbench</em> profiles, pin favorites, visualize workflow composition via color-coded <strong>Workflow Fingerprint</strong> strips, and export standalone or sub-macro-bundled <code>.smacro</code> files.
+      Filter routines by <em>Arena</em> or <em>Workbench</em> profile, see what each macro does at a glance via color-coded <strong>Workflow Fingerprint</strong> bars, and export self-contained <code>.smacro</code> bundles with deduplicated image assets.
     </td>
     <td width="50%" valign="top">
       <a href="docs/images/studio-audit.png">
         <img src="docs/images/studio-audit.png" alt="SmartMacro 1-Click Library Health and Portability Audit" width="100%" />
       </a>
       <br />
-      <strong>1-Click Library Health & Portability Audit</strong>
+      <strong>1-Click Library Health & Input Hygiene Audit</strong>
       <br />
-      Scan every macro in your library before running or sharing to catch broken sub-macro calls, cyclic graphs, hotkey collisions, missing vision targets, or machine-specific paths — with 1-click jump-to-step fixes.
+      Scan your entire library in one click to catch broken sub-macro calls, recursive loops, hotkey collisions, unbalanced mouse-button holds, missing assets, or hardcoded paths — with instant jump-to-step fixes.
     </td>
   </tr>
 </table>
@@ -69,19 +100,19 @@ SmartMacro Studio is a **100% local-first** Windows automation IDE built for bot
       </a>
     </td>
     <td width="60%" valign="middle">
-      <h3>Stay in Command While Automated Runs Execute</h3>
+      <h3>Your Co-Pilot While Macros Run</h3>
       <ul>
-        <li><strong>Always-On-Top Live Pod & Mini-Bar:</strong> Keep full telemetry visible or collapse into a sleek TinyTask-style Mini-Bar while your game or workspace runs underneath.</li>
-        <li><strong>Real-Time Step & Vision Telemetry:</strong> Monitor current loop counts, elapsed clock, sub-millisecond vision timing, active step progress, and watcher status at 30 FPS UI throttling with zero playback overhead.</li>
-        <li><strong>Live Brain Variable Watch:</strong> Track live counters, OCR numbers, and strings updating in real time — plus instant <code>Pause (F8)</code> and <code>Stop (Esc)</code> controls.</li>
+        <li><strong>Full Telemetry Pod or Compact Mini-Bar:</strong> Keep the always-on-top HUD beside your game, or collapse it into a sleek pill bar that stays out of the way.</li>
+        <li><strong>Sub-Millisecond Vision & Step Profiling:</strong> Watch current loop turn, elapsed time, live vision match confidence, and active step progress at 30 FPS UI refresh with zero playback lag.</li>
+        <li><strong>Live Variable Watch & Instant Controls:</strong> Inspect runtime counters, OCR values, and audio peaks live — with <code>Pause (F8)</code> and <code>Emergency Stop (Esc)</code> always one tap away.</li>
       </ul>
     </td>
   </tr>
 </table>
 
-### 4. Studio Appearance, Context Profiles & Hardware Acceleration
+### 4. Studio Themes, Context Auto-Profiles & Hardware Acceleration
 
-> Customize **Obsidian Neon** or **Midnight Blue** themes, 5 neon accents, layout density, Beginner/Advanced inspector complexity, Windows startup (`--tray`), and automatic `.smbackup` library archives.
+> Switch between **Obsidian Neon** and **Midnight Blue** themes, pick from 5 neon accents, configure **Foreground Window Auto-Profile Switching**, enable **Windows Graphics Capture (WGC)**, and manage automatic `.smbackup` archives.
 
 <p align="center">
   <img src="docs/images/studio-settings.png" alt="SmartMacro Settings view with KuroLogic Studio branding and appearance controls" width="100%" />
@@ -89,82 +120,94 @@ SmartMacro Studio is a **100% local-first** Windows automation IDE built for bot
 
 ---
 
+## 30-Second Quick Start
+
+1. **Hit Record (`Ctrl+Shift+F9`):** Do your task naturally — click buttons, drag windows or sliders, type text, or turn a 3D game camera. Press `Ctrl+Shift+F9` again to stop.
+2. **Click `✨ Polish` in the Editor:** SmartMacro automatically merges your typing into editable **Type text** steps, turns straight drags into smooth **Drag** steps, wraps multi-point drags into collapsible **Groups**, and cleans up redundant mouse paths.
+3. **Play (`Ctrl+Shift+F10`) or Debug (`F9` / `F10` / `F11`):** Watch **Smart Intent** relocate targets even if you moved the window, or press `Ctrl+M` to monitor live telemetry from **Mission Control**.
+
+---
+
+## Core Superpowers
+
+### 🧭 1. Dual-Stream Recording, Closed-Loop Dragging & 5-Tier Smart Intent
+- **One Recorder for Everything:** Captures desktop cursor coordinates and raw hardware mouse deltas (`WM_INPUT`) on a single clock. Stationary duplicate moves are filtered without losing a microsecond of timing, and clicking an elevated (*Administrator*) window while running un-elevated triggers a proactive **UIPI warning**.
+- **Closed-Loop Stepped Window & UI Drag Engine:** Dragging a Win32 title bar (`WM_NCLBUTTONDOWN` / `SC_MOVE`), WinUI 3 window (`InputNonClientPointerSource`), WPF `DragMove()` surface, or browser slider subdivides movement via `DragStepPlanner` into stepped, closed-loop relative `MOUSEEVENTF_MOVE` ticks with adaptive pointer-ballistics gain.
+- **Window-Shift-Invariant Drag Replay:** When a drag's `Down` step relocates a moved window via **Smart Intent** or **Smart-Aim**, SmartMacro automatically translates all intermediate `MouseMove` waypoints and the final `Up` release by the exact same `(ShiftX, ShiftY)` offset.
+- **The 5-Tier Smart Intent Relocator Chain:**
+  | Tier | Strategy | What It Solves |
+  | :---: | :--- | :--- |
+  | **1** | **UI Automation (`UIA`)** | Finds controls by `AutomationId`, `Name`, and `ControlType` instantly — even if moved across monitors. |
+  | **2** | **OCR Text Anchor** | Reads nearby label text via Windows OCR and applies the recorded pixel offset. |
+  | **3** | **Multi-Scale Image (`75%–150%`)** | Matches the recorded `56×56` thumbnail across DPI and UI zoom changes. |
+  | **4** | **Window-Relative Anchor** | Scales coordinates proportionally to the target app window's live position and size. |
+  | **5** | **Recorded Coordinates** | Exact physical pixel `(X, Y)` fallback. |
+
+### 👁 2. Vision Pipeline 2.0: SIMD FFT, Occlusion Grid, Kalman Tracking & Text/Color 2.0
+- **Hardware-Accelerated Capture + SIMD FFT:** Combines **Windows Graphics Capture (`WGC`)** GPU frame pools and `BitBlt` with `Vector256<float>` AVX2/SSE2 radix-2 2D FFT cross-correlation and summed-area tables for ultra-fast template matching.
+- **Partial-Visibility (Occlusion-Tolerant) Matching:** Splits templates into a `3×3` or `4×4` sub-patch grid (`MinVisiblePercent`) so targets still match when 30–40% covered by particles, damage numbers, or cursor tooltips.
+- **Edge / Shape Matcher & Rotation Tolerance:** Sobel gradient-orientation contour matching (`EdgeShapeMatcher`) handles dramatic lighting shifts and `±0°–45°` rotation (`RotationRangeDeg`).
+- **2D Kalman Tracker & Predictive Lead Clicks:** Estimates target velocity `(VelocityX, VelocityY)` in `px/s` across frames and leads clicks ahead of fast-moving targets (`PredictiveClick`, `PredictiveLeadMs`).
+- **🔤 Text 2.0 (`O(1)` 1,000-Word Index + 60 FPS Visual Tracking):** Indexes 1,000+ screen words in `O(1)` with 64-bit character bitmask pre-filtering, regex support, Otsu/contrast preprocessing, and **Find-Once-Then-Track** (`TrackTextAsImage` crops the matched word and tracks it visually at 60 FPS without re-running OCR).
+- **🎨 Color 2.0 (Perceptual CIE Lab $\Delta E$ / HSV & Shape Filtering):** Matches colors in `LabDeltaE`, `Hsv`, or `Rgb`, filters blobs by circularity (`MinCircularityPercent`) and fill density, and selects by `Largest`, `NearestToCenter`, `NearestToLastSpot`, or `TopMost`.
+
+### ⚖️ 3. Smart Predictive Feedback Loop 2.0 (120 FPS Minigame Servo)
+- **Adaptive PD Controller + Stopping-Distance Brake:** Tracks moving markers and catch zones at up to **120 FPS** (`FeedbackControlMode.SmartPredictive`), calculating coasting distance from live velocity to brake before overshooting.
+- **Hover Pulse PWM & 1-Click Physics Presets:** Pick **🧲 Momentum Bar**, **⬇️ Gravity Bar**, **⚡ Snap Bar**, or **🍃 Floaty Bar**, or fine-tune lead time, deadzone, and PWM duty cycle for horizontal or vertical gauges.
+
+### 🧠 4. Brain 2.0: Variables, WASAPI Audio Meter, Watchers & Sub-Macros
+- **Typed Variables & Live Expressions:** Use `Number`, `Text`, and `Boolean` variables with math (`Set`, `Add`, `Subtract`, `Multiply`, `Divide`, `Modulo`, `Round`), string transforms (`Trim`, `ExtractDigits`, `UPPERCASE`, `lowercase`), and `{varName}` interpolation in any text or webhook field.
+- **Rich Live Data Sources:** Read values from **Screen OCR numbers/text**, **📊 HUD bar/gauge fill % (`0–100%`)**, **🔊 System master audio peak % (`0–100%`)** via zero-dependency WASAPI, **🎲 Random numbers**, **🖥 Active window title**, **🕒 Current time**, **Clipboard**, **Last found X/Y**, or **📄 N-th line / CSV item**.
+- **Checkpoints, Background Watchers & Sub-Macros:** Handle unexpected popups with periodic **Watchers**, recover from failures via **Retry / Jump to Checkpoint / Recovery Sub-Macro**, and extract any `Group` into a reusable sub-macro (`CallMacroStep`) with isolated call frames.
+
+### ⚡ 5. Reflex & Context: Scoped Triggers, Run Governor, Background Input & CLI
+- **Context-Scoped Triggers:** Bind **Hotkeys** (`PressOnce`, `HoldToRun`, `RepeatWhileHeld`, `Toggle`), **Schedules** (`OnStartup`, `Interval`, `DailyAt`), or **Window Events** (`WindowAppears`, `WindowFocused`) — optionally scoped to fire **only when a specific window title or process is active**.
+- **Run Governor & Auto-Profiles:** Choose how overlapping triggers behave (`IgnoreIfBusy`, `QueueNext`, `PreemptCurrent`) and automatically switch active macro profiles when your foreground app or game changes.
+- **👻 Background Input (`Win32 PostMessage` & `UI Automation`):** Send clicks, keystrokes, and text directly to background windows without moving your physical cursor or stealing focus.
+- **Single-Instance CLI Automation:** Trigger macros from batch scripts, Task Scheduler, or Elgato Stream Deck:
+  ```powershell
+  # Run a macro by name or GUID (routes via Named Pipe IPC if SmartMacro Studio is already open)
+  SmartMacro.exe --run "Daily Report Export"
+
+  # List all macros and their IDs in the local library
+  SmartMacro.exe --list
+
+  # Launch SmartMacro silently into the Windows System Tray
+  SmartMacro.exe --tray
+  ```
+
+---
+
 ## System Architecture
 
 ```mermaid
 flowchart TB
-    subgraph Triggers["⚡ Reflex & Context (Triggers, Profiles & Tray)"]
-        HK["Per-Macro Hotkeys\n(PressOnce · HoldToRun · RepeatWhileHeld · Toggle)"]
-        SCHED["Schedules & Timers\n(Startup · Interval · Daily HH:mm)"]
-        WIN["Window Events & Auto-Profiles\n(Window Appears/Focused · Foreground Profile Router)"]
+    subgraph Triggers["⚡ Reflex, CLI & Context Router"]
+        HK["Scoped Hotkeys\n(PressOnce · Hold · Repeat · Toggle)"]
+        SCHED["Schedules & Window Events\n(Startup · Interval · Daily · Window Focused)"]
+        CLI["Single-Instance CLI IPC\n(--run · --list · --tray)"]
         GOV["Run Governor\n(IgnoreIfBusy · QueueNext · PreemptCurrent)"]
-        HK & SCHED & WIN --> GOV
+        HK & SCHED & CLI --> GOV
     end
 
     subgraph Studio["🎛 Studio X Workflow IDE"]
-        TB["Searchable Toolbox\n+ 10 1-Click Blueprints + Quick Patterns"]
-        CANVAS["Collapsible Block Canvas\n(Groups · Sub-Macros · Minimap · F9 Breakpoints)"]
-        DBG["Interactive Debugger & HUD\n(F9 Break · F10 Over · F11 Into · Shift+F11 Out · Ctrl+M HUD)"]
-        DOCK["Bottom Dock\n(Activity · Problems · Live Variables · Watchers · Triggers · Debug · Trace)"]
+        TB["Searchable Toolbox\n+ 10 Blueprints + Shared Template Gallery"]
+        CANVAS["Collapsible Block Canvas\n(Groups · ✨ Polish · ✂ Expand Drag · Minimap)"]
+        DBG["Debugger 2.0 & Mission Control\n(Conditional F9 · F10 Over · F11 Into · Shift+F11 Out)"]
+        DOCK["Bottom Dock\n(Activity · Problems · Live Variables · Watchers · Triggers · Trace)"]
     end
 
-    subgraph Engine["🚀 Playback & Vision 2.0 Engine (SmartMacro.Core)"]
-        INTENT["🧭 5-Tier Smart Intent Relocator\n(UIA → OCR → Multi-Scale Image → Window → Coords)"]
-        VISION["👁 Vision Pipeline 2.0 & HUD Probes\n(Partial Occlusion · Edge/Shape · 2D Kalman Tracker · FrameBus Motion ROI)"]
-        TEXTCOLOR["🔤 Text 2.0 & 🎨 Color 2.0\n(O(1) 1,000-Word OCR + 60 FPS Track · CIE Lab/HSV + Blob Circularity · Gauge 0-100%)"]
-        BRAIN["🧠 Brain Runtime\n(Typed Variables · Text/CSV Ops · Checkpoints · Watchers · Call-Frame Sub-Macros)"]
-        SERVO["⚖️ Smart Predictive PD Servo\n(120 FPS Minigame Bar Tracking + Stopping-Distance Brake + PWM)"]
+    subgraph Engine["🚀 Playback, Input & Vision 2.0 Engine (SmartMacro.Core)"]
+        INTENT["🧭 5-Tier Smart Intent + Shift-Invariant Drag\n(UIA → OCR → Multi-Scale Image → Window → Coords)"]
+        DRAG["🖱 Closed-Loop Stepped Drag Planner\n(Relative Sub-Steps + Adaptive Ballistics Gain)"]
+        VISION["👁 Vision 2.0 (WGC + SIMD FFT)\n(Occlusion Grid · Edge/Shape · 2D Kalman · FrameBus ROI)"]
+        BRAIN["🧠 Brain Runtime & WASAPI Audio\n(Variables · Checkpoints · Watchers · Sub-Macro Call Stack)"]
+        SERVO["⚖️ 120 FPS Predictive PD Servo\n(Velocity Estimation + Stopping-Distance Brake + PWM)"]
     end
 
     GOV --> Engine
     Studio <--> Engine
 ```
-
----
-
-## Key Capabilities
-
-### 1. 👁 Vision Pipeline 2.0: Occluded Targets, Moving Targets, Text 2.0 & Color 2.0
-- **Partial-Visibility (Occlusion-Tolerant) Image Matching:** Splits templates into a `3×3` or `4×4` sub-patch grid and scores unoccluded cells (`MinVisiblePercent`), reliably matching targets even when 30–40% covered by particles, hit flashes, or floating combat text.
-- **Edge / Shape Gradient Detector & Rotation Tolerance:** Sobel gradient-orientation contour matching (`EdgeShapeMatcher`) stays invariant under severe lighting or color shifts, with optional `±0°–45°` rotation tolerance (`RotationRangeDeg`).
-- **2D Kalman / Alpha-Beta Target Tracker & Predictive Lead Clicks:** Tracks moving targets across frames (`TargetTracker`), estimates 2D velocity `(VelocityX, VelocityY)` in `px/s`, expands the ROI along trajectory, and leads clicks ahead of moving targets (`PredictiveClick`, `PredictiveLeadMs`).
-- **Temporal N-Frame Confirmation & Motion-Gated ROI (`FrameBus`):** `ConfirmFrames` (`2..10`) rejects 1-frame particle flashes; `OnlyWhereMoved` uses a thread-safe `16×16` grid motion mask to scan only pixels that changed, alongside `< 1 ms` Hot-Spot ROI caching.
-- **🔤 Text 2.0 (`O(1)` 1,000-Word Index & Find-Once-Then-Track):**
-  - Instant `O(1)` hash-table lookup across 1,000+ words on screen, 64-bit character bitmask pre-filtering before fuzzy Levenshtein matching, and regex matching (`UseRegexPattern`).
-  - **Find-Once-Then-Track (`TrackTextAsImage`):** Once OCR locates a target word, SmartMacro crops its live bounding box and tracks it visually at 60 FPS (`~1–3 ms`) without re-running OCR every frame.
-  - Built-in **OCR Image Preprocessor** (`Auto`, `HighContrast`, `InvertLightOnDark`, `BinarizeOtsu`).
-- **🎨 Color 2.0 (Perceptual CIE Lab / HSV & Blob Shape Filtering):** Match colors in `LabDeltaE` ($\Delta E$), `Hsv`, or `Rgb`, filter blobs by circularity (`MinCircularityPercent`), fill ratio, and pixel area, and select by `Largest`, `NearestToCenter`, `NearestToLastSpot`, or `TopMost`.
-- **✨ 1-Click Scenario Presets, Shared Templates & Live Auto-Tune:** Pick scenario cards (`Static UI`, `Game HUD`, `Moving Target`, `Busy Particles`, `Scrolling Text`, `Fast Reaction`), reuse crops across steps via the **Shared Template Gallery**, or run **Auto-Tune** (`TemplateAutoTuner`) to calibrate optimal thresholds automatically.
-
-### 2. ⚖️ Smart Predictive Feedback Loop 2.0 (120 FPS Minigame Servo)
-- **Adaptive PD Controller + Stopping-Distance Brake:** Tracks moving targets and catch zones up to **120 FPS** (`FeedbackControlMode.SmartPredictive`), predicting coasting distance from live velocity and braking before overshoot.
-- **Hover Pulse PWM & 4 Behavior Cards:** Choose 1-click tuning presets (**🧲 Momentum Bar**, **⬇️ Gravity Bar**, **⚡ Snap Bar**, **🍃 Floaty Bar**) or tune lead prediction, deadzone, and PWM duty cycle for horizontal or vertical gauges.
-
-### 3. 🧭 Dual-Stream Recording & 5-Tier Smart Intent Relocator
-- **One Record Button for Desktop Apps & 3D Games:** Captures desktop coordinates and raw relative mouse deltas (`WM_INPUT`) on one timeline. Cursor segments become editable **Move / Click / Key / Delay** steps; locked-camera turns become **Recorded input** steps with stuck-key guards and smooth catch-up debt limiting.
-- **5-Tier Resilient Target Relocator:** When **Intent Recording** is enabled, recorded clicks capture an off-thread `TargetFingerprint` and relocate automatically when windows move or scale:
-  1. **UI Automation element** (`AutomationId`, `Name`, `ControlType`, normalized click point — with single-flight protection against frozen UI threads)
-  2. **Nearby OCR text anchor** + pixel offset
-  3. **56×56 Image Snapshot** (1:1 fast path + **75%–150% multi-scale pyramid** for DPI/zoom shifts)
-  4. **Window-Relative coordinate anchor** (window title + process name)
-  5. **Recorded coordinates fallback**
-- **🔧 Opt-In Smart Self-Heal & Adaptive Delays:** When playback relocates a drifted click by `≥ 25 px`, a 1-click editor banner offers to update coordinates (`Ctrl+Z` undoes it). **Delay** steps can wait fixed intervals, **✨ Until screen settles**, or **⚡ Until screen changes**, alongside optional **Humanize** jitter and curved glides.
-
-### 4. 🧠 Brain 2.0: Variables, WASAPI Audio Meter, Checkpoints, Watchers & Sub-Macros
-- **Typed Variables, Math & `{placeholders}`:** Declare `Number`, `Text`, or `Boolean` variables with live runtime inspection. Supports `Set`, `Add`, `Subtract`, `Multiply` (`×=`), `Divide` (`÷=`), `Modulo` (`%=`), `Round`, text cleanup (`Trim`, `ExtractDigits`, `UPPERCASE`, `lowercase`), clipboard export, and `{varName}` substitution across steps.
-- **Live Screen, HUD Gauge, System Audio & CSV Data Sources:** Populate variables from constants, **OCR numbers/text**, **📊 Bar / gauge fill % (`0–100%`)** across `1080p` / `1440p` / `4K`, **🔊 System master audio peak % (`0–100%`)** via zero-dependency WASAPI, **🎲 Random integer**, **🖥 Active window title**, **🕒 Date/time**, **Clipboard**, **Last found X/Y**, **Loop counter**, **Elapsed seconds**, or **📄 N-th line / CSV item**.
-- **➕ Compound Logic (`AND` / `OR`) & Workbench Window Snap:** Combine multiple `Text`, `Image`, `Color`, or `Variable` conditions inside `If` / `Repeat` blocks, and snap windows (`SnapLeftHalf`, `SnapRightHalf`, `Maximize`, `CenterOnPrimary`) via **Focus window**.
-- **📍 Checkpoints, Watchers & Modular Sub-Macros:** Configure per-step failure recovery (**Continue**, **Skip next step**, **Stop**, **Retry**, **Run recovery sub-macro**, or **Jump to Checkpoint**), guard runs with periodic **Background Watchers**, **Extract** repeated step blocks into reusable sub-macros (`CallMacroStep`) with isolated call frames & cycle checks, and share everything in self-contained `.smacro` bundles.
-
-### 5. ⚡ Reflex & Context: Triggers, Run Governor, Auto-Profiles & System Tray
-- **Per-Macro Triggers:** Attach **Hotkeys** (**Press once**, **Hold to run**, **Repeat while held**, **Toggle**), **Schedules** (**On startup**, **Every N minutes/seconds**, **Daily at `HH:mm`**), or **🖥 Window Events** (**Window opened / focused**) directly to any macro.
-- **Run Governor, Auto-Profiles & Background Startup:** Configure conflict behavior (**Ignore if busy**, **Queue next**, **Preempt & stop current**), toggle **⚡ Triggers Armed**, enable **Auto-switch active profile from foreground window**, minimize to the **System Tray**, and launch silently with Windows (`--tray`).
-
-### 6. 🎛 Studio X & Evergreen Reliability: Groups, Debugger, Blackbox & Backups
-- **Organized Block Workflows:** Collapse noisy sequences into color-tagged **`Group … End Group`** sections (`Ctrl+Shift+G`), preview structure on the **Workflow Minimap**, jump with `Ctrl+K` **Command Palette**, and clean recordings in 1 click (**Clean up** / **Merge keys**).
-- **🔴 Full Call-Frame Debugger (`F9` / `F10` / `F11` / `Shift+F11`) & Vision Test (`Ctrl+T`):** Toggle `F9` breakpoints, step over (`F10`), step *into* called sub-macros (`F11`) with active runtime call-frame variables, step *out* (`Shift+F11`), spot slow steps via per-step timing badges (`×N · X ms`), and test any step live (`Ctrl+T`).
-- **🔍 Blackbox Flight Recorder, Sound Cues & Webhooks:** Stopping on a vision timeout automatically saves `last-failure-snapshot.png` for 1-click inspection. **Take screenshot** steps support synthesized WAV audio cues, formatted logs, and Discord/Slack HTTPS webhooks.
-- **📦 Self-Service Library Recovery & Diagnostics:** Audit all macros (`Audit Library`), recover deleted macros from **🗑 Trash**, create 1-click `.smbackup` Studio archives, copy safe diagnostics, and rely on automatic 30-day log/trash pruning.
 
 ---
 
@@ -175,40 +218,40 @@ flowchart TB
 | `Ctrl+Shift+F9` *(customizable)* | Start / stop recording | Global (anywhere) |
 | `Ctrl+Shift+F10` *(customizable)* | Play macro / stop playback | Global (anywhere) |
 | `F8` *(customizable)* | Pause / resume playback (releases held keys while paused) | Global while playing |
-| `Esc` | Emergency stop (releases all held keys and buttons immediately) | Global while playing |
-| `F9` | Toggle debugger breakpoint on selected step | Editor |
-| `F10` | **Step Over:** run one step while paused and pause before the next | Editor / While paused |
-| `F11` | **Step Into:** step into a called sub-macro (`CallMacroStep`) and inspect its call frame | Editor / While paused |
+| `Esc` | **Emergency Stop** (releases all held keys and mouse buttons immediately) | Global while playing |
+| `F9` | Toggle debugger breakpoint on selected step (supports conditional expressions) | Editor |
+| `F10` | **Step Over:** execute current step while paused and pause before the next | Editor / While paused |
+| `F11` | **Step Into:** step into a called sub-macro (`CallMacroStep`) and inspect its frame | Editor / While paused |
 | `Shift+F11` | **Step Out:** finish the current sub-macro frame and pause back at the caller | Editor / While paused |
 | `Ctrl+T` | **Test Step:** test vision detection once (with near-miss score) or run action step once | Editor |
-| `Ctrl+F5` | Play only the selected step (or whole `If` / `Repeat` / `Group` block) | Editor |
+| `Ctrl+F5` | Play only the selected step (or entire `If` / `Repeat` / `Group` block) | Editor |
 | `Shift+F5` | Play from the selected step to the end | Editor |
-| `Ctrl+K` | Open **Command Palette** (add steps, blueprints, play, auto-fix, speed…) | Studio |
+| `Ctrl+K` | Open **Command Palette** (search steps, blueprints, polish, auto-fix, speed…) | Studio |
 | `Ctrl+M` | Toggle floating **Mission Control** live telemetry HUD window | Studio |
 | `Ctrl+F` | Search steps in workflow (`F3` / `Shift+F3` next/previous match) | Editor |
 | `Ctrl+S` | Save workflow | Editor |
-| `Ctrl+Z` / `Ctrl+Y` | Undo / Redo (`Ctrl+Shift+Z` also redoes) | Editor |
-| `Ctrl+C` / `Ctrl+V` / `Ctrl+D` | Block-aware Copy / Paste / Duplicate | Step list |
+| `Ctrl+Z` / `Ctrl+Y` | Structural Undo / Redo (`Ctrl+Shift+Z` also redoes) | Editor |
+| `Ctrl+C` / `Ctrl+V` / `Ctrl+D` | Block-aware Copy / Paste / Duplicate (with in-app clipboard fallback) | Step list |
 | `Space` | Enable / disable selected steps (or whole block) | Step list |
 | `←` / `→` | Fold / unfold selected `If`, `Repeat`, or `Group` block | Step list |
 | `Alt+↑` / `Alt+↓` | Block-aware move step up / down (`Alt+Home` / `Alt+End` for top / bottom) | Step list |
 | `Ctrl+Shift+I` / `Ctrl+Shift+R` | Wrap selected steps in `If … End If` / `Repeat … End Repeat` | Step list |
-| `Ctrl+Shift+G` | Wrap selected steps in `Group … End Group` | Step list |
+| `Ctrl+Shift+G` | Wrap selected steps in a color-customizable `Group … End Group` | Step list |
 
 ---
 
 ## Requirements & Installation
 
-- **OS:** Windows 10 version 2004 (May 2020 Update, build 19041) or newer, or Windows 11 (`x64`).
+- **OS:** Windows 10 version 2004 (Build 19041) or newer, or Windows 11 (`x64`).
 - **OCR:** Uses the built-in Windows OCR engine (`Windows.Media.Ocr`). Check **Settings → Text recognition** in SmartMacro to verify your display language's OCR pack is installed.
-- **Data Location & Portable Mode:** By default, macros, settings, logs, and crash diagnostics are stored locally in `%LOCALAPPDATA%\SmartMacro` (never inside the application folder, so updating preserves your library). To run in **Portable Mode** (for a USB drive or synced folder), create an empty `portable.txt` file or a `PortableData` folder next to `SmartMacro.exe`.
+- **Data Location & Portable Mode:** By default, macros, settings, logs, and crash diagnostics are stored locally in `%LOCALAPPDATA%\SmartMacro` (never inside the app folder, so updates never overwrite your library). For **Portable Mode** (USB drive or synced folder), create an empty `portable.txt` file or a `PortableData` folder next to `SmartMacro.exe`.
 
 ### Build, Verify & Package from Source
 
 Requires the **.NET 10 SDK** on Windows:
 
 ```powershell
-# Build with 0 warnings / 0 errors and run all 1,424 automated tests (logs written to artifacts\build.log & artifacts\test.log)
+# Build with 0 warnings / 0 errors and run all 1,438 automated tests (Core + WPF/ViewModel)
 cmd /c tools\verify.cmd
 
 # Run tests, publish a self-contained single-file win-x64 EXE, verify third-party notices, and create the release ZIP
@@ -219,10 +262,10 @@ cmd /c tools\publish.cmd
 
 ## Safety & Honest Limits
 
-- **Emergency Stop & Stuck-Key Failsafe:** Pressing physical `Esc` stops playback immediately. Every key and mouse button pressed by SmartMacro is tracked in `HeldInputTracker` and released when playback finishes, stops, pauses, or if an error occurs.
-- **Administrator Apps (UIPI):** Windows blocks non-elevated processes from sending input to elevated (*Run as Administrator*) windows, the lock screen, or UAC prompts. Run SmartMacro as Administrator if your target game or app runs as Administrator.
+- **Emergency Stop & Stuck-Key Failsafe:** Pressing physical `Esc` stops playback immediately. Every key and mouse button pressed by SmartMacro is tracked in `HeldInputTracker` and released when playback finishes, stops, pauses, or encounters an error.
+- **Administrator Apps (UIPI):** Windows blocks non-elevated processes from sending input to elevated (*Run as Administrator*) windows, the lock screen, or UAC prompts. SmartMacro detects elevated target windows during recording and warns you; run SmartMacro as Administrator when automating elevated apps.
 - **Exclusive Fullscreen:** Desktop screen capture sees black in exclusive fullscreen games; switch the game to **Borderless Windowed** or **Windowed** mode for vision steps.
-- **Anti-Cheat:** SmartMacro uses standard Win32 input and screen capture APIs (`SendInput`, `BitBlt`, `Windows.Media.Ocr`, `UIAutomation`) and never reads or modifies game memory or attempts to bypass anti-cheat software.
+- **Fair Play & Anti-Cheat:** SmartMacro uses standard Windows APIs (`SendInput`, `Windows.Graphics.Capture`, `BitBlt`, `Windows.Media.Ocr`, `UIAutomation`) and never reads or modifies process memory or attempts to bypass anti-cheat software.
 
 ---
 
